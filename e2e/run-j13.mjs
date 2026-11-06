@@ -2063,11 +2063,14 @@ async function main() {
         `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划可按需查看。`,
         '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。',
       ]), 'series-sheet-chosen-apart', { sheet: seriesSheet, box: seriesBox });
-    // Left unticked, nothing is prepared: the sheet says to choose a category.
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare-empty');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-sheet-problem')?.textContent==='请至少选择一个审阅类别。' && document.querySelector('dialog.review-sheet')?.open===true`, 'series-sheet-nothing-chosen');
+    // Left unticked, both actions stay disabled (#1374): no new Run or authorization is created.
+    const READ_SERIES_RUN_STATE = `window.ai7.inspectReviewWorkspace().then((page) => ({ runs: page.runs.map((run) => [run.reviewRunId, run.state]), open: page.run === null ? null : [page.run.reviewRunId, page.run.state, page.run.authorization] }))`;
+    const beforeSeriesOptIn = await renderer.evaluate(READ_SERIES_RUN_STATE);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); return sheet instanceof HTMLDialogElement && sheet.open && ['prepare','start'].every((action) => { const button=sheet.querySelector('[data-review-action="'+action+'"]'); return button instanceof HTMLButtonElement && button.disabled; }); })()`, 'series-sheet-empty-actions-disabled');
+    requireJourney(JSON.stringify(await renderer.evaluate(READ_SERIES_RUN_STATE)) === JSON.stringify(beforeSeriesOptIn), 'series-sheet-empty-no-effect');
     await clickSelector(renderer, 'dialog.review-sheet input[name="review-category"][value="series-consistency"]', 'series-sheet-tick');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
+    await assertRenderer(renderer, `['prepare','start'].every((action) => { const button=document.querySelector('dialog.review-sheet [data-review-action="'+action+'"]'); return button instanceof HTMLButtonElement && !button.disabled; })`, 'series-sheet-selected-actions-enabled');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')===null && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
