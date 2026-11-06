@@ -1681,10 +1681,9 @@ async function main() {
     const modelZoom = await primary.evaluate(`(() => ({
       viewportFits: document.documentElement.scrollWidth<=document.documentElement.clientWidth+2,
       credentialFormSingleColumn: getComputedStyle(document.querySelector('.model-credential-form')).gridTemplateColumns.split(' ').length===1,
-      candidateCardsFit: Array.from(document.querySelectorAll('[data-search-candidate]')).every(card=>card.scrollWidth<=card.clientWidth+2),
-      candidateDetailsWrap: Array.from(document.querySelectorAll('[data-search-candidate] .field-note')).every(line=>getComputedStyle(line).overflowWrap==='anywhere')
+      candidateCardsFit: Array.from(document.querySelectorAll('[data-search-candidate]')).every(card=>card.scrollWidth<=card.clientWidth+2)
     }))()`);
-    requireJourney(modelZoom.viewportFits && modelZoom.credentialFormSingleColumn, 'model-settings-zoom-reflow', modelZoom);
+    requireJourney(modelZoom.viewportFits && modelZoom.credentialFormSingleColumn && modelZoom.candidateCardsFit, 'model-settings-zoom-reflow', modelZoom);
     await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(primary, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.model-role-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.model-credential-form input')).borderStyle!=='none'`, 'model-settings-forced-colors');
     await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });

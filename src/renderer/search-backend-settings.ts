@@ -87,7 +87,7 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   const price = `单价 ${candidate.price} · 不可选择`;
   const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
   card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
-  if (technicalLayerVisible) card.append(element('p', 'field-note', `接口 ${candidate.endpoint} · 协议 ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest}`));
+  if (technicalLayerVisible) card.append(element('p', 'field-note search-candidate-technical', `接口 ${candidate.endpoint} · 协议 ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest}`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
   const probe = button(SEARCH_CANDIDATE_PROBE_LABEL, 'quiet', async () => {
