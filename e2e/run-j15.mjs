@@ -790,6 +790,7 @@ async function main() {
     // The anchors are positions: a Word file has no page numbers.
     const libraryIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-built');
     const layers = new Map(libraryIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('article.library-material'); const warning=card?.querySelector(':scope > .knowledge-file-summary .knowledge-file-index'); return warning?.textContent==='索引：已在本机建好' && !warning.closest('.knowledge-file-more'); })()`, 'library-folded-index-warning');
     requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 7 &&
       JSON.stringify(layers.get('original')) === JSON.stringify(['complete', '已原样保存在本机']) &&
       layers.get('metadata')?.[0] === 'complete' && /^中文 · \d+ 段 · \d+ 个标题/u.test(layers.get('metadata')?.[1] ?? '') &&

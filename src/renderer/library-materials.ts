@@ -294,6 +294,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       // choice, a note being read — is touched.
       const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > details.knowledge-file-more > section.material-index`);
       section?.replaceWith(indexSection(next));
+      const warning = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] .knowledge-file-index`);
+      if (warning) warning.textContent = `索引：${materialIndexStateLine(next.index)}`;
     }
     pollDelay = nextIndexPollDelay(pollDelay, moved);
     schedulePoll();
@@ -397,7 +399,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
     node.append(heading);
-    node.append(el('p', 'knowledge-file-summary', `${libraryReferenceLine(material)} · 索引：${materialIndexStateLine(material.index)}`));
+    const summary = el('p', 'knowledge-file-summary', libraryReferenceLine(material));
+    summary.append(' · ', el('span', 'knowledge-file-index', `索引：${materialIndexStateLine(material.index)}`));
+    node.append(summary);
     const more = el('details', 'knowledge-file-more');
     more.append(el('summary', undefined, '查看资料'), el('p', 'library-source', librarySourceLine(material, localInstantLabel)));
     const facts = el('dl', 'library-facts');

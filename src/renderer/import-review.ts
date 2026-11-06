@@ -701,6 +701,15 @@ export function createImportReview(options: ImportReviewOptions) {
         if (target) { target.tabIndex = -1; target.scrollIntoView({ block: 'start' }); target.focus({ preventScroll: true }); }
       },
     }));
+    content.addEventListener('focusin', (event) => {
+      const target = event.target as HTMLElement;
+      const current = target.closest('.fidelity-list, .import-structure') ? '3' : target.closest('[data-import-target-choices], [data-import-title-for-relationship]') ? '2' : null;
+      if (current === null) return;
+      for (const step of content.querySelectorAll<HTMLElement>('[data-import-step]')) {
+        if (step.dataset['importStep'] === current) step.setAttribute('aria-current', 'step');
+        else step.removeAttribute('aria-current');
+      }
+    });
     appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
     queueMicrotask(() => {

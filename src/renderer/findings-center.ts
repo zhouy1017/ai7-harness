@@ -28,7 +28,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       const allItems = [...page.items];
       let cursor = page.next;
       while (cursor !== null) { const rest = await read(cursor); allItems.push(...rest.items); cursor = rest.next; }
-      if (!root.isConnected || request !== generation) return;
+      if (!root.isConnected || request !== generation || pollControlEngaged(root)) return;
       const key = JSON.stringify([page.groups, allItems]); if (key === signature) return;
       signature = key;
       const restoreInteraction = retainPollInteraction(root);
