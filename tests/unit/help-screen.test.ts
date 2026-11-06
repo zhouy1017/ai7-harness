@@ -44,7 +44,8 @@ describe('the mounted 帮助 screen', () => {
   it('describes only the pages available in the selected mode', () => {
     const ordinary = helpUsageSections(false).map((section) => section.paragraphs.join(''));
     const developer = helpUsageSections(true).map((section) => section.paragraphs.join(''));
-    expect(ordinary.join('')).toContain('审阅规范文件、范例、资料库');
+    expect(ordinary.join('')).toContain('审阅规范文件、本社审阅偏好、范例、资料库');
+    expect(ordinary.join('')).toContain('审阅偏好、反馈记录');
     expect(ordinary.join('')).not.toContain('诊断');
     expect(ordinary.join('')).not.toContain('检索排除');
     expect(developer.join('')).toContain('外部来源留存');

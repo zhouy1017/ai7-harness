@@ -941,6 +941,22 @@ async function main() {
         !visible.includes('@base') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/i.test(visible);
     })()`, 'global-agent-unified-readable-memory');
 
+    // #1377 / J-16: an existing preference stays reachable in ordinary quality without its engineering forms.
+    for (const developer of ['false', 'true']) {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await click(renderer, '帮助', `quality-mode-${developer}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
+      if (developer === 'true') continue;
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
+      await waitFor(renderer, `document.querySelector('[data-review-preference]')?.textContent.includes('保留作者有意使用的短句。')`, 'ordinary-existing-preference-visible');
+      await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); return row.textContent.includes('已启用') && Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用') && !root.querySelector('form') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-preference-return-global');
+    await waitFor(renderer, `document.querySelector('[data-global-agent-item]') && document.querySelector('[data-global-agent-save]')`, 'ordinary-preference-developer-preserved');
+
     await assertRenderer(renderer, `(() => { const item = document.querySelector('[data-global-agent-item]'); const operation = document.querySelector('[data-global-agent-operation]'); const effect = document.querySelector('[data-global-agent-effect]'); const text = document.querySelector('[data-global-agent-text]'); if (!(item instanceof HTMLInputElement) || !(operation instanceof HTMLSelectElement) || !(effect instanceof HTMLSelectElement) || !(text instanceof HTMLTextAreaElement)) return false; item.click(); operation.value = 'supervise'; operation.dispatchEvent(new Event('change', { bubbles: true })); effect.value = 'freeze'; text.value = '先冻结这条概括，等更多判断后再归纳。'; return true; })()`, 'global-agent-supervision-written');
     await clickSelector(renderer, '[data-global-agent-save]', 'global-agent-supervision-record');
     await waitFor(renderer, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.directives.length === 2 && state.items.length === 1 && state.items[0].state === 'frozen' && state.history.length === 0; })()`, 'global-agent-governance-local');

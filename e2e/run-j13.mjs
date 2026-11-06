@@ -839,6 +839,27 @@ async function main() {
     let manager = await launch();
     let renderer = await waitForRenderer(manager, 'initial-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
+    // #1377 / J-13: ordinary navigation reaches the same preferences owner from both destinations.
+    for (const developer of ['false', 'true']) {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await click(renderer, '帮助', `quality-mode-${developer}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
+      if (developer === 'true') continue;
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-default');
+      await waitFor(renderer, `document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true' && document.querySelector('[data-learning-enabled]')`, 'ordinary-preferences-loaded');
+      await clickSelector(renderer, '#quality-tab-feedback', 'ordinary-feedback-tab');
+      await waitFor(renderer, `document.querySelectorAll('[data-feedback-filter]').length===2 && !document.querySelector('#feedback-filter-dimension, #feedback-filter-from, #feedback-filter-to, #feedback-group-by')`, 'ordinary-feedback-two-filters');
+      await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preferences-return');
+      await waitFor(renderer, `document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-preferences-roundtrip');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-house-knowledge');
+      await clickSelector(renderer, '[data-knowledge-category="memory"]', 'ordinary-house-entry');
+      await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]') && !document.querySelector('form')`, 'ordinary-house-same-owner');
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'ordinary-quality-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'ordinary-quality-library-ready');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await renderer.send('Page.setBypassCSP', { enabled: false });

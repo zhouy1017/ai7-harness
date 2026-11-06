@@ -81,3 +81,25 @@ it('ignores a late rules response when mode changes while the rules loading page
   expect(page.root.querySelector('[data-rule-count]')).toBeNull();
   expect(page.setStatus).not.toHaveBeenCalledWith('工序与规则已打开');
 });
+
+it('defaults ordinary quality to preferences and shares its controls with the knowledge-base entrance', async () => {
+  setTechnicalLayerVisible(false);
+  const inspectEditorialLearning = vi.fn(async () => ({ enabled: true, controlEntries: 0, items: [], signals: [], excludedBooks: [], excludedMaterials: [], nextItemOffset: null }));
+  vi.stubGlobal('window', { ai7: { inspectEditorialLearning,
+    inspectGlobalAgent: vi.fn(async () => ({ categories: [], books: [], items: [] })),
+    inspectHouseReviewPreference: vi.fn(async () => ({ current: null, history: [] })),
+    inspectFeedbackHistory: vi.fn(async () => ({ books: [], entries: [], truncated: false })),
+  } });
+  const page = navigation(); await page.renderQualityLearning();
+  expect(page.root.querySelector('[id="quality-tab-preferences"]')!.getAttribute('aria-selected')).toBe('true');
+  expect(Array.from(page.root.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual(['审阅偏好', '反馈记录']);
+  expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
+  page.root.querySelector<HTMLButtonElement>('[id="quality-tab-feedback"]')!.click();
+  for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(page.root.querySelector('[id="feedback-filter-book"]')).not.toBeNull();
+  expect(page.root.querySelector('[id="feedback-group-by"]')).toBeNull();
+  await page.renderKnowledgeBase('memory');
+  expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
+  expect(page.root.textContent).toContain('本社审阅偏好');
+  expect(inspectEditorialLearning).toHaveBeenCalledTimes(2);
+});
