@@ -376,7 +376,7 @@ Since #1058, J-10's existing cancellation stages remain unchanged compatibility 
 
 ## J-11 A Book's 作者, 责编 and 相关人
 
-Issue #1377 exercises the real Help mode switch into ordinary quality: proposed memory appears first, is accepted there and an enabled memory is stopped there; the same mount then stops a feedback-derived preference using its refreshed exact pin, and remount preserves readable source books and item change times. Private identifiers and engineering forms are absent. Returning to developer mode keeps the existing full signal composition, governance, admission and lineage scenarios.
+Issue #1377 exercises the real Help mode switch into ordinary quality: proposed memory appears first, is accepted there and an enabled memory is stopped there; the mixed-action setup explicitly admits one feedback material and waits for the rebuild to finish before selecting its legacy preference; the same mount then stops that preference using its refreshed exact pin, and remount preserves readable source books and item change times. Private identifiers and engineering forms are absent. Returning to developer mode keeps the existing full signal composition, governance, admission and lineage scenarios.
 
 Issue #1287 (W23-S7) uses sidebar evaluation navigation and opens memory creation forms explicitly; signal rows initially contain no form, and the batch composer opens from its disclosure.
 

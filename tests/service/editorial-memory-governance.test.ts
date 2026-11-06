@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 /** Actual selected production policy/store/gate; only transport is synthetic. Nothing is sent to a provider. */
-async function sourceDecisions() {
+async function sourceDecisions(admitLegacy = true) {
   requestGovernor = new ModelRequestGovernor();
   roots = await createServiceTestRoots('ai7-memory-governance-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -91,7 +91,7 @@ async function sourceDecisions() {
   expect(signals).toHaveLength(4);
   const explicit = signals[1]!;
   const material = subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
-  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+  if (admitLegacy) subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
     expectedDecisions: material.decisions, choice: 'house', note: null });
   const create = (selected: readonly string[], title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
     signalIds: selected, applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
@@ -147,6 +147,18 @@ async function ordinaryMemory(subject: EditorialStore) {
   await remount();
   return { root, click, remount, close: () => { restore(); setTechnicalLayerVisible(true); vi.useRealTimers(); } };
 }
+
+it('sets up a legacy feedback preference through its learning admission before mixed-action selection', async () => {
+  const { subject, book, signals } = await sourceDecisions(false);
+  subject.rebuildHouseReviewPreference();
+  const isLegacy = (item: ReturnType<EditorialStore['inspectGlobalAgent']>['items'][number]) => item.kind === 'preference' && item.bookId === null && item.categoryId === 'typos-and-usage';
+  expect(subject.inspectGlobalAgent().items.some(isLegacy)).toBe(false);
+  const material = subject.inspectLearningMaterial(book.bookId, signals[0]!.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+    expectedDecisions: material.decisions, choice: 'house', note: null });
+  subject.rebuildHouseReviewPreference();
+  expect(subject.inspectGlobalAgent().items.some(isLegacy)).toBe(true);
+});
 
 it('refreshes ordinary preference pins after memory acceptance before stopping feedback-derived preferences', async () => {
   const { subject, signals, make, create } = await sourceDecisions();

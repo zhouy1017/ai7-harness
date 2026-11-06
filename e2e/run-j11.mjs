@@ -3315,6 +3315,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'settled'`, 'memory-governance-review-settled', 180_000);
     const memorySources = await renderer.evaluate(`(async () => { const run=(await window.ai7.inspectReviewWorkspace()).run; const findings=run.findings.filter(finding=>finding.categoryId==='typos-and-usage' && finding.markId!==null).slice(0,2); if(findings.length!==2)return null; for(const finding of findings) await window.ai7.recordChangeSuggestionDecision({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,windowStartBlockId:finding.blockId,markId:finding.markId,clientDecisionId:crypto.randomUUID(),disposition:'accepted-with-edit',editedText:'合成编辑记忆来源修订',reason:'保留有意的表达节奏'}); const page=await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}); return {ids:page.signals.filter(signal=>signal.source.bookId===${JSON.stringify(memorySourceBook)} && signal.memoryCandidate?.editorialDimension==='typos-and-usage').map(signal=>signal.signalId),influence:run.influence.length}; })()`);
     requireJourney(memorySources?.ids?.length === 2 && memorySources.influence === 0, 'memory-governance-real-sources');
+    // The mixed-action fixture needs a feedback-derived preference as well as default-admitted memory signals.
+    // Legacy feedback aggregation uses its own explicit material admission; preserve that product boundary.
+    const preferenceSourceAdmitted = await renderer.evaluate(`(async () => { const page=await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}); const signal=page.signals.find(signal=>signal.signalId===${JSON.stringify(memorySources.ids[0])}); if(!signal)return false; const material=await window.ai7.inspectLearningMaterial({bookId:signal.source.bookId,materialKey:signal.source.materialKey}); await window.ai7.decideLearningMaterial({bookId:signal.source.bookId,materialKey:material.materialKey,materialDigest:material.digest,expectedDecisions:material.decisions,choice:'house',note:null}); return true; })()`);
+    requireJourney(preferenceSourceAdmitted === true, 'ordinary-preference-source-admitted');
     const openMemory = async (name) => {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
       await click(renderer, '社级编辑记忆', `${name}-tab`);
@@ -3339,8 +3343,10 @@ async function main() {
       const itemId = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.items.find(item=>item.current.schema==='ai7.global-editorial-memory/2' && item.current.title===${JSON.stringify(title)}).current.itemId)`);
       if (name === 'memory-governance-first') {
         await click(renderer, '更新本社审阅偏好', 'ordinary-preference-refresh');
-        await waitFor(renderer, `window.ai7.inspectGlobalAgent().then(page=>page.items.some(item=>item.kind==='preference' && item.bookId===null && item.categoryId==='typos-and-usage'))`, 'ordinary-preference-derived-ready');
-        ordinaryPreference = await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(page=>page.items.find(item=>item.kind==='preference' && item.bookId===null && item.categoryId==='typos-and-usage').itemId)`);
+        // waitFor evaluates a synchronous Boolean predicate: a Promise itself would pass before publication.
+        await waitFor(renderer, `(() => { const section=document.querySelector('[data-house-review-preference]');const status=section?.querySelector('[role="status"]')?.textContent??'';return section?.querySelector('button')?.disabled===false && (status.startsWith('已更新为本社审阅偏好') || status==='本社审阅偏好没有变化。'); })()`, 'ordinary-preference-derived-ready');
+        ordinaryPreference = await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(page=>page.items.find(item=>item.kind==='preference' && item.bookId===null && item.categoryId==='typos-and-usage')?.itemId??null)`);
+        requireJourney(typeof ordinaryPreference === 'string', 'ordinary-preference-derived-readable');
         await qualityMode(false, 'ordinary-memory');
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-memory-quality');
         await waitFor(renderer, `document.querySelector('[data-memory-candidates] [data-memory-item="${itemId}"]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-memory-candidate-first');
