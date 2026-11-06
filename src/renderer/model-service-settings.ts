@@ -105,7 +105,14 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   const modelChoices = new Map<ModelServiceChannelId, string>();
   let stopFollow: (() => void) | undefined;
 
+  function focusSearchSettings(): void {
+    const heading = document.querySelector<HTMLElement>('[data-search-backends="true"] h3');
+    heading?.scrollIntoView({ block: 'start' });
+    heading?.focus({ preventScroll: true });
+  }
+
   function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
+    const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
     stopFollow?.();
     const content = panel();
     content.classList.add('model-service-settings');
@@ -185,6 +192,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       renderModelServiceProxyBlock(projection));
     content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
+    if (searchHadFocus) focusSearchSettings();
     let reading = false;
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);
@@ -219,11 +227,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     try {
       renderModelServiceSettingsProjection(await window.ai7.getModelServiceSettings());
       setStatus('模型服务设置已打开');
-      if (focus === 'search') {
-        const heading = document.querySelector<HTMLElement>('[data-search-backends="true"] h3');
-        heading?.scrollIntoView({ block: 'start' });
-        heading?.focus({ preventScroll: true });
-      }
+      if (focus === 'search') focusSearchSettings();
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取模型服务设置。'), 'error');
     }

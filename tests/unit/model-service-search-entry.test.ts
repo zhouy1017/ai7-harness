@@ -34,7 +34,8 @@ function mount() {
       return settings;
     }),
   };
-  vi.stubGlobal('window', { ai7: api, setInterval: () => 0, clearInterval: vi.fn() });
+  let follow: () => void = () => undefined;
+  vi.stubGlobal('window', { ai7: api, setInterval: (callback: () => void) => { follow = callback; return 0; }, clearInterval: vi.fn() });
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
     const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
   };
@@ -42,7 +43,7 @@ function mount() {
   const page = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
     rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
-  return { root: root as unknown as MiniElement, page, api, settings };
+  return { root: root as unknown as MiniElement, page, api, settings, poll: () => follow() };
 }
 
 it('lands the review search-settings route on the visible, focused search heading in ordinary mode (#1370)', async () => {
@@ -74,6 +75,19 @@ it('saves ordinary proxy configuration and restores it after navigating away and
   root.replaceChildren(); await page.renderModelServiceSettings();
   expect(root.querySelector('select[aria-label="网络代理方式"]')!.value).toBe('proxy');
   expect(root.querySelector('input[aria-label="代理 URL"]')!.value).toBe('http://127.0.0.1:7890');
+});
+
+it('keeps the review search heading focused through two changed catalogue reads (#1370)', async () => {
+  const { root, page, settings, poll } = mount();
+  await page.renderModelServiceSettings('search');
+  for (const suffix of ['second', 'third']) {
+    const previous = root.querySelector('[data-search-backends] h3');
+    const channel = settings.channels[0]!;
+    Object.assign(channel, { models: channel.models.map((model) => ({ ...model, modelLabel: `${model.modelLabel} ${suffix}` })) });
+    poll();
+    await vi.waitFor(() => expect(root.querySelector('[data-search-backends] h3')).not.toBe(previous));
+    expect(document.activeElement === root.querySelector('[data-search-backends] h3')).toBe(true);
+  }
 });
 
 it('keeps the ordinary search-source choice across a settings round trip (#1370)', async () => {

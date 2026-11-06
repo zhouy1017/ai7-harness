@@ -2944,17 +2944,7 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-search-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-search-sheet');
     await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');
-    try {
-      await waitFor(renderer, `(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); if(!(heading instanceof HTMLElement))return false; const box=heading.getBoundingClientRect(); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && document.querySelector('[data-model-service-proxy]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'review-search-settings-focused-visible');
-    } catch (error) {
-      error.detail = await renderer.evaluate(`(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); const box=heading?.getBoundingClientRect(); return {
-        searchHeadingExists: heading instanceof HTMLElement, searchHeadingFocused: document.activeElement===heading,
-        headingTopVisible: box!==undefined && box.top>=0, headingBottomVisible: box!==undefined && box.bottom<=innerHeight,
-        proxyExists: !!document.querySelector('[data-model-service-proxy]'), ordinaryMode: document.documentElement.dataset.technicalLayerVisible==='false',
-        catalogueFailureRendered: !!document.querySelector('[data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')
-      }; })()`);
-      throw error;
-    }
+    await waitFor(renderer, `(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); if(!(heading instanceof HTMLElement))return false; const box=heading.getBoundingClientRect(); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && document.querySelector('[data-model-service-proxy]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'review-search-settings-focused-visible');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-search-restore-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-search-restore-settings-ready');
     await click(renderer, '帮助', 'review-search-restore-help');
