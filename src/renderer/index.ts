@@ -18,7 +18,7 @@ import { showToast } from './components/toast.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
-import type { BookFindingProjection } from '../shared/protocol.js';
+import type { BookFindingProjection, ProductionDocumentProjection } from '../shared/protocol.js';
 import {
   APPEARANCE_BACK,
   APPEARANCE_CHOICES,
@@ -627,8 +627,8 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
     else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
-    // 写作任务 (Issue #432, S84a) is followed in 交付物, where its draft opens.
-    else if (plan.kind === 'writing') renderBookDeliverables(plan.bookId, plan.goal.chips.book);
+    // 写作任务 is followed on 稿件 (Issue #1403), where its draft opens.
+    else if (plan.kind === 'writing') await renderBookManuscript(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -1214,7 +1214,8 @@ function renderTaskOverview(focusItemId?: string): void {
     openResult: (item) => void openOverviewResult(item), closeDrawer: () => taskDrawer.close(true),
     configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
       if (kind === 'review') renderBookReview(bookId, route.bookTitle);
-      else renderBookDeliverables(bookId, route.bookTitle);
+      // 写作 lives on 稿件 (Issue #1403).
+      else await renderBookManuscript(bookId, route.bookTitle);
       const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
     }),
   });
@@ -1314,7 +1315,7 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
             renderBookEvaluation(route.bookId, route.bookTitle);
             break;
           case 'writing':
-            renderBookDeliverables(route.bookId, route.bookTitle);
+            await renderBookManuscript(route.bookId, route.bookTitle);
             break;
           default:
             renderBookAnalysis(route.bookId, route.bookTitle);
@@ -1914,7 +1915,8 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     // manuscript.
     const openBook = async (): Promise<void> => {
       if (onDocument) {
-        renderBookDeliverables(recovery.bookId, recovery.bookTitle);
+        // A derivative document lives on 稿件 (Issue #1403): its switcher opens it again.
+        await renderBookManuscript(recovery.bookId, recovery.bookTitle);
         setStatus(DOCUMENT_STATUS_LINES.recoveredNotOpened, 'error');
         return;
       }
@@ -1932,15 +1934,15 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
       // Nothing waits on the editor's confirmation any more (Issues #593, #603), so the screen's words stop asking for a
       // decision.
       showRestoreStands({ sectionLabel, heading, lede, legend });
-      const reopen = button(onDocument ? PUBLICATION_ACTION_LABELS.open : '打开图书', 'primary', async () => {
+      const reopen = button(onDocument ? '打开稿件' : '打开图书', 'primary', async () => {
         reopen.disabled = true;
-        setStatus(onDocument ? DELIVERABLES_STATUS_LINES.opening : '正在打开图书…', 'busy');
+        setStatus(onDocument ? '正在打开稿件…' : '正在打开图书…', 'busy');
         try {
           await openBook();
         } catch (again) {
           reopen.disabled = false;
           setStatus(onDocument
-            ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, DELIVERABLES_STATUS_LINES.openFailed)}`
+            ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, '无法打开稿件。')}`
             : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
         }
       });
@@ -2987,6 +2989,17 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
   );
 }
 
+/** The Book's 稿件 at its remembered place (Issue #1403): where every derivative document, and AI 写作, now lives. */
+async function renderBookManuscript(bookId: string, bookTitle: string): Promise<void> {
+  await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+}
+
+/** One derivative document on the manuscript's surface (Issue #1403), read like the manuscript's window. */
+async function openProductionDocument(documentNow: ProductionDocumentProjection, type: { typeId: string; label: string }, bookTitle: string, notice?: string | null): Promise<void> {
+  const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
+  renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
+}
+
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {
   const content = panel();
   content.classList.add('book-deliverables');
@@ -3007,20 +3020,15 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     // 录入定价与首印… (Issue #430, S82): 设置 › 评估校准与预测 with this Book's entry open.
     ...(technicalLayerVisible ? { openActuals: (bookId: string) => void renderEvaluationCalibration(bookId) } : {}),
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
-    openDocument: async (documentNow, type, notice) => {
-      const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
-      renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
-    },
+    openDocument: (documentNow, type, notice) => openProductionDocument(documentNow, type, bookTitle, notice),
+    // 新闻稿、简介等衍生稿件 live on 稿件 (Issue #1403).
+    openManuscript: () => void renderBookManuscript(bookId, bookTitle).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error')),
     // 前往审阅 from 图书交付包's work records (Issue #416): the Book's 审阅, where a report is generated.
     openReview: () => renderBookReview(bookId, bookTitle),
-    // 新建文档 · 写作任务 (Issue #432, S84a): its preparation job, and its plan in the Task Drawer beside 交付物.
-    awaitServiceJob,
-    openWritingPlan: (ref, note) => openTaskPlan(bookId, 'writing', ref, note),
   });
   replaceScreen('book-deliverables', content, { bookId, title: bookTitle, section: 'deliverables' });
   agentWorkspaceReturns.set(content, () => renderBookDeliverables(bookId, bookTitle, openCase, focusPackageVersionId));
   deliverablesSurface = surface;
-  taskSurfaceRefresh = { writing: () => surface.refreshWriting() };
   surface.start();
   setStatus(DELIVERABLES_STATUS_LINES.opened);
 }
@@ -4729,8 +4737,10 @@ function renderEditorWindow(
     persistenceStatus, contextView: requiredElement('#context-view'), viewPreferences, preferences: shellPreferences,
     commandDispatcher, taskDrawer, interrupted: () => authorityInterrupted,
     attach: (content, surface) => {
-      replaceScreen('editor', content, { bookId: initialWindow.bookId, title: bookTitle, section: productionDocument === undefined ? 'manuscript' : 'deliverables' });
+      // A derivative document is the Book's 稿件 too (Issue #1403).
+      replaceScreen('editor', content, { bookId: initialWindow.bookId, title: bookTitle, section: 'manuscript' });
       manuscriptOnScreen = surface;
+      taskSurfaceRefresh = { writing: () => surface.refreshWriting() };
       leaveGuard = () => surface.settle();
       agentWorkspaceReturns.set(content, async () => {
         const opened = await window.ai7.getManuscriptWindow({ manuscriptId: initialWindow.manuscriptId, branchId: initialWindow.branchId, cursor: null });
@@ -4743,6 +4753,9 @@ function renderEditorWindow(
     renderEditorWindow, renderBookAnalysis, renderBookReview,
     renderBookDeliverables, renderProposalConflict, renderProposalWorkspace,
     returnToRecoveryComparison,
+    openPrimaryManuscript: renderBookManuscript,
+    openProductionDocument,
+    openWritingPlan: (bookId, ref, note) => openTaskPlan(bookId, 'writing', ref, note),
   });
 }
 

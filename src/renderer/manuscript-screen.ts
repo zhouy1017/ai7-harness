@@ -33,6 +33,8 @@ import {
   documentVersionSavedLine,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
+import { mountManuscriptSwitcher, type ManuscriptSwitcher } from './manuscript-switcher.js';
+import type { ProductionDocumentProjection } from '../shared/protocol.js';
 import {
   MILESTONE_FORM_WORDS,
   MILESTONE_PURPOSE_NOTE,
@@ -81,6 +83,8 @@ export interface ManuscriptScreen {
   followReviewMarks(bookId: string, reviewRunId: string | undefined): void;
   interrupt(): void;
   blockedClose(): boolean;
+  /** AI 写作 on 稿件's switcher reads again (Issue #1403): the Task Drawer started or recorded its Task. */
+  refreshWriting(): void;
   destroy(): void;
 }
 
@@ -118,6 +122,10 @@ interface ManuscriptScreenOptions {
   renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void;
   renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void>;
   returnToRecoveryComparison(attentionId: string): Promise<void>;
+  /** 本书稿件 (Issue #1403): the Book's manuscript, and one of its derivative documents, opened on this surface. */
+  openPrimaryManuscript(bookId: string, bookTitle: string): Promise<void>;
+  openProductionDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, bookTitle: string, notice?: string | null): Promise<void>;
+  openWritingPlan(bookId: string, taskIntentId: string, note?: string): void;
 }
 
 /** A Production Document's type and versions, read for a window that holds it (Issue #415, S66). */
@@ -232,7 +240,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   content.dataset['bookId'] = initialWindow.bookId;
   const isDocument = productionDocument !== undefined;
   if (productionDocument !== undefined) {
-    content.dataset['deliverable'] = 'production-document';
+    // A derivative document of the Book's 稿件 (Issue #1403), never one of 交付物.
+    content.dataset['manuscriptKind'] = 'derivative';
     content.dataset['documentId'] = productionDocument.document.documentId;
     content.dataset['documentTypeId'] = productionDocument.typeId;
   }
@@ -253,11 +262,74 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (block === undefined) return windowNow.position.label;
     return returnChipPlace(windowNow.position.structureLabel, block.position);
   };
-  if (isDocument) title.append(
-    element('h2', undefined, productionDocument !== undefined
-      ? technicalLayerVisible ? `${productionDocument.document.title} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.document.title
-      : '稿件'),
-  );
+  // A document's title says its type and its name, and is renamed in place (Issue #1404): the editor never leaves the text.
+  const titleHeading = element('h2', 'document-title-heading');
+  const headingWords = (name: string): string => productionDocument === undefined ? '稿件'
+    : technicalLayerVisible ? `${name} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : name;
+  if (productionDocument !== undefined) {
+    titleHeading.textContent = headingWords(productionDocument.document.title);
+    const titleRow = element('div', 'document-title-row');
+    const badge = element('span', 'document-type-badge', `[${productionDocument.typeLabel}]`);
+    const rename = button('重命名', 'quiet', () => beginRename());
+    rename.dataset['documentAction'] = 'rename';
+    rename.setAttribute('aria-label', `重命名：${productionDocument.document.title}`);
+    titleRow.append(badge, titleHeading, rename);
+    title.append(titleRow);
+    const beginRename = (): void => {
+      if (titleRow.querySelector('.document-title-input') !== null) return;
+      const input = element('input', 'document-title-input');
+      input.type = 'text';
+      input.maxLength = 80;
+      input.value = productionDocument.document.title;
+      input.setAttribute('aria-label', '稿件题目');
+      const save = button('保存', 'secondary', () => void commitRename());
+      save.dataset['documentAction'] = 'confirmRename';
+      const cancel = button('取消', 'quiet', () => endRename());
+      cancel.dataset['documentAction'] = 'cancelRename';
+      const endRename = (): void => {
+        input.remove(); save.remove(); cancel.remove();
+        titleHeading.hidden = false;
+        rename.hidden = false;
+        rename.focus();
+      };
+      const commitRename = async (): Promise<void> => {
+        const next = input.value.trim();
+        if (next === '') {
+          setStatus('稿件题目不能为空。', 'error');
+          input.focus();
+          return;
+        }
+        if (next === productionDocument.document.title) { endRename(); return; }
+        input.disabled = save.disabled = cancel.disabled = true;
+        try {
+          const result = await api.renameProductionDocument({ documentId: productionDocument.document.documentId, title: next });
+          if (destroyed) return;
+          const renamed = result.document?.title ?? next;
+          // Only the name moves: the text, its caret, its scroll and its open cards stay as they are.
+          productionDocument.document = { ...productionDocument.document, title: renamed };
+          titleHeading.textContent = headingWords(renamed);
+          rename.setAttribute('aria-label', `重命名：${renamed}`);
+          switcher?.renamed(result.documents);
+          endRename();
+          setStatus('稿件题目已保存', 'success');
+        } catch (error) {
+          input.disabled = save.disabled = cancel.disabled = false;
+          setStatus(rendererErrorMessage(error, '题目无法保存'), 'error');
+          input.focus();
+        }
+      };
+      input.addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
+        if (event.key === 'Enter') { event.preventDefault(); void commitRename(); }
+        else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); endRename(); }
+      });
+      titleHeading.hidden = true;
+      rename.hidden = true;
+      titleHeading.after(input, save, cancel);
+      input.focus();
+      input.setSelectionRange(0, input.value.length);
+    };
+  }
   const meta = element('div', 'editor-meta');
   const position = element('span', 'editor-position', positionWords(initialWindow));
   position.setAttribute('title', initialWindow.position.structureLabel ?? positionWords(initialWindow));
@@ -343,16 +415,23 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     try {
       const saved = await api.saveProductionDocumentVersion({ documentId: currentWindow.manuscriptId, branchId: currentWindow.branchId });
       const version = saved.document?.versions[0];
-      if (version === undefined) throw new Error('无法固定交付物版本。');
+      if (version === undefined) throw new Error('无法固定稿件版本。');
       taskDrawer.openComposer({ bookId: currentWindow.bookId, bookTitle, origin: 'composer-deliverable', manuscript: null, ranges: [], outcomeClass: 'writing',
         deliverable: { manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, revisionId: version.revisionId,
-          label: `交付物 · ${productionDocument.typeLabel} · ${version.label}` } }, () => editorHost.querySelector<HTMLElement>('.ProseMirror'));
-    } catch (error) { setStatus(rendererErrorMessage(error, '无法发起交付物任务。'), 'error'); }
+          label: `稿件 · ${productionDocument.typeLabel} · ${productionDocument.document.title} · ${version.label}` } }, () => editorHost.querySelector<HTMLElement>('.ProseMirror'));
+    } catch (error) { setStatus(rendererErrorMessage(error, '无法发起稿件任务。'), 'error'); }
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
   toolbarActions.append(paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
+  // 本书稿件 (Issue #1403): the manuscript and every derivative document of the Book, and 新建 / 导入衍生稿件, above the editor.
+  let switcher: ManuscriptSwitcher | undefined;
+  const leaveFor = async (open: () => Promise<void>): Promise<void> => {
+    if (!(await settleLocalEdit())) return;
+    await rememberEntryPosition();
+    if (!destroyed) await open();
+  };
 
   const workspace = element('div', 'editor-workspace');
   const navigator = element('aside', 'manuscript-navigator');
@@ -627,7 +706,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   commentsPane.id = 'manuscript-comments-pane';
   commentsPane.setAttribute('aria-label', '批注栏');
   const commentsKey = `ai7.comments-pane.${initialWindow.bookId}`;
-  let commentsOpen = globalThis.localStorage?.getItem(commentsKey) === 'true' && !isDocument;
+  let commentsOpen = globalThis.localStorage?.getItem(commentsKey) === 'true';
   commentsPane.hidden = !commentsOpen;
   const commentsEntry = button('批注', 'quiet', () => setCommentsOpen(!commentsOpen));
   commentsEntry.dataset['edgeEntry'] = 'comments';
@@ -664,7 +743,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const badge = entry.querySelector<HTMLElement>('.edge-badge')!;
     entry.setAttribute('aria-label', `${entry.querySelector('.edge-label')!.textContent}${badge.hidden ? '' : ` · ${badge.dataset['count']}`}`);
   };
-  edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry, commentsEntry]));
+  // A derivative document has its 批注栏 too (Issue #1405); 分析 and 任务 stay the manuscript's.
+  edgeEntries.append(navigationEntry, ...(isDocument ? [commentsEntry] : [analysisEntry, tasksEntry, commentsEntry]));
   const railTrack = element('div', 'rail-track');
   railTrack.id = 'manuscript-position';
   const railColumn = element('div', 'rail-column');
@@ -682,7 +762,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     errorMessage: rendererErrorMessage,
   });
   if (documentLens !== undefined) workspace.classList.add('document-workspace');
-  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, ...(isDocument ? [] : [analysisPanel, commentsPane]), edge);
+  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, ...(isDocument ? [commentsPane] : [analysisPanel, commentsPane]), edge);
 
   const setNavigationOpen = (open: boolean): void => {
     // One supporting side surface at a time (IA): 导航 opening closes the Task Drawer beside the manuscript.
@@ -726,7 +806,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     element('dd', undefined, initialWindow.revisionLabel),
   );
   identities.append(identityGrid, journal);
-  content.append(toolbar, workspace, technicalDisclosure(identities));
+  switcher = mountManuscriptSwitcher({
+    bookId: initialWindow.bookId,
+    bookTitle,
+    api,
+    currentDocumentId: productionDocument?.document.documentId ?? null,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    awaitServiceJob,
+    openPrimary: () => leaveFor(() => options.openPrimaryManuscript(initialWindow.bookId, bookTitle)),
+    openDocument: (document, type, notice) => leaveFor(() => options.openProductionDocument(document, type, bookTitle, notice)),
+    openWritingPlan: (ref, note) => options.openWritingPlan(initialWindow.bookId, ref, note),
+  });
+  content.append(switcher.element, toolbar, workspace, technicalDisclosure(identities));
   if (options.reimportNotice !== undefined) toolbar.after(options.reimportNotice);
   const toggleSaveMenu = (): void => {
     if (saveMenu !== undefined) (saveMenu.element as HTMLDetailsElement).open = !(saveMenu.element as HTMLDetailsElement).open;
@@ -759,6 +851,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       protectionSurface?.openOptions(PROTECTION_CLOSE_BLOCKED);
       return true;
     },
+    refreshWriting: () => switcher?.refreshWriting(),
     destroy,
   };
   // The shell captures/destroys the departing screen and installs this handle before DOM-dependent mounting and focus.
@@ -770,7 +863,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     focus: focusMode,
     rail: true,
     openNavigation: () => setNavigationOpen(true),
-    ...(isDocument ? {} : { openTasks: () => { setCommentsOpen(false); taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }),
+    ...(isDocument ? { toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }
+      : { openTasks: () => { setCommentsOpen(false); taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }),
     setStatus,
     shortcutHint,
   });
@@ -2208,7 +2302,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   }
   updateCommentsBadge();
   editorialMarks = mountEditorialMarks({
-    ...(isDocument ? {} : { comments: { host: commentsPane, enabled: () => commentsOpen && !focusMode.active } }),
+    comments: { host: commentsPane, enabled: () => commentsOpen && !focusMode.active },
     scroll: editorWindow,
     host: editorHost,
     editor,
@@ -2321,6 +2415,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     milestonePersistenceRead += 1;
     returnRequest += 1;
     commentsFocusOff();
+    switcher?.destroy();
+    switcher = undefined;
     editorialMarks?.destroy();
     editorialMarks = undefined;
     manuscriptRail?.destroy();

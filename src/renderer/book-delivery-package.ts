@@ -1,10 +1,11 @@
 import { stateTerm, windowStep } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
   publicationText,
   type BookDeliveryPackageConditionProjection,
+  type BookDeliveryPackageDocumentOptionProjection,
   type BookDeliveryPackageExportFileOutcomeProjection,
   type BookDeliveryPackageExportFileProjection,
   type BookDeliveryPackageExportOptions,
@@ -171,6 +172,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   let section: HTMLElement | undefined;
   let exporting: ExportState | null = null;
   let exportTicket = 0;
+  // The derivative documents the editor ticked, each at one saved version (Issue #1405); `null` until they tick one, so the package
+  // reads as it always did — each type's latest delivered version — until then.
+  let choices: Map<string, string> | null = null;
   const linkedFocus = new LinkedPackageVersionFocus(options.focusVersionId ?? null);
 
   const exportWorking = (): boolean =>
@@ -181,7 +185,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function refresh(): void {
     if (destroyed) return;
     const ticket = ++generation;
-    void api.inspectBookDeliveryPackage().then(
+    void api.inspectBookDeliveryPackage(choices === null ? undefined : { documents: chosenDocuments() }).then(
       (next) => {
         if (destroyed || ticket !== generation || !options.root.isConnected || next.bookId !== bookId) return;
         projection = next;
@@ -193,6 +197,66 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         options.setStatus(options.errorMessage(error, PACKAGE_STATUS_LINES.refreshFailed), 'error');
       },
     );
+  }
+
+  function chosenDocuments(): Array<{ documentId: string; revisionId: string }> {
+    return [...(choices ?? new Map<string, string>())].map(([documentId, revisionId]) => ({ documentId, revisionId }));
+  }
+
+  /** A tick or a version changed (Issue #1405): the package is read again with exactly what is ticked now. */
+  function choose(next: BookDeliveryPackageProjection, documentId: string, revisionId: string | null): void {
+    choices ??= new Map(next.documents.filter((entry) => entry.selectedRevisionId !== null).map((entry) => [entry.documentId, entry.selectedRevisionId!]));
+    if (revisionId === null) choices.delete(documentId);
+    else choices.set(documentId, revisionId);
+    problem = null;
+    refresh();
+  }
+
+  /**
+   * 随书稿件 (Issue #1405): every derivative document by its type and title, ticked to go into the package at the saved version
+   * chosen beside it — newest first, the latest offered — with no Delivery Record and no workflow phase asked for.
+   */
+  function renderDocumentChoices(next: BookDeliveryPackageProjection): HTMLElement {
+    const block = el('section', 'package-documents');
+    block.append(el('h4', undefined, '随书稿件'));
+    if (next.documents.length === 0) {
+      block.append(el('p', 'field-note', '本书还没有衍生稿件；可在「稿件」选项卡新建或导入。'));
+      return block;
+    }
+    const list = el('ul', 'package-document-choices');
+    for (const entry of next.documents) list.append(documentChoice(next, entry));
+    block.append(list);
+    return block;
+  }
+
+  function documentChoice(next: BookDeliveryPackageProjection, entry: BookDeliveryPackageDocumentOptionProjection): HTMLElement {
+    const item = el('li');
+    item.dataset['documentId'] = entry.documentId;
+    item.dataset['typeId'] = entry.typeId;
+    const box = el('input');
+    box.type = 'checkbox';
+    box.id = uid('document');
+    box.dataset['packageField'] = 'document';
+    box.dataset['packageMember'] = entry.documentId;
+    box.checked = entry.selectedRevisionId !== null;
+    box.disabled = busy();
+    const label = el('label', undefined, `[${entry.typeLabel}] ${entry.title}`);
+    label.htmlFor = box.id;
+    const version = el('select');
+    version.dataset['packageField'] = 'document-version';
+    version.dataset['packageMember'] = entry.documentId;
+    version.setAttribute('aria-label', `${entry.title} 的版本`);
+    for (const saved of entry.versions) {
+      const option = el('option', undefined, `${saved.label} · ${localInstantLabel(saved.savedAt)}`);
+      option.value = saved.revisionId;
+      option.selected = saved.revisionId === (entry.selectedRevisionId ?? entry.versions[0]?.revisionId);
+      version.append(option);
+    }
+    version.disabled = busy() || !box.checked;
+    box.addEventListener('change', () => choose(next, entry.documentId, box.checked ? version.value : null));
+    version.addEventListener('change', () => choose(next, entry.documentId, version.value));
+    item.append(box, label, version);
+    return item;
   }
 
   /** A control's identity across a redraw, so focus stays where the editor was. */
@@ -228,13 +292,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     heading.id = uid('heading');
     view.setAttribute('aria-labelledby', heading.id);
     view.append(heading, el('p', 'field-note package-statement', next.statement));
-    view.append(renderConditions(next.conditions), renderPreview(next), renderPrepare(next));
+    // A document's row is the earlier 交付 ledger's reading: once documents are ticked, or outside the technical layer, 随书稿件 says it.
+    const conditions = choices === null && technicalLayerVisible ? next.conditions : next.conditions.filter((condition) => condition.key !== 'document');
+    view.append(renderConditions(conditions), renderDocumentChoices(next), renderPreview(next), renderPrepare(next));
     if (next.versions.length > 0) view.append(renderVersions(next.versions, next.versionsTruncated));
     if (section?.isConnected === true) section.replaceWith(view);
     else options.root.replaceChildren(view);
     section = view;
     if (restore !== null) {
-      const again = Array.from(view.querySelectorAll<HTMLElement>('button, input')).find((node) => focusKeyOf(node) === restore);
+      const again = Array.from(view.querySelectorAll<HTMLElement>('button, input, select')).find((node) => focusKeyOf(node) === restore);
       again?.focus();
       if (again instanceof HTMLInputElement && selection !== null) again.setSelectionRange(selection[0], selection[1]);
     } else if (focus === 'prepare') {
@@ -864,7 +930,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     draw('keep');
     options.setStatus(PACKAGE_STATUS_LINES.preparing, 'busy');
     try {
-      const result = await api.prepareBookDeliveryPackage({ purpose, expectedContentDigest: next.content.digest });
+      const result = await api.prepareBookDeliveryPackage({ purpose, expectedContentDigest: next.content.digest,
+        ...(choices === null ? {} : { documents: chosenDocuments() }) });
       if (destroyed) return;
       if (result.bookId !== bookId || result.package.bookId !== bookId) throw new Error(PACKAGE_STATUS_LINES.prepareFailed);
       working = false;

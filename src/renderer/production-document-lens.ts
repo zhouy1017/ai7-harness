@@ -1,5 +1,6 @@
 import type { ProductionDocumentProjection } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { technicalLayerVisible } from './technical-layer.js';
 import {
   DOCUMENT_CHANGED_SINCE_DELIVERY,
   DOCUMENT_CHANGED_SINCE_VERSION,
@@ -9,6 +10,8 @@ import {
   DOCUMENT_MATERIALS_HEADING,
   DOCUMENT_VERSION_CURRENT_MARK,
   DOCUMENT_VERSIONS_HEADING,
+  DOCUMENT_VERSIONS_LIGHT_HEADING,
+  DOCUMENT_VERSIONS_LIGHT_LABEL,
   DOCUMENT_VERSIONS_TRUNCATED,
   documentDeliveryExportLine,
   documentDeliveryLine,
@@ -81,7 +84,10 @@ export function renderDocumentLens(
   const aside = el('aside', 'document-lens');
   aside.setAttribute('aria-label', DOCUMENT_LENS_LABEL);
   aside.dataset['documentId'] = context.document.documentId;
-  const workflow = renderDocumentWorkflow(context.document.workflow, workflowActions);
+  // Ordinary mode keeps only the document's versions (Issue #1405): no seven phases, no Delivery Records, no empty materials line.
+  // The technical layer keeps all three for audit.
+  const audit = technicalLayerVisible;
+  const workflow = audit ? renderDocumentWorkflow(context.document.workflow, workflowActions) : null;
   const versions = el('section', 'document-lens-section document-versions');
   const materials = el('section', 'document-lens-section document-materials');
   const materialsHeading = el('h3', undefined, DOCUMENT_MATERIALS_HEADING);
@@ -91,7 +97,9 @@ export function renderDocumentLens(
   const materialsState = el('span', 'document-materials-empty', DOCUMENT_MATERIALS_EMPTY);
   materialsHeading.append(' · ', materialsState);
   if (notCarried !== null && notCarried > 0) materialsHeading.append(' · ', el('span', 'document-origin-marks', documentOriginMarksLine(notCarried)));
-  aside.append(el('p', 'section-label', DOCUMENT_LENS_LABEL), workflow.element, versions, materials);
+  aside.append(el('p', 'section-label', audit ? DOCUMENT_LENS_LABEL : DOCUMENT_VERSIONS_LIGHT_LABEL), ...(workflow === null ? [] : [workflow.element]), versions,
+    ...(audit || (notCarried !== null && notCarried > 0) ? [materials] : []));
+  if (!audit) materialsState.remove();
   // The document as the service last answered, and the working digest the window holds now.
   let shown = context.document;
   let workingDigest = shown.workingDigest;
@@ -100,7 +108,7 @@ export function renderDocumentLens(
     if (painted !== null && painted.document === shown && painted.workingDigest === workingDigest) return;
     painted = { document: shown, workingDigest };
     const standing = documentStanding(shown, workingDigest);
-    const versionsHeading = el('h3', undefined, DOCUMENT_VERSIONS_HEADING);
+    const versionsHeading = el('h3', undefined, audit ? DOCUMENT_VERSIONS_HEADING : DOCUMENT_VERSIONS_LIGHT_HEADING);
     versionsHeading.id = `document-versions-${shown.documentId}`;
     versions.setAttribute('aria-labelledby', versionsHeading.id);
     const list = el('ol', 'document-version-list');
@@ -122,7 +130,7 @@ export function renderDocumentLens(
       if (standing.changedSinceVersion) status.append(...(shown.versionsTruncated ? ['；'] : []), el('span', 'document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
       versionsHeading.append(' · ', status);
     }
-    if (shown.deliveries.length > 0) {
+    if (audit && shown.deliveries.length > 0) {
       versions.append(el('h4', undefined, DOCUMENT_DELIVERIES_HEADING));
       const deliveries = el('ol', 'document-lens-deliveries');
       for (const delivery of shown.deliveries) {
@@ -140,7 +148,7 @@ export function renderDocumentLens(
   let readTimer: number | undefined;
   let reads = 0;
   const refresh = (): void => {
-    if (workflowActions === null) return;
+    if (workflowActions === null || workflow === null) return;
     const actions = workflowActions;
     if (readTimer !== undefined) window.clearTimeout(readTimer);
     readTimer = window.setTimeout(() => {
