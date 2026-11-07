@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-09 (Issue #424, plan slice S78): 待我处理 — a cross-Book attention view (editor-surfaces §8.1, V2-UX-ATTN-001
@@ -535,10 +535,12 @@ async function runHeldAt(renderer, bookId, settled, name) {
  */
 async function editAndSave(renderer, suffix, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, `${name}-editor-ready`);
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, `${name}-scope`);
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, `${name}-inserted`);
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, `${name}-dirty`);
   await click(renderer, '保存', `${name}-save`);
-  await waitFor(renderer, `document.querySelector('[data-toast]')?.dataset.tone==='success' && document.querySelector('[data-toast]')?.textContent.includes('修订日志')`, `${name}-durable`, 120_000);
+  await waitFor(renderer, journalEditPersisted(before, suffix), `${name}-durable`, 120_000);
   await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="editor"] .ProseMirror'); if(!(text instanceof HTMLElement))return false; text.focus(); return document.activeElement===text; })()`, `${name}-caret-back`);
 }
 
