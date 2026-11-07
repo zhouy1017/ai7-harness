@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -1607,13 +1607,19 @@ async function main() {
         networkUnavailable: blocked,
         // The sheet's scope choices are the manuscript's: 全书 and 选章 are offered, 当前选区 needs a real selection.
         scopeChoices: workspace.scopeOptions.whole.available && workspace.scopeOptions.chapters.available && !workspace.scopeOptions.selection.available,
-        factualAvailable: factual?.available === true,
+        // Choosable now (it may still wait for 联网检索), or refused for a reason of its own that the sheet must tell.
+        factualChoosable: factual?.available === true || blocked,
         factualReason: factual?.unavailableReason ?? null,
       };
     })`);
     requireJourney(factualVerdict?.empty === true && factualVerdict.consistent === true, 'factual-first-scope-verdict');
     requireJourney(factualVerdict.scopeChoices === true, 'factual-first-scope-choices');
     const factualNetworkUnavailable = factualVerdict.networkUnavailable === true;
+    const factualChoosable = factualVerdict.factualChoosable === true;
+    // A refused 事实核查 (here: a Book outside the admitted public SampleBooks under the provider-free launch) stays on the sheet,
+    // disabled and saying the service's own reason; the range round trip is then made with the category this Book can choose.
+    const rangeCategory = factualChoosable ? 'factual-review' : 'local-text-check';
+    const factualReasonLine = factualVerdict.factualReason === null ? null : `${String(factualVerdict.factualReason).split(/[；。]/u)[0]}。`;
     const tasksBeforeFactualSheet = await primary.evaluate(`window.ai7.inspectBookTasks().then(tasks=>JSON.stringify(tasks))`);
     requireJourney(typeof tasksBeforeFactualSheet === 'string', 'factual-first-scope-tasks-before');
     await assertRenderer(primary, `(() => { const open=document.querySelector('[data-review-action="new-review"]'); if(!open||open.disabled)return false; open.click(); return true; })()`, 'factual-first-scope-new');
@@ -1624,26 +1630,29 @@ async function main() {
       // A category toggle redraws the whole sheet, so every control is read fresh and none is held across a change.
       const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
       const factual=()=>sheet.querySelector('input[name="review-category"][value="factual-review"]');
+      const chosen=()=>sheet.querySelector('input[name="review-category"][value=${JSON.stringify(rangeCategory)}]');
+      const factualReason=()=>factual().closest('label').querySelector('.review-category-reason');
       const chapter=which=>sheet.querySelector('[data-review-chapter="'+which+'"]');
       const checkedIds=()=>Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value);
       for(let step=0; step<20 && sheet.querySelector('input[name="review-category"]:checked'); step++)sheet.querySelector('input[name="review-category"]:checked').click();
       if(checkedIds().length!==0)return 'cleared';
-      if(!factual())return 'offered-factual-missing';
-      if(factual().disabled){
-        const checkedScope=sheet.querySelector('input[name="review-scope"]:checked')?.value ?? 'none';
-        return 'offered-factual-disabled-'+checkedScope+${JSON.stringify(factualVerdict.factualAvailable ? '-available' : `-unavail-${createHash('sha256').update(String(factualVerdict.factualReason)).digest('hex').slice(0, 8)}`)};
+      if(!factual()||!chosen())return 'offered-missing';
+      if(${JSON.stringify(!factualChoosable)}){
+        const why=factualReason();
+        if(!factual().disabled||factual().checked||factual().dataset.unavailableReason!==${JSON.stringify(factualVerdict.factualReason)}||!why||why.hidden||why.textContent!==${JSON.stringify(factualReasonLine)})return 'refused-told';
       }
+      if(chosen().disabled)return 'offered-disabled';
       for(const kind of ['whole','chapters']){ if(!scope(kind))return 'offered-'+kind+'-missing'; if(scope(kind).disabled)return 'offered-'+kind+'-disabled'; }
       // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
       if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return 'selection-held';
-      factual().click(); scope('whole').click();
-      if(!factual().checked||factual().disabled||!scope('whole').checked)return 'whole-chosen';
+      chosen().click(); scope('whole').click();
+      if(!chosen().checked||chosen().disabled||!scope('whole').checked)return 'whole-chosen';
       scope('chapters').click();
-      if(!factual().checked||factual().disabled||!chapter('from')||!chapter('to')||chapter('from').disabled||chapter('to').disabled||chapter('from').options.length<3)return 'chapters-offered';
-      const chosen=chapter('from').options[2].value;
-      chapter('from').value=chosen; chapter('from').dispatchEvent(new Event('change',{bubbles:true}));
-      chapter('to').value=chosen; chapter('to').dispatchEvent(new Event('change',{bubbles:true}));
-      const kept=()=>checkedIds().join(',')==='factual-review'&&!factual().disabled&&chapter('from').value===chosen&&chapter('to').value===chosen;
+      if(!chosen().checked||chosen().disabled||!chapter('from')||!chapter('to')||chapter('from').disabled||chapter('to').disabled||chapter('from').options.length<3)return 'chapters-offered';
+      const range=chapter('from').options[2].value;
+      chapter('from').value=range; chapter('from').dispatchEvent(new Event('change',{bubbles:true}));
+      chapter('to').value=range; chapter('to').dispatchEvent(new Event('change',{bubbles:true}));
+      const kept=()=>checkedIds().join(',')===${JSON.stringify(rangeCategory)}&&!chosen().disabled&&chapter('from').value===range&&chapter('to').value===range;
       if(!kept())return 'range-chosen';
       scope('whole').click();
       if(!scope('whole').checked||!kept())return 'whole-kept';
@@ -1651,7 +1660,7 @@ async function main() {
       if(!scope('chapters').checked||!kept()||document.documentElement.dataset.technicalLayerVisible!=='false')return 'chapters-kept';
       // The chosen factual review is told as the service's verdict reads it, and nothing is started either way.
       const blocked=${JSON.stringify(factualNetworkUnavailable)};
-      const reason=factual().closest('label').querySelector('.review-category-reason');
+      const reason=factualReason();
       const notice=sheet.querySelector('.review-network-notice');
       const start=sheet.querySelector('[data-review-action="start"]'), prepare=sheet.querySelector('[data-review-action="prepare"]');
       if(!reason||!notice||!start||!prepare)return 'controls';
@@ -1660,10 +1669,11 @@ async function main() {
         if(notice.hidden||notice.textContent!=='联网检索尚未就绪，请到设置中配置后再开始。')return 'blocked-notice';
         return start.disabled&&prepare.disabled ? 'ok' : 'blocked-actions';
       }
+      if(${JSON.stringify(!factualChoosable)})return factual().disabled&&!factual().checked&&notice.hidden ? 'ok' : 'refused-kept';
       return reason.hidden&&notice.hidden ? 'ok' : 'open-reason-or-notice';
     })()`);
     requireJourney(factualRoundtrip === 'ok', factualRoundtrip === 'ok' ? 'factual-first-category-range-roundtrip'
-      : `factual-first-category-range-roundtrip-${factualNetworkUnavailable ? 'network-blocked' : 'open'}-${String(factualRoundtrip)}`);
+      : `factual-first-category-range-roundtrip-${factualNetworkUnavailable ? 'network-blocked' : factualChoosable ? 'open' : 'refused'}-${String(factualRoundtrip)}`);
     await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
     requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
