@@ -1514,6 +1514,42 @@ async function main() {
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
     await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
     await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
+    // #1401: the first factual review offers ranges before any whole-book result; no review is started here.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('review')), 'factual-first-scope-review');
+    await waitFor(primary, `document.querySelector('[data-screen="book-review"] .review-workspace-card')?.dataset.reviewState==='empty' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'factual-first-scope-empty');
+    requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>{
+      const factual=workspace.categories.find(category=>category.categoryId==='factual-review');
+      return workspace.runs.length===0 && workspace.run===null && factual?.available===true &&
+        factual.scopes.whole.available && factual.scopes.chapters.available && factual.scopes.selection.available &&
+        workspace.scopeOptions.chapters.available;
+    })`), 'factual-first-chapter-selection-available');
+    await assertRenderer(primary, `(() => { const open=document.querySelector('[data-review-action="new-review"]'); if(!open||open.disabled)return false; open.click(); return true; })()`, 'factual-first-scope-new');
+    await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-first-scope-sheet');
+    await assertRenderer(primary, `(() => {
+      const sheet=document.querySelector('dialog.review-sheet');
+      for(const input of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked')))input.click();
+      const factual=sheet.querySelector('input[name="review-category"][value="factual-review"]');
+      const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
+      if(!factual||factual.disabled||!scope('whole')||scope('whole').disabled||!scope('chapters')||scope('chapters').disabled)return false;
+      factual.click(); scope('whole').click();
+      if(!factual.checked||factual.disabled)return false;
+      scope('chapters').click();
+      const from=sheet.querySelector('[data-review-chapter="from"]'), to=sheet.querySelector('[data-review-chapter="to"]');
+      if(!factual.checked||factual.disabled||!from||!to||from.disabled||to.disabled||from.options.length<3)return false;
+      const chosen=from.options[2].value;
+      from.value=chosen; from.dispatchEvent(new Event('change',{bubbles:true}));
+      to.value=chosen; to.dispatchEvent(new Event('change',{bubbles:true}));
+      const kept=()=>factual.checked&&!factual.disabled&&from.value===chosen&&to.value===chosen;
+      scope('whole').click();
+      if(!scope('whole').checked||!kept())return false;
+      scope('chapters').click();
+      return scope('chapters').checked && kept() &&
+        Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value).join(',')==='factual-review' &&
+        document.documentElement.dataset.technicalLayerVisible==='false';
+    })()`, 'factual-first-category-range-roundtrip');
+    await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
+    await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
+    requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-author-restore-settings-ready');
     await click(primary, '帮助', 'model-author-restore-help');
