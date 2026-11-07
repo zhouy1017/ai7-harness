@@ -3369,7 +3369,7 @@ export class BaselineAnalysisExecutionOwner {
       if (definition.factualClaims !== undefined) {
         const claimOwner = ledger.factualVerification;
         const claims = claimOwner.freezeClaims(facts.runRecordId, freezeFactualClaimLedger({ manifest, blocks: blocksById,
-          units: outcomes.flatMap((outcome) => outcome.state !== 'closed' ? [] : [{ result: outcome.result as FactualReviewUnitResult,
+          units: outcomes.flatMap((outcome) => outcome.state !== 'closed' || reusedOrdinals.has(outcome.unitOrdinal) ? [] : [{ result: outcome.result as FactualReviewUnitResult,
             sourceUnitMessage: unitMessages.get(outcome.unitOrdinal)! }]) }));
         const rule = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;
         if (rule === undefined || rule.procedureId !== facts.compositionOptions?.procedure?.procedureId ||

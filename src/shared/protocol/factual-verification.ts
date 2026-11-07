@@ -1,4 +1,5 @@
 import type { SalvagedModelResult } from './analysis.js';
+import type { ReviewCategoryUpdateProjection, ReviewCategoryUpdateControlsProjection } from './review-runs.js';
 import {
   FACTUAL_REVIEW_CONTRACT_VERSION,
   FACTUAL_REVIEW_EXPECTED_OUTCOME,
@@ -833,9 +834,9 @@ export interface FactualReviewProjection extends Omit<
     stopCondition: string;
   };
   resultSetRevision: null | FactualReviewResultSetRevisionProjection;
-  /** The factual kind declares no update mode yet; its update surfaces arrive with S18b and S19. */
-  update: null;
-  updateControls: null;
+  /** First and subsequent range reviews share the covered-review plan and reuse controls. */
+  update: ReviewCategoryUpdateProjection | null;
+  updateControls: ReviewCategoryUpdateControlsProjection | null;
   history: null | FactualReviewHistoryProjection;
   inspectedRevision: null | { revision: FactualReviewResultSetRevisionProjection; current: boolean; readOnly: true };
 }

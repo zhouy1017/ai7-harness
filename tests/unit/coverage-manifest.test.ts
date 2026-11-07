@@ -39,6 +39,19 @@ function identity() {
 }
 
 describe('deriveCoverageManifest', () => {
+  it('keeps factual range units and overlap inside exact boundaries without changing the default manifest', () => {
+    const blocks = [block(1, 'heading', 0, 1), block(2, 'paragraph', 700), block(3, 'paragraph', 600), block(4, 'paragraph', 500)];
+    const input = { ...identity(), blocks };
+    const whole = deriveCoverageManifest(input);
+    const manifest = deriveCoverageManifest({ ...input, exactRange: { startPosition: 2, endPosition: 3 } });
+    const selected = manifest.units.filter(unit => unit.startPosition >= 2 && unit.endPosition <= 3);
+    expect(selected.flatMap(unit => unit.blockIds)).toEqual([blocks[1]!.blockId, blocks[2]!.blockId]);
+    expect(selected.every(unit => unit.headingText === null && unit.overlapBlockIds.every(id => id === blocks[1]!.blockId))).toBe(true);
+    expect(manifest.units.at(-1)!.overlapBlockIds).toEqual([]);
+    expect(manifestCoversEveryBlock(manifest) && manifestDigestIsExact(manifest)).toBe(true);
+    expect(deriveCoverageManifest(input)).toEqual(whole);
+  });
+
   it('turns every heading-delimited section into one unit and covers every block exactly once', () => {
     const blocks = [
       block(1, 'title', 0, 1),
