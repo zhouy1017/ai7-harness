@@ -63,7 +63,7 @@ export interface CoverageManifestProjection {
     revisionLabel: string;
     revisionDigest: string;
   };
-  parameters: { unitBudgetGraphemes: number; overlapBlocks: number };
+  parameters: { unitBudgetGraphemes: number; overlapBlocks: number; rangeContext?: 'exact' };
   totalBlocks: number;
   totalGraphemes: number;
   sectionCount: number;
