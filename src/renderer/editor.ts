@@ -75,6 +75,8 @@ export interface BoundedEditor {
   setMarks(marks: ReadonlyArray<EditorialMarkAnchorProjection>, truncated: boolean): void;
   /** The mark whose card is open, and the replacement a Change Suggestion previews in place (预览 · 未应用). */
   setActiveMark(active: { markId: string; previewText: string | null } | null): void;
+  /** Highlight a range linked to a supporting card without changing the active card's preview or the selection. */
+  setLinkedMark(markId: string | null): void;
   /**
    * What the editor has selected, in the window's own vocabulary: one block and a grapheme range of
    * its durable text, or — across paragraphs (Issue #1176) — the exact span over the contiguous blocks
@@ -449,6 +451,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }));
   };
   let activeMark: { markId: string; previewText: string | null } | undefined;
+  let linkedMark: string | undefined;
   // Focus has just entered the text and the browser's caret reveal, if it makes one, is still to be heard.
   let focusReveal: object | undefined;
   // Editing Protection Mode (Issue #951; DUR-001 to DUR-012): entered when a journal write is not acknowledged, left only when
@@ -570,6 +573,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     marks: () => windowProjection.marks,
     baselineText: (blockId) => baselines.get(blockId)?.text,
     active: () => activeMark,
+    linked: () => linkedMark,
     generation: () => baselines,
   });
   const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
@@ -1257,6 +1261,11 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     setActiveMark: (active) => {
       if (destroyed) return;
       activeMark = active ?? undefined;
+      view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
+    },
+    setLinkedMark: (markId) => {
+      if (destroyed || linkedMark === (markId ?? undefined)) return;
+      linkedMark = markId ?? undefined;
       view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
     selectedRange: (): EditorSelectedRange => {

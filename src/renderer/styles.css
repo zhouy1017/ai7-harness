@@ -1542,6 +1542,32 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .editor-meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Supporting panels occupy their own grid cell, never the manuscript or its mark cards. */
 .editor-workspace { position: relative; display: grid; flex: 1 1 0; grid-template-columns: minmax(0, 1fr) 4.75rem; grid-template-rows: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.manuscript-comments-pane { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface-subdued); border-left: 1px solid var(--boundary); }
+.manuscript-comments-pane[hidden] { display: none; }
+.manuscript-comments-heading { display: flex; align-items: center; justify-content: space-between; padding: .4rem .6rem; border-bottom: 1px solid var(--boundary); }
+.manuscript-comments-heading button { font-size: .8rem; }
+.manuscript-comments-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
+.manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
+.manuscript-comments-card > .editorial-mark-card { position: static; width: 100%; box-sizing: border-box; padding: .6rem .7rem; box-shadow: 0 2px 8px var(--shadow); }
+.manuscript-comments-card[data-active="true"] { outline: 2px solid var(--mark-annotation); outline-offset: 1px; }
+.manuscript-comments-reply { padding: .6rem; background: var(--surface); border: 1px solid var(--boundary); }
+.manuscript-comments-reply textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.manuscript-comments-problem { color: var(--status-blocked); margin: .2rem 0; }
+.manuscript-comments-problem:empty { display: none; }
+.manuscript-comments-leaders { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 7; pointer-events: none; overflow: hidden; }
+.manuscript-comments-leaders path { fill: none; stroke: var(--mark-annotation); stroke-width: 1.5px; stroke-dasharray: 4 3; opacity: .7; }
+.manuscript-comments-anchor { outline: 1px solid var(--mark-annotation); background-color: var(--mark-annotation-fill); }
+@media (min-width: 1120px) {
+  .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; grid-template-rows: minmax(0, 1fr); }
+}
+@media (max-width: 1119px) {
+  .editor-workspace > .manuscript-comments-pane { position: absolute; z-index: 8; inset: 0 4.75rem 0 auto; width: min(340px, calc(100% - 4.75rem)); }
+}
+@media (max-width: 760px) {
+  .editor-workspace > .manuscript-comments-pane { right: 3.4rem; width: min(340px, calc(100% - 3.4rem)); }
+}
+:root[data-focus-mode="on"] .manuscript-comments-pane, :root[data-focus-mode="on"] .manuscript-comments-leaders { display: none !important; }
 .editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) var(--supporting-effective-width) 4.75rem; }
 .manuscript-surface { position: relative; grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .manuscript-navigator { grid-column: 2; grid-row: 1; position: relative; width: auto; min-width: 0; min-height: 0; padding: 1rem; overflow: auto; border-left: 1px solid var(--boundary); background: var(--surface-subdued); }
