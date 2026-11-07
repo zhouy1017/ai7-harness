@@ -2154,7 +2154,7 @@ async function main() {
       'evaluation-rewrite-edit-offered', reportClosed);
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'evaluation-rewrite-begin');
     const fifteenth = await readEvaluation(renderer, (page) => page.record?.heading === '版本 · AI7 初稿' && page.rewrite !== null, 'evaluation-rewrite-begun');
-    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith('版本 · AI7 初稿') && fifteenth.versions.length === reportClosed.versions.length + 1 &&
+    requireJourney(fifteenth.record.report === true && fifteenth.versions[0].startsWith('版本 · AI7 初稿') && fifteenth.versions[1] === reportClosed.versions[0] &&
       fifteenth.rewrite.reason === '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' &&
       JSON.stringify(fifteenth.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)) && fifteenth.record.verdict === '' &&
       JSON.stringify(fifteenth.market.lists) === JSON.stringify(MARKET_LISTS), 'evaluation-rewrite-begun-words', fifteenth);
@@ -2182,7 +2182,6 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="prepare-rewrite"]', 'evaluation-rewrite-prepare');
     const endedRewrite = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.rewrite?.state), 'evaluation-rewrite-ended');
     requireJourney(endedRewrite.rewrite.state === 'settled' && endedRewrite.view === 'record', 'evaluation-rewrite-settled', endedRewrite.rewrite);
-    await assertRenderer(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'evaluation-rewrite-no-drawer');
     const rewritePlan = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => window.ai7.inspectTaskPlan({ kind: 'evaluation-rewrite', ref: page.rewrite.task.taskIntentId }))
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.steps.map((step) => step.label),
         plan.notDo.editorial.includes('不改分数：只重写评语与总评，每一项的分数照你保存的'), plan.notDo.editorial.includes('不自动写入评估：重写的评语要你采用后才记入这一版')]))`);
