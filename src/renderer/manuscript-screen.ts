@@ -610,6 +610,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   analysisEntry.title = PARAGRAPH_ANALYSIS_WORDS.entry;
   // 任务 (Issue #423, S77a; TASK-044): the Book's 任务 panel in the side slot, and closed again from here.
   const tasksEntry = button('任务', 'quiet', () => {
+    setCommentsOpen(false);
     const showing = taskDrawer.view();
     if (showing?.kind === 'panel' && showing.bookId === initialWindow.bookId) {
       taskDrawer.close(true);
@@ -622,8 +623,35 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   tasksEntry.dataset['shortcutCommand'] = 'view.openTasks';
   tasksEntry.dataset['shortcutBase'] = '这本书的任务';
   tasksEntry.title = `这本书的任务（${shortcutHint('view.openTasks') ?? ''}）`;
+  const commentsPane = element('aside', 'manuscript-comments-pane');
+  commentsPane.id = 'manuscript-comments-pane';
+  commentsPane.setAttribute('aria-label', '批注栏');
+  const commentsKey = `ai7.comments-pane.${initialWindow.bookId}`;
+  let commentsOpen = globalThis.localStorage?.getItem(commentsKey) === 'true' && !isDocument;
+  commentsPane.hidden = !commentsOpen;
+  const commentsEntry = button('批注', 'quiet', () => setCommentsOpen(!commentsOpen));
+  commentsEntry.dataset['edgeEntry'] = 'comments';
+  commentsEntry.dataset['shortcutCommand'] = 'view.comments';
+  commentsEntry.dataset['shortcutBase'] = '批注栏';
+  commentsEntry.title = `批注栏（${shortcutHint('view.comments') ?? ''}）`;
+  commentsEntry.setAttribute('aria-controls', commentsPane.id);
+  commentsEntry.setAttribute('aria-expanded', String(commentsOpen));
+  const commentsFocusOff = focusMode.subscribe(() => editorialMarks?.refreshComments());
+  const commentsHeading = element('header', 'manuscript-comments-heading');
+  const commentsClose = button('关闭批注栏', 'quiet', () => { setCommentsOpen(false); commentsEntry.focus(); });
+  commentsHeading.append(element('strong', undefined, '批注'), commentsClose);
+  commentsPane.append(commentsHeading);
+  function setCommentsOpen(open: boolean): void {
+    commentsOpen = open;
+    commentsPane.hidden = !open;
+    commentsEntry.setAttribute('aria-expanded', String(open));
+    options.contextView.querySelector('[data-view-command="toggle-comments"]')?.setAttribute('aria-pressed', String(open));
+    globalThis.localStorage?.setItem(commentsKey, String(open));
+    if (open) { setNavigationOpen(false); localParagraphPanel?.close(); taskDrawer.close(false); }
+    editorialMarks?.refreshComments(open);
+  }
   const edgeEntries = element('div', 'edge-entries');
-  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task']] as const) {
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-nav']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
     const badge = element('span', 'edge-badge');
     badge.setAttribute('aria-hidden', 'true');
@@ -636,7 +664,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const badge = entry.querySelector<HTMLElement>('.edge-badge')!;
     entry.setAttribute('aria-label', `${entry.querySelector('.edge-label')!.textContent}${badge.hidden ? '' : ` · ${badge.dataset['count']}`}`);
   };
-  edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
+  edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry, commentsEntry]));
   const railTrack = element('div', 'rail-track');
   railTrack.id = 'manuscript-position';
   const railColumn = element('div', 'rail-column');
@@ -654,11 +682,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     errorMessage: rendererErrorMessage,
   });
   if (documentLens !== undefined) workspace.classList.add('document-workspace');
-  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, ...(isDocument ? [] : [analysisPanel]), edge);
+  workspace.append(manuscript, ...(documentLens === undefined ? [] : [documentLens.element]), navigator, ...(isDocument ? [] : [analysisPanel, commentsPane]), edge);
 
   const setNavigationOpen = (open: boolean): void => {
     // One supporting side surface at a time (IA): 导航 opening closes the Task Drawer beside the manuscript.
-    if (open) { taskDrawer.close(false); localParagraphPanel?.close(); }
+    if (open) { taskDrawer.close(false); localParagraphPanel?.close(); setCommentsOpen(false); }
     navigator.hidden = !open;
     navigationEntry.setAttribute('aria-expanded', open ? 'true' : 'false');
     workspace.dataset['navigation'] = open ? 'open' : 'closed';
@@ -720,6 +748,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     isComposing: () => editor?.isComposing() === true,
     closeSupportingPanel: () => {
       if (!navigator.hidden) setNavigationOpen(false);
+      if (commentsOpen) setCommentsOpen(false);
       localParagraphPanel?.close();
     },
     followReviewMarks,
@@ -741,7 +770,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     focus: focusMode,
     rail: true,
     openNavigation: () => setNavigationOpen(true),
-    ...(isDocument ? {} : { openTasks: () => taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry) }),
+    ...(isDocument ? {} : { openTasks: () => { setCommentsOpen(false); taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }),
     setStatus,
     shortcutHint,
   });
@@ -793,7 +822,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       lastViewed: () => preferences.current['analysis.lastViewedRevision'][initialWindow.bookId]?.ordinal ?? 0,
       viewed: (revision) => preferences.viewAnalysis(initialWindow.bookId, revision),
       notice: () => showTransientNotice(PARAGRAPH_ANALYSIS_WORDS.hint),
-      beforeOpen: () => { setNavigationOpen(false); taskDrawer.close(false); },
+      beforeOpen: () => { setNavigationOpen(false); setCommentsOpen(false); taskDrawer.close(false); },
       openItem: (item: ParagraphAnalysisProjection['items'][number], revisionId: string) => {
         void (async () => {
           if (authoritativeMutationBusy()) return;
@@ -1951,6 +1980,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (step === 'set-marks') {
       // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
       editor.setMarks(next.marks, next.marksTruncated);
+      editorialMarks?.refreshComments();
+      updateCommentsBadge();
       manuscriptRail?.refresh();
       const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
       editorHost.dataset['marksRefreshed'] = refreshed.join(',');
@@ -2041,6 +2072,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           editorWindowProjection.workingDigest !== currentWindow.workingDigest;
         if (bindingChanged) {
           currentWindow = editorWindowProjection;
+          editorialMarks?.refreshComments();
+          updateCommentsBadge();
           updateWindowChrome();
           void loadOutline(null);
           scheduleRailRefresh();
@@ -2068,6 +2101,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       analysisPositionSource = 'caret';
       localParagraphPanel?.refresh();
       editorialMarks?.reanchor();
+      updateCommentsBadge();
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');
     },
@@ -2095,6 +2129,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     'view.focusManuscript': () => editor?.focus(),
     // 专注模式 (Issue #951; ED-004): the same toggle as the header's 专注.
     'view.focusMode': () => focusMode.toggle(),
+    'view.comments': () => { focusMode.leave(); setCommentsOpen(!commentsOpen); },
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
@@ -2163,7 +2198,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     document.addEventListener('visibilitychange', taskBadgeVisibility);
     void readTaskBadge();
   }
+  function updateCommentsBadge(): void {
+    if (!editor) return;
+    const count = editor.currentWindow().marks.filter((mark) => mark.kind !== 'personal-highlight').length;
+    const badge = commentsEntry.querySelector<HTMLElement>('.edge-badge')!;
+    badge.dataset['count'] = String(count);
+    badge.hidden = count === 0;
+    updateEdgeName(commentsEntry);
+  }
+  updateCommentsBadge();
   editorialMarks = mountEditorialMarks({
+    ...(isDocument ? {} : { comments: { host: commentsPane, enabled: () => commentsOpen && !focusMode.active } }),
     scroll: editorWindow,
     host: editorHost,
     editor,
@@ -2171,6 +2216,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
     // A mark changes what a Production Document's workflow waits on (N 条修改建议待处理), which its lens reads again.
     marksChanged: () => {
+      updateCommentsBadge();
       manuscriptRail?.refresh();
       documentLens?.refresh();
     },
@@ -2274,6 +2320,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);
     milestonePersistenceRead += 1;
     returnRequest += 1;
+    commentsFocusOff();
     editorialMarks?.destroy();
     editorialMarks = undefined;
     manuscriptRail?.destroy();

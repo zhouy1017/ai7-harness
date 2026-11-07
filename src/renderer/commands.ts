@@ -74,6 +74,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'view.focusManuscript', name: COMMAND_NAMES['view.focusManuscript'], group: 'view', context: 'manuscript', defaults: both('Mod+Shift+M') },
   { id: 'view.openTasks', name: COMMAND_NAMES['view.openTasks'], group: 'view', context: 'book', defaults: both('F7') },
   // 专注模式 (Issue #951, wave 12 slice 12a; ED-004): the manuscript's view command; Esc and the header's restore control leave it too.
+  { id: 'view.comments', name: COMMAND_NAMES['view.comments'], group: 'view', context: 'manuscript', defaults: both('F9') },
   { id: 'view.focusMode', name: COMMAND_NAMES['view.focusMode'], group: 'view', context: 'manuscript', defaults: both('F8') },
 ];
 

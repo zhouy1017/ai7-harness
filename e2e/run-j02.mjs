@@ -1,3 +1,4 @@
+import { commentsLayouts, commentsOrdinaryForEditor } from './comments-pane.mjs';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
@@ -2052,6 +2053,9 @@ async function main() {
     await runProtectionJourney(renderer);
     // Issue #1175: Enter splits and Backspace merges inside the bounded window, after every pinned stage above.
     await runStructureJourney(renderer);
+    at('comments-responsive-pane');
+    await commentsOrdinaryForEditor(renderer, requireJourney, waitFor);
+    await commentsLayouts(renderer, requireJourney, waitFor);
     // The close and what follows it are their own stages: left under the last j14 step, a failure to
     // shut the product down or to clear the run root would read as an accessibility failure (#474).
     at('completion-browser-close');

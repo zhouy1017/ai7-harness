@@ -63,7 +63,7 @@ vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/editorial-marks.js')>(),
   mountEditorialMarks: () => ({
     selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
-    ownsScroll: () => false, reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
+    ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
   }),
 }));
 vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
