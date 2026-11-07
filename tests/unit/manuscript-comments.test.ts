@@ -20,7 +20,8 @@ const windowOf = (): ManuscriptWindowProjection => ({
   bookId: 'book', manuscriptId: 'manuscript', branchId: 'branch', revisionId: 'revision', journalSequence: 0, workingDigest: 'digest',
   blocks: [{ blockId: 'block', kind: 'paragraph', text: '公开合成测试段落', digest: 'digest', position: 1 }], marks: [anchor()], marksTruncated: false,
 } as unknown as ManuscriptWindowProjection);
-const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; };
+const deferred = <T>() => { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
+const suggestion: EditorialMarkCardProjection = { ...card, kind: 'change-suggestion', suggestion: { itemId: 'item', changeType: 'replace', currentText: '合成', proposedText: '改后', rationale: '理由', atomicGroupId: null, decision: null, application: null } };
 
 it('stacks all five measured cards in anchor order with ten pixel gaps, including offscreen buffers', () => {
   const items = [{ desiredTop: 200, measuredHeight: 90 }, { desiredTop: -190, measuredHeight: 40 },
@@ -65,6 +66,18 @@ it('does not retry a failed read on scrolling until its version changes', async 
   await expect(cache.read(card.markId, fetch)).rejects.toThrow('read failed'); expect(fetch).toHaveBeenCalledTimes(2);
 });
 
+it('coalesces explicit retries and fences a stale retry failure after a returned command card', async () => {
+  const cache = new EditorialCardCache(); cache.sync(windowOf());
+  await expect(cache.read(card.markId, async () => { throw new Error('transient'); })).rejects.toThrow('transient');
+  const pending = deferred<EditorialMarkCardProjection>(); const fetch = vi.fn(() => pending.promise);
+  const retry = cache.read(card.markId, fetch, true); const second = cache.read(card.markId, fetch, true);
+  await Promise.resolve(); expect(fetch).toHaveBeenCalledTimes(1);
+  const current = { ...card, body: '命令返回的新正文', status: 'resolved' as const }; cache.put(current);
+  pending.reject(new Error('obsolete failure'));
+  await expect(retry).resolves.toBeUndefined(); await expect(second).resolves.toBeUndefined();
+  expect(cache.cards.get(card.markId)).toBe(current); expect(cache.failed(card.markId)).toBe(false);
+});
+
 // The real pane owner with measured boundary doubles: no Electron or manuscript persistence.
 describe('comments command parity and refresh continuity', () => {
   let restore: () => void; let frames: Array<() => void>; let mounted: ReturnType<typeof mountEditorialMarks> | undefined;
@@ -74,6 +87,8 @@ describe('comments command parity and refresh continuity', () => {
     vi.spyOn(miniDocument, 'createElement').mockImplementation((tag) => {
       const node = create(tag);
       Object.assign(node, { style: {}, clientHeight: 600, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 50, bottom: 230, left: 600, right: 920, width: 320, height: 180 }) });
+      let hidden = false;
+      Object.defineProperty(node, 'hidden', { get: () => hidden, set: (value: boolean) => { hidden = value; if (value && node.contains(miniDocument.activeElement)) miniDocument.activeElement = null; } });
       Object.defineProperty(node, 'firstElementChild', { get: () => node.children[0] ?? null });
       return node;
     });
@@ -81,13 +96,14 @@ describe('comments command parity and refresh continuity', () => {
     vi.stubGlobal('requestAnimationFrame', (fn: () => void) => { frames.push(fn); return frames.length; });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
     vi.stubGlobal('HTMLDetailsElement', MiniElement);
     vi.stubGlobal('HTMLFormElement', MiniElement);
   });
   afterEach(() => { mounted?.destroy(); mounted = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
-  async function paint() { for (let n = 0; n < 12; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
+  async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
   function mount(value = card) {
-    let page = { ...windowOf(), marks: [anchor(value)] }; let latest = value;
+    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value)] }; let latest = value; let enabled = true;
     const host = document.createElement('div'); const scroll = document.createElement('div'); const pane = document.createElement('aside');
     miniDocument.body.append(host as unknown as MiniElement, scroll as unknown as MiniElement, pane as unknown as MiniElement);
     const block = document.createElement('p'); block.dataset['blockId'] = 'block'; host.append(block);
@@ -99,15 +115,21 @@ describe('comments command parity and refresh continuity', () => {
     const decide = vi.fn(async (_input: Record<string, unknown>) => ({ markId: latest.markId, card: latest, marks: [anchor(latest)], marksTruncated: false }));
     const apply = vi.fn(async (_input: Record<string, unknown>) => ({ markId: latest.markId, card: latest, marks: [anchor(latest)], marksTruncated: false, window: page, application: {} }));
     const write = vi.fn(async (operation: () => Promise<unknown>) => operation());
-    const status = vi.fn();
-    const options = { host, scroll, comments: { host: pane, enabled: () => true },
-      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: vi.fn(), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
-      api: { getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
+    const status = vi.fn(); const active = vi.fn();
+    const outcome = vi.fn(async (_input: Record<string, unknown>): Promise<unknown> => { throw new Error('outcome unavailable'); });
+    const receipt = vi.fn(async (input: Record<string, unknown>) => ({ state: input['recovery'] === 'confirming' ? 'confirming' : 'unresolved', clientEffectId: input['clientEffectId'], reason: '结果待确认' }));
+    const options = { host, scroll, comments: { host: pane, enabled: () => enabled },
+      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
+      api: { getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
     mounted = mountEditorialMarks(options);
-    return { host, pane, get, update, decide, apply, write, status, refresh: () => mounted!.refreshComments() };
+    return { host, pane, block, scroll, get, update, decide, apply, write, status, active, outcome, receipt,
+      open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
+      setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
+      setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
+    };
   }
   it('reuses reply/resolve commands, keeps the actual reply input and caret across a returned-card refresh, and reads once', async () => {
     const ui = mount(); await paint();
@@ -116,7 +138,7 @@ describe('comments command parity and refresh continuity', () => {
     input.value = '尚未发送的答复'; input.focus(); input.setSelectionRange(2, 4);
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')!.click(); await paint();
     expect(ui.update.mock.calls[0]?.[0]).toMatchObject({ action: 'set-status', status: 'resolved', markId: card.markId });
-    expect(ui.pane.querySelector('[data-comment-reply]')).toBe(input);
+    expect(ui.pane.querySelector('[data-comment-reply]') === input).toBe(true);
     expect([input.value, input.selectionStart, input.selectionEnd]).toEqual(['尚未发送的答复', 2, 4]);
     expect(document.activeElement).toBe(input);
     expect(ui.pane.querySelector('[data-mark-state]')?.textContent).toContain('已处理');
@@ -149,4 +171,80 @@ describe('comments command parity and refresh continuity', () => {
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')!.click(); await paint();
     expect(ui.pane.querySelector('[data-mark-state]')?.textContent).toContain('已处理');
   });
+  it('recovers an explicit full-card open after one failed passive read without retrying passive refresh', async () => {
+    const ui = mount(); ui.get.mockRejectedValueOnce(new Error('transient read')); await paint();
+    ui.refresh(); await paint(); expect(ui.get).toHaveBeenCalledTimes(1);
+    await ui.open(); await paint();
+    expect(ui.get).toHaveBeenCalledTimes(2);
+    expect(ui.scroll.querySelector('[data-mark-card]')?.textContent).toContain(card.body);
+  });
+  it.each(['new draft', 'composition', 'restored text'])('preserves %s begun while a captured reply is sending', async (mode) => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!;
+    input.value = '已提交的回复'; const pending = deferred<Awaited<ReturnType<typeof ui.update>>>();
+    ui.update.mockImplementationOnce(() => pending.promise);
+    (ui.pane.querySelector('form')! as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    if (mode === 'new draft') { input.value = '新写的草稿'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' }); }
+    else if (mode === 'composition') (input as unknown as MiniElement).dispatchEvent({ type: 'compositionstart' });
+    else { input.value = '临时改动'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' }); input.value = '已提交的回复'; (input as unknown as MiniElement).dispatchEvent({ type: 'input' }); }
+    input.focus(); input.setSelectionRange(2, 4);
+    pending.resolve({ markId: card.markId, card: { ...card, replies: [{ replyId: 'r', body: '已提交的回复', createdAt: card.createdAt }] }, marks: [anchor()], marksTruncated: false });
+    await paint();
+    expect(input.value).toBe(mode === 'new draft' ? '新写的草稿' : '已提交的回复');
+    expect(document.activeElement).toBe(input); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 4]);
+    expect(ui.update.mock.calls[0]?.[0]).toMatchObject({ body: '已提交的回复' });
+    expect(ui.pane.querySelector('[data-mark-region="replies"]')?.textContent).toContain('已提交的回复');
+  });
+  it('keeps a surviving reply node across an unrelated structural edit, and discards it on actual Book departure', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '结构编辑前的草稿';
+    ui.setPage({ journalSequence: 1, blocks: [...windowOf().blocks, { ...windowOf().blocks[0]!, blockId: 'new-unrelated-block' }], marks: [anchor()] });
+    await paint(); expect(ui.pane.querySelector('[data-comment-reply]') === input).toBe(true); expect(input.value).toBe('结构编辑前的草稿');
+    ui.setPage({ bookId: 'other-book', manuscriptId: 'other-manuscript', marks: [] }); await paint();
+    expect(ui.pane.querySelector('[data-comment-reply]')).toBeNull();
+  });
+  it('keeps focused input visible during deferred revalidation, disables stale actions, then respects viewport removal', async () => {
+    const ui = mount(); await paint(); ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = ui.pane.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '刷新期间的草稿'; input.focus(); input.setSelectionRange(2, 4);
+    const oldResolve = ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')!;
+    const pending = deferred<EditorialMarkCardProjection>(); ui.get.mockImplementationOnce(() => pending.promise);
+    ui.setPage({ journalSequence: 1, marks: [anchor()] }); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')?.hidden).toBe(false);
+    expect(document.activeElement).toBe(input); expect(input.value).toBe('刷新期间的草稿');
+    expect(ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')?.disabled).toBe(true);
+    oldResolve.click(); await paint(); expect(ui.update).not.toHaveBeenCalled();
+    pending.resolve({ ...card, body: '刷新后的最新正文' }); await paint();
+    expect(ui.pane.querySelector('[data-comment-reply]') === input).toBe(true); expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([2, 4]); expect(ui.pane.textContent).toContain('刷新后的最新正文');
+    Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 3000, bottom: 3100 }) });
+    (ui.scroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')?.hidden).toBe(true);
+  });
+  it('clears only the inline-owned proposed preview when comments are dismissed', async () => {
+    const ui = mount(suggestion); await paint(); ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.click();
+    expect(ui.active).toHaveBeenLastCalledWith({ markId: card.markId, previewText: '改后' });
+    ui.setEnabled(false); await paint(); expect(ui.active).toHaveBeenLastCalledWith(null);
+    ui.setEnabled(true); await paint(); await ui.open(); await paint();
+    const calls = ui.active.mock.calls.length; ui.setEnabled(false); await paint();
+    expect(ui.active.mock.calls.length).toBe(calls); expect(ui.active).toHaveBeenLastCalledWith({ markId: card.markId, previewText: '改后' });
+  });
+  it('synchronizes unresolved receipt controls, blocks stale mutations and rechecks the original Effect without resending', async () => {
+    const ui = mount(suggestion); await paint();
+    const accept = ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')!;
+    const reject = ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reject"]')!;
+    const pending = deferred<unknown>(); ui.outcome.mockImplementationOnce(() => pending.promise);
+    ui.apply.mockRejectedValueOnce(new Error('lost acknowledgement')); accept.click(); await paint();
+    pending.reject(new Error('outcome read failed')); await paint();
+    expect(ui.scroll.querySelector('[data-apply-receipt-state="unresolved"]')).not.toBeNull();
+    expect(ui.pane.querySelector('[data-apply-receipt-state="unresolved"]')).not.toBeNull();
+    accept.click(); reject.click(); await paint();
+    expect(ui.apply).toHaveBeenCalledTimes(1); expect(ui.decide).not.toHaveBeenCalled();
+    const effect = ui.apply.mock.calls[0]![0]['clientEffectId'];
+    ui.receipt.mockImplementationOnce(async (input) => ({ state: 'not-applied', clientEffectId: input['clientEffectId'], reason: '未应用' }));
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="receipt-recheck"]')!.click(); await paint();
+    expect(ui.receipt).toHaveBeenLastCalledWith(expect.objectContaining({ clientEffectId: effect, recovery: 'recheck' }));
+    expect(ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')?.disabled).toBe(false);
+    expect(ui.scroll.querySelector('[data-apply-receipt-state="unresolved"]')).toBeNull(); expect(ui.apply).toHaveBeenCalledTimes(1);
+  });
+
 });

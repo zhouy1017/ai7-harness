@@ -648,7 +648,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     options.contextView.querySelector('[data-view-command="toggle-comments"]')?.setAttribute('aria-pressed', String(open));
     globalThis.localStorage?.setItem(commentsKey, String(open));
     if (open) { setNavigationOpen(false); localParagraphPanel?.close(); taskDrawer.close(false); }
-    editorialMarks?.refreshComments();
+    editorialMarks?.refreshComments(open);
   }
   const edgeEntries = element('div', 'edge-entries');
   for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-nav']] as const) {
