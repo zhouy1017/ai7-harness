@@ -3526,6 +3526,13 @@ async function main() {
       requireJourney(ranged?.ordinal===pass+1 && ranged.scope.selectedRange.startPosition===1 && ranged.scope.selectedRange.endPosition===15 &&
         ranged.categories.length===1 && ranged.categories[0].state==='settled' && ranged.categories[0].plan.recomputed===1 &&
         ranged.categories[0].plan.unreviewed===7, `factual-range-exact-${pass}`);
+      if (pass === 1) {
+        const finding = ranged.findings.find(entry => entry.markId !== null);
+        requireJourney(finding !== undefined, 'factual-range-author-finding');
+        await reviewAction(renderer, `article.review-finding[data-finding-id="${finding.findingId}"] [data-review-action="go-to-text"]`, 'factual-range-author-open');
+        // This producing route is the local fixture. It must not invent a remote model or reasoning effort.
+        await waitFor(renderer, `(() => { const author=document.querySelector('[data-mark-card="${finding.markId}"] [data-mark-source]')?.textContent ?? ''; return document.documentElement.dataset.technicalLayerVisible==='false' && author.startsWith('AI7 本地检查 · ') && !author.includes('@high'); })()`, 'factual-range-producing-author', 30_000);
+      }
     }
     cancellation.throwIfRequested();
 
