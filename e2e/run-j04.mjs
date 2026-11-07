@@ -3483,9 +3483,12 @@ async function main() {
 
     // #1401: first factual chapter review in ordinary mode, with no preceding whole-book result.
     at('factual-evidence-workspace');
-    // The import starts where every import does, on 书库; the factual fixture's launch stays open for this Book.
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'factual-range-import-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'factual-range-import-landing');
+    // Like every section that imports, this one starts from a fresh launch of the same factual fixture.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = FACTUAL_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'factual-range-launch-ready');
     const rangeBook = await importSample1(renderer, cancellation, true);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-settings-ready');
