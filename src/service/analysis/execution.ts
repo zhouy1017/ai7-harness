@@ -1,3 +1,4 @@
+import { editorialMemoryDefinition } from '../learning/editorial-memory.js';
 import { majorityGapReason } from '../../shared/analysis-run-summary.js';
 import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
@@ -2277,7 +2278,9 @@ export class BaselineAnalysisExecutionOwner {
         }),
         // Under ordinary production the baseline's own rule names the categories its unit messages carry.
         ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories),
-          ...(definition.procedureBinding === undefined ? {} : { contractCategories: new Set(['editor-task-instruction'] as const) }) } : {}),
+          ...(editorialMemoryDefinition(definition) !== null
+            ? { contractCategories: new Set(liveKindContractCategories(definition.kind, definition)) }
+            : definition.procedureBinding === undefined ? {} : { contractCategories: new Set(['editor-task-instruction'] as const) }) } : {}),
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: localVersion, liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : production !== null

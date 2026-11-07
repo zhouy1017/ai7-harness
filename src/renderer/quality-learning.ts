@@ -38,6 +38,42 @@ import {
 } from './quality-learning-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
+/** A direct editor rule uses the existing versioned supervision owner and becomes active on save. */
+export function editorialPreferenceEditor(options: {
+  categories: readonly { categoryId: string; label: string }[];
+  books: readonly { bookId: string; title: string }[];
+  existing?: import('../shared/protocol.js').GlobalMemoryItem;
+  save(input: import('../shared/protocol.js').RecordLearningSupervisionInput): void;
+}): HTMLElement {
+  const form = el('form', 'preference-editor');
+  form.dataset['preferenceEditor'] = options.existing?.itemId ?? 'new';
+  const category = el('select'); category.setAttribute('aria-label', '适用维度');
+  for (const entry of options.categories) {
+    const option = el('option', undefined, entry.label); option.value = entry.categoryId; category.append(option);
+  }
+  const scope = el('select'); scope.setAttribute('aria-label', '适用范围');
+  const house = el('option', undefined, '全社'); house.value = ''; scope.append(house);
+  for (const book of options.books) {
+    const option = el('option', undefined, `本书：《${book.title}》`); option.value = book.bookId; scope.append(option);
+  }
+  const text = el('textarea'); text.rows = 2; text.required = true; text.maxLength = 1_200;
+  text.setAttribute('aria-label', '一句话偏好规则'); text.placeholder = '写下一条编辑规则，可包含脱敏的短语正反例';
+  if (options.existing) {
+    category.value = options.existing.categoryId; category.disabled = true;
+    scope.value = options.existing.bookId ?? ''; scope.disabled = true; text.value = options.existing.text;
+  }
+  const save = el('button', 'button primary', options.existing ? '保存偏好' : '新增并启用偏好'); save.type = 'submit';
+  form.append(category, scope, text, save);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault(); if (!text.value.trim()) return;
+    options.save({ actionId: crypto.randomUUID(), operation: options.existing ? 'correct' : 'create',
+      targets: options.existing ? [{ itemId: options.existing.itemId, revisionId: options.existing.revisionId }] : [],
+      categoryId: category.value, scope: scope.value ? { kind: 'book', bookId: scope.value } : { kind: 'house' },
+      text: text.value.trim(), effect: 'guide' });
+  });
+  return form;
+}
+
 /**
  * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-002 to LEARN-012, FDBK-013): each Book's Learning Material,
  * grouped by Book with its 作者 and 责编, each with where it stands. `查看…` opens its Review Card in place — the bounded

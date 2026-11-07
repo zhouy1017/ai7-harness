@@ -2704,19 +2704,19 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
 
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25';
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
 
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
 /** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
 export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
 
-export const CURRENT_ACTIVE_SET_SHA256 = '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d';
+export const CURRENT_ACTIVE_SET_SHA256 = '20ce6301a65f5a661117d66d1c5f9d185d8211c65c65c660f5ad3d2976809eaa';
 
-export const CURRENT_PRODUCTION_POLICY_SHA256 = '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5';
+export const CURRENT_PRODUCTION_POLICY_SHA256 = 'ca506c18c7d84308be2cb69f08400187a6ae49d595d32211356ea987dfbe3bcb';
 
 export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
 
@@ -2730,15 +2730,15 @@ export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cef
 export function isSupportedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
   if (scope === 'development-ci') return version === 'v1' || version === 'v29';
   if (scope === 'developer-live') return ['v5', 'v8', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22', 'v24'].some((entry) => entry === version);
-  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34'].some((entry) => entry === version);
+  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].some((entry) => entry === version);
   return false;
 }
 
 /** Identity of the actual verified selected documents; this metadata grants no execution authority. */
 export interface SelectedPolicyIdentity {
-  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34';
+  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
   readonly providerProcessingSha256: string;
-  readonly activePolicySetVersion: 'v21' | 'v22' | 'v23' | 'v24' | 'v25';
+  readonly activePolicySetVersion: 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
   readonly activePolicySetSha256: string;
 }
 
@@ -2776,7 +2776,7 @@ const SELECTED_PROVIDER_DIGESTS = {
   v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
   v29: LOCAL_FIXTURE_POLICY_SHA256,
   v30: ORIGINAL_FIELDS_POLICY_SHA256,
-  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: CURRENT_PRODUCTION_POLICY_SHA256,
+  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5', v35: CURRENT_PRODUCTION_POLICY_SHA256,
 } as const;
 
 const LOCAL_FIXTURE_REGISTERED_PROFILES: readonly LocalFixtureRegisteredProfile[] = [
@@ -2793,12 +2793,12 @@ export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
   const version = value['providerProcessingVersion'];
   const set = value['activePolicySetVersion'];
-  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? CURRENT_ACTIVE_SET_SHA256 : null;
-  if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31' && (version !== 'v32' && version !== 'v33' && version !== 'v34')) ||
+  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d' : set === 'v26' ? CURRENT_ACTIVE_SET_SHA256 : null;
+  if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31' && (version !== 'v32' && version !== 'v33' && version !== 'v34' && version !== 'v35')) ||
       value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] || setSha256 === null || value['activePolicySetSha256'] !== setSha256 ||
-      !((set === 'v21' && ['v24', 'v29', 'v30'].includes(version)) || (set === 'v22' && ['v1', 'v24', 'v31'].includes(version)) || (set === 'v23' && ['v1', 'v24', 'v32'].includes(version)) || (set === 'v24' && ['v1', 'v24', 'v33'].includes(version)) || (set === 'v25' && ['v1', 'v24', 'v34'].includes(version)))) return null;
+      !((set === 'v21' && ['v24', 'v29', 'v30'].includes(version)) || (set === 'v22' && ['v1', 'v24', 'v31'].includes(version)) || (set === 'v23' && ['v1', 'v24', 'v32'].includes(version)) || (set === 'v24' && ['v1', 'v24', 'v33'].includes(version)) || (set === 'v25' && ['v1', 'v24', 'v34'].includes(version)) || (set === 'v26' && ['v1', 'v24', 'v35'].includes(version)))) return null;
   return { providerProcessingVersion: version, providerProcessingSha256: SELECTED_PROVIDER_DIGESTS[version],
-    activePolicySetVersion: set as 'v21' | 'v22' | 'v23' | 'v24' | 'v25', activePolicySetSha256: setSha256 };
+    activePolicySetVersion: set as 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26', activePolicySetSha256: setSha256 };
 }
 
 /** Shape and document equality only; the actual fixture/caller/message conjunction is checked by the fixture owner. */
@@ -2880,11 +2880,11 @@ export type ResultSetPolicyPin =
  */
 const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArray<readonly [string, string]>>> = {
   'development-ci': [...['v3', 'v4', 'v5', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19']
-    .map((set) => ['v1', set] as const), ['v29', 'v21'], ['v1', 'v22'], ['v1', 'v23'], ['v1', 'v24'], ['v1', 'v25']],
+    .map((set) => ['v1', set] as const), ['v29', 'v21'], ['v1', 'v22'], ['v1', 'v23'], ['v1', 'v24'], ['v1', 'v25'], ['v1', 'v26']],
   'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
-    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22', 'v23', 'v24', 'v25'].map((set) => ['v24', set] as const)],
+    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26'].map((set) => ['v24', set] as const)],
   'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
-    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25']],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25'], ['v35', 'v26']],
 };
 
 /** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */

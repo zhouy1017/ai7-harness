@@ -1,3 +1,4 @@
+import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isRecord, sha256Hex } from '../analysis/canonical.js';
 import { validModelServiceModelId, type DiscoveredModel } from '../../shared/protocol/model-service.js';
@@ -142,6 +143,7 @@ export interface DeepSeekRequestAssembly {
 }
 
 export interface ProviderRequestContext {
+  readonly editorialMemory?: EditorialMemorySnapshot;
   readonly attribution: Readonly<Record<string, string>>;
   readonly promptContractDigest: string;
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
@@ -223,6 +225,18 @@ function isRetrievalDialogue(payload: AssembledModelPayload, systemPrompt: strin
 
 /** Whether a stream request carries one of the frozen dialogue contracts the SSE shape is admitted for. */
 function isStreamedDialogue(payload: AssembledModelPayload, context: ProviderRequestContext): boolean {
+  if (context.editorialMemory !== undefined) {
+    const memory = context.editorialMemory;
+    const contracts = [[DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT.systemPrompt],
+      [DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt],
+      [GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt],
+      [AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt],
+      [AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt]] as const;
+    const base = contracts.find(([digest, prompt]) => editorialMemoryDigest(digest, memory) === context.promptContractDigest &&
+      editorialMemoryPrompt(prompt, memory) === payload.system);
+    const { editorialMemory: _memory, ...original } = context;
+    return base !== undefined && isStreamedDialogue({ ...payload, system: base[1] }, { ...original, promptContractDigest: base[0] });
+  }
   const message = payload.messages[0];
   const predecessor = context.promptContractDigest === DIALOGUE_PROMPT_CONTRACT_DIGEST &&
     payload.system === DIALOGUE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
@@ -510,6 +524,7 @@ export interface DeepSeekAdapterDependencies {
   readonly tickets: TransmitTicketSource;
   readonly attribution: () => Readonly<Record<string, string>>;
   readonly promptContractDigest: string;
+  readonly editorialMemory?: EditorialMemorySnapshot;
   readonly codes: DshFailureCodes;
   /** Defaults to the global `fetch`, which the product interval denies. */
   readonly transport?: DeepSeekTransport;
@@ -638,6 +653,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       assembly = assembleProviderRequest(this.#profile, this.#modelProfile, options, {
         attribution: this.#deps.attribution(),
         promptContractDigest: this.#deps.promptContractDigest,
+        ...(this.#deps.editorialMemory === undefined ? {} : { editorialMemory: this.#deps.editorialMemory }),
         ...(this.#deps.sessionId === undefined ? {} : { sessionId: this.#deps.sessionId(options) }),
         ...(this.#deps.requestShape === undefined ? {} : { requestShape: this.#deps.requestShape }),
       });

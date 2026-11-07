@@ -51,7 +51,7 @@ import { EDITORIAL_POLISH_SPAN_ATOMIC_REASON, placeSpanSuggestions, type PolishP
  * on its own.
  */
 export type FastRoleStore = Pick<EditorialStore,
-  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'>;
+  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory'>>;
 
 /** The label every 润色这段 mark carries as its source, beside the polish task it came from. */
 export const EDITORIAL_POLISH_MARK_SOURCE_LABEL = '润色这段';
@@ -170,7 +170,8 @@ function polishProjection(prepared: Pick<PreparedPolish, 'bookId' | 'taskId'>, s
  */
 async function finishPolish(owner: FastRoleExecutionOwner, store: FastRoleStore, prepared: PreparedPolish): Promise<EditorialPolishProjection> {
   const { selection, words, taskId } = prepared;
-  const answer = await owner.ask(EDITORIAL_POLISH_KIND, buildEditorialPolishMessage({ before: words.before, selection: words.text, after: words.after }), 'ask');
+  const answer = await owner.ask(EDITORIAL_POLISH_KIND, buildEditorialPolishMessage({ before: words.before, selection: words.text, after: words.after }), 'ask',
+    () => store.editorialMemory?.(prepared.bookId, 'editorial-dialogue') ?? null);
   if (answer.kind === 'failed') return polishProjection(prepared, 'failed', answer.message, { outcomeUnknown: answer.outcomeUnknown });
   const reading = readEditorialPolishAnswer(answer.text, words.text);
   if (reading.kind === 'withheld') return polishProjection(prepared, 'withheld', `${reading.reason}；没有新建修改建议。`);
@@ -312,7 +313,8 @@ async function finishRegeneration(owner: FastRoleExecutionOwner, store: FastRole
   const unit = conflict.units[unitIndex]!;
   const settled = (outcome: ProposalConflictRegenerationProjection['outcome'], label: string, outcomeUnknown = false): ProposalConflictRegenerationProjection =>
     ({ ...prepared.pending, outcome, outcomeUnknown, label });
-  const answer = await owner.ask(CONFLICT_REGENERATE_KIND, buildConflictRegenerateMessage(region), 'unit');
+  const answer = await owner.ask(CONFLICT_REGENERATE_KIND, buildConflictRegenerateMessage(region), 'unit',
+    () => store.editorialMemory?.(conflict.bookId, 'editorial-dialogue') ?? null);
   if (answer.kind === 'failed') return settled('failed', answer.message, answer.outcomeUnknown);
   const reading = readConflictRegenerateAnswer(answer.text);
   if (reading.kind === 'withheld') return settled('withheld', `${reading.reason}；没有改动解决草稿。`);

@@ -50,7 +50,8 @@ it('puts candidates first, accepts and excludes them, disables memory and keeps 
   await mountEditorialMemory(root, renderer, vi.fn());
   expect(Array.from(root.querySelectorAll<HTMLElement>('[data-memory-item]'), (item) => item.dataset['memoryItem'])).toEqual(['candidate', 'active']);
   expect(root.textContent).toContain('错别字与规范用语');
-  expect(root.querySelector('form')).toBeNull();
+  expect(root.querySelector('[data-preference-editor="new"]') !== null).toBe(true);
+  expect(root.querySelector('[data-memory-candidate-form]')).toBeNull();
   expect(root.textContent).not.toMatch(/token|1–10|SHA|日志|candidate-version|active-version/iu);
   expect(root.querySelector('details')!.textContent).toContain(AT);
   click(root.querySelector('[data-memory-item="candidate"]')!, '接受记忆'); await settle();
@@ -81,7 +82,7 @@ it('preserves the developer budget, signal synthesis and full memory lineage', a
   expect(root.querySelector('[data-memory-candidate-form]')).not.toBeNull();
   expect(root.textContent).toContain('来源与版本历史');
   expect(root.textContent).toContain('信心 80%');
-  expect(api.inspectGlobalAgent).not.toHaveBeenCalled();
+  expect(api.inspectGlobalAgent).toHaveBeenCalledOnce();
 });
 
 const feedback = (): FeedbackHistoryProjection => ({ books: [

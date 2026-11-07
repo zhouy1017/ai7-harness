@@ -64,8 +64,8 @@ describe('house review preference ledger', () => {
       expect(() => db.prepare('DELETE FROM house_review_preference_versions').run()).toThrow('IMMUTABLE');
       const many = Array.from({ length: 30 }, (_, index) => source({ categoryId: `category-${index}`, categoryLabel: '类别', reason: '字'.repeat(300) }));
       const lines = preferenceLines(many);
-      expect(lines.length).toBeLessThanOrEqual(12);
-      expect(lines.reduce((sum, line) => sum + Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(line.text)).length, 0)).toBeLessThanOrEqual(200);
+      expect(lines.length).toBeLessThanOrEqual(64);
+      expect(lines.reduce((sum, line) => sum + Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(line.text)).length, 0)).toBeLessThanOrEqual(6000);
     } finally { db.close(); }
   });
 
@@ -108,19 +108,19 @@ describe('house review preference ledger', () => {
       expect(version.lines.map((line) => [line.categoryId, line.bookId])).toEqual([['style-and-format', null], ['typos-and-usage', null], ['typos-and-usage', bookId]]);
       const typos = version.lines[1]!.text;
       // The excluded source's five surviving targets never count: only the admitted one, written over, is read.
-      expect(typos).toContain('采纳1、未采纳0；应用后常再改，注意编辑改写偏好');
+      expect(typos).not.toMatch(/采纳\d|未采纳|应用后常再改/u);
       expect(typos).toContain('校对认为应统一');
       expect(typos).not.toContain('王四');
-      expect(ledger.use('ordinary-production', bookId, 'typos-and-usage')!.lines).toEqual([version.lines[2]!.text, typos]);
-      expect(ledger.use('ordinary-production', randomUUID(), 'typos-and-usage')!.lines).toEqual([typos]);
+      expect(ledger.use('ordinary-production', bookId, 'typos-and-usage')!.lines).toEqual([version.lines[2]!.text, version.lines[0]!.text, typos]);
+      expect(ledger.use('ordinary-production', randomUUID(), 'typos-and-usage')!.lines).toEqual([version.lines[0]!.text, typos]);
       expect(ledger.use('ordinary-production', bookId, 'style-and-format')!).toMatchObject({ lines: [version.lines[0]!.text], sourceCount: 1 });
-      expect(ledger.use('ordinary-production', bookId, 'literary-expression')).toBeNull();
+      expect(ledger.use('ordinary-production', bookId, 'literary-expression')!.lines).toEqual([version.lines[0]!.text]);
       // Only a changed material set, or lines that read differently, make a version: new lineage alone does not.
       expect(ledger.rebuild('ordinary-production', [bookOnly, { ...kept, quality: { ...kept.quality, lineageDigest: 'e'.repeat(64) } }, excluded, style], ['王四'])!.versionId).toBe(version.versionId);
       const reread = ledger.rebuild('ordinary-production', [bookOnly, { ...kept, quality: { ...kept.quality, surviving: 1 } }, excluded, style], ['王四'])!;
-      expect(reread).toMatchObject({ ordinal: 2, supersedes: version.versionId, materialSetDigest: version.materialSetDigest });
-      expect(reread.lines[1]!.text).toContain('应用后多保留');
-      expect(ledger.history('ordinary-production').map((entry) => entry.ordinal)).toEqual([1, 2]);
+      expect(reread.versionId).toBe(version.versionId);
+      expect(reread.lines[1]!.text).toBe(typos);
+      expect(ledger.history('ordinary-production').map((entry) => entry.ordinal)).toEqual([1]);
     } finally { db.close(); }
   });
 
@@ -150,8 +150,8 @@ describe('house review preference ledger', () => {
   it('traces a pinned category by identity when another category has identical preference text (#912 review)', () => {
     const { db, ledger } = ledgerOf();
     try {
-      const first = source({ categoryId: 'typos-and-usage', categoryLabel: '合成同名类别', reason: null });
-      const other = source({ categoryId: 'style-and-format', categoryLabel: '合成同名类别', reason: null });
+      const first = source({ categoryId: 'typos-and-usage', categoryLabel: '合成同名类别', reason: '相同的编辑规则' });
+      const other = source({ categoryId: 'plot-consistency', categoryLabel: '合成同名类别', reason: '相同的编辑规则' });
       ledger.rebuild('ordinary-production', [first, other]);
       const run = randomUUID(); const task = randomUUID();
       db.exec('CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY); CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY, book_id TEXT, kind TEXT);');

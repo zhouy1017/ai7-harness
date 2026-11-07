@@ -19,7 +19,7 @@ function line(lineIndex: number, overrides: Partial<PreferenceLineCandidate> = {
   return { versionId: 'version', ordinal: 1, lineIndex, text: `规则${lineIndex}`, bookId: null, categoryId: 'style',
     active: true, confidence: 0, recordedAt: '2026-10-01T00:00:00Z', ...overrides };
 }
-describe('Top-5 preference retrieval', () => {
+describe('Top-15 preference retrieval', () => {
   it('keeps pinned /1–/3 and their pre-2a preference pins byte-identical, admits the /4 selected identity, refuses an unknown digest', async () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'developer-live');
     const input = reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!);
@@ -55,7 +55,7 @@ describe('Top-5 preference retrieval', () => {
     const candidates = [line(0, { confidence: 1 }), line(1, { bookId: 'book' }),
       line(2, { confidence: .9, recordedAt: '2026-10-02T00:00:00Z' }), line(3, { confidence: .9 }),
       ...Array.from({ length: 5 }, (_, i) => line(i + 4))];
-    expect(selectPreferenceLines(candidates.reverse(), unit).map((entry) => entry.lineIndex)).toEqual([1, 0, 2, 3, 4]);
+    expect(selectPreferenceLines(candidates.reverse(), unit).map((entry) => entry.lineIndex)).toEqual([1, 0, 2, 3, 4, 5, 6, 7, 8]);
     expect(selectPreferenceLines(candidates, unit)[0]).toMatchObject({ versionId: 'version', ordinal: 1, lineIndex: 1 });
   });
   it('excludes other Books/categories, inactive lines and missing attribution without mutating inputs', () => {
@@ -69,10 +69,10 @@ describe('Top-5 preference retrieval', () => {
   });
   it('keeps complete grapheme-bounded lines, skips an oversized line, and never drops its identity', () => {
     const emoji = '👨‍👩‍👦';
-    const selected = selectPreferenceLines([line(0, { text: '字'.repeat(201) }),
-      line(1, { text: emoji.repeat(199) }), line(2, { text: '好' }), line(3)], unit);
+    const selected = selectPreferenceLines([line(0, { text: '字'.repeat(1201) }),
+      line(1, { text: emoji.repeat(1199) }), line(2, { text: '好' }), line(3)], unit);
     expect(selected.map((entry) => entry.lineIndex)).toEqual([1, 2]);
-    expect(selected[0]!.text).toBe(emoji.repeat(199));
+    expect(selected[0]!.text).toBe(emoji.repeat(1199));
     expect(selectPreferenceLines([], unit)).toEqual([]);
   });
 });

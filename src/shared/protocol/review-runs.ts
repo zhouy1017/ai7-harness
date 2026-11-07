@@ -690,6 +690,8 @@ export interface ReviewRunInfluenceProjection {
 
 /** Local, versioned editorial preferences; attribution never enters the prompt block. */
 export interface HouseReviewPreferenceUse {
+  /** New requests use the unified envelope; absent historical pins retain their original prompt. */
+  editorialMemory?: { version: 1; categories: ReadonlyArray<string> };
   versionId: string;
   ordinal: number;
   materialSetDigest: string;

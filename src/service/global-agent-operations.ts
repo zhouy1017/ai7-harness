@@ -200,7 +200,7 @@ export function localFixtureRuntime(host: GlobalAgentOperationsHost): LocalFixtu
 
 export function internalGlobalOriginalFieldsSelected(host: GlobalAgentOperationsHost): boolean {
   const policy = host.baselineAnalysis.launch.policy;
-  if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33' && policy?.providerProcessing.version !== 'v34')) return false;
+  if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33' && policy?.providerProcessing.version !== 'v34' && policy?.providerProcessing.version !== 'v35')) return false;
   requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
     selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
@@ -215,7 +215,7 @@ export function globalAgentModelConnection(host: GlobalAgentOperationsHost): { b
   requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
   const policy = resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production',
     host.getConfiguredModelRoleBinding('main-editorial'), binding);
-  requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || policy.providerProcessing.version === 'v34')) &&
+  requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33' || (policy.providerProcessing.version === 'v34' || policy.providerProcessing.version === 'v35'))) &&
     canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(host.baselineAnalysis.launch.policy?.selectedPolicyIdentity),
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
   return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };
