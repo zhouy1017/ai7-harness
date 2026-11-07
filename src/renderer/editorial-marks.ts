@@ -37,6 +37,7 @@ import type {
   EditorialMarkCommandProjection,
   EditorialMarkKind,
   ManuscriptApplyCommandProjection,
+  ManuscriptWindowProjection,
   PersonalHighlightColor,
   ProposalItemDecisionProjection,
   RendererApi,
@@ -105,6 +106,7 @@ export interface SelectionSpanReading {
 }
 
 export interface EditorialMarksSurface {
+  refreshComments(): void;
   /** Close whatever is floating: the blocks it was anchored to may be gone. */
   close(): void;
   /**
@@ -133,6 +135,8 @@ export interface EditorialMarksSurface {
 }
 
 interface MountOptions {
+  /** The manuscript's existing supporting slot; absent on embedded document editors. */
+  comments?: { host: HTMLElement; enabled(): boolean };
   scroll: HTMLElement;
   host: HTMLElement;
   editor: BoundedEditor;
@@ -212,6 +216,54 @@ interface MountOptions {
   writeManuscript<T extends ManuscriptApplyCommandProjection>(operation: () => Promise<T>, done: string): Promise<T | undefined>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
+}
+
+/** Window-only memory. A new projection/version fences every outstanding read, including failed reads. */
+export class EditorialCardCache {
+  readonly cards = new Map<string, EditorialMarkCardProjection>();
+  #identity = '';
+  #marks: ReadonlyArray<EditorialMarkAnchorProjection> | undefined;
+  #reads = new Map<string, Promise<EditorialMarkCardProjection | undefined>>();
+  #epoch = 0;
+  sync(window: Pick<ManuscriptWindowProjection, 'bookId' | 'manuscriptId' | 'branchId' | 'revisionId' | 'journalSequence' | 'workingDigest' | 'blocks' | 'marks'>): void {
+    const identity = JSON.stringify([window.bookId, window.manuscriptId, window.branchId, window.revisionId, window.journalSequence,
+      window.workingDigest, window.blocks.map((block) => block.blockId)]);
+    if (identity === this.#identity && window.marks === this.#marks) return;
+    this.#identity = identity;
+    this.#marks = window.marks;
+    this.clear();
+  }
+  clear(): void { this.#epoch++; this.cards.clear(); this.#reads.clear(); }
+  put(card: EditorialMarkCardProjection): void {
+    // Replacing the pending entry prevents an older read from overwriting a command's returned card.
+    this.#reads.delete(card.markId);
+    if (card.kind === 'personal-highlight') this.cards.delete(card.markId);
+    else this.cards.set(card.markId, card);
+  }
+  read(markId: string, fetch: () => Promise<EditorialMarkCardProjection>): Promise<EditorialMarkCardProjection | undefined> {
+    const cached = this.cards.get(markId);
+    if (cached) return Promise.resolve(cached);
+    const existing = this.#reads.get(markId);
+    if (existing) return existing;
+    const epoch = this.#epoch;
+    const read = Promise.resolve().then(fetch).then((card) => {
+      if (epoch !== this.#epoch || this.#reads.get(markId) !== read) return undefined;
+      if (card.kind !== 'personal-highlight') this.cards.set(markId, card);
+      return card;
+    });
+    this.#reads.set(markId, read);
+    return read;
+  }
+}
+
+/** Measured cards stay in anchor order and remain reachable in the pane's own scroll area. */
+export function stackEditorialComments<T extends { desiredTop: number; measuredHeight: number }>(items: readonly T[]): Array<T & { top: number }> {
+  let bottom = 8;
+  return [...items].sort((a, b) => a.desiredTop - b.desiredTop).map((item) => {
+    const top = Math.max(item.desiredTop, bottom);
+    bottom = top + item.measuredHeight + 10;
+    return { ...item, top };
+  });
 }
 
 /** How often 润色这段 reads its request again while it is in flight (Issue #842). */
@@ -424,6 +476,221 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   void inSeries?.refresh();
   let closedAt: { top: number } | undefined;
 
+  const cardCache = new EditorialCardCache();
+  const commentNodes = new Map<string, { card: EditorialMarkCardProjection; node: HTMLElement }>();
+  const commentsScroll = el('div', 'manuscript-comments-scroll');
+  const commentsCanvas = el('div', 'manuscript-comments-canvas');
+  commentsCanvas.setAttribute('role', 'list');
+  commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
+  commentsScroll.append(commentsCanvas);
+  options.comments?.host.append(commentsScroll);
+  const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  leaders.classList.add('manuscript-comments-leaders');
+  leaders.setAttribute('aria-hidden', 'true');
+  options.comments?.host.parentElement?.append(leaders);
+  let commentsFrame: number | undefined;
+  let activeComment: string | undefined;
+  let commentsReading = 0;
+  let commentCardReads = 0;
+  let commentsIdentity = '';
+  const commentAnchor = (mark: EditorialMarkAnchorProjection): HTMLElement | null =>
+    options.host.querySelector<HTMLElement>(`.editorial-mark[data-mark-id="${CSS.escape(mark.markId)}"]`) ?? blockElement(mark.blockId);
+  const activateComment = (markId: string | undefined): void => {
+    activeComment = markId;
+    for (const [id, entry] of commentNodes) entry.node.dataset['active'] = String(id === markId);
+    for (const node of options.host.querySelectorAll('.manuscript-comments-anchor')) node.classList.remove('manuscript-comments-anchor');
+    if (markId) {
+      for (const node of options.host.querySelectorAll(`[data-mark-id="${CSS.escape(markId)}"]`)) node.classList.add('manuscript-comments-anchor');
+    }
+    scheduleCommentsLayout();
+  };
+  const returnToCommentAnchor = (card: EditorialMarkCardProjection): void => {
+    editor.selectRange(card.blockId, card.fromGrapheme, card.fromGrapheme);
+    editor.focus();
+  };
+  function openCommentReply(markId: string): void {
+    const entry = commentNodes.get(markId);
+    if (!entry) return;
+    const existing = entry.node.querySelector<HTMLTextAreaElement>('[data-comment-reply]');
+    if (existing) { existing.focus(); return; }
+    const form = el('form', 'manuscript-comments-reply');
+    const input = el('textarea');
+    input.rows = 2;
+    input.dataset['commentReply'] = markId;
+    input.setAttribute('aria-label', '回复内容');
+    const send = el('button', 'secondary', '发送回复');
+    send.type = 'submit';
+    send.dataset['markAction'] = 'send-reply';
+    const problem = el('p', 'manuscript-comments-problem');
+    problem.setAttribute('role', 'alert');
+    form.append(input, send, problem);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!input.value.trim() || send.disabled) return;
+      send.disabled = true;
+      const body = input.value;
+      void change(markId, 'reply', { body }, '已回复。', false).then((done) => {
+        if (done) { input.value = ''; problem.textContent = ''; }
+        else problem.textContent = '回复未发送，请查看状态提示后重试。';
+      }).finally(() => { send.disabled = false; scheduleCommentsLayout(); });
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    entry.node.append(form);
+    input.focus({ preventScroll: true });
+    scheduleCommentsLayout();
+  }
+  function scheduleCommentsLayout(): void {
+    if (destroyed || commentsFrame !== undefined || !options.comments) return;
+    commentsFrame = requestAnimationFrame(() => { commentsFrame = undefined; layoutComments(); });
+  }
+  function layoutComments(): void {
+    const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
+    leaders.replaceChildren();
+    if (!visible) return;
+    const viewport = options.scroll.getBoundingClientRect();
+    const base = commentsScroll.getBoundingClientRect();
+    const items = [];
+    const present = new Set<string>();
+    for (const mark of editor.currentWindow().marks) {
+      if (mark.kind === 'personal-highlight') continue;
+      const anchor = commentAnchor(mark);
+      if (!anchor) continue;
+      const rect = anchor.getBoundingClientRect();
+      if (rect.bottom < viewport.top - 200 || rect.top > viewport.bottom + 200) continue;
+      const card = cardCache.cards.get(mark.markId);
+      if (!card) continue;
+      present.add(mark.markId);
+      let entry = commentNodes.get(mark.markId);
+      if (!entry) {
+        const node = el('article', 'manuscript-comments-card');
+        node.tabIndex = 0;
+        node.dataset['commentCard'] = mark.markId;
+        entry = { card, node };
+        commentNodes.set(mark.markId, entry);
+        commentsCanvas.append(node);
+        commentsResize.observe(node);
+        node.addEventListener('pointerenter', () => activateComment(mark.markId));
+        node.addEventListener('pointerleave', () => { if (!node.contains(document.activeElement)) activateComment(undefined); });
+        node.addEventListener('focusin', () => activateComment(mark.markId));
+        node.addEventListener('click', (event) => {
+          if ((event.target as Element).closest('button, input, textarea, summary, a')) return;
+          const current = commentNodes.get(mark.markId)?.card;
+          if (!current) return;
+          commentAnchor({ ...mark, blockId: current.blockId })?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+          activateComment(mark.markId);
+          const preview = current.suggestion && current.status !== 'applied' && current.anchorState === 'exact' && current.suggestion.decision?.disposition !== 'rejected';
+          editor.setActiveMark({ markId: current.markId, previewText: preview ? current.suggestion!.decision?.editedText ?? current.suggestion!.proposedText : null });
+        });
+        node.addEventListener('keydown', (event) => {
+          if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+          const current = commentNodes.get(mark.markId)?.card;
+          if (!current) return;
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); returnToCommentAnchor(current); return; }
+          if (event.target !== node) return;
+          const ordered = Array.from(commentsCanvas.children).filter((child): child is HTMLElement => child instanceof HTMLElement && !child.hidden);
+          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            ordered[Math.max(0, Math.min(ordered.length - 1, ordered.indexOf(node) + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+          } else if (event.key === 'Enter') { event.preventDefault(); showCard(current); }
+        });
+      }
+      if (entry.card !== card || !entry.node.firstElementChild) {
+        // Keep the actual reply form node: browser selection, IME and caret survive background refreshes.
+        const reply = entry.node.querySelector<HTMLFormElement>('.manuscript-comments-reply');
+        const focused = entry.node.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+        const action = focused?.dataset['markAction'];
+        const more = entry.node.querySelector<HTMLDetailsElement>('.editorial-mark-more');
+        if (more) moreOpen.set(mark.markId, more.open);
+        const selection = focused instanceof HTMLTextAreaElement ? [focused.selectionStart, focused.selectionEnd] as const : null;
+        const composed = composeCard(card, undefined, true);
+        const previous = entry.node.firstElementChild;
+        if (previous && previous !== reply) previous.replaceWith(composed);
+        else entry.node.prepend(composed);
+        entry.card = card;
+        if (focused) {
+          const target = reply?.contains(focused) ? focused : action ? entry.node.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(action)}"]`)
+            : focused.tagName === 'SUMMARY' ? entry.node.querySelector<HTMLElement>('.editorial-mark-more summary') : entry.node;
+          target?.focus({ preventScroll: true });
+          if (selection && focused instanceof HTMLTextAreaElement) focused.setSelectionRange(...selection);
+        }
+      }
+      entry.node.hidden = false;
+      items.push({ mark, anchor: rect, node: entry.node, desiredTop: rect.top - base.top, measuredHeight: entry.node.getBoundingClientRect().height });
+    }
+    for (const [id, entry] of commentNodes) {
+      if (!present.has(id)) {
+        // Offscreen drafts stay in memory only while their mark still belongs to this window.
+        if (editor.currentWindow().marks.some((mark) => mark.markId === id)) entry.node.hidden = true;
+        else { commentsResize.unobserve(entry.node); entry.node.remove(); commentNodes.delete(id); }
+      }
+    }
+    const placed = stackEditorialComments(items);
+    for (const [index, item] of placed.entries()) {
+      item.node.style.top = `${item.top}px`;
+      item.node.dataset['active'] = String(item.mark.markId === activeComment);
+      if (commentsCanvas.children[index] !== item.node) commentsCanvas.insertBefore(item.node, commentsCanvas.children[index] ?? null);
+    }
+    commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
+    const active = placed.find((item) => item.mark.markId === activeComment);
+    if (active) {
+      const origin = options.comments!.host.parentElement!.getBoundingClientRect();
+      const target = active.node.getBoundingClientRect();
+      if (target.bottom >= base.top && target.top <= base.bottom) {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const x = Math.min(active.anchor.right, viewport.right) - origin.left;
+        const y = active.anchor.top + Math.min(active.anchor.height, 20) / 2 - origin.top;
+        const endX = target.left - origin.left;
+        const endY = Math.max(base.top, target.top) + 12 - origin.top;
+        line.dataset['commentLeader'] = active.mark.markId;
+        line.setAttribute('d', `M ${x} ${y} L ${endX - 8} ${y} L ${endX} ${endY}`);
+        leaders.append(line);
+      }
+    }
+    commentsCanvas.dataset['loading'] = String(commentsReading > 0);
+  }
+  function refreshComments(): void {
+    const current = editor.currentWindow();
+    const identity = JSON.stringify([current.bookId, current.manuscriptId, current.branchId, current.blocks.map((block) => block.blockId)]);
+    if (identity !== commentsIdentity) {
+      commentsIdentity = identity;
+      for (const entry of commentNodes.values()) { commentsResize.unobserve(entry.node); entry.node.remove(); }
+      commentNodes.clear();
+      activateComment(undefined);
+    }
+    cardCache.sync(current);
+    scheduleCommentsLayout();
+    if (!options.comments?.enabled()) { activateComment(undefined); return; }
+    for (const mark of current.marks) {
+      if (mark.kind === 'personal-highlight') continue;
+      commentsReading++;
+      void cardCache.read(mark.markId, () => {
+        commentsCanvas.dataset['cardReads'] = String(++commentCardReads);
+        return api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId: mark.markId });
+      })
+        .catch((error) => { if (!destroyed && current === editor.currentWindow()) options.setStatus(options.errorMessage(error, '批注内容未能读取。'), 'error'); })
+        .finally(() => { commentsReading--; scheduleCommentsLayout(); });
+    }
+  }
+  const commentsResize = new ResizeObserver(scheduleCommentsLayout);
+  commentsResize.observe(options.scroll);
+  commentsResize.observe(options.host);
+  if (options.comments) commentsResize.observe(commentsScroll);
+  const commentSelection = (): void => {
+    if (!options.comments?.enabled() || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
+    const point = editor.captureContinuity().head;
+    activateComment(editor.currentWindow().marks.find((mark) => mark.kind !== 'personal-highlight' && mark.blockId === point.blockId &&
+      point.grapheme >= mark.fromGrapheme && point.grapheme <= mark.toGrapheme)?.markId);
+  };
+  document.addEventListener('selectionchange', commentSelection);
+  options.scroll.addEventListener('scroll', scheduleCommentsLayout, { passive: true });
+  commentsScroll.addEventListener('scroll', scheduleCommentsLayout, { passive: true });
+  window.addEventListener('resize', scheduleCommentsLayout);
+
   /**
    * The proposal workspace a 修改建议 card reads for its 在专用工作区审阅 and atomic group (Issue #1178): read once for the marks the
    * window holds, not again for every card opened over them; a decision or a new window — new marks — reads it again.
@@ -497,7 +764,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const applyCommand = (result: EditorialMarkCommandProjection): void => {
+    if (destroyed) return;
     editor.setMarks(result.marks, result.marksTruncated);
+    cardCache.sync(editor.currentWindow());
+    if (result.card) {
+      const card = result.card;
+      cardCache.put(card);
+      if (activeComment === card.markId || openCardId === card.markId) {
+        const previews = card.suggestion !== null && card.status !== 'applied' && card.anchorState === 'exact' && card.suggestion.decision?.disposition !== 'rejected';
+        editor.setActiveMark({ markId: card.markId, previewText: previews ? card.suggestion!.decision?.editedText ?? card.suggestion!.proposedText : null });
+      }
+    }
+    refreshComments();
     options.marksChanged?.();
   };
 
@@ -830,12 +1108,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     action: UpdateEditorialMarkInput['action'],
     extra: Parameters<typeof update>[2],
     done: string,
+    reveal = true,
   ): Promise<boolean> => command(async () => {
     const result = await update(markId, action, extra);
+    if (destroyed) return;
     applyCommand(result);
     options.setStatus(done, 'success');
-    if (result.card !== null && result.card.kind !== 'personal-highlight') showCard(result.card);
-    else closeFloating();
+    if (reveal) {
+      if (result.card !== null && result.card.kind !== 'personal-highlight') showCard(result.card);
+      else closeFloating();
+    }
   }, '标记未能更新。');
 
   const convertForm = (
@@ -939,7 +1221,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (card.source.origin !== 'review-category' || openReview === undefined) return disabledAction('view-task', '查看任务', TASK_CARD_REASON);
     const waiting = disabledAction('view-task', '查看任务', REVIEW_VIEW_TASK_RESOLVING);
     void reviewFindingOf(card.markId).then((found) => {
-      if (destroyed || openCardId !== card.markId || !waiting.isConnected) return;
+      if (destroyed || !waiting.isConnected) return;
       if (found === null) {
         const reason = waiting.querySelector('small');
         if (reason !== null) reason.textContent = REVIEW_VIEW_TASK_ABSENT;
@@ -987,7 +1269,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     void reviewFindingOf(card.markId).then(async (found) => {
       if (found === null) return;
       const sources = (await readFindingSources(api, found.bookId, found.reviewRunId, undefined, found.findingId)).get(found.findingId) ?? [];
-      if (sources.length > 0 && !destroyed && openCardId === card.markId && slot.isConnected) slot.replaceChildren(findingEvidenceList(sources));
+      if (sources.length > 0 && !destroyed && slot.isConnected) slot.replaceChildren(findingEvidenceList(sources));
     });
     return [slot];
   };
@@ -1022,22 +1304,22 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return [block];
   };
 
-  function showCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig): void {
-    closeMenu();
+  function composeCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig, inline = false): HTMLElement {
+    if (!inline) closeMenu();
     if (promptFor !== null && promptFor.markId !== card.markId) promptFor = null;
-    const previous = floating?.dataset['markCard'] === card.markId ? floating : null;
+    const previous = inline ? commentNodes.get(card.markId)?.node : floating?.dataset['markCard'] === card.markId ? floating : null;
     const active = previous?.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
     const focusAction = active?.dataset['markAction'];
     const focusMore = active?.tagName === 'SUMMARY' && active.parentElement?.classList.contains('editorial-mark-more');
     const priorMore = previous?.querySelector<HTMLDetailsElement>('.editorial-mark-more');
     if (priorMore) moreOpen.set(card.markId, priorMore.open);
-    const dismiss = actionButton('close', '关闭', 'quiet', () => {
-      closeFloating();
-      editor.focus();
+    const dismiss = actionButton(inline ? 'expand' : 'close', inline ? '展开' : '关闭', 'quiet', () => {
+      if (inline) showCard(card);
+      else { closeFloating(); editor.focus(); }
     });
     const { panel, more, actions } = renderEditorialMarkCard(card, { technical: technicalLayerVisible, moreOpen, dismiss });
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}浮卡`);
+    panel.setAttribute('role', inline ? 'listitem' : 'dialog');
+    panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}${inline ? '卡片' : '浮卡'}`);
 
     if (card.anchorState !== 'exact') {
       const drifted = el('p', 'editorial-mark-drifted', markDriftNote(card));
@@ -1154,7 +1436,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           bound.append(el('dt', undefined, term), el('dd', undefined, value));
         }
         credentials.append(bound, el('p', 'muted', '凭据只证明这次写入发生了，不证明内容的对错。'));
-        more.append(credentials);
+        more.append(technicalDisclosure(credentials));
         if (form) {
           yours.append(buildForm(form(reopen)));
         } else if (exact) {
@@ -1164,7 +1446,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             quote: null,
             fields: [],
             submitLabel: '确认撤销本次应用',
-            note: `${reverseApplyNote(shown, suggestion.currentText)} ${preparation.reason} 当前修订 ${preparation.revisionId} · 修订日志序号 ${preparation.journalSequence}。范围：${preparation.ranges.map((range) => `第 ${range.position} 段 ${range.fromGrapheme}–${range.toGrapheme}`).join('；')}`,
+            note: `${reverseApplyNote(shown, suggestion.currentText)} ${preparation.reason}${technicalLayerVisible ? ` 当前修订 ${preparation.revisionId} · 修订日志序号 ${preparation.journalSequence}。` : ''}范围：${preparation.ranges.map((range) => `第 ${range.position} 段 ${range.fromGrapheme}–${range.toGrapheme}`).join('；')}`,
             submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
             cancel,
           })); }).catch((error) => options.setStatus(options.errorMessage(error, '无法准备撤销。'), 'error'))));
@@ -1183,10 +1465,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           exact
             ? actionButton('accept-and-apply', '接受并应用', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null,
-              }), '已应用这条修改建议。', null))
+              }), '已应用这条修改建议。', null, !inline))
             : disabledAction('accept-and-apply', '接受并应用', '原文已变，无法应用这条修改建议。'),
           ...resolveConflict(),
-          actionButton('reject', '拒绝', 'secondary', () => void decide(card, 'rejected', null, null)),
+          actionButton('reject', '拒绝', 'secondary', () => void decide(card, 'rejected', null, null, !inline)),
           exact
             ? actionButton('accept-with-edit', '修改后接受', 'secondary', () => showCard(card, (cancel) => ({
                 id: 'accept-with-edit',
@@ -1220,7 +1502,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           disposition.append(exact
             ? actionButton('apply-recorded', '应用到稿件', 'primary', () => void writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
                 ...binding(), markId: card.markId, clientEffectId, interaction: 'apply-recorded-decision', editedText: null, reason: null,
-              }), '已按你改定的文字应用。', decision.decisionId))
+              }), '已按你改定的文字应用。', decision.decisionId, !inline))
             : disabledAction('apply-recorded', '应用到稿件', '原文已变，无法应用这条修改建议。'), ...resolveConflict());
         }
         // 保留当前稿件 resolved a conflict with this rejection; that resolution is final (Issue #57).
@@ -1239,7 +1521,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const yours = actions;
       if (card.kind === 'annotation') {
         disposition.append(
-          actionButton('reply', '回复', 'secondary', () => showCard(card, (cancel) => ({
+          actionButton('reply', '回复', 'secondary', () => { if (inline) { openCommentReply(card.markId); return; } showCard(card, (cancel) => ({
             id: 'reply',
             title: '回复',
             quote: null,
@@ -1247,10 +1529,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             submitLabel: '发送回复',
             submit: async (values) => { await change(card.markId, 'reply', { body: values.body }, '已回复。'); },
             cancel,
-          }))),
+          })); }),
           card.status === 'open'
-            ? actionButton('resolve', '标记为已处理', 'secondary', () => void change(card.markId, 'set-status', { status: 'resolved' }, '已标记为已处理。'))
-            : actionButton('reopen', '重新打开', 'secondary', () => void change(card.markId, 'set-status', { status: 'open' }, '已重新打开。')),
+            ? actionButton('resolve', '标记为已处理', 'secondary', () => void change(card.markId, 'set-status', { status: 'resolved' }, '已标记为已处理。', !inline))
+            : actionButton('reopen', '重新打开', 'secondary', () => void change(card.markId, 'set-status', { status: 'open' }, '已重新打开。', !inline)),
         );
         more.append(convertOrExplain('change-suggestion'));
         if (card.source.kind === 'ai7') more.append(viewTaskAction(card));
@@ -1294,6 +1576,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     technical.append(identities);
     more.append(technicalDisclosure(technical));
 
+    if (inline) return panel;
     floating?.remove();
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);
@@ -1310,6 +1593,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const restore = focusMore ? more.querySelector<HTMLElement>('summary') : focusAction ? panel.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(focusAction)}"]`) : null;
       (restore ?? dismiss).focus({ preventScroll: true });
     }
+    return panel;
+  }
+
+  function showCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig): void {
+    if (destroyed) return;
+    composeCard(card, form);
   }
 
   /**
@@ -1416,6 +1705,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     disposition: 'rejected' | 'accepted-with-edit' | 'withdrawn',
     editedText: string | null,
     reason: string | null,
+    reveal = true,
   ): Promise<void> {
     const before = card.suggestion?.decision?.decisionId ?? null;
     await command(async () => {
@@ -1427,6 +1717,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         editedText,
         reason,
       });
+      if (destroyed) return;
       applyCommand(result);
       options.setStatus(
         disposition === 'rejected' ? '已拒绝这条修改建议；原文保留。'
@@ -1435,7 +1726,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         'success',
       );
       notePrompt(before, result.card);
-      if (result.card) showCard(result.card);
+      if (reveal && result.card) showCard(result.card);
     }, '你的处理未能记录。');
   }
 
@@ -1449,6 +1740,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     done: string,
     /** The decision an Apply starts from, when it may record a new one to ask about; `undefined` for a reversal. */
     decidedBefore?: string | null,
+    reveal = true,
   ): Promise<void> {
     if (destroyed || refuseWhileBusy()) return;
     working = true;
@@ -1471,7 +1763,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (applied.acknowledged) {
         recoveryCards.delete(markId);
         if (decidedBefore !== undefined) notePrompt(decidedBefore, applied.result.card);
-        if (applied.result.card !== null) showCard(applied.result.card);
+        applyCommand(applied.result);
+        if (reveal && applied.result.card !== null) showCard(applied.result.card);
         if (decidedBefore !== undefined) showToast(done, { action: { label: '撤销', run: () => void writeManuscript(markId,
           (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId, clientEffectId }), '已撤销本次应用。') } });
         return;
@@ -1491,8 +1784,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (destroyed) return;
     try {
       const current = editor.currentWindow();
-      const card = await api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId });
-      if (destroyed) return;
+      cardCache.sync(current);
+      const card = await cardCache.read(markId, () => api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId }));
+      if (destroyed || !card || editor.currentWindow() !== current) return;
       showCard(card, form ? (cancel) => form(card, cancel) : undefined);
     } catch (error) {
       options.setStatus(options.errorMessage(error, '无法打开这条标记。'), 'error');
@@ -1671,6 +1965,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const read = await polishOptions.marks().catch(() => null);
     if (read === null || destroyed || read.journalSequence !== editor.currentWindow().journalSequence) return;
     editor.setMarks(read.marks, read.truncated);
+    refreshComments();
     options.marksChanged?.();
   };
 
@@ -2149,7 +2444,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   const onDocumentKeyDown = (event: KeyboardEvent): void => {
     // An Escape that ends an input method's composition belongs to the composition (J-14): the composer stays open.
-    if (event.key !== 'Escape' || event.isComposing || (menu === undefined && floating === undefined)) return;
+    if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || (menu === undefined && floating === undefined)) return;
     event.preventDefault();
     close();
     editor.focus();
@@ -2180,9 +2475,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   document.addEventListener('mousedown', onDocumentMouseDown);
   document.addEventListener('keydown', onDocumentKeyDown);
 
+  refreshComments();
+
   return {
+    refreshComments,
     close,
     reanchor: () => {
+      refreshComments();
       closeMenu();
       if (floating === undefined) return;
       const blockId = floatingBlockId;
@@ -2211,6 +2510,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;
+      cardCache.clear();
+      commentNodes.clear();
+      commentsResize.disconnect();
+      if (commentsFrame !== undefined) cancelAnimationFrame(commentsFrame);
+      document.removeEventListener('selectionchange', commentSelection);
+      options.scroll.removeEventListener('scroll', scheduleCommentsLayout);
+      commentsScroll.removeEventListener('scroll', scheduleCommentsLayout);
+      window.removeEventListener('resize', scheduleCommentsLayout);
+      commentsScroll.remove();
+      leaders.remove();
+      for (const node of options.host.querySelectorAll('.manuscript-comments-anchor')) node.classList.remove('manuscript-comments-anchor');
       reflow.disconnect();
       options.scroll.removeEventListener('wheel', onReaderScroll);
       options.scroll.removeEventListener('touchmove', onReaderScroll);

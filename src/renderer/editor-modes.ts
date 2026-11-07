@@ -63,6 +63,8 @@ export interface EditorModesOptions {
   openNavigation(): void;
   /** Reopen the Book's 任务 panel; absent where the surface has none. */
   openTasks?(): void;
+  toggleComments?(): void;
+  commentsOpen?(): boolean;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   shortcutHint(commandId: string): string | null;
 }
@@ -119,6 +121,8 @@ export function mountEditorModes(options: EditorModesOptions): EditorModes {
     focus.leave();
     options.openTasks?.();
   });
+  const commentsItem = options.toggleComments === undefined ? null : item('批注栏', 'toggle-comments', () => options.toggleComments?.());
+  if (commentsItem) commentsItem.dataset['shortcutCommand'] = 'view.comments';
   const railItem = options.rail ? item(VIEW_MENU_ITEMS.rail, 'toggle-rail', () => {
     const hidden = view.current.regions.hidden.includes('position-rail');
     void view.setRegionHidden('position-rail', !hidden).catch(() => options.setStatus(VIEW_SETTINGS_SAVE_FAILED, 'error'));
@@ -129,7 +133,7 @@ export function mountEditorModes(options: EditorModesOptions): EditorModes {
       () => options.setStatus(VIEW_SETTINGS_SAVE_FAILED, 'error'),
     );
   });
-  list.append(focusItem, restoreHeading, navigationItem, ...(tasksItem === null ? [] : [tasksItem]), ...(railItem === null ? [] : [railItem]),
+  list.append(focusItem, restoreHeading, navigationItem, ...(commentsItem ? [commentsItem] : []), ...(tasksItem === null ? [] : [tasksItem]), ...(railItem === null ? [] : [railItem]),
     restoreItem, el('p', 'field-note', VIEW_MENU_NOTE));
   menu.append(summary, list);
   host.replaceChildren(protectionHost, toggle, menu);
@@ -141,6 +145,7 @@ export function mountEditorModes(options: EditorModesOptions): EditorModes {
     const hint = options.shortcutHint('view.focusMode');
     toggle.title = active ? FOCUS_MODE_EXIT : `${FOCUS_MODE_ENTER_TITLE}${hint === null ? '' : `（${hint}）`}`;
     focusItem.setAttribute('aria-pressed', String(active));
+    commentsItem?.setAttribute('aria-pressed', String(options.commentsOpen?.() === true));
     if (railItem !== null) railItem.setAttribute('aria-pressed', String(!view.current.regions.hidden.includes('position-rail')));
   };
   toggle.addEventListener('click', () => focus.toggle());

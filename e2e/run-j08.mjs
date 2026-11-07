@@ -1,3 +1,4 @@
+import { seedCommentsPane, commentsGeometryAndScroll, commentsReplyAndResolve, commentsBookMemory } from './comments-pane.mjs';
 import { existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -612,6 +613,12 @@ async function main() {
     await assertRenderer(renderer, `(() => { document.querySelector('.editorial-mark[data-mark-kind="editor-note"]').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'recovered-card-open');
     await waitFor(renderer, `document.querySelector('[data-mark-card][data-mark-kind="editor-note"]')`, 'recovered-card-ready');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-mark-card]'); return document.documentElement.dataset.technicalLayerVisible==='false' && Array.from(card.querySelectorAll('[data-mark-block]')).map((block)=>block.dataset.markBlock).join('|')==='body|quote|author|more|actions' && card.querySelector('[data-mark-body]').textContent==='恢复后公开合成备注' && card.querySelector('[data-mark-block="quote"]').textContent.length===4 && card.querySelector('[data-mark-source]').textContent.startsWith('恢复责编 · ') && !card.querySelector('.editorial-mark-more').open && card.querySelector('.editorial-mark-more [data-mark-action="remove"]') && !card.querySelector('[data-mark-action="edit"]').closest('details'); })()`, 'recovered-card-hierarchy-and-author');
+
+    at('comments-inline-reply');
+    await seedCommentsPane(renderer, requireJourney, waitFor);
+    await commentsGeometryAndScroll(renderer, requireJourney, waitFor);
+    await commentsReplyAndResolve(renderer, requireJourney, waitFor);
+    await commentsBookMemory(renderer, requireJourney, waitFor);
 
     // The remaining candidate UUID/SHA assertions inspect developer disclosures, not ordinary UI payload.
     await recoveryTechnicalMode(renderer, true, 'recovery-identities-developer');

@@ -25,7 +25,7 @@ function wording(tag: 'ins' | 'del', text: string, other: string): HTMLElement {
   return element;
 }
 
-/** Shared card hierarchy for floating cards and the future manuscript rail (#1379 / #1380).
+/** Shared card hierarchy for floating cards and the manuscript comments pane (#1379 / #1380).
  * Callers supply the existing authority-bearing actions and secondary evidence; this renderer writes no manuscript.
  */
 export function renderEditorialMarkCard(card: EditorialMarkCardProjection, options: {

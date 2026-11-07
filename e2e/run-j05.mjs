@@ -1,3 +1,4 @@
+import { seedCommentsPane, commentsGeometryAndScroll, commentsApplyAndReject } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
@@ -1043,7 +1044,8 @@ async function main() {
     // offered no choice, as a one-paragraph draft is here, and 准备计划 stays disabled with that reason. The card names the span.
     // Promotion over exactly the span, its plan statement and `draft-span` pins are proven by tests/service/task-intent-drafts.test.ts.
     at('selection-span-no-review-choice');
-    await waitFor(renderer, `(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range blockquote footer')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字' && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'span-promote-withheld-by-reason', 10_000);
+    await waitFor(renderer, `document.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution==='unsupported'`, 'span-unsupported-dom-ready', 10_000);
+    requireJourney(await renderer.evaluate(`(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range blockquote footer')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字' && document.documentElement.dataset.technicalLayerVisible==='false'; })()`), 'span-promote-withheld-by-reason');
     await assertRenderer(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({ reviewRunId: null })).run === null && window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c)()`, 'span-nothing-prepared-or-written');
     await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'span-drawer-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
@@ -1077,7 +1079,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
     await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-batch-confirm-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="batch-confirm"]').click(); return true; })()`, 'local-batch-confirm');
-    await waitFor(renderer, `(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`, 'local-batch-committed');
+    await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('[data-toast]')?.textContent.includes('条修改建议写入稿件')`, 'local-batch-dom-ready');
+    requireJourney(await renderer.evaluate(`(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`), 'local-batch-committed');
     await waitFor(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-return-to-mark');
     // The finding retains the same suggestion and Apply lineage; its reverse action restores the tester edit.
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.mark('change-suggestion', window.__j05LocalBlock).length===1`, 'local-batch-suggestion-on-text');
@@ -1090,6 +1093,11 @@ async function main() {
     await waitFor(renderer, `window.__j05.text(window.__j05LocalBlock)===window.__j05LocalOriginal && window.__j05.card()?.querySelector('[data-mark-state]')?.textContent==='待你处理'`, 'local-reversal-restores-text');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
     await settled(renderer, 'local-workflow-settled');
+
+    at('comments-inline-apply');
+    await seedCommentsPane(renderer, requireJourney, waitFor);
+    await commentsGeometryAndScroll(renderer, requireJourney, waitFor);
+    await commentsApplyAndReject(renderer, requireJourney, waitFor);
 
     at('completion-browser-close');
     await close();
