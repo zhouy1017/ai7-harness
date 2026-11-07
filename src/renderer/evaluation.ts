@@ -335,8 +335,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   let refusal: string | null = null;
   let poll: number | null = null;
   let paintDeferred = false;
-  /** The editor opened a version from the list: the page stays on it rather than on AI7's newer report (Issue #1406). */
-  let picked = false;
+  /**
+   * The AI7 report the editor set aside by opening a version from the list or beginning one alone (Issue #1406): the page stays
+   * on that version while this report is the latest — `'none'` when there was none — and a newer report leads again.
+   */
+  let pickedOver: string | null = null;
+  const pick = (): void => { pickedOver = workspace?.initial.latest?.revisionId ?? 'none'; };
 
   // 审稿意见's DOCX export (Issue #429, S81c): ④ 导出's own card, drawn into one slot every paint of the 审稿意见 block takes
   // back, so a card open across a repaint keeps its state.
@@ -917,8 +921,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const latest = workspace.initial.latest;
     const holdsLatest = latest !== null && workspace.record?.initial?.revisionId === latest.revisionId;
     // AI7's newest report leads (Issue #1406) — unless the editor opened a version from the list, or is typing in one.
-    if (latest !== null && !holdsLatest && unsaved()) picked = true;
-    const reportFirst = latest !== null && !holdsLatest && !picked;
+    if (latest !== null && !holdsLatest && pickedOver !== latest.revisionId && unsaved()) pickedOver = latest.revisionId;
+    const reportFirst = latest !== null && !holdsLatest && pickedOver !== latest.revisionId;
     const record = reportFirst ? null : workspace.record;
     const keptForm = preserveForm && record !== null ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
@@ -1027,7 +1031,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const prepareInitial = async (preview = false): Promise<void> => {
     if (busy || workspace === null) return;
     // A new report is what the editor asked for: it leads once it settles.
-    if (!preview) picked = false;
+    if (!preview) pickedOver = null;
     if (workspace.initial.task?.state === 'prepared' && workspace.materialReferences?.blocked.initial !== true) {
       const ref = workspace.initial.task.taskIntentId;
       if (preview) { options.openPlan(ref); return; }
@@ -1478,9 +1482,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     try {
       workspace = await api.inspectEvaluation({ recordId });
       busy = false;
-      picked = recordId !== null;
+      if (recordId === null) pickedOver = null; else pick();
       setStatus(EVALUATION_STATUS.opened);
-      paint(picked ? '.evaluation-record h3' : '.evaluation-report h3, .evaluation-record h3');
+      paint(recordId !== null ? '.evaluation-record h3' : '.evaluation-report h3, .evaluation-record h3');
     } catch (error) {
       busy = false;
       refusal = errorMessage(error, EVALUATION_STATUS.unavailable);
@@ -1511,7 +1515,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       return;
     }
     // A version begun alone stays on show; one begun from the report is the report.
-    picked = !fromInitial;
+    if (fromInitial) pickedOver = null; else pick();
     busy = true;
     refusal = null;
     setStatus(fromInitial ? EVALUATION_AI7_STATUS.startingFromInitial : EVALUATION_STATUS.starting, 'busy');
@@ -1582,7 +1586,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       root.dataset['evaluation'] = 'loading';
       try {
         workspace = await api.inspectEvaluation({ recordId: null });
-        picked = false;
+        pickedOver = null;
         root.dataset['evaluation'] = 'ready';
         paint(null);
       } catch (error) {

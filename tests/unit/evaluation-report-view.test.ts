@@ -67,3 +67,19 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(root.querySelectorAll('.evaluation-record .evaluation-item-ai7-comment')).toHaveLength(0);
   expect(root.querySelector('[data-evaluation-action="save"]')!.textContent).toBe('保存修改');
 });
+
+it('lets a report that settles after a version begun alone lead the page (Issue #1406)', async () => {
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  const before = { ...page, records: [], recordCount: 0, record: null, initial: { ...page.initial, latest: null }, start: { allowed: true, kind: 'first', fromInitial: null, skipDamaged: null } };
+  let current: unknown = before;
+  const startEvaluation = vi.fn(async () => ({ ...before, records: [blank], recordCount: 1, record: { ...record, recordId: 'blank', ordinal: 1, state: 'editing', initial: null, seededFrom: null }, start: { allowed: false, reason: '第 1 版还没有定稿；定稿后才能重新评估。' } }));
+  const surface = mountEvaluation({ root: root as unknown as HTMLElement, api: { inspectEvaluation: async () => current, startEvaluation }, bookId: 'book',
+    technicalDetails: details, setStatus: vi.fn(), errorMessage: () => '' } as unknown as MountEvaluationOptions);
+  await surface.load();
+  root.querySelector('[data-evaluation-action="start"]')!.click();
+  await vi.waitFor(() => expect(root.dataset['evaluationView']).toBe('record'));
+  current = page;
+  surface.refresh();
+  await vi.waitFor(() => expect(root.dataset['evaluationView']).toBe('report'));
+  expect(root.querySelector('[data-evaluation-action="edit-report"]')).not.toBeNull();
+});
