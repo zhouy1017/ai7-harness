@@ -221,7 +221,8 @@ function placePolishMarks(store: FastRoleStore, selection: DialogueSelectionInpu
         atomicGroupId: groups[index]!,
         ...(groups[index] === null ? {} : { atomicReason: EDITORIAL_POLISH_SPAN_ATOMIC_REASON }),
         source: { kind: 'ai7' as const, origin: 'task' as const, label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, taskId },
-        sourceModelBinding: { route: binding.route, model: binding.model },
+        sourceModelBinding: { route: binding.route, model: binding.model,
+          ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }) },
         basis: [{ label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, blockId: part.blockId, fromGrapheme: part.fromGrapheme, toGrapheme: part.toGrapheme, quote }],
       };
     }));

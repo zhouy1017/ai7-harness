@@ -12,6 +12,7 @@ import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
+import { effectiveModelReasoningEffort } from '../provider/model-profile.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -215,6 +216,7 @@ export interface FastRoleBindingFacts {
   readonly promptContractDigest: string;
   readonly route: string;
   readonly model: string;
+  readonly reasoningEffort?: string | null;
   readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
   /** The selected policy's rule that admitted it, under a live scope; `null` on the local route. */
   readonly policyRuleId: string | null;
@@ -487,6 +489,7 @@ export class FastRoleExecutionOwner {
             promptContractDigest,
             route: executionRoute,
             model,
+            ...(route === null ? {} : { reasoningEffort: effectiveModelReasoningEffort(route.modelProfile) }),
             operationalScope: route === null ? 'development-ci' : route.operationalScope,
             policyRuleId: route?.ruleId ?? null,
             fixtureSha256: route === null ? this.#deps.fixture!.sha256 : null,
