@@ -334,14 +334,14 @@ async function assertProgressiveSelect(renderer) {
     const select=document.createElement('select'); select.id='j12-native-select'; select.name='choice';
     select.dataset.contract='native'; select.setAttribute('aria-label','公开合成选项'); select.required=true;
     for(let index=0;index<150;index++)select.add(new Option('选项 '+String(index).padStart(3,'0'),'v'+index,index===4,index===4));
-    fieldset.append(label,select); form.append(fieldset); document.querySelector('.model-service-settings').append(form);
+    fieldset.append(label,select); form.append(fieldset); document.querySelector('.model-service-settings').append(form); select.focus();
     let changes=0; form.addEventListener('change',()=>changes++);
     const untouched=document.createElement('select');
     const originalDescriptor=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');
     try {
       await frame();
       const trigger=select.nextElementSibling, popup=trigger?.nextElementSibling, list=popup?.querySelector('[role="listbox"]'), filter=popup?.querySelector('input');
-      if(!trigger?.matches('.ui-select-trigger')||!list||!filter||select.id!=='j12-native-select'||select.name!=='choice'||select.dataset.contract!=='native'||select.getAttribute('aria-label')!=='公开合成选项'||select.options.length!==150||select.value!=='v4'||select.tabIndex!==-1||select.getAttribute('aria-hidden')!=='true')return false;
+      if(!trigger?.matches('.ui-select-trigger')||document.activeElement!==trigger||!list||!filter||select.id!=='j12-native-select'||select.name!=='choice'||select.dataset.contract!=='native'||select.getAttribute('aria-label')!=='公开合成选项'||select.options.length!==150||select.value!=='v4'||select.tabIndex!==-1||select.getAttribute('aria-hidden')!=='true')return false;
       select.value='v13'; if(!trigger.textContent.includes('013')||changes)return false;
       select.selectedIndex=17; if(!trigger.textContent.includes('017'))return false;
       select.options[18].selected=true; if(select.value!=='v18'||!trigger.textContent.includes('018'))return false;
@@ -511,11 +511,26 @@ async function saveEdit(renderer, suffix) {
 async function saveMilestone(renderer) {
   // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
   await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
-  await assertRenderer(renderer, `(() => { const details=document.querySelector('.milestone-section'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return true; })()`, 'milestone-open');
+  await assertRenderer(renderer, `(() => { const menu=document.querySelector('[data-save-menu="manuscript"]'),details=document.querySelector('.milestone-section'); if(!(menu instanceof HTMLDetailsElement)||!(details instanceof HTMLDetailsElement))return false; menu.open=true; details.open=true; return true; })()`, 'milestone-open');
   await fill(renderer, '#milestone-label', 'J12 后续修订版', 'milestone-label');
   // Synchronized delta with Issue #414: a purpose is chosen from the unselected cards, not typed.
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return radio.checked; })()`, 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
+  // #1376 review F3: a valid, enabled save action must leave the arrow order when its subsection is collapsed.
+  await assertRenderer(renderer, `(() => {
+    const menu=document.querySelector('[data-save-menu="manuscript"]'),section=menu?.querySelector('.milestone-section'),outer=menu?.querySelector('summary'),summary=section?.querySelector('summary');
+    const save=section?.querySelector('button'),exportAction=menu?.querySelector('.editor-save-menu-body > button');
+    if(!section||!outer||!summary||!save||save.disabled||!exportAction)return false;
+    section.open=false; outer.focus();
+    const key=(value)=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+    key('ArrowDown');if(document.activeElement!==summary)return false;
+    key('ArrowDown');if(document.activeElement!==exportAction)return false;
+    key('ArrowDown');if(document.activeElement!==summary)return false;
+    key('End');if(document.activeElement!==exportAction)return false;
+    key('Home');if(document.activeElement!==summary)return false;
+    key('ArrowUp');if(document.activeElement!==exportAction)return false;
+    key('Home');summary.click();return section.open&&!save.disabled&&document.activeElement===summary;
+  })()`, 'milestone-collapsed-menu-keyboard');
   await click(renderer, '保存里程碑版本', 'milestone-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-saved', 120_000);
 }
@@ -1557,7 +1572,7 @@ async function main() {
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .page-content', returnToScreen: async () => {
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .settings-layout > .model-service-settings.page-content', returnToScreen: async () => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
       await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
       // 设置 paints its hub after the click, so the 模型服务 row is waited for and followed once it is there (#935).
@@ -1703,26 +1718,29 @@ async function main() {
     }
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole`, 'ordinary-poll-catalogue-restored');
-    // #1376: a dynamically inserted 150-option selector uses the same production owner as every catalogue.
+    // #1376 review F2: use the real model control, augmenting only its options with public synthetic labels.
     requireJourney(await primary.evaluate(`(async()=>{
-      const owner=document.querySelector('.model-service-settings'),select=document.createElement('select');
-      select.setAttribute('aria-label','公开合成大目录');
+      const owner=document.querySelector('.model-service-settings'),select=owner?.querySelector('select[aria-label="AI7 使用的模型"]');
+      if(!(select instanceof HTMLSelectElement))return false;
       for(let i=0;i<150;i++)select.add(new Option('公开选项 '+i,'option-'+i));
-      owner.append(select); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
       const trigger=select.nextElementSibling,popup=trigger?.nextElementSibling,filter=popup?.querySelector('input'),list=popup?.querySelector('[role="listbox"]');
       if(!trigger?.matches('.ui-select-trigger')||!filter||!list)return false;
       trigger.scrollIntoView({block:'center',behavior:'instant'});trigger.click();filter.value='公开';filter.dispatchEvent(new Event('input',{bubbles:true}));filter.focus();filter.setSelectionRange(0,1);list.scrollTop=128;
-      globalThis.__j12OpenSelect={owner,select,trigger,popup,filter,list};return !popup.hidden;
+      globalThis.__j12OpenSelect={owner,select,trigger,popup,filter,list,value:select.value};return !popup.hidden;
     })()`), 'ordinary-select-poll-open');
     for(let cycle=0;cycle<2;cycle++) {
       const reads=await primary.evaluate(`Number(globalThis.__j12OpenSelect.owner.dataset.changedCataloguePolls)`);
       await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-popup-poll-'+cycle)}})`);
       await waitFor(primary, `Number(globalThis.__j12OpenSelect.owner.dataset.changedCataloguePolls)>${reads}`, 'ordinary-select-actual-changed-poll');
-      await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;return s.owner===document.querySelector('.model-service-settings')&&s.select.isConnected&&!s.popup.hidden&&s.trigger.getAttribute('aria-expanded')==='true'&&s.filter.value==='公开'&&document.activeElement===s.filter&&s.filter.selectionStart===0&&s.filter.selectionEnd===1&&s.list.scrollTop===128&&s.select.value==='option-0';})()`, 'ordinary-select-filter-caret-scroll-poll-survival');
+      await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;return s.owner===document.querySelector('.model-service-settings')&&s.select.isConnected&&!s.popup.hidden&&s.trigger.getAttribute('aria-expanded')==='true'&&s.filter.value==='公开'&&document.activeElement===s.filter&&s.filter.selectionStart===0&&s.filter.selectionEnd===1&&s.list.scrollTop===128&&s.select.value===s.value;})()`, 'ordinary-select-filter-caret-scroll-poll-survival');
     }
-    await primary.evaluate(`(()=>{const s=globalThis.__j12OpenSelect;s.filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));s.select.remove();delete globalThis.__j12OpenSelect;document.querySelector('[data-search-backends] h3').focus();})()`);
+    await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;s.filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return s.popup.hidden&&document.activeElement===s.trigger;})()`, 'ordinary-select-escape-trigger-focus');
+    await waitFor(primary, `(()=>{const s=globalThis.__j12OpenSelect,owner=document.querySelector('.model-service-settings'),native=owner?.querySelector('select[aria-label="AI7 使用的模型"]'),trigger=native?.nextElementSibling;return owner!==s.owner&&native?.value===s.value&&trigger?.matches('.ui-select-trigger')&&document.activeElement===trigger&&trigger.getAttribute('aria-expanded')==='false'&&document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('J12 Popup Poll 1');})()`, 'ordinary-select-latest-projection-trigger-focus');
+    await primary.evaluate(`globalThis.__j12AfterCloseOwner=document.querySelector('.model-service-settings')`);
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole`, 'ordinary-select-poll-role-restored');
+    await waitFor(primary, `(()=>{const native=document.querySelector('select[aria-label="AI7 使用的模型"]');return document.querySelector('.model-service-settings')!==globalThis.__j12AfterCloseOwner&&document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole&&native?.value===globalThis.__j12OpenSelect.value&&document.activeElement===native?.nextElementSibling;})()`, 'ordinary-select-poll-role-restored');
+    await primary.evaluate(`delete globalThis.__j12OpenSelect;delete globalThis.__j12AfterCloseOwner`);
     await assertRenderer(primary, `(() => {const mode=document.querySelector('select[aria-label="网络代理方式"]');mode.value='proxy';mode.dispatchEvent(new Event('change',{bubbles:true}));const input=document.querySelector('input[aria-label="代理 URL"]');input.value='http://127.0.0.1:1';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(7,12,'backward');globalThis.__j12PollDraft=input;return true;})()`, 'ordinary-poll-draft-focus');
     for (let cycle=0;cycle<2;cycle++) {
       await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-poll-draft-'+cycle)}})`);

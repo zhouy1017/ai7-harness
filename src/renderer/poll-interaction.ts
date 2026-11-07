@@ -1,4 +1,5 @@
 /** Retain editor interaction when a polled projection replaces its DOM (#1375). */
+import { enhanceSelect, nativeSelectForTrigger } from './components/controls.js';
 const RECORD_KEYS = ['data-history-revision-id', 'data-history-result-set-id', 'data-task-item', 'data-attention-item', 'data-finding-id', 'data-dimension-id', 'data-row-id', 'data-record-id', 'data-model-channel'];
 const CONTROL_KEYS = ['data-attention-open', 'data-task-action', 'data-task-drawer-control', 'data-task-plan-edit', 'data-analysis-tab', 'data-analysis-action', 'data-action', 'data-model-choice', 'data-favorite-model', 'data-evaluation-action', 'data-custom-action', 'data-filter-value', 'data-findings-filter', 'data-task-compose-action', 'data-task-composer-field', 'aria-label', 'name'];
 type Part = { tag: string; attribute: string | null; value: string; index: number };
@@ -6,7 +7,8 @@ type Address = { record: [string, string] | null; scope: [string, string] | null
 
 function part(node: HTMLElement): Omit<Part, 'index'> {
   const attribute = CONTROL_KEYS.find((key) => node.hasAttribute(key)) ?? null;
-  return { tag: node.tagName, attribute, value: attribute === null ? node.className.split(/\s+/u)[0] ?? '' : node.getAttribute(attribute)! };
+  const classes = node.className.split(/\s+/u).filter((name) => name !== 'ui-select-native');
+  return { tag: node.tagName, attribute, value: attribute === null ? classes[0] ?? '' : node.getAttribute(attribute)! };
 }
 function same(node: HTMLElement, key: Omit<Part, 'index'>): boolean {
   const candidate = part(node);
@@ -36,7 +38,7 @@ function resolve(root: HTMLElement, location: Address): HTMLElement | null {
 /** Capture immediately before replacement and restore immediately after; never persist drafts or read password fields. */
 export function retainPollInteraction(root: HTMLElement, drafts = true): (replacement?: HTMLElement) => void {
   const active = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
-  const focus = active === null ? null : address(root, active);
+  const focus = active === null ? null : address(root, nativeSelectForTrigger(active) ?? active);
   const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
   const disclosures = nodes.filter((node) => node.tagName === 'DETAILS').map((node) => ({ at: address(root, node), open: (node as HTMLDetailsElement).open }));
   const fields = (drafts ? nodes : []).filter((node) => node.tagName === 'TEXTAREA' || node.tagName === 'INPUT' && !['password', 'range', 'checkbox', 'radio', 'hidden', 'submit', 'button'].includes((node as HTMLInputElement).type))
@@ -53,7 +55,8 @@ export function retainPollInteraction(root: HTMLElement, drafts = true): (replac
       if (saved.start != null && saved.end != null && typeof node.setSelectionRange === 'function') node.setSelectionRange(saved.start, saved.end, saved.direction ?? undefined);
     }
     if (focus) {
-      const node = active && replacement.contains(active) ? active : resolve(replacement, focus);
+      let node = active && replacement.contains(active) ? active : resolve(replacement, focus);
+      if (node?.tagName === 'SELECT') node = enhanceSelect(node as HTMLSelectElement)?.trigger ?? node;
       if (node && !(node as HTMLButtonElement).disabled) node.focus({ preventScroll: true });
     }
     for (const saved of scroll) { const node = resolve(replacement, saved.at); if (node) { node.scrollTop = saved.top; node.scrollLeft = saved.left; } }

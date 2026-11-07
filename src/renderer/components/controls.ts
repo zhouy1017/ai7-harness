@@ -40,6 +40,7 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
   if (nativeFallbacks.has(select) || !view || typeof view.MutationObserver !== 'function' || typeof view.getComputedStyle !== 'function'
     || typeof view.Event !== 'function' || typeof view.addEventListener !== 'function' || typeof doc.addEventListener !== 'function' || typeof select.getBoundingClientRect !== 'function'
     || !select.parentElement || !select.options || select.multiple || select.size > 1) return null;
+  const wasFocused = doc.activeElement === select;
 
   const trigger = doc.createElement('button');
   trigger.type = 'button';
@@ -314,7 +315,16 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
   const control = { trigger, sync, destroy };
   enhancedSelects.set(select, control);
   sync();
+  if (wasFocused && !disposed && !trigger.disabled && !trigger.hidden) trigger.focus({ preventScroll: true });
   return control;
+}
+
+/** Poll focus addresses belong to the stable native control, before its disposable trigger exists. */
+export function nativeSelectForTrigger(node: HTMLElement): HTMLSelectElement | null {
+  if (!node.classList.contains('ui-select-trigger') || !node.parentElement) return null;
+  const siblings = Array.from(node.parentElement.children);
+  const native = siblings[siblings.indexOf(node) - 1];
+  return native?.tagName === 'SELECT' && native.classList.contains('ui-select-native') ? native as HTMLSelectElement : null;
 }
 
 /** One application-owned observer covers inserted native selects and releases removed controls. */
@@ -380,9 +390,11 @@ export function mountMenuControls(root: HTMLElement): () => void {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation();
     menu.open = true; position();
-    const items = Array.from(panelOf(menu)?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []).filter((item) => !item.closest('[hidden]'));
-    const at = items.indexOf(target as HTMLButtonElement);
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    const panel = panelOf(menu);
+    const items = panel ? menuDestinations(panel) : [];
+    const at = items.indexOf(target);
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : at < 0 ? event.key === 'ArrowUp' ? items.length - 1 : 0 : (at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
     items[index]?.focus();
   };
   const outside = (event: Event): void => { for (const menu of menus()) if (menu.open && !menu.contains(event.target as Node)) close(menu); };
@@ -396,6 +408,20 @@ export function mountMenuControls(root: HTMLElement): () => void {
     root.removeEventListener('keydown', keydown, true); root.removeEventListener('toggle', toggle, true);
     root.ownerDocument.removeEventListener('pointerdown', outside, true); view.removeEventListener('resize', position); root.ownerDocument.removeEventListener('scroll', position, true);
   };
+}
+
+export function menuDestinations(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>('button, summary')).filter((item) => {
+    if (item.matches(':disabled')) return false;
+    for (let node: HTMLElement | null = item; node && panel.contains(node); node = node.parentElement) {
+      if (node.hidden || node.hasAttribute('inert')) return false;
+      if (node.tagName === 'DETAILS' && !(node as HTMLDetailsElement).open) {
+        const summary = Array.from(node.children).find((child) => child.tagName === 'SUMMARY');
+        if (!summary?.contains(item)) return false;
+      }
+    }
+    return typeof item.getClientRects !== 'function' || item.getClientRects().length > 0;
+  });
 }
 
 /** Build the panel before insertion so poll focus addresses stay stable across synchronous paints. */

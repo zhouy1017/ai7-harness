@@ -1288,7 +1288,7 @@ async function main() {
     await fill(renderer, authorsInput, PEOPLE.authors, 'people-authors');
     await fill(renderer, `${peopleSection} input[data-people-field="editors"]`, PEOPLE.editors, 'people-editors');
     await clickSelector(renderer, `${peopleSection} [data-people-action="addRelated"]`, 'people-add-related');
-    await waitFor(renderer, `document.activeElement === document.querySelector(${JSON.stringify(`${peopleSection} .book-people-related-row[data-related-index="0"] select`)})`, 'people-related-row');
+    await waitFor(renderer, `(() => { const native=document.querySelector(${JSON.stringify(`${peopleSection} .book-people-related-row[data-related-index="0"] select`)}); const trigger=native?.nextElementSibling; return native instanceof HTMLSelectElement && trigger?.matches('.ui-select-trigger') && !trigger.disabled && native.tabIndex===-1 && document.activeElement===trigger; })()`, 'people-related-row');
     await assertRenderer(renderer, `(() => {
       const save = document.querySelector(${JSON.stringify(`${peopleSection} [data-people-action="save"]`)});
       const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? '');
