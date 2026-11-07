@@ -10,7 +10,7 @@ afterEach(() => restore());
 const card: EditorialMarkCardProjection = {
   markId: 'mark', kind: 'change-suggestion', status: 'open', anchorState: 'exact', highlightColor: null,
   blockId: 'block', fromGrapheme: 0, toGrapheme: 2, pinnedText: '原文', body: '', replies: [], basis: [],
-  source: { kind: 'ai7', origin: 'task', label: '校对', taskId: 'task', modelLabel: 'OpenAI 官方', modelTechnicalLabel: 'raw-model-id' },
+  source: { kind: 'ai7', origin: 'task', label: '校对', taskId: 'task', modelLabel: 'gpt-6-luna@high', modelTechnicalLabel: 'OpenAI 官方 · gpt-6-luna@high' },
   suggestion: { itemId: 'item', changeType: 'replace', currentText: '原文', proposedText: '改后', rationale: '理由', atomicGroupId: null, decision: null, application: null },
   convertedFrom: null, resolvedFrom: null, changedElsewhere: false, conflict: null, exportDisposition: 'exported-by-default',
   createdAt: '2026-11-07T00:00:00Z', updatedAt: '2026-11-07T00:00:00Z',
@@ -28,8 +28,8 @@ describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
     expect(blocks(panel)).toEqual(['proposed', 'original', 'rationale', 'author', 'more', 'actions']);
     expect(panel.querySelector('ins')?.textContent).toBe('改后');
     expect(panel.querySelector('del')?.textContent).toBe('原文');
-    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('OpenAI 官方');
-    expect(panel.textContent).not.toContain('raw-model-id');
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('gpt-6-luna@high · 任务「校对」');
+    expect(panel.textContent).not.toContain('OpenAI 官方');
     expect(more.open).toBe(false);
   });
 
@@ -59,7 +59,15 @@ describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
     expect(panel.querySelector('ins mark')?.textContent).toBe('改');
     expect(panel.querySelector('del mark')?.textContent).toBe('原');
     expect(panel.querySelector('ins')?.textContent).toBe(value.suggestion.proposedText);
-    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('raw-model-id');
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('OpenAI 官方 · gpt-6-luna@high');
+  });
+
+  it('keeps unrecorded effort absent in ordinary-mode shared cards (#1402)', () => {
+    const { panel } = render({ ...card, source: { ...card.source, modelLabel: 'gpt-6-luna',
+      modelTechnicalLabel: 'OpenAI 官方 · gpt-6-luna' } });
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('gpt-6-luna · 任务「校对」');
+    expect(panel.textContent).not.toContain('@high');
+    expect(panel.textContent).not.toContain('OpenAI 官方');
   });
 
   it('keeps conversion provenance under More while the author stays compact for conflict-card consumers', () => {

@@ -941,7 +941,8 @@ async function main() {
         !visible.includes('@base') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/i.test(visible);
     })()`, 'global-agent-unified-readable-memory');
 
-    // #1377 / J-16: an existing preference stays reachable in ordinary quality without its engineering forms.
+    // #1377 / J-16: an existing preference stays reachable in ordinary quality without its engineering forms; #1408 adds only the
+    // ordinary rule editor (one to add a rule, 编辑偏好 on an active one).
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
@@ -952,7 +953,7 @@ async function main() {
       if (developer === 'true') continue;
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
       await waitFor(renderer, `document.querySelector('[data-review-preference]')?.textContent.includes('保留作者有意使用的短句。')`, 'ordinary-existing-preference-visible');
-      await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); return row.textContent.includes('已启用') && Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用') && !root.querySelector('form') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
+      await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); const buttons=Array.from(row.querySelectorAll('button'), button=>button.textContent); return row.textContent.includes('已启用') && buttons.includes('停用') && buttons.includes('编辑偏好') && Array.from(root.querySelectorAll('form')).every(form=>form.matches('form.preference-editor[data-preference-editor]')) && root.querySelectorAll('form[data-preference-editor="new"]').length===1 && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-preference-return-global');
     await waitFor(renderer, `document.querySelector('[data-global-agent-item]') && document.querySelector('[data-global-agent-save]')`, 'ordinary-preference-developer-preserved');
@@ -1597,7 +1598,9 @@ async function main() {
     const offered = new Map(composer?.options ?? []);
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
       composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
-      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '发起任务' &&
+      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
+      // #1401: a first 事实核查 may read just this selection, so it is offered beside the other range reviews.
+      offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '发起任务' &&
       composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
     // Nothing is prepared before a Task is chosen.

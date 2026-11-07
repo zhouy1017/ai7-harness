@@ -545,7 +545,8 @@ export const SEARCH_BACKEND_FALLBACK_SQL = `CREATE TABLE search_backend_fallback
 ) STRICT`;
 /** Revision 105 (#1282): independent Fast model and cached account model metadata. */
 export const MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION = 105;
-export const LATEST_SCHEMA_VERSION = 109; // #1378: multiple production documents per house type.
+export const LATEST_SCHEMA_VERSION = 110; // #1401: first factual range tasks.
+export const FACTUAL_RANGE_SCHEMA_VERSION = 110;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1868,10 +1869,12 @@ function requireExactObjects(
       && CURATION_SCHEMA_SQL[name] !== undefined && row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(CURATION_SCHEMA_SQL[name]!);
     const factualShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_CLAIM_SCHEMA_VERSION
       && name === 'analysis_task_intents' && row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(FACTUAL_TASK_INTENTS_SQL);
+    const factualRangeShape = type === 'table' && name === 'analysis_task_intents' && row !== undefined &&
+      normalizeSql(asString(row.sql)) === normalizeSql(FACTUAL_RANGE_TASK_INTENTS_SQL);
     const idlePreStamp = type === 'table' && name === 'analysis_run_authorizations' &&
       normalizeSql(sql) === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations) &&
       row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL);
-    requireTask(row !== undefined && (normalizeSql(asString(row.sql)) === normalizeSql(sql) || idlePreStamp || curationShape || factualShape),
+    requireTask(row !== undefined && (normalizeSql(asString(row.sql)) === normalizeSql(sql) || idlePreStamp || curationShape || factualShape || factualRangeShape),
       'SCHEMA_INVALID', `${label} ${name} 结构不兼容。`);
   }
 }
@@ -3198,6 +3201,35 @@ export const FACTUAL_TASK_INTENTS_SQL = CURATION_SCHEMA_SQL.analysis_task_intent
   .replace('CHECK((kind =', "CHECK((kind = 'factual-recheck' AND contract_version = 'ai7.factual-claim-verification/1' AND mode = 'factual-recheck') OR (kind =")
   .replace('CHECK((mode IN (', "CHECK((mode IN ('factual-recheck', ");
 
+/** Revision 110 changes only the factual kind/mode CHECK; historical task bytes stay untouched. */
+export const FACTUAL_RANGE_TASK_INTENTS_SQL = FACTUAL_TASK_INTENTS_SQL.replace(
+  "AND mode IN ('whole-manuscript', 'range', 'review-again', 'review-range')",
+  "AND mode IN ('whole-manuscript', 'range', 'review-first-range', 'review-again', 'review-range')",
+);
+
+/** Call before terminal task-schema validation; older stores reach this shape through fresh initialization. */
+export function initializeFactualRangeTaskSchema(db: DatabaseSync): void {
+  const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
+  if (version < FACTUAL_CLAIM_SCHEMA_VERSION || version >= FACTUAL_RANGE_SCHEMA_VERSION) return;
+  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    const columns = db.prepare('PRAGMA table_info(analysis_task_intents)').all().map(row => String(row.name)).join(', ');
+    db.exec('CREATE TEMP TABLE factual_range_migration AS SELECT rowid AS prior_rowid, * FROM analysis_task_intents');
+    db.exec('DROP TABLE analysis_task_intents');
+    db.exec(FACTUAL_RANGE_TASK_INTENTS_SQL);
+    db.exec(`INSERT INTO analysis_task_intents(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.factual_range_migration ORDER BY prior_rowid`);
+    db.exec('DROP TABLE temp.factual_range_migration');
+    db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_task_intents_no_update!);
+    db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_task_intents_no_delete!);
+    requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '事实范围任务迁移后引用校验失败。');
+    db.exec(`PRAGMA user_version = ${FACTUAL_RANGE_SCHEMA_VERSION}`);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
+}
+
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   requireTask(Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
@@ -3231,8 +3263,8 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107, 108].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
-    db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
+  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107, 108, 109].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+    initializeFactualRangeTaskSchema(db);
     return validateTaskAuthorizationSchema(db);
   }
   initializeCurationSchema(db);
@@ -3243,7 +3275,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     db.exec('CREATE TEMP TABLE factual_task_migration AS SELECT rowid AS prior_rowid, * FROM analysis_task_intents');
     const columns = db.prepare('PRAGMA table_info(analysis_task_intents)').all().map((row) => String(row.name)).join(', ');
     db.exec('DROP TABLE analysis_task_intents');
-    db.exec(FACTUAL_TASK_INTENTS_SQL);
+    db.exec(FACTUAL_RANGE_TASK_INTENTS_SQL);
     db.exec(`INSERT INTO analysis_task_intents(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.factual_task_migration ORDER BY prior_rowid`);
     db.exec('DROP TABLE temp.factual_task_migration');
     db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_task_intents_no_update!);

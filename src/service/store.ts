@@ -1,3 +1,4 @@
+import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
 import { customAnalysisModeGoal } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
@@ -465,6 +466,7 @@ import {
   WORD_TRACKED_IMPORT_SCHEMA_VERSION,
   EDITORIAL_MEMORY_SCHEMA_VERSION,
   initializeTaskAuthorizationSchema,
+  initializeFactualRangeTaskSchema,
   EDITORIAL_LEARNING_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   TaskAuthorizationError,
@@ -3246,6 +3248,7 @@ export class EditorialStore {
         new SupervisionDirectives(authority).validate();
         new HouseReviewPreferenceLedger(authority).validate();
       }
+      initializeFactualRangeTaskSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3308,6 +3311,7 @@ export class EditorialStore {
       store.#codeRoot = codeRoot;
       const localLaunch = { operationalScope: 'development-ci' as const, live: null,
         policy: resolveSourceCheckoutLaunchPolicySync(codeRoot), localFixtureRuntime: () => store.localFixtureRuntime(),
+        editorialMemory: (bookId: string, taskKind: string) => store.editorialMemory(bookId, taskKind),
         retainedPolicyFor: (pin: import('../shared/protocol.js').ResultSetPolicyPin, binding: ConfiguredProviderBinding) => readRetainedBoundAnalysisPolicySync(codeRoot, pin, binding) };
       store.#baselineAnalysis.bindLaunch(localLaunch);
       store.#factualReview.bindLaunch(localLaunch);
@@ -13898,6 +13902,16 @@ export class EditorialStore {
    */
   learningInfluenceGuard(runRecordId: string): string | null {
     this.#assertAvailable();
+    const row = this.#authority.prepare(`SELECT t.book_id, t.kind, p.canonical_json FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+      JOIN analysis_plan_records p ON p.sha256 = a.plan_envelope_sha256 AND p.component = 'plan-envelope'
+      WHERE r.run_record_id = ?`).get(runRecordId);
+    if (row !== undefined) {
+      const frozen = (JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown }).editorialMemory;
+      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), String(row.kind))))
+        return '本社与本书编辑偏好已变化，请重新准备任务。';
+    }
     return this.#reviewRuns.learningReadGuard(runRecordId) ?? this.#preferenceGovernanceGuard(runRecordId);
   }
 
@@ -15598,8 +15612,23 @@ export class EditorialStore {
     });
   }
 
+  /** Automatic house context for Global Agent; book context for selection dialogue and workspace turns. */
+  dialogueEditorialMemory(dialogueId: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
+    const task = this.#dialogues.task(dialogueId);
+    return this.editorialMemory(task?.bookId ?? null, task?.origin === 'agent-workspace' ? 'agent-workspace' : task ? 'editorial-dialogue' : 'global-agent');
+  }
+
+  editorialMemory(bookId: string | null, taskKind: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
+    const launch = this.#baselineAnalysis.launch;
+    if (launch.operationalScope !== 'ordinary-production' || launch.policy?.selectedPolicyIdentity?.providerProcessingVersion !== 'v35') return null;
+    return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).memory(launch.operationalScope,
+      { bookId, taskKind, ...(taskKind.startsWith('custom-analysis/') ? { categoryId: taskKind.slice('custom-analysis/'.length) } : {}) },
+      learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+  }
+
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
-    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding)));
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding.route === 'ai7-local-deterministic' || binding.reasoningEffort !== undefined ? binding :
+      { ...binding, reasoningEffort: effectiveModelReasoningEffort(modelProfileFor(binding.route, binding.model)) })));
   }
 
   openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number, now: Date = new Date()): void {

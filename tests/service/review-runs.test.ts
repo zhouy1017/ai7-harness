@@ -35,9 +35,6 @@ import { reviewCategoryKindDefinition } from '../../src/service/review/review-ca
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import {
-  FACTUAL_AGAIN_REASON,
-  FACTUAL_CHAPTERS_REASON,
-  FACTUAL_SELECTION_REASON,
   NEVER_REVIEWED_REASON,
   MAX_SELECTION_BLOCKS,
   SELECTION_BASE_REASON,
@@ -1303,9 +1300,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const { at, on } = selectionContext(session, book);
       const twenty = at(20), twentyOne = at(21);
       const facts = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
-      expect(facts.scopes.selection).toEqual({ available: false, unavailableReason: FACTUAL_SELECTION_REASON });
-      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [FACTUAL], on(twenty.blockId, twenty.blockId), launchPolicy)))
-        .toContain(FACTUAL_SELECTION_REASON);
+      expect(facts.scopes.selection).toEqual({ available: true, unavailableReason: null });
       expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(`blk_${'0'.repeat(24)}`, twenty.blockId), launchPolicy)))
         .toBe(SELECTION_GONE_REASON);
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(twentyOne.blockId, twenty.blockId), launchPolicy)))
@@ -2002,11 +1997,29 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('checks facts as 事实核查 over the whole manuscript once, tiers read as severities and every finding 未外部复核', async () => {
+  it('executes first factual chapters and reruns only that range under development-ci', async () => {
+    await withBook('sample1-factual-authored', async (session, book) => {
+      const chapter = workspace(session, book).scopeOptions.chapters.chapters[0]!;
+      const scope = { kind: 'chapters' as const, fromChapterBlockId: chapter.blockId, toChapterBlockId: chapter.blockId };
+      const prepared = prepare(session, book, [FACTUAL], scope);
+      expect(prepared.categories[0]!.plan).toMatchObject({ recomputed: 1, unreviewed: 7 });
+      const first = await authorizeAndDrive(session, book, prepared);
+      expect(first.state).toBe('settled');
+      const revision = session.store.inspectFactualReview(book.bookId).resultSetRevision!;
+      expect(revision.coverage).toMatchObject({ unitsClosed: 1, unitsOutOfScope: 7 });
+      expect(revision.gaps.every(gap => gap.code === 'out-of-scope' && gap.startPosition > chapter.endPosition)).toBe(true);
+      const rerun = await authorizeAndDrive(session, book, prepare(session, book, [FACTUAL], scope));
+      expect(rerun.state).toBe('settled');
+      expect(session.store.inspectFactualReview(book.bookId).resultSetRevision!.ordinal).toBe(2);
+      expect(session.store.factualReviewLedger.inspectRevision(book.bookId, revision.revisionId).digest).toBe(revision.digest);
+    });
+  }, 300_000);
+
+  it('checks facts as 事实核查 over the whole manuscript, tiers read as severities and every finding 未外部复核', async () => {
     await withBook('sample1-factual-authored', async (session, book) => {
       const before = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
       expect(before.available).toBe(true);
-      expect(before.scopes).toMatchObject({ whole: { available: true }, chapters: { available: false, unavailableReason: FACTUAL_CHAPTERS_REASON } });
+      expect(before.scopes).toMatchObject({ whole: { available: true }, chapters: { available: true }, selection: { available: true } });
       expect(before.basis.searchEngine).toBe(true);
 
       const prepared = prepare(session, book, [FACTUAL], WHOLE);
@@ -2026,11 +2039,15 @@ describe('a Review Run over the real store on exact sample1', () => {
         expect(card.body.startsWith('【未外部复核】')).toBe(true);
         expect(card.basis[0]!.label.startsWith('可核查依据')).toBe(true);
       }
-      // Once checked, 事实核查 says why it cannot check again yet, and its coverage stands.
+      // Once checked, facts can be reviewed again by range without a supplement decision.
       const after = workspace(session, book);
-      expect(after.categories.find((category) => category.categoryId === FACTUAL)).toMatchObject({ available: false, unavailableReason: FACTUAL_AGAIN_REASON });
+      expect(after.categories.find((category) => category.categoryId === FACTUAL)).toMatchObject({ available: true, scopes: { chapters: { available: true }, selection: { available: true } } });
       expect(after.coverage.find((row) => row.categoryId === FACTUAL)!.state).toBe('current');
-      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [FACTUAL], WHOLE, launchPolicy))).toBe('REVIEW_CATEGORY_UNAVAILABLE');
+        const chapter = after.scopeOptions.chapters.chapters[0]!;
+        const ranged = prepare(session, book, [FACTUAL], { kind: 'chapters', fromChapterBlockId: chapter.blockId, toChapterBlockId: chapter.blockId });
+        expect(ranged.categories[0]!.plan).toMatchObject({ recomputed: 1, reused: 7, unreviewed: 0 });
+        expect((await authorizeAndDrive(session, book, ranged)).state).toBe('settled');
+      expect(prepare(session, book, [FACTUAL], selectionAt(session, book, 29)).state).toBe('prepared');
     });
   }, 300_000);
 });
@@ -2341,14 +2358,14 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
         .toBe('审阅范围的设定无效。');
       const onSelection = store.inspectCapturedProcedureApplicability(book.bookId, 'selection').procedures;
       expect(onSelection.map((entry) => [entry.title, entry.fit, entry.chosenApart, entry.leftOut.map((step) => step.label)])).toEqual([
-        ['书系复核', 'all', ['书系一致性'], []], ['含事实核查', 'partial', [], ['事实核查']], ['体例线索复核', 'all', [], []],
+        ['书系复核', 'all', ['书系一致性'], []], ['含事实核查', 'all', [], []], ['体例线索复核', 'all', [], []],
       ]);
       expect(storeCode(() => store.inspectCapturedProcedureApplicability(book.bookId, 'chapters'))).toBe('CAPTURED_PROCEDURE_INVALID');
       expect(storeCode(() => store.inspectCapturedProcedureRun(book.bookId, factual.procedureId, null, 'whole'))).toBe('CAPTURED_PROCEDURE_INVALID');
     });
   }, 300_000);
 
-  it('names factual steps that cannot read a selection on another Book (#423)', async () => {
+  it('offers factual steps for a first selection on another Book (#1401)', async () => {
     await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
       const { store } = session;
       const other = await importSample1Book(store, roots.codeRoot, 'L2 书系外');
@@ -2356,9 +2373,9 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
       const otherWhole = store.inspectCapturedProcedureApplicability(other.bookId).procedures.find((entry) => entry.title === '含事实核查')!;
       const otherSelection = store.inspectCapturedProcedureApplicability(other.bookId, 'selection').procedures.find((entry) => entry.title === '含事实核查')!;
       expect(otherWhole.leftOut.map((step) => step.label)).not.toContain('事实核查');
-      expect(otherSelection).toMatchObject({ fit: 'partial', availableCount: 1, leftOut: [{ label: '事实核查', reason: FACTUAL_SELECTION_REASON }] });
+      expect(otherSelection).toMatchObject({ fit: 'all', availableCount: 2, leftOut: [] });
       expect(store.inspectCapturedProcedureRun(other.bookId, factual.procedureId, null, 'selection').resolved!.steps[1])
-        .toEqual({ categoryId: FACTUAL, label: '事实核查', available: false, unavailableReason: FACTUAL_SELECTION_REASON, chosenApart: false });
+        .toEqual({ categoryId: FACTUAL, label: '事实核查', available: true, unavailableReason: null, chosenApart: false });
       expect(store.inspectCapturedProcedureRun(other.bookId, steps.procedureId, null, 'selection').resolved!.steps[1])
         .toMatchObject({ categoryId: PLOT, available: true, unavailableReason: null });
     });
@@ -2433,12 +2450,12 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
     });
   }, 300_000);
 
-  it('leaves an unavailable factual step out of a selection by capability (#423)', async () => {
+  it('keeps the now available factual step in a saved selection procedure (#1401)', async () => {
     await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
       const { store } = session;
-      const partial = preparePinned(session, book, [STYLE], selectionAt(session, book, 29), factual);
-      expect(partial.procedure!.leftOut).toEqual([expect.objectContaining({ categoryId: FACTUAL, label: '事实核查', byChoice: false })]);
-      expect(partial.categories.map((category) => category.categoryId)).toEqual([STYLE]);
+      const partial = preparePinned(session, book, [STYLE, FACTUAL], selectionAt(session, book, 29), factual);
+      expect(partial.procedure!.leftOut).toEqual([]);
+      expect(partial.categories.map((category) => category.categoryId)).toEqual([STYLE, FACTUAL]);
     });
   }, 300_000);
 
@@ -2545,9 +2562,10 @@ describe('house preference review consumption (#911)', () => {
       expect(version.sourceCount).toBe(2);
       expect(version.lines).toHaveLength(1);
       const text = version.lines[0]!.text;
-      expect(text).toContain('采纳1、未采纳1');
-      expect(text).toContain('应用后常再改，注意编辑改写偏好');
+      // #1408: the line is the editors' confirmed reasons alone; no mechanical tally or survival prefix reaches the model.
+      for (const tally of ['采纳', '未采纳', '应用后', '注意编辑改写偏好']) expect(text).not.toContain(tally);
       expect(text).toContain('认为按规范改');
+      expect(text).toContain('说不必改');
       for (const absent of ['周一', '郑三', '王四', '排除的理由']) expect(text).not.toContain(absent);
       expect(version.lines[0]!.sources[0]!.attribution).toMatchObject({ authors: ['周一'], editors: ['郑三'] });
       const original = session.store.baselineAnalysisLedger.launch;

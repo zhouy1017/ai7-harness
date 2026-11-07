@@ -1,3 +1,4 @@
+import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import {
@@ -427,7 +428,7 @@ export class EvaluationRewrites {
     requireRewrite(sha256Hex(json) === text(row.sha256), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
     const envelope = parseStoredJson(json, corrupt);
     requireRewrite(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-    return envelope.promptContractDigest;
+    return editorialMemoryBasePromptDigest(envelope);
   }
 
   /** The Book's latest rewrite Task by its intent, as the analysis ledger orders them; `null` before the first. */

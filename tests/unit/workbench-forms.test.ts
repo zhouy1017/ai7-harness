@@ -54,7 +54,8 @@ describe('workbench forms (#1287)', () => {
         attribution: { authors: [], editors: [] }, source: { bookId: 'book-a', decisionId: `decision-${id}`, journalSequence: id },
         eligibility: { decisionId: null }, currentEligibility: 'house', rewriteDistance: null, memoryCandidate: null })) } as unknown as EditorialLearningProjection;
     const create = vi.fn();
-    const api = { inspectEditorialLearning: async () => page, createEditorialMemory: create } as unknown as RendererApi;
+    const api = { inspectEditorialLearning: async () => page, createEditorialMemory: create,
+      inspectGlobalAgent: async () => ({ categories: [], books: [], items: [], directives: [] }) } as unknown as RendererApi;
     await mountEditorialMemory(root as unknown as HTMLElement, api, vi.fn());
     expect(root.querySelectorAll('.learning-material form').length).toBe(0);
     expect(root.querySelectorAll('[data-memory-action="new"]').length).toBe(2);

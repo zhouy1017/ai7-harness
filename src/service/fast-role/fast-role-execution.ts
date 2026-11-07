@@ -1,3 +1,4 @@
+import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
@@ -12,6 +13,7 @@ import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
+import { effectiveModelReasoningEffort } from '../provider/model-profile.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -215,6 +217,7 @@ export interface FastRoleBindingFacts {
   readonly promptContractDigest: string;
   readonly route: string;
   readonly model: string;
+  readonly reasoningEffort?: string | null;
   readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
   /** The selected policy's rule that admitted it, under a live scope; `null` on the local route. */
   readonly policyRuleId: string | null;
@@ -275,7 +278,7 @@ export class FastRoleExecutionOwner {
    * Send the one message of a kind and read its answer. `step` names the request inside the development validation; the
    * caller has checked the route with `requireReady` and built `message` from verified words only.
    */
-  async ask(kindId: FastRoleKindId, message: string, step: string): Promise<FastRoleAnswer> {
+  async ask(kindId: FastRoleKindId, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
     this.requireReady(kindId);
     if (kindId === CONNECTION_TEST_KIND && message !== CONNECTION_TEST_POLICY.message) throw new FastRoleError('MODEL_CONNECTION_TEST_INVALID', '连接测试只接受固定的公开合成消息。');
     this.#inFlight = true;
@@ -286,7 +289,7 @@ export class FastRoleExecutionOwner {
       if (this.#deps.live !== null) producer = this.#deps.producer ?? this.#deps.requestGovernor.registerProducer({
         key: `fast-role:${randomUUID()}`, kind: kindId === CONNECTION_TEST_KIND ? 'connection-test' : 'fast-role', lane: 'foreground',
       });
-      return await this.#run(FAST_ROLE_KINDS[kindId], message, step, producer, cancellation.signal);
+      return await this.#run(FAST_ROLE_KINDS[kindId], message, step, producer, cancellation.signal, readMemory);
     } finally {
       if (producer !== null && this.#deps.producer === undefined) this.#deps.requestGovernor.unregisterProducer(producer);
       this.#requestAbort = null;
@@ -295,18 +298,21 @@ export class FastRoleExecutionOwner {
     }
   }
 
-  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal): Promise<FastRoleAnswer> {
+  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal, readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
     const live = this.#deps.live;
     const route = live === null ? null : live.routes[kind.kindId] ?? null;
     // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
     const credentialReference = live === null ? '' : live.credentialReference;
     const credentialGeneration = live?.credentialGeneration?.();
+    const memory = route?.providerProcessingVersion === 'v35' && kind.kindId !== CONNECTION_TEST_KIND ? readMemory?.() ?? null : null;
     const isCurrent = (): boolean => route === null || live === null ||
       ((live.current?.(credentialReference, route) ?? true) &&
+       (memory === null || editorialMemoryDigest(kind.promptContractDigest, readMemory?.()) === editorialMemoryDigest(kind.promptContractDigest, memory)) &&
        (live.credentialGeneration === undefined || (credentialGeneration !== null && live.credentialGeneration() === credentialGeneration)));
     const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
     const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
-    const { promptContractDigest, systemPrompt } = kind;
+    const promptContractDigest = editorialMemoryDigest(kind.promptContractDigest, memory);
+    const systemPrompt = editorialMemoryPrompt(kind.systemPrompt, memory);
     const sessionId = randomUUID();
     const composition = describeComposition(executionRoute, model, promptContractDigest);
     const localRuntime = live === null ? this.#deps.localFixtureRuntime?.() : null;
@@ -334,6 +340,7 @@ export class FastRoleExecutionOwner {
           : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
       // The one message this request may send.
       admittedUserMessages: new Set([message]),
+      ...(memory === null ? {} : { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt']) }),
       // 生成来源译文's production category is not one the route reader carries (Issue #892); its route was admitted only because
       // the rule names exactly that category, so it is the rule's own, carried for this kind alone.
       ...(route === null ? {} : {
@@ -487,6 +494,7 @@ export class FastRoleExecutionOwner {
             promptContractDigest,
             route: executionRoute,
             model,
+            ...(route === null ? {} : { reasoningEffort: effectiveModelReasoningEffort(route.modelProfile) }),
             operationalScope: route === null ? 'development-ci' : route.operationalScope,
             policyRuleId: route?.ruleId ?? null,
             fixtureSha256: route === null ? this.#deps.fixture!.sha256 : null,

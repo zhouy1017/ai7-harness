@@ -33,15 +33,9 @@ export const NOTHING_CHANGED_REASON = '稿件在这一类上次审阅之后没�
 export const LEADS_ABSENT_REASON = '先完成基线分析，才有前后不一致的线索。' as const;
 export const LEADS_CHANGED_REASON = '线索来自基线分析的全书结果，不按改动过的章筛选；请选全书或所选各章。' as const;
 export const NO_CHAPTERS_REASON = '这份稿件还没有可选的章：它既没有标题，也还没有可分的结构单元。' as const;
-/**
- * 事实核查 reads the factual kind, which prepares only its whole first Task today: its range and update
- * modes arrive with the factual surfaces (S18b, S19), so every other scope says so rather than being
- * approximated by a whole-book check.
- */
+/** Historical whole-book availability and the still unsupported changed-chapters scope. */
 export const FACTUAL_AGAIN_REASON = '这本书已完成过一次全书事实核查；再次核查随事实核查的更新方式接入。' as const;
-export const FACTUAL_CHAPTERS_REASON = '事实核查暂只能核查全书；按章核查随事实核查的更新方式接入。' as const;
-export const FACTUAL_CHANGED_REASON = '事实核查暂只能核查全书；只审改动过的章随事实核查的更新方式接入。' as const;
-export const FACTUAL_SELECTION_REASON = '事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。' as const;
+export const FACTUAL_CHANGED_REASON = '事实核查暂不支持只审改动过的章；请选择全书、选章或当前选区。' as const;
 
 /** One contiguous block range, inclusive, over the working manuscript's positions. */
 export type ReviewBlockRange = BaselineAnalysisSelectedRange;
@@ -70,7 +64,6 @@ export type ReviewCategoryScopePlan =
 /** The facts of one category's ledger a scope reads: whether it has reviewed, and whether that is stale. */
 export interface ReviewCategoryLedgerFacts {
   readonly factualUpdates?: boolean;
-  readonly factualSupplement?: boolean;
   readonly hasRevision: boolean;
   /**
    * A Run of the whole manuscript, chosen chapters or changed chapters put this category on the manuscript (Issue #423 review,
@@ -105,7 +98,7 @@ export interface ReviewCategoryLedgerFacts {
  * - 选章 is a first range review, or a range review once the category has one;
  * - 当前选区 reads as 选章 does, over the blocks the selection names (Issue #423, S77b) — never wider than the block range,
  *   save the overlap closure every range review reads.
- * The leads read no mode at all, and 事实核查 reads only its whole first Task.
+ * The leads read no mode at all. 事实核查 can start directly by chapters or selection.
  */
 export function reviewCategoryScopePlan(
   executor: ReviewCategoryExecutor,
@@ -123,12 +116,12 @@ export function reviewCategoryScopePlan(
     return { kind: 'leads', selectedRange: scope.kind === 'chapters' || scope.kind === 'selection' ? scope.selectedRange : null };
   }
   if (executor === 'factual-review-kind') {
+    if (scope.kind === 'chapters' || scope.kind === 'selection') return scope.selectedRange === null
+      ? { kind: 'refused', reason: NO_CHAPTERS_REASON }
+      : { kind: 'task', mode: facts.hasRevision ? 'review-range' : 'review-first-range', selectedRange: scope.selectedRange };
     if (facts.factualUpdates === true) {
       if (scope.kind === 'whole') return { kind: 'task', mode: facts.hasRevision ? 'review-again' : 'whole-manuscript', selectedRange: null };
-      if (facts.factualSupplement === true && facts.hasRevision && (scope.kind === 'chapters' || scope.kind === 'selection') && scope.selectedRange !== null) return { kind: 'task', mode: 'review-range', selectedRange: scope.selectedRange };
     }
-    if (scope.kind === 'chapters') return { kind: 'refused', reason: FACTUAL_CHAPTERS_REASON };
-    if (scope.kind === 'selection') return { kind: 'refused', reason: FACTUAL_SELECTION_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: FACTUAL_CHANGED_REASON };
     return facts.hasRevision ? { kind: 'refused', reason: FACTUAL_AGAIN_REASON } : { kind: 'task', mode: 'whole-manuscript', selectedRange: null };
   }

@@ -1,7 +1,7 @@
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel, REVIEW_PREFERENCES_NOTE } from './quality-learning-labels.js';
-import { mountWordTrackedEditDetail } from './quality-learning.js';
+import { editorialPreferenceEditor, mountWordTrackedEditDetail } from './quality-learning.js';
 
 /** Both entrances use the same controls and current preference/memory owners (#1377). */
 export async function mountReviewPreferences(root: HTMLElement, api: RendererApi,
@@ -42,7 +42,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
   section.className = 'learning-materials';
   root.append(section);
   let page = await api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-  let global = technicalLayerVisible ? null : await api.inspectGlobalAgent();
+  let global = await api.inspectGlobalAgent();
   let house = technicalLayerVisible ? null : await api.inspectHouseReviewPreference();
   let signalOffset = 0; let itemOffset = 0; let exclusionOffset = 0;
   let busy = false; let refreshFailed = false;
@@ -54,7 +54,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     let changed = false;
     void operation().then(async (next) => {
       changed = true; page = next;
-      if (!technicalLayerVisible) [global, house] = await Promise.all([api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
+      [global, house] = await Promise.all([api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
       selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = '学习记录已更新。';
     })
       .catch(() => { refreshFailed = changed && !technicalLayerVisible; status.textContent = refreshFailed ? '记录已更新，请重新打开此页以读取最新状态。' : '无法更新学习记录，请重新查看。'; })
@@ -76,6 +76,11 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     switchLabel.prepend(enabled);
     if (technicalLayerVisible) section.append(switchLabel); else heading.append(switchLabel);
     section.append(status);
+    const savePreference = (input: import('../shared/protocol.js').RecordLearningSupervisionInput) => run(async () => {
+      await api.recordLearningSupervision(input);
+      return api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
+    });
+    section.append(editorialPreferenceEditor({ categories: global.categories, books: global.books, save: savePreference }));
     if (!technicalLayerVisible && global !== null) {
       section.classList.add('review-preferences-ordinary');
       section.append(el('p', REVIEW_PREFERENCES_NOTE));
@@ -96,6 +101,12 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         if (current.schema === 'ai7.global-editorial-memory/2' && state === 'proposed') {
           controls.append(action('接受记忆', () => run(() => api.acceptEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId, actionId: crypto.randomUUID() }))), action('排除', stop));
         } else if (state === 'active') controls.append(action('停用', stop));
+        if (state === 'active') controls.append(action('编辑偏好', () => {
+          controls.replaceChildren(editorialPreferenceEditor({ categories: global.categories, books: global.books,
+            existing: { itemId: current.itemId, revisionId: current.versionId, kind: 'memory', text: current.title,
+              categoryId: current.editorialDimension, bookId: current.schema === 'ai7.global-editorial-memory/2' && current.applicability.kind === 'book' ? current.applicability.bookId : null,
+              state: 'active', lineage: [] }, save: savePreference }));
+        }));
         const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
         const titles = new Set((sources ?? []).map((source) => source.bookTitle));
         for (const source of [...current.positiveExamples, ...current.negativeExamples]) titles.add(bookTitle(source.bookId));
@@ -124,6 +135,10 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
             categoryId: preference.categoryId, text: '', effect: 'guide' });
           return api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
         })));
+        if (preference.state === 'active') controls.append(action('编辑偏好', () => {
+          controls.replaceChildren(editorialPreferenceEditor({ categories: global.categories, books: global.books,
+            existing: preference, save: savePreference }));
+        }));
         const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
         const basis = house?.current?.legacyBasis?.lines ?? house?.current?.governance?.baseLines ?? house?.current?.lines ?? [];
         const sourceBooks = (itemId: string, seen = new Set<string>()): string[] => {

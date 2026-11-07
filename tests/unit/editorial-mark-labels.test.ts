@@ -79,8 +79,8 @@ describe('the wording of the Mark surface', () => {
   it('uses registered editors and frozen human model labels, with technical IDs only when requested (#1379)', () => {
     expect(markSourceLine({ source: { ...editor, editorName: '责任编辑甲、责任编辑乙' }, convertedFrom: null })).toBe('责任编辑甲、责任编辑乙');
     const card = { source: { kind: 'ai7', origin: 'task', label: '润色这段', taskId: 'past-task',
-      modelLabel: 'OpenAI 官方 · 模型甲', modelTechnicalLabel: 'OpenAI 官方 · raw-model-id' }, convertedFrom: null } as const;
-    expect(markSourceLine(card)).toBe('OpenAI 官方 · 模型甲 · 任务「润色这段」');
+      modelLabel: '模型甲@high', modelTechnicalLabel: 'OpenAI 官方 · raw-model-id@high' }, convertedFrom: null } as const;
+    expect(markSourceLine(card)).toBe('模型甲@high · 任务「润色这段」');
     expect(markSourceLine(card, true)).toContain('raw-model-id');
     expect(markSourceLine({ ...card, source: { ...card.source, modelLabel: 'AI7 本地检查' } })).toBe('AI7 本地检查 · 任务「润色这段」');
   });

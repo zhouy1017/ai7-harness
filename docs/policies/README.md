@@ -6,13 +6,13 @@ Versioned JSON policies, their schemas and their human projections are immutable
 
 ## Current runtime selection
 
-Wave 24b #1371 selects [active-policy-set v25](active-policy-set.v25.json), ordinary-production v34 and the lightweight zero-transmission development-ci v1. This implementation becomes integrated only at the exact dev commit carrying the coherent selection and its readers:
+Owner-authorized #1408 selects [active-policy-set v26](active-policy-set.v26.json), ordinary-production v35 and the lightweight zero-transmission development-ci v1. This implementation becomes integrated only at the exact dev commit carrying the coherent selection and its readers:
 
 | Scope | Canonical JSON | Schema | Human projection |
 | --- | --- | --- | --- |
 | `development-ci` | [Provider Processing v1](provider-processing-policy.v1.json) | [schema](provider-processing-policy.v1.schema.json) | [projection](provider-processing-policy.md) |
 | `fixture-recording` | [Provider Processing v2](provider-processing-policy.v2.json) | [schema](provider-processing-policy.v2.schema.json) | [projection](provider-processing-policy.v2.md) |
-| `ordinary-production` | [Provider Processing v34](provider-processing-policy.v34.json) | [schema](provider-processing-policy.v34.schema.json) | [projection](provider-processing-policy.v34.md) |
+| `ordinary-production` | [Provider Processing v35](provider-processing-policy.v35.json) | [schema](provider-processing-policy.v35.schema.json) | [projection](provider-processing-policy.v35.md) |
 | `developer-live` | [Provider Processing v24](provider-processing-policy.v24.json) | [schema](provider-processing-policy.v24.schema.json) | [projection](provider-processing-policy.v24.md) |
 | External Export, all scopes | [External Export v2](external-export-policy.v2.json) | [schema](external-export-policy.v2.schema.json) | [projection](external-export-policy.v2.md) |
 
@@ -76,7 +76,7 @@ F-21b projects these declarations and reads the reviewed runtime model table. Th
 
 ## Approved, unselected v28/v29/set-v20 declarations
 
-[Issue #1120](https://github.com/zhouy1017/ai7-harness/issues/1120), brief revision 4, integrates [ordinary-production v28](provider-processing-policy.v28.md), [development-ci v29](provider-processing-policy.v29.md) and [active-set v20](active-policy-set.v20.json) as unselected policy records. On 2026-10-25 the Owner approved their nine exact declarations at reviewed commit `a60c843d97a827aea42ad4db004d143921ae9acf` ([Owner record](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6393190963) on the [nine-row packet](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6387752881)). Row 1 is option A, full typed native learning examples. **Set v20 and ordinary v28 remain unselected; development-ci v29 was selected through set v21 and is now unselected.** Set v20 maps ordinary-production→v28 and development-ci→v29 while preserving fixture-recording v2, developer-live v24 and External Export v2 byte/digest pins. The source-checkout carrier and build now select set v25; the unselected set v20 and ordinary v28 grant no runtime permission or feature completion.
+[Issue #1120](https://github.com/zhouy1017/ai7-harness/issues/1120), brief revision 4, integrates [ordinary-production v28](provider-processing-policy.v28.md), [development-ci v29](provider-processing-policy.v29.md) and [active-set v20](active-policy-set.v20.json) as unselected policy records. On 2026-10-25 the Owner approved their nine exact declarations at reviewed commit `a60c843d97a827aea42ad4db004d143921ae9acf` ([Owner record](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6393190963) on the [nine-row packet](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6387752881)). Row 1 is option A, full typed native learning examples. **Set v20 and ordinary v28 remain unselected; development-ci v29 was selected through set v21 and is now unselected.** Set v20 maps ordinary-production→v28 and development-ci→v29 while preserving fixture-recording v2, developer-live v24 and External Export v2 byte/digest pins. The source-checkout carrier and build now select set v26; the unselected set v20 and ordinary v28 grant no runtime permission or feature completion.
 
 The projections keep the accepted omission repairs separate from the nine approved new-scope declarations:
 
@@ -87,7 +87,7 @@ v29 carries the complete frozen809 metadata-only legacy fixture manifest, includ
 
 The accepted [ADR 0100](../adr/0100-admit-scoped-editor-task-instruction-text.md) instruction exception and [ADR 0101](../adr/0101-admit-scoped-full-fidelity-learned-examples.md) learned-example exception are separate designs, and these unchanged bytes implement neither. The v28/v29 learning-example and instruction declarations keep their redaction and no-person-name rules. The Owner separately accepted exact [ADR 0099](../adr/0099-distinguish-public-release-from-scoped-global-agent-processing.md) at `c82b105f2a4c3dcaa283c878d7b0889532b0bc8e` ([acceptance 6394479236](https://github.com/zhouy1017/ai7-harness/issues/1123#issuecomment-6394479236)); that design is not implemented by these unchanged v28/v29 declarations, and this status correction selects no policy or runtime behavior. Selection, readers and consuming features need separately bounded assignments, each with the full exact-head guest ladder and the existing Gate. These remain excluded: F-18c fixture subagents, developer-live F-04 stages, Search-probe fixture success, untyped Word curation, semantic claim grouping, retained-source recheck and any redaction lift.
 
-## Selected ordinary v34 / set-v25
+## Predecessor ordinary v34 / set-v25
 
 [Ordinary-production v34](provider-processing-policy.v34.json), its [schema](provider-processing-policy.v34.schema.json) and [projection](provider-processing-policy.v34.md) succeed v33 under [#1371](https://github.com/zhouy1017/ai7-harness/issues/1371). [Set v25](active-policy-set.v25.json) selects it and preserves development-ci v1, fixture-recording v2, developer-live v24 and External Export v2. Every predecessor artifact and retained Plan identity stays byte-for-byte unchanged.
 
@@ -124,3 +124,7 @@ Preserve every predecessor policy JSON, schema, Markdown projection and active-s
 `node tools/validate-policies.mjs` validates every policy/schema pair with the existing installed closure. `pnpm test` exercises that validator; compare active-set SHA-256 pins with their exact referenced file bytes separately. These are local consistency checks, not a new hosted gate. No live request or credential is needed.
 
 Wave 23 #1283 repairs OpenCode Zen’s three configured paths to the documented `/inference/openai/v1/` and `/inference/anthropic/v1/` APIs, with metadata discovery at `/inference/v1/models`. The selected v33 admits the same host/protocol/slot identities and needs no policy-byte successor for this path repair; v32 and all other saved policy identities retain their original bytes. Fixed-public search probes consume the verified search declaration independently of a configured Main role. Ordinary-production evidence retention now honors `sourceTranslationAllowed` through the ready Fast Interaction Role; development-ci remains provider-free.
+
+## Selected ordinary v35 / set-v26
+
+[Provider Processing v35](provider-processing-policy.v35.md) admits the shared editorial memory envelope on all ordinary-production Agent tasks: at most 15 rules and 1,200 graphemes per request, selected from a library of at most 64 rules and 6,000 graphemes. Confirmed house and book rules guide editorial discretion and style while preserving task output formats and factual-evidence boundaries. Set v26 retains the exact development-ci v1, developer-live v24, fixture-recording v2 and Export v2 pins; predecessor policies and existing no-memory fixture contracts remain immutable.

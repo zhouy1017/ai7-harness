@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
+import * as markSources from '../../src/service/editorial-mark-source.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
@@ -174,7 +175,43 @@ function storeError(operation: () => unknown): string {
 }
 
 describe('Editorial Marks on a manuscript', () => {
-  it('keeps the original author through legacy bare-array conversions after a later dialogue binding (#1379)', async () => {
+  it.each([
+    ['gpt-6-luna', undefined, 'gpt-6-luna'],
+    ['gpt-6-luna', 'high', 'gpt-6-luna@high'],
+    ['gpt-6-luna@low', 'high', 'gpt-6-luna@low'],
+    ['deepseek-flash', undefined, 'DeepSeek V4.1 Flash'],
+  ])('shows the executing model %s with only recorded effort %s (#1402)', (model, effort, label) => {
+    expect(markSources.markModelLabels({ route: model.startsWith('deepseek') ? 'deepseek-open-platform' : 'openai-platform',
+      model, ...(effort === undefined ? {} : { reasoningEffort: effort }) }).modelLabel).toBe(label);
+  });
+
+  it('repairs frozen provider-only authors on read without regenerating historical marks (#1402)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(window);
+      // Emulate the 0.6.1 writer at its label seam; persist through the real immutable mark owner.
+      const legacyWriter = vi.spyOn(markSources, 'markModelLabels').mockReturnValueOnce({
+        modelLabel: 'OpenAI 官方', modelTechnicalLabel: 'OpenAI 官方 · gpt-6-luna',
+      });
+      let markId: string;
+      try {
+        markId = store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 2, toGrapheme: 6,
+          pinnedText: graphemesOf(block.text).slice(2, 6).join(''), kind: 'annotation', body: '公开合成批注',
+          proposedText: null, rationale: null, atomicGroupId: null, basis: [],
+          source: { kind: 'ai7', origin: 'task', label: '校对', taskId: randomUUID() },
+          sourceModelBinding: { route: 'openai-platform', model: 'gpt-6-luna' } });
+      } finally { legacyWriter.mockRestore(); }
+      const read = () => store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
+      expect(read().source.modelLabel).toBe('gpt-6-luna');
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(read().source.modelLabel).toBe('gpt-6-luna');
+    } finally { store.close(); }
+  });
+
+  it.each(['bare-array', 'frozen-provider'])('keeps the original author through legacy %s conversions after a later dialogue binding (#1402)', async (shape) => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
@@ -190,7 +227,11 @@ describe('Editorial Marks on a manuscript', () => {
       const produce = () => store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 2, toGrapheme: 6,
         pinnedText: selection.selectedText, kind: 'change-suggestion', body: '', proposedText: '公开合成改稿', rationale: '',
         atomicGroupId: null, basis: [], source: { kind: 'ai7', origin: 'task', label: '对话回答', taskId: turn.dialogueId } });
+      const legacyWriter = shape === 'frozen-provider' ? vi.spyOn(markSources, 'markModelLabels').mockReturnValue({
+        modelLabel: 'OpenCode Go', modelTechnicalLabel: 'OpenCode Go · historical-model-a',
+      }) : null;
       const original = produce(); const alreadyConverted = produce();
+      legacyWriter?.mockRestore();
       vi.setSystemTime(at(3));
       const legacyAnnotation = store.updateEditorialMark(change(book, window, alreadyConverted, 'convert', { targetKind: 'annotation' })).card!;
       vi.useRealTimers();
@@ -207,6 +248,7 @@ describe('Editorial Marks on a manuscript', () => {
       const next = ledger.nextAttempt(turn.dialogueId, 'regenerate', () => 0, at(2));
       bind(next, 'deepseek-open-platform', 'historical-model-b', 2);
       const converted = store.updateEditorialMark(change(book, window, original, 'convert', { targetKind: 'annotation' })).card!;
+      expect(converted.source.modelLabel).toBe('historical-model-a');
       expect(converted.source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
       expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, legacyAnnotation.markId).source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
       store.markCleanShutdown(); store.close(); database.close();
@@ -231,10 +273,10 @@ describe('Editorial Marks on a manuscript', () => {
         pinnedText: graphemesOf(block.text).slice(8, 13).join(''), kind: 'change-suggestion', body: '', proposedText: '公开合成建议',
         rationale: '公开合成理由', atomicGroupId: null, basis: [],
         source: { kind: 'ai7', origin: 'task', label: '润色这段', taskId: randomUUID() },
-        sourceModelBinding: { route: 'openai-platform', model: 'historical-custom-model' } });
+        sourceModelBinding: { route: 'openai-platform', model: 'historical-custom-model', reasoningEffort: 'high' } });
       const source = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).source;
-      expect(source.modelLabel).toBe('OpenAI 官方');
-      expect(source.modelTechnicalLabel).toBe('OpenAI 官方 · historical-custom-model');
+      expect(source.modelLabel).toBe('historical-custom-model@high');
+      expect(source.modelTechnicalLabel).toBe('OpenAI 官方 · historical-custom-model@high');
       const converted = store.updateEditorialMark(change(book, window, markId, 'convert', { targetKind: 'annotation' })).card!;
       expect(converted.source).toEqual(source);
       store.markCleanShutdown(); store.close();

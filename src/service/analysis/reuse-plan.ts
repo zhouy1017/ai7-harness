@@ -275,7 +275,11 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
       else failedKeys.add(key);
     });
   }
-  const closure = selectedRange === null ? new Set<number>() : selectedRangeClosure(manifest, selectedRange);
+  // Exact factual manifests constrain execution to own blocks; untouched neighbours retain their
+  // original overlap for reuse. Historical manifests keep their recorded overlap-closure semantics.
+  const closure = selectedRange === null ? new Set<number>() : input.kind === 'factual-review' && manifest.parameters.rangeContext === 'exact'
+    ? new Set(manifest.units.filter(unit => unit.startPosition <= selectedRange.endPosition && unit.endPosition >= selectedRange.startPosition).map(unit => unit.ordinal))
+    : selectedRangeClosure(manifest, selectedRange);
   const consumed = new Map<number, { disposition: 'reused' | 'bypassed'; successorUnitOrdinal: number }>();
   const units: ReviewScopePlanUnitProjection[] = manifest.units.map((unit, index) => {
     const contentKey = newKeys[index]!;

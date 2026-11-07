@@ -1,3 +1,4 @@
+import { editorialMemoryDigest } from '../learning/editorial-memory.js';
 import type { GlobalMemoryPin, LocalFixtureProfile, OrdinaryProductionRouteId, SelectedPolicyIdentity } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -337,7 +338,7 @@ export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 
 export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
   readonly textProcessing: 'qualified-original-fields';
-  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32' | 'v33' | 'v34';
+  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
   /** The no-tools rule, or v31's scoped tool rule (#1171); a record never moves between them. */
   readonly policyRuleId: 'ordinary-production-global-agent-dialogue' | typeof GLOBAL_AGENT_SCOPED_RULE_ID;
   readonly route: OrdinaryProductionRouteId;
@@ -361,7 +362,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
     providerProcessingSha256: value.providerProcessingSha256, activePolicySetVersion: value.activePolicySetVersion,
     activePolicySetSha256: value.activePolicySetSha256 });
   const route = value.route;
-  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && (identity.providerProcessingVersion !== 'v32' && identity.providerProcessingVersion !== 'v33' && identity.providerProcessingVersion !== 'v34')) || value.textProcessing !== 'qualified-original-fields' ||
+  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && (identity.providerProcessingVersion !== 'v32' && identity.providerProcessingVersion !== 'v33' && identity.providerProcessingVersion !== 'v34' && identity.providerProcessingVersion !== 'v35')) || value.textProcessing !== 'qualified-original-fields' ||
       (value.policyRuleId !== 'ordinary-production-global-agent-dialogue' && (value.policyRuleId !== GLOBAL_AGENT_SCOPED_RULE_ID ||
         identity.providerProcessingVersion === 'v30')) || value.modelRole !== 'Fast Interaction Role' ||
       typeof route !== 'string' || typeof value.model !== 'string' || value.model.length === 0 ||
@@ -448,6 +449,8 @@ export interface StoredLocalDialogueBinding extends DialogueBindingBase {
  * DeepSeek 开放平台（官方） route under ordinary-production, with the policy version and allow rule that admitted it.
  */
 export interface StoredLiveDialogueBinding extends DialogueBindingBase {
+  readonly reasoningEffort?: string | null;
+  readonly editorialMemory?: import('../learning/editorial-memory.js').EditorialMemorySnapshot;
   readonly route: OrdinaryProductionRouteId;
   readonly operationalScope: 'developer-live' | 'ordinary-production';
   readonly providerProcessingVersion: string;
@@ -761,8 +764,14 @@ export class DialogueLedger {
         }
       } else {
         requireDialogue(livePairAdmitted(route, scope) && bindingRow.fixture_sha256 === null, 'DIALOGUE_RECORD_INVALID', INVALID);
+        const record = parseStoredJson(text(bindingRow.canonical_json), () => new DialogueError('DIALOGUE_RECORD_INVALID', INVALID));
+        requireDialogue(isRecord(record), 'DIALOGUE_RECORD_INVALID', INVALID);
+        requireDialogue(record.reasoningEffort === undefined || record.reasoningEffort === null ||
+          typeof record.reasoningEffort === 'string' && record.reasoningEffort.length <= 40, 'DIALOGUE_RECORD_INVALID', INVALID);
         binding = {
           ...shared, route: route as StoredLiveDialogueBinding['route'], operationalScope: scope as StoredLiveDialogueBinding['operationalScope'],
+          ...(record.reasoningEffort === undefined ? {} : { reasoningEffort: record.reasoningEffort as string | null }),
+          ...(record.editorialMemory === undefined ? {} : { editorialMemory: record.editorialMemory as NonNullable<StoredLiveDialogueBinding['editorialMemory']> }),
           providerProcessingVersion: text(bindingRow.provider_processing_version), policyRuleId: text(bindingRow.policy_rule_id),
         };
       }
@@ -789,8 +798,8 @@ export class DialogueLedger {
   #verifyQualifiedBinding(qualification: QualifiedGlobalAttemptMetadata, binding: StoredDialogueBinding): void {
     requireDialogue(binding.operationalScope === 'ordinary-production' && binding.route === qualification.route && binding.model === qualification.model &&
       binding.providerProcessingVersion === qualification.providerProcessingVersion && binding.policyRuleId === qualification.policyRuleId &&
-      binding.promptContractSha256 === (qualification.policyRuleId === GLOBAL_AGENT_SCOPED_RULE_ID
-        ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST), 'DIALOGUE_RECORD_INVALID', INVALID);
+      binding.promptContractSha256 === editorialMemoryDigest(qualification.policyRuleId === GLOBAL_AGENT_SCOPED_RULE_ID
+        ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, binding.editorialMemory), 'DIALOGUE_RECORD_INVALID', INVALID);
   }
 
   #insertAttempt(dialogueId: string, ordinal: number, kind: DialogueAttemptKind, priorAttemptId: string | null, now: Date,

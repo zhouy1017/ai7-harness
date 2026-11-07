@@ -639,15 +639,19 @@ const FACTUAL_REVIEW_UPDATE_EXECUTION_STEPS = FACTUAL_REVIEW_EXECUTION_STEPS;
 const FACTUAL_REVIEW_REDUCER_STAGES = ['unit-validation', 'reference-integrity', 'finding-reduction'] as const;
 const FACTUAL_REVIEW_CROSS_UNIT_ABSENT_REASON = '本分析种类没有跨单元归纳阶段。' as const;
 
-const FACTUAL_REVIEW_MODES: ReadonlyArray<AnalysisModeDefinition> = FACTUAL_REVIEW_TASK_MODES.map((mode) => ({
+const FACTUAL_REVIEW_MODES: ReadonlyArray<AnalysisModeDefinition> = [...FACTUAL_REVIEW_TASK_MODES.map((mode) => ({
   mode,
   goal: FACTUAL_REVIEW_MODE_GOALS[mode],
   label: FACTUAL_REVIEW_MODE_LABELS[mode],
   meaning: FACTUAL_REVIEW_MODE_MEANINGS[mode],
   initial: mode === 'whole-manuscript',
   rangeBound: mode === 'range',
-  recompute: mode === 'range' ? 'selected-range' : 'everything',
-}));
+  recompute: mode === 'range' ? 'selected-range' as const : 'everything' as const,
+})),
+  { mode: 'review-first-range', goal: '核查所选范围的事实，范围外保持未核查。', label: '首次范围核查', meaning: '直接核查所选章节或选区，无需先核查全书。', initial: true, rangeBound: true, recompute: 'selected-range' },
+  { mode: 'review-again', goal: '再次核查当前全书事实，保留此前核查历史。', label: '再次核查', meaning: '以新的明确授权重读全书并核查事实。', initial: false, rangeBound: false, recompute: 'everything' },
+  { mode: 'review-range', goal: '核查所选范围的事实，沿用范围外可复用的结果。', label: '范围核查', meaning: '重新核查所选章节或选区，保留此前核查历史。', initial: false, rangeBound: true, recompute: 'selected-range' },
+];
 
 /**
  * The factual kind. Its research capability refuses under every scope this slice can run in, so the
@@ -663,10 +667,8 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     taskGoal: FACTUAL_REVIEW_MODE_GOALS['whole-manuscript'],
     initialMode: 'whole-manuscript',
     modes: FACTUAL_REVIEW_MODES,
-    updateModes: [],
-    // The factual kind prepares no update Task yet, so no plan of its own ever asks; it states the
-    // answer every kind had before Issue #417.
-    outOfScope: 'recompute',
+    updateModes: ['review-again', 'review-range'],
+    outOfScope: 'leave-unreviewed',
     systemPrompt: FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt,
     promptContractDigest: FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST,
     unitResultSchema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,

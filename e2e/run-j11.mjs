@@ -3389,7 +3389,7 @@ async function main() {
         await qualityMode(false, 'ordinary-memory');
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-memory-quality');
         await waitFor(renderer, `document.querySelector('[data-memory-candidates] [data-memory-item="${itemId}"]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-memory-candidate-first');
-        await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); return root.querySelector('[data-learning-enabled]') && !root.querySelector('form') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent) && root.textContent.includes('来源与历史'); })()`, 'ordinary-memory-private-labels');
+        await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); return root.querySelector('[data-learning-enabled]') && root.querySelector('[data-preference-editor="new"]') && !root.querySelector('[data-memory-candidate-form]') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent) && root.textContent.includes('来源与历史'); })()`, 'ordinary-memory-private-labels');
       }
       await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受记忆');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
       await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);

@@ -761,7 +761,7 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v25', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v26', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -857,7 +857,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v25', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v26', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -2956,7 +2956,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-search-sheet');
     // #1371: the ordinary configuration entry and selected-set identity remain visible under CI's provider-free policy.
     // The real v34 Main-channel freeze for all three official routes is covered by search-backend-freeze service composition.
-    requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v25' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
+    requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v26' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
     await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelector('input[name="review-category"][value="factual-review"]')?.disabled===false`, 'review-search-ordinary-category-available');
 
     await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');
@@ -3353,8 +3353,7 @@ async function main() {
     // which answers contract /2 at 标准核查 and layers v1's own answers beneath it. The deterministic route fetches nothing, so
     // every relation the fixture states stays 候选来源 · 尚未核对 and no result can be 证据支持 or 疑似错误 here; checked
     // evidence, 严格核查's independence gate, the offline downgrade and Apply/reversal of a Correction Proposal are proven over
-    // the real store on a socket-free transport by tests/service/factual-verification.test.ts. A Book holds one 事实核查 Run until
-    // the factual update modes land (#905).
+    // the real store on a socket-free transport by tests/service/factual-verification.test.ts.
     at('factual-level-plan');
     await closeOwnedBrowser();
     cancellation.throwIfRequested();
@@ -3481,6 +3480,74 @@ async function main() {
     await waitFor(renderer, `document.querySelector('${correctionCardSelector} .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('${correctionCardSelector}'); const lineage=card?.querySelector('.editorial-mark-factual'); return card?.dataset.markKind==='change-suggestion' && lineage?.dataset.markFactualResult===${JSON.stringify(sourced.resultId)} && lineage.dataset.markFactualVersion==='1' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('事实核查 · 更正提案'); })()`, 'factual-correction-mark');
     cancellation.throwIfRequested();
+
+    // #1401: first factual chapter review in ordinary mode, with no preceding whole-book result.
+    at('factual-evidence-workspace');
+    // Like every section that imports, this one starts from a fresh launch of the same factual fixture.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = FACTUAL_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'factual-range-launch-ready');
+    const rangeBook = await importSample1(renderer, cancellation, true);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-settings-ready');
+    await click(renderer, '帮助', 'factual-range-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-toggle-ready');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(toggle.checked)toggle.click(); return true; })()`, 'factual-range-ordinary');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'factual-range-ordinary-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'factual-range-library');
+    await waitFor(renderer, `document.querySelector('button[data-book-id=${JSON.stringify(rangeBook.bookId)}]')`, 'factual-range-library-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('button[data-book-id=${JSON.stringify(rangeBook.bookId)}]').click(); return true; })()`, 'factual-range-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(rangeBook.bookId)}]')`, 'factual-range-book-ready');
+    await openReviewDestination(renderer, 'factual-range-review');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await reviewAction(renderer, '[data-review-action="new-review"]', `factual-range-new-${pass}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `factual-range-sheet-${pass}`);
+      await assertRenderer(renderer, `(() => {
+        const sheet=document.querySelector('dialog.review-sheet');
+        for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click();
+        const factual=sheet.querySelector('input[name="review-category"][value="factual-review"]');
+        if(!factual||factual.disabled)return false; factual.click();
+        const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
+        scope('chapters').click();
+        const from=sheet.querySelector('[data-review-chapter="from"]'), to=sheet.querySelector('[data-review-chapter="to"]');
+        if(!from||!to||from.options.length<2)return false;
+        from.value=from.options[1].value; from.dispatchEvent(new Event('change',{bubbles:true}));
+        to.value=from.value; to.dispatchEvent(new Event('change',{bubbles:true}));
+        const chosen=from.value; scope('whole').click(); scope('chapters').click();
+        const remembered=sheet.querySelector('input[name="review-category"][value="factual-review"]');
+        if(!remembered.checked||remembered.disabled||from.value!==chosen||to.value!==chosen||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+        const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!prepare||prepare.disabled)return false; prepare.click(); return true;
+      })()`, `factual-range-memory-prepare-${pass}`);
+      await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, `factual-range-prepared-${pass}`, 120_000);
+      const rangePrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+      requireJourney(rangePrepared?.scope.selectedRange.startPosition===1 && rangePrepared.scope.selectedRange.endPosition===15 &&
+        rangePrepared.categories.length===1 && rangePrepared.categories[0].plan.recomputed===1 && rangePrepared.categories[0].plan.unreviewed===7,
+        `factual-range-plan-${pass}`);
+      await drawerShowing(renderer, rangePrepared.reviewRunId, 'ready', `factual-range-drawer-${pass}`);
+      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', `factual-range-start-${pass}`);
+      await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, `factual-range-settled-${pass}`, 180_000);
+      const ranged = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+      requireJourney(ranged?.ordinal===pass+1 && ranged.scope.selectedRange.startPosition===1 && ranged.scope.selectedRange.endPosition===15 &&
+        ranged.categories.length===1 && ranged.categories[0].state==='settled' && ranged.categories[0].plan.recomputed===1 &&
+        ranged.categories[0].plan.unreviewed===7, `factual-range-exact-${pass}`);
+      if (pass === 1) {
+        const finding = ranged.findings.find(entry => entry.markId !== null);
+        requireJourney(finding !== undefined, 'factual-range-author-finding');
+        await reviewAction(renderer, `article.review-finding[data-finding-id="${finding.findingId}"] [data-review-action="go-to-text"]`, 'factual-range-author-open');
+        // This producing route is the local fixture. It must not invent a remote model or reasoning effort.
+        await waitFor(renderer, `(() => { const author=document.querySelector('[data-mark-card="${finding.markId}"] [data-mark-source]')?.textContent ?? ''; return document.documentElement.dataset.technicalLayerVisible==='false' && author.startsWith('AI7 本地检查 · ') && !author.includes('@high'); })()`, 'factual-range-producing-author', 30_000);
+      }
+    }
+    cancellation.throwIfRequested();
+
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-restore-ready');
+    await click(renderer, '帮助', 'factual-range-restore-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-restore-toggle');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(!toggle.checked)toggle.click(); return true; })()`, 'factual-range-restore-development');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'factual-range-restored');
 
     // ---- 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4) ----
     // Synchronized delta with Issue #922: a fresh, unedited sample1 Book on the provider-free `sample1-custom-analysis-authored`

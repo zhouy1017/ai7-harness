@@ -78,7 +78,7 @@ export function validSupervisionInput(value: unknown): value is RecordLearningSu
   if (input.actionId !== undefined && !UUID_PATTERN.test(input.actionId)) return false;
   if (!['create', 'merge', 'correct', 'deactivate', 'supervise'].includes(input.operation) ||
       !['guide', 'freeze', 'correct'].includes(input.effect) || typeof input.text !== 'string' || !input.text.isWellFormed() ||
-      [...input.text.trim()].length > 200 || typeof input.categoryId !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/u.test(input.categoryId) ||
+      [...input.text.trim()].length > 1_200 || typeof input.categoryId !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/u.test(input.categoryId) ||
       !Array.isArray(input.targets) || input.targets.length > 12 || input.targets.some((pin) => pin === null || typeof pin !== 'object' ||
         Object.keys(pin).sort().join(',') !== 'itemId,revisionId' || typeof pin.itemId !== 'string' || pin.itemId.length === 0 || pin.itemId.length > 180 ||
         typeof pin.revisionId !== 'string' || pin.revisionId.length === 0 || pin.revisionId.length > 180) ||

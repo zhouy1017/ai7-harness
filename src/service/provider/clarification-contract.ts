@@ -71,7 +71,7 @@ export function clarificationPromptContractDigest(
 /** The exact inner contract a frozen material reader reconstructs; invalid provenance never unwraps. */
 export function clarificationPlanBaseDigest(execution: Record<string, unknown>, envelope: Record<string, unknown>): string | null {
   // A plan bound to a procedure version wraps its kind's contract; that contract, recorded beside it, is the one rebuilt (#1173).
-  const outer = envelope.basePromptContractDigest ?? envelope.promptContractDigest;
+  const outer = envelope.basePromptContractDigest ?? envelope.editorialMemoryBasePromptContractDigest ?? envelope.promptContractDigest;
   if (typeof outer !== 'string' || !/^[0-9a-f]{64}$/u.test(outer)) return null;
   const base = execution.clarificationBasePromptContractDigest;
   if (base === undefined) return outer;
