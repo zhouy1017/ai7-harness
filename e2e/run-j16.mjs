@@ -1598,7 +1598,9 @@ async function main() {
     const offered = new Map(composer?.options ?? []);
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
       composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
-      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '发起任务' &&
+      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
+      // #1401: a first 事实核查 may read just this selection, so it is offered beside the other range reviews.
+      offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '发起任务' &&
       composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
     // Nothing is prepared before a Task is chosen.
