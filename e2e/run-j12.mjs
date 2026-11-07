@@ -1631,7 +1631,7 @@ async function main() {
       if(!factual())return 'offered-factual-missing';
       if(factual().disabled){
         const checkedScope=sheet.querySelector('input[name="review-scope"]:checked')?.value ?? 'none';
-        return 'offered-factual-disabled-'+checkedScope+${JSON.stringify(factualVerdict.factualAvailable ? '-available' : `-unavailable-${createHash('sha256').update(String(factualVerdict.factualReason)).digest('hex').slice(0, 16)}`)};
+        return 'offered-factual-disabled-'+checkedScope+${JSON.stringify(factualVerdict.factualAvailable ? '-available' : `-unavail-${createHash('sha256').update(String(factualVerdict.factualReason)).digest('hex').slice(0, 8)}`)};
       }
       for(const kind of ['whole','chapters']){ if(!scope(kind))return 'offered-'+kind+'-missing'; if(scope(kind).disabled)return 'offered-'+kind+'-disabled'; }
       // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
