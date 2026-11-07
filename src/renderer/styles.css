@@ -954,6 +954,17 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .evaluation-prediction-rows dd, .evaluation-rewrite-items dd { display: grid; gap: .2rem; margin: 0; min-width: 0; }
 .evaluation-rewrite-proposal { display: grid; gap: .5rem; min-width: 0; padding: .6rem .8rem; border-left: 3px solid var(--boundary-strong); background: var(--surface-subdued); }
 .evaluation-rewrite-after { font-weight: 600; color: var(--action-text); }
+/* 详细评估报告 (Issue #1406, #1407): AI7's full report leads 评估 before it becomes the editor's version. */
+.evaluation-report { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
+.evaluation-report h3, .evaluation-report h4, .evaluation-report p, .evaluation-report dl { margin: 0; overflow-wrap: anywhere; }
+.evaluation-report-items { display: grid; gap: .6rem; min-width: 0; }
+.evaluation-report-item { display: grid; gap: .35rem; min-width: 0; padding: .6rem .8rem; border: 1px solid var(--boundary); border-radius: 8px; }
+.evaluation-report-comment { margin: 0; padding-left: .8rem; border-left: 3px solid var(--boundary-strong); overflow-wrap: anywhere; }
+.evaluation-report-lists { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem .8rem; }
+.evaluation-report-lists dd { margin: 0; min-width: 0; }
+.evaluation-report-lists ul { display: grid; gap: .2rem; margin: 0; padding-left: 1.2rem; }
+.evaluation-report-conclusion { font-weight: 700; }
+@media (max-width: 720px) { .evaluation-report-lists { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) { .evaluation-prediction-rows, .evaluation-rewrite-items { grid-template-columns: minmax(0, 1fr); } }
 /* ②A 分析反馈 (S38): the card opens under the item it judges, inside the list, never a modal; the Book's tally under the synopsis. */
 .analysis-feedback { display: grid; gap: .35rem; margin: .3rem 0 .5rem; min-width: 0; }
@@ -2697,8 +2708,6 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .review-more, .evaluation-more { position: relative; }
 .review-more > summary, .evaluation-more > summary { cursor: pointer; padding: .4rem .65rem; }
 .review-more[open] { display: flex; flex-wrap: wrap; gap: .4rem; }
-.evaluation-consequences { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .35rem 1rem; }
-.evaluation-consequences dd { margin: 0; }
 .readers-report-templates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: .8rem; padding: 0; list-style: none; }
 .readers-report-templates > li { padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; }
 .readers-report-template { margin: 0 0 .6rem; }
