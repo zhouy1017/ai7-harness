@@ -1502,7 +1502,7 @@ async function dispatch(
     case 'inspectProductionDocuments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectProductionDocuments(request.input.bookId) };
     case 'inspectBookDeliveryPackage':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId, request.input.documents) };
     case 'prepareBookDeliveryPackage':
       return { id: request.id, ok: true, op: request.op, result: store.prepareBookDeliveryPackage(request.input) };
     // Its export (Issue #416, S67b): local only, and only under this launch's verified External Export Policy, as ④ 导出.

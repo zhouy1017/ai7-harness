@@ -134,6 +134,7 @@ import {
   type RecordProductionDocumentDeliveryInput,
   type TransitionProductionDocumentPhaseInput,
   type BookDeliveryPackageProjection,
+  type BookDeliveryPackageDocumentChoice,
   type BookDeliveryPackageResultProjection,
   type PrepareBookDeliveryPackageInput,
   type ApproveBookDeliveryPackageExportInput,
@@ -14663,8 +14664,8 @@ export class EditorialStore {
   }
 
   /** 图书交付包 of one Book (Issue #416, S67a): the condition table, the Manifest Preview and the frozen versions. */
-  inspectBookDeliveryPackage(bookId: string): BookDeliveryPackageProjection {
-    return this.#packageCall(() => this.#bookDeliveryPackages.inspect(bookId));
+  inspectBookDeliveryPackage(bookId: string, documents?: ReadonlyArray<BookDeliveryPackageDocumentChoice>): BookDeliveryPackageProjection {
+    return this.#packageCall(() => this.#bookDeliveryPackages.inspect(bookId, documents));
   }
 
   /**
@@ -14674,7 +14675,7 @@ export class EditorialStore {
    */
   prepareBookDeliveryPackage(input: PrepareBookDeliveryPackageInput): BookDeliveryPackageResultProjection {
     const outcome = this.#packageCall(() => this.#transaction(this.#authority, () => this.#bookDeliveryPackages.prepare(input)));
-    return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId) };
+    return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId, input.documents) };
   }
 
   /** `导出…` of one package version (Issue #416, S67b): the files it writes, each reviewed as S64 reviews a file. */
