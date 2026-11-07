@@ -1,12 +1,12 @@
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent } from './deepseek-adapter.js';
 import { conversationMessages, functionToolOf, systemPromptOf } from './family-payload.js';
-import type { ProviderModelProfile } from './model-profile.js';
+import { effectiveModelReasoningEffort, type ProviderModelProfile } from './model-profile.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { sseFrames, streamFailure } from './stream-frames.js';
 
 /** The reasoning effort the production route's `deepseek-thinking` control sends. */
-export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
+export { DEEPSEEK_REASONING_EFFORT } from './model-profile.js';
 
 /**
  * The OpenAI Chat Completions family (Issue #1180 moved it beside the adapter, byte for byte): the body adapter revision
@@ -30,12 +30,13 @@ export function chatCompletionsBody(model: ProviderModelProfile, payload: Assemb
   const system = systemPromptOf(payload);
   const conversation = toolCalling ? chatCompletionsConversation(payload) : conversationMessages(payload);
   const messages = system === null ? conversation : [{ role: 'system', content: system }, ...conversation];
+  const reasoningEffort = effectiveModelReasoningEffort(model);
   return canonicalJson({
     model: model.model,
     messages,
     stream: false,
-    ...(model.capabilities.reasoningControl === 'deepseek-thinking'
-      ? { thinking: { type: 'enabled' }, reasoning_effort: DEEPSEEK_REASONING_EFFORT }
+    ...(reasoningEffort !== null
+      ? { thinking: { type: 'enabled' }, reasoning_effort: reasoningEffort }
       : {}),
     // One field, and nothing else moves: a profile that declares `json-object` sends the body it
     // would have sent anyway plus this key, so the constraint can be added to or withdrawn from a
