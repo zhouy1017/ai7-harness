@@ -1514,42 +1514,72 @@ async function main() {
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
     await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
     await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
-    // #1401: the first factual review offers ranges before any whole-book result; no review is started here.
+    // #1401: the first factual review offers ranges before any whole-book result; no review is started here. This launch has
+    // no model adapter, route or search source, so whether 事实核查 can start is the service's own verdict: it is read and
+    // told truthfully below, never forced, bypassed or required (true first-range prepare/execute/out-of-scope is J-04's).
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('review')), 'factual-first-scope-review');
     await waitFor(primary, `document.querySelector('[data-screen="book-review"] .review-workspace-card')?.dataset.reviewState==='empty' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'factual-first-scope-empty');
-    requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>{
+    const factualVerdict = await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>{
       const factual=workspace.categories.find(category=>category.categoryId==='factual-review');
-      return workspace.runs.length===0 && workspace.run===null && factual?.available===true &&
-        factual.scopes.whole.available && factual.scopes.chapters.available && factual.scopes.selection.available &&
-        workspace.scopeOptions.chapters.available;
-    })`), 'factual-first-chapter-selection-available');
+      const blocked=factual?.networkUnavailable===true;
+      return {
+        empty: workspace.runs.length===0 && workspace.run===null,
+        // One verdict, said the same way everywhere: a category that cannot start names why on itself and on every scope it offers.
+        consistent: factual!==undefined && factual.available===(factual.unavailableReason===null) &&
+          (factual.available || Object.values(factual.scopes).every(scope=>!scope.available && scope.unavailableReason===factual.unavailableReason)) &&
+          (!blocked || (!factual.available && factual.unavailableReason!=='')),
+        networkUnavailable: blocked,
+        // The sheet's scope choices are the manuscript's: 全书 and 选章 are offered, 当前选区 needs a real selection.
+        scopeChoices: workspace.scopeOptions.whole.available && workspace.scopeOptions.chapters.available && !workspace.scopeOptions.selection.available,
+      };
+    })`);
+    requireJourney(factualVerdict?.empty === true && factualVerdict.consistent === true, 'factual-first-scope-verdict');
+    requireJourney(factualVerdict.scopeChoices === true, 'factual-first-scope-choices');
+    const factualNetworkUnavailable = factualVerdict.networkUnavailable === true;
+    const tasksBeforeFactualSheet = await primary.evaluate(`window.ai7.inspectBookTasks().then(tasks=>JSON.stringify(tasks))`);
+    requireJourney(typeof tasksBeforeFactualSheet === 'string', 'factual-first-scope-tasks-before');
     await assertRenderer(primary, `(() => { const open=document.querySelector('[data-review-action="new-review"]'); if(!open||open.disabled)return false; open.click(); return true; })()`, 'factual-first-scope-new');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-first-scope-sheet');
     await assertRenderer(primary, `(() => {
       const sheet=document.querySelector('dialog.review-sheet');
-      for(const input of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked')))input.click();
-      const factual=sheet.querySelector('input[name="review-category"][value="factual-review"]');
+      // A category toggle redraws the whole sheet, so every control is read fresh and none is held across a change.
       const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
-      if(!factual||factual.disabled||!scope('whole')||scope('whole').disabled||!scope('chapters')||scope('chapters').disabled)return false;
-      factual.click(); scope('whole').click();
-      if(!factual.checked||factual.disabled)return false;
+      const factual=()=>sheet.querySelector('input[name="review-category"][value="factual-review"]');
+      const chapter=which=>sheet.querySelector('[data-review-chapter="'+which+'"]');
+      const checkedIds=()=>Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value);
+      for(let step=0; step<20 && sheet.querySelector('input[name="review-category"]:checked'); step++)sheet.querySelector('input[name="review-category"]:checked').click();
+      if(checkedIds().length!==0)return false;
+      if(!factual()||factual().disabled||!scope('whole')||scope('whole').disabled||!scope('chapters')||scope('chapters').disabled)return false;
+      // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
+      if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return false;
+      factual().click(); scope('whole').click();
+      if(!factual().checked||factual().disabled||!scope('whole').checked)return false;
       scope('chapters').click();
-      const from=sheet.querySelector('[data-review-chapter="from"]'), to=sheet.querySelector('[data-review-chapter="to"]');
-      if(!factual.checked||factual.disabled||!from||!to||from.disabled||to.disabled||from.options.length<3)return false;
-      const chosen=from.options[2].value;
-      from.value=chosen; from.dispatchEvent(new Event('change',{bubbles:true}));
-      to.value=chosen; to.dispatchEvent(new Event('change',{bubbles:true}));
-      const kept=()=>factual.checked&&!factual.disabled&&from.value===chosen&&to.value===chosen;
+      if(!factual().checked||factual().disabled||!chapter('from')||!chapter('to')||chapter('from').disabled||chapter('to').disabled||chapter('from').options.length<3)return false;
+      const chosen=chapter('from').options[2].value;
+      chapter('from').value=chosen; chapter('from').dispatchEvent(new Event('change',{bubbles:true}));
+      chapter('to').value=chosen; chapter('to').dispatchEvent(new Event('change',{bubbles:true}));
+      const kept=()=>checkedIds().join(',')==='factual-review'&&!factual().disabled&&chapter('from').value===chosen&&chapter('to').value===chosen;
+      if(!kept())return false;
       scope('whole').click();
       if(!scope('whole').checked||!kept())return false;
       scope('chapters').click();
-      return scope('chapters').checked && kept() &&
-        Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value).join(',')==='factual-review' &&
-        document.documentElement.dataset.technicalLayerVisible==='false';
+      if(!scope('chapters').checked||!kept()||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+      // The chosen factual review is told as the service's verdict reads it, and nothing is started either way.
+      const blocked=${JSON.stringify(factualNetworkUnavailable)};
+      const reason=factual().closest('label').querySelector('.review-category-reason');
+      const notice=sheet.querySelector('.review-network-notice');
+      const start=sheet.querySelector('[data-review-action="start"]'), prepare=sheet.querySelector('[data-review-action="prepare"]');
+      if(!reason||!notice||!start||!prepare)return false;
+      return blocked
+        ? !reason.hidden && reason.textContent==='此类别需要联网检索。' && !notice.hidden &&
+          notice.textContent==='联网检索尚未就绪，请到设置中配置后再开始。' && start.disabled && prepare.disabled
+        : reason.hidden && notice.hidden;
     })()`, 'factual-first-category-range-roundtrip');
     await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
     requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
+    requireJourney(await primary.evaluate(`window.ai7.inspectBookTasks().then(tasks=>JSON.stringify(tasks))`) === tasksBeforeFactualSheet, 'factual-first-scope-no-task');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-author-restore-settings-ready');
     await click(primary, '帮助', 'model-author-restore-help');
