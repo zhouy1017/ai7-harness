@@ -1607,6 +1607,7 @@ async function main() {
         networkUnavailable: blocked,
         // The sheet's scope choices are the manuscript's: 全书 and 选章 are offered, 当前选区 needs a real selection.
         scopeChoices: workspace.scopeOptions.whole.available && workspace.scopeOptions.chapters.available && !workspace.scopeOptions.selection.available,
+        factualScopes: factual===undefined ? '' : ['whole','chapters','changed','selection'].map(kind=>factual.scopes[kind]?.available ? '1' : '0').join(''),
       };
     })`);
     requireJourney(factualVerdict?.empty === true && factualVerdict.consistent === true, 'factual-first-scope-verdict');
@@ -1627,7 +1628,10 @@ async function main() {
       for(let step=0; step<20 && sheet.querySelector('input[name="review-category"]:checked'); step++)sheet.querySelector('input[name="review-category"]:checked').click();
       if(checkedIds().length!==0)return 'cleared';
       if(!factual())return 'offered-factual-missing';
-      if(factual().disabled)return factual().dataset.unavailableReason ? 'offered-factual-disabled-with-reason' : 'offered-factual-disabled';
+      if(factual().disabled){
+        const checkedScope=sheet.querySelector('input[name="review-scope"]:checked')?.value ?? 'none';
+        return 'offered-factual-disabled-'+checkedScope+'-scopes'+${JSON.stringify(String(factualVerdict.factualScopes ?? ''))};
+      }
       for(const kind of ['whole','chapters']){ if(!scope(kind))return 'offered-'+kind+'-missing'; if(scope(kind).disabled)return 'offered-'+kind+'-disabled'; }
       // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
       if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return 'selection-held';
