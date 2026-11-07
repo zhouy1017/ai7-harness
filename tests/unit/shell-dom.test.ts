@@ -47,6 +47,14 @@ function mounted(notice: string | null = null) {
 }
 
 describe('mounted shell preferences', () => {
+  it('keeps only Settings in the sidebar footer and selects it for Help', () => {
+    const { sidebar, surface, position } = mounted();
+    surface.follow('help', null);
+    expect(sidebar.querySelector('[data-shell-slot="help"]')).toBeNull();
+    expect(sidebar.querySelector('[data-nav-help]')).toBeNull();
+    expect(sidebar.querySelector('[data-nav-settings]')?.getAttribute('aria-current')).toBe('page');
+    expect(position.textContent).toBe('本机 · 帮助');
+  });
   it('keeps focus on the same Book pin when pinning and unpinning moves it between lists', async () => {
     const { sidebar, preferences } = mounted();
     await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });

@@ -2933,8 +2933,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'multi-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'multi-settings-ready');
     await click(renderer, '帮助', 'multi-help');
-    await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, 'multi-mode-ready');
-    await assertRenderer(renderer, `(() => { const box=document.querySelector('.help-developer-mode input'); if(box.checked)box.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'multi-mode-off');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'multi-mode-ready');
+    await assertRenderer(renderer, `(() => { const box=document.querySelector('.help-developer-mode input'); if(!box||box.disabled)return false; if(box.checked)box.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'multi-mode-off');
     await openDeliverables(renderer, 'multi-deliverables');
     await waitFor(renderer, `['blank','writing','import'].every(action=>{const button=window.__j07.cardAction('promotion-article',action);return button instanceof HTMLButtonElement&&!button.disabled;})`, 'multi-ordinary-actions');
     await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="writing"]', 'multi-writing-entry');

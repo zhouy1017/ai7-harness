@@ -844,8 +844,8 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
-      await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `quality-mode-${developer}-switch-ready`);
-      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
       await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
       if (developer === 'true') continue;
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-default');
@@ -1967,7 +1967,7 @@ async function main() {
     const olderSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'exact-older-filled');
     requireJourney(olderSheet.latestEligible === 'false' && olderSheet.chosen === 1 && JSON.stringify(olderSheet.checked) === JSON.stringify(['style-and-format']) &&
       olderSheet.lines.includes('你选了第 1 版；最新可用的是第 2 版。'), 'exact-older-words', olderSheet);
-    await waitFor(renderer, `document.activeElement === document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]')`, 'exact-version-focused', 10_000);
+    await waitFor(renderer, `(() => { const native=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'),trigger=native?.nextElementSibling; return native instanceof HTMLSelectElement && !native.disabled && native.selectedIndex===1 && trigger instanceof HTMLButtonElement && trigger.matches('.ui-select-trigger') && !trigger.disabled && !trigger.hidden && trigger.getClientRects().length>0 && trigger.textContent.includes('第 1 版') && document.activeElement===trigger; })()`, 'exact-version-focused', 10_000);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'exact-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exact-prepared', 180_000);
     const exactRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;

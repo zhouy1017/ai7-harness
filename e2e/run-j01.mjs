@@ -722,7 +722,7 @@ async function clickExactButton(renderer, label, location) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
-    `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!button) return false; button.click(); return true; })()`,
+    `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!button) return false; button.click(); return true; })()`,
     location,
   );
 }
@@ -1964,9 +1964,11 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await assertRenderer(renderer, sidebarNavigate('#sidebar-toggle'), 'empty-book-sidebar-expand');
   await waitFor(renderer, `document.documentElement.dataset.sidebar === 'full' && document.documentElement.dataset.sidebarCollapsed === 'false' && document.querySelector('#sidebar-toggle')?.getAttribute('aria-expanded') === 'true'`, 'empty-book-sidebar-expanded');
   // Help is read-only navigation inside this existing launch stage; it adds no preload member or stage.
-  await assertRenderer(renderer, sidebarNavigate('[data-shell-slot="help"] [data-nav-help="hub"]'), 'help-open');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'help-settings');
+  await waitFor(renderer, `document.querySelector('.settings-hub-row[data-settings-route="help"]') && !document.querySelector('[data-shell-slot="help"], .sidebar-help-slot, [data-nav-help]')`, 'help-settings-entry');
+  await clickExactButton(renderer, '帮助', 'help-open');
   await waitFor(renderer, `document.querySelector('[data-screen="help"] [data-help-ready="true"]') && document.activeElement?.id === 'help-tab-usage'`, 'help-usage-focus');
-  await waitFor(renderer, `Boolean(document.querySelector('.help-about-line')?.textContent.match(/^软件版本 .+ · 数据版本 [0-9]+ · 服务协议 [0-9]+$/)) && document.querySelector('#context-title')?.textContent === '帮助' && document.querySelector('[data-nav-help="hub"]')?.getAttribute('aria-current') === 'page'`, 'help-live-versions');
+  await waitFor(renderer, `Boolean(document.querySelector('.help-about-line')?.textContent.match(/^软件版本 .+ · 数据版本 [0-9]+ · 服务协议 [0-9]+$/)) && document.querySelector('#context-title')?.textContent === '设置' && document.querySelector('#context-position')?.textContent === '本机 · 帮助' && document.querySelector('[data-nav-settings="hub"]')?.getAttribute('aria-current') === 'page'`, 'help-live-versions');
   await assertRenderer(renderer, `(() => {
     const tab = document.querySelector('#help-tab-usage');
     tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
@@ -1982,6 +1984,8 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     return shown.length === 1 && shown[0].dataset.licenseName === filter.value;
   })()`, 'help-licenses-filter');
   await clickExactButton(renderer, '返回', 'help-back');
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'help-settings-return');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'help-return-library');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'help-library-return');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');

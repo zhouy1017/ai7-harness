@@ -287,7 +287,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
 async function clickSelector(renderer, selector, name) {
@@ -617,7 +617,7 @@ const FOCUS_STATE = `(() => {
 
 /** Press the enabled button with exactly these words inside one region of the screen. */
 async function clickIn(renderer, scope, label, name) {
-  await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll(${JSON.stringify(`${scope} button`)})).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll(${JSON.stringify(`${scope} button`)})).find((item)=>(item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)})); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
 }
 
 /** 待我处理 from the shell's header: the screen opens in the library state and paints the service's answer. */
@@ -1722,7 +1722,7 @@ async function main() {
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-ordinary-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-ordinary-settings-ready');
     await click(renderer,'帮助','overview-poll-ordinary-help');
-    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
     await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
@@ -1789,7 +1789,7 @@ async function main() {
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');
     await click(renderer,'帮助','overview-poll-developer-help');
-    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`,'overview-poll-developer-mode');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'overview-poll-developer-mode');
 
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');

@@ -25,7 +25,6 @@ import {
   shellSectionLabel,
   type ShellDestination,
 } from './shell-labels.js';
-import { HELP_ENTRY } from './help-labels.js';
 
 // The shell around every screen (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076, ADR 0092):
 // a two-level sidebar — the six global destinations, 置顶 and 最近打开 Books,
@@ -44,7 +43,6 @@ export interface ShellPlace {
 export type ShellActive =
   | { readonly kind: 'destination'; readonly destination: ShellDestination }
   | { readonly kind: 'settings' }
-  | { readonly kind: 'help' }
   | { readonly kind: 'section'; readonly section: ShellBookSection }
   | { readonly kind: 'none' };
 
@@ -69,7 +67,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'quality-learning': { kind: 'destination', destination: 'quality' },
   'global-agent': { kind: 'destination', destination: 'global-agent' },
   settings: { kind: 'settings' },
-  help: { kind: 'help' },
+  help: { kind: 'settings' },
   'model-service': { kind: 'settings' },
   'data-storage': { kind: 'settings' },
   'evaluation-calibration': { kind: 'settings' },
@@ -99,7 +97,6 @@ export function contextHeading(state: string, active: ShellActive, book: ShellBo
     return { title: book.title, position: `${shellSectionGroupLabel(active.section)} · ${shellSectionLabel(active.section)}`, book: true };
   }
   if (active.kind === 'settings') return { title: SHELL_SETTINGS.label, position: SETTINGS_PAGE_TITLES[state] ?? SHELL_LABELS.global, book: false };
-  if (active.kind === 'help') return { title: HELP_ENTRY.label, position: SHELL_LABELS.global, book: false };
   if (active.kind === 'destination') {
     const label = shellDestinationLabel(active.destination);
     return IMPORT_STATES.has(state) ? { title: SHELL_LABELS.importing, position: label, book: false } : { title: label, position: SHELL_LABELS.global, book: false };
@@ -388,9 +385,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const settings = navLink(SHELL_SETTINGS.label, SHELL_SETTINGS.icon, () => options.openSettings());
   settings.dataset['navSettings'] = 'hub';
   // 帮助 (slice 11f) takes this slot beside 设置.
-  const helpSlot = el('div', 'sidebar-help-slot');
-  helpSlot.dataset['shellSlot'] = 'help';
-  foot.append(settings, helpSlot);
+  foot.append(settings);
   const bookMenu = el('div', 'sidebar-book-menu');
   bookMenu.setAttribute('popover', 'auto');
   bookMenu.setAttribute('role', 'menu');
@@ -516,9 +511,6 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     else agentWorkspaceLink?.removeAttribute('aria-current');
     if (active.kind === 'settings') settings.setAttribute('aria-current', 'page');
     else settings.removeAttribute('aria-current');
-    const helpLink = helpSlot.querySelector('[data-nav-help="hub"]');
-    if (active.kind === 'help') helpLink?.setAttribute('aria-current', 'page');
-    else helpLink?.removeAttribute('aria-current');
     bookGroup.hidden = book === null;
     if (book !== null) {
       bookGroup.dataset['bookId'] = book.bookId;

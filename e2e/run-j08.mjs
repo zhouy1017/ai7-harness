@@ -239,15 +239,15 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
-// Settings > Help remains the mode owner until Batch 3 #1376/#1382 moves that control.
+// Settings > Help remains compatible with the one-step Settings Local switch (#1376 / #1382).
 async function recoveryTechnicalMode(renderer, visible, name) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
   await click(renderer, '帮助', `${name}-help`);
-  await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `${name}-toggle-ready`);
-  await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);
+  await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-toggle-ready`);
+  await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);
   await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible===${JSON.stringify(String(visible))}`, `${name}-mode`);
 }
 async function fill(renderer, selector, value, name) {

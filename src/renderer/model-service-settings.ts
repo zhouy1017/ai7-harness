@@ -214,6 +214,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form')) draftEdited = true; });
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);
+    let changedCataloguePolls = 0;
+    content.dataset['changedCataloguePolls'] = '0';
     const follow = async (discover = false): Promise<void> => {
       if (!content.isConnected) { stopFollow?.(); return; }
       if (reading || document.visibilityState !== 'visible') return;
@@ -225,6 +227,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         const result = discover && channel?.route ? await window.ai7.refreshModelServiceModels({ route: channel.route })
           : { ...next, ...(projection.modelDiscovery === undefined ? {} : { modelDiscovery: projection.modelDiscovery }) };
         const changed = catalogueKey(result) !== signature;
+        if (content.isConnected && changed) content.dataset['changedCataloguePolls'] = String(++changedCataloguePolls);
         // A requested discovery has its own outcome even when the catalogue/failure matches the last render.
         if (content.isConnected && (discover || changed) && result.modelDiscovery?.status === 'failure') setStatus(result.modelDiscovery.reason, 'error');
         if (content.isConnected && changed && !draftEdited && !pollControlEngaged(content)) renderModelServiceSettingsProjection(result, true);

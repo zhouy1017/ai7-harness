@@ -1,5 +1,5 @@
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
-import { filterChoices, stateTerm } from './components/controls.js';
+import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
@@ -922,7 +922,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     if (empty) {
       const more = el('details', 'evaluation-more');
-      more.append(el('summary', undefined, '更多 ▾'), start);
+      more.append(el('summary', undefined, '更多 ▾'), menuPanel(start));
       parts[0]!.append(more);
     } else parts.push(start);
     if (workspace.readersReport.basis !== null) parts.push(readersReportNode(workspace));

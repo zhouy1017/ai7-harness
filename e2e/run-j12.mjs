@@ -325,6 +325,79 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), name);
 }
 
+/** #1376: exercise the actual progressive controls against browser-native form/select behavior. */
+async function assertProgressiveSelect(renderer) {
+  requireJourney(await renderer.evaluate(`(async () => {
+    const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const form=document.createElement('form'), fieldset=document.createElement('fieldset');
+    const label=document.createElement('label'); label.textContent='公开合成选项'; label.htmlFor='j12-native-select';
+    const select=document.createElement('select'); select.id='j12-native-select'; select.name='choice';
+    select.dataset.contract='native'; select.setAttribute('aria-label','公开合成选项'); select.required=true;
+    for(let index=0;index<150;index++)select.add(new Option('选项 '+String(index).padStart(3,'0'),'v'+index,index===4,index===4));
+    const status=document.createElement('p');status.setAttribute('role','status');
+    fieldset.append(label,select); form.append(fieldset,status); document.querySelector('.model-service-settings').append(form); select.focus();
+    let changes=0; form.addEventListener('change',()=>changes++);
+    const untouched=document.createElement('select');
+    const originalDescriptor=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');
+    try {
+      await frame();
+      const trigger=select.nextElementSibling, popup=trigger?.nextElementSibling, list=popup?.querySelector('[role="listbox"]'), filter=popup?.querySelector('input');
+      if(form.querySelector('[role="status"]')!==status)return false;
+      if(!trigger?.matches('.ui-select-trigger')||document.activeElement!==trigger||!list||!filter||select.id!=='j12-native-select'||select.name!=='choice'||select.dataset.contract!=='native'||select.getAttribute('aria-label')!=='公开合成选项'||select.options.length!==150||select.value!=='v4'||select.tabIndex!==-1||select.getAttribute('aria-hidden')!=='true')return false;
+      select.value='v13'; if(!trigger.textContent.includes('013')||changes)return false;
+      select.selectedIndex=17; if(!trigger.textContent.includes('017'))return false;
+      select.options[18].selected=true; if(select.value!=='v18'||!trigger.textContent.includes('018'))return false;
+      select.options[18].text='更新后的选项'; select.remove(149); select.add(new Option('新增选项','added'));
+      select.options[113].disabled=true; await frame();
+      if(!trigger.textContent.includes('更新后的选项')||select.options.length!==150)return false;
+      trigger.scrollIntoView({block:'center',behavior:'instant'}); await frame();
+      trigger.click(); await frame();
+      if(popup.hidden||filter.hidden||list.querySelectorAll('[role="option"]').length!==150||list.scrollHeight<=list.clientHeight||list.clientHeight>321)return false;
+      if(list.querySelector('[aria-selected="true"]')?.lastElementChild?.textContent!=='✓')return false;
+      const rect=popup.getBoundingClientRect(); if(rect.left<0||rect.right>innerWidth+1||rect.top<0||rect.bottom>innerHeight+1)return false;
+      filter.value='013'; filter.dispatchEvent(new Event('input',{bubbles:true}));
+      if(list.querySelectorAll('[role="option"]').length!==1||select.value!=='v18')return false;
+      filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+      if(select.value!=='v13'||changes!==1||!popup.hidden||document.activeElement!==trigger)return false;
+      trigger.click(); filter.value='113'; filter.dispatchEvent(new Event('input',{bubbles:true}));
+      list.querySelector('[role="option"]').click(); if(select.value!=='v13'||changes!==1||popup.hidden)return false;
+      filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+      if(!popup.hidden||document.activeElement!==trigger)return false;
+      trigger.click();
+      filter.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+      filter.value='选项 09'; filter.dispatchEvent(new Event('input',{bubbles:true}));
+      filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}));
+      if(select.value!=='v13'||popup.hidden||changes!==1)return false;
+      filter.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+      if(list.querySelectorAll('[role="option"]').length!==10)return false;
+      filter.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+      filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+      if(select.value!=='v91'||changes!==2||!popup.hidden)return false;
+      form.reset(); await frame(); if(select.value!=='v4'||!trigger.textContent.includes('004')||changes!==2)return false;
+      trigger.click(); select.disabled=true; if(!trigger.disabled||!popup.hidden)return false;
+      select.disabled=false; fieldset.disabled=true; await frame(); if(!trigger.disabled)return false;
+      fieldset.disabled=false; await frame(); if(trigger.disabled)return false;
+      select.replaceChildren(new Option('甲','a',true,true),new Option('乙','b'),new Option('丙','c'));
+      await frame(); trigger.click(); if(!filter.hidden)return false;
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+      if(select.value!=='c'||changes!==3)return false;
+      trigger.click(); trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));
+      trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+      if(select.value!=='a'||changes!==4||new FormData(form).get('choice')!=='a')return false;
+      select.selectedIndex=-1; if(form.checkValidity()||document.activeElement!==trigger)return false;
+      select.value='b'; select.dispatchEvent(new Event('change',{bubbles:true}));
+      if(changes!==5||!trigger.textContent.includes('乙'))return false;
+      trigger.click(); document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true})); if(!popup.hidden)return false;
+      if(Object.hasOwn(untouched,'value')||Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set!==originalDescriptor.set)return false;
+      form.remove(); await frame();
+      return !trigger.isConnected && !popup.isConnected && !Object.hasOwn(select,'value') && !Object.hasOwn(select,'selectedIndex') && select.getAttribute('aria-hidden')===null && select.tabIndex===0;
+    } finally { form.remove(); }
+  })()`), 'select-native-progressive-contract');
+}
+
 /** #1372: complete ordinary settings may scroll vertically; controls must remain visible and usable at supported sizes. */
 async function assertOrdinaryModelReachability(renderer) {
   const native = await renderer.evaluate(`({width:innerWidth,height:innerHeight,outerWidth,outerHeight})`);
@@ -336,7 +409,8 @@ async function assertOrdinaryModelReachability(renderer) {
       const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','[data-favorite-model]','[data-custom-model-id]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
       const controls=[];
       for (const [index,selector] of selectors.entries()) {
-        const node=document.querySelector(selector);
+        const native=document.querySelector(selector);
+        const node=native instanceof HTMLSelectElement && native.classList.contains('ui-select-native') ? native.nextElementSibling : native;
         if(!(node instanceof HTMLElement))return {ok:false,width:innerWidth,height:innerHeight,missing:index,controls};
         node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
         const focusable=node.matches('input,select,button')&&!node.disabled;
@@ -439,11 +513,26 @@ async function saveEdit(renderer, suffix) {
 async function saveMilestone(renderer) {
   // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
   await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
-  await assertRenderer(renderer, `(() => { const details=document.querySelector('.milestone-section'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return true; })()`, 'milestone-open');
+  await assertRenderer(renderer, `(() => { const menu=document.querySelector('[data-save-menu="manuscript"]'),details=document.querySelector('.milestone-section'); if(!(menu instanceof HTMLDetailsElement)||!(details instanceof HTMLDetailsElement))return false; menu.open=true; details.open=true; return true; })()`, 'milestone-open');
   await fill(renderer, '#milestone-label', 'J12 后续修订版', 'milestone-label');
   // Synchronized delta with Issue #414: a purpose is chosen from the unselected cards, not typed.
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return radio.checked; })()`, 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
+  // #1376 review F3: a valid, enabled save action must leave the arrow order when its subsection is collapsed.
+  await assertRenderer(renderer, `(() => {
+    const menu=document.querySelector('[data-save-menu="manuscript"]'),section=menu?.querySelector('.milestone-section'),outer=menu?.querySelector('summary'),summary=section?.querySelector('summary');
+    const save=section?.querySelector('button'),exportAction=menu?.querySelector('.editor-save-menu-body > button');
+    if(!section||!outer||!summary||!save||save.disabled||!exportAction)return false;
+    section.open=false; outer.focus();
+    const key=(value)=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+    key('ArrowDown');if(document.activeElement!==summary)return false;
+    key('ArrowDown');if(document.activeElement!==exportAction)return false;
+    key('ArrowDown');if(document.activeElement!==summary)return false;
+    key('End');if(document.activeElement!==exportAction)return false;
+    key('Home');if(document.activeElement!==summary)return false;
+    key('ArrowUp');if(document.activeElement!==exportAction)return false;
+    key('Home');summary.click();return section.open&&!save.disabled&&document.activeElement===summary;
+  })()`, 'milestone-collapsed-menu-keyboard');
   await click(renderer, '保存里程碑版本', 'milestone-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-saved', 120_000);
 }
@@ -753,7 +842,7 @@ async function main() {
     onboardingManager = await launch(undefined, undefined, onboardingRoot);
     [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'onboarding-restart-window');
     await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'onboarding-restart-ready');
-    await assertRenderer(onboardingPage, `(async () => (await window.ai7.getPreferences()).values['onboarding.state']==='skipped' && !document.querySelector('[data-onboarding-card]'))()`, 'first-run-skip-remembered');
+    await requireJourney(await onboardingPage.evaluate(`(async () => (await window.ai7.getPreferences()).values['onboarding.state']==='skipped' && !document.querySelector('[data-onboarding-card]'))()`), 'first-run-skip-remembered');
     await close();
     at('sample-book-import');
     const sampleRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'sample-onboarding-data'), checkout);
@@ -761,14 +850,14 @@ async function main() {
     [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'sample-onboarding-window');
     await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'sample-onboarding-ready');
     const sampleBook = await importBook(onboardingPage, 'J12 示例图书', true);
-    await assertRenderer(onboardingPage, `(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest==='b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483') && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`, 'sample-admitted-source-and-completion');
+    await requireJourney(await onboardingPage.evaluate(`(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest==='b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483') && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`), 'sample-admitted-source-and-completion');
     at('guided-strip');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
-    await assertRenderer(onboardingPage, `(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-strip-navigation-only');
+    await requireJourney(await onboardingPage.evaluate(`(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`), 'guided-strip-navigation-only');
     await assertRenderer(onboardingPage, `(() => { const link=document.querySelector('[data-onboarding-guidance="sample-book"] button[data-onboarding-step="analysis"]'); if(!(link instanceof HTMLButtonElement)||link.disabled)return false; link.click(); return true; })()`, 'guided-analysis-link');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"]')`, 'guided-analysis-page');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card[data-analysis-state="unavailable"]')`, 'guided-analysis-prerequisite');
-    await assertRenderer(onboardingPage, `(async () => { const tasks=await window.ai7.inspectBookTasks(); return !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`, 'guided-analysis-not-started');
+    await requireJourney(await onboardingPage.evaluate(`(async () => { const tasks=await window.ai7.inspectBookTasks(); return !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`), 'guided-analysis-not-started');
     await close();
 
     at('offline-empty-and-import');
@@ -782,17 +871,17 @@ async function main() {
     // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');
-    await click(primary, '帮助', 'technical-mode-help');
-    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
-    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-off');
+    // #1376 / #1382: the persisted switch is one step from Settings Local.
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'technical-mode-default-on');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'technical-mode-off');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && !document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'technical-mode-off-applied');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
     await waitFor(primary, `document.querySelectorAll('[data-screen="settings"] [data-settings-entry]').length===6 && !document.querySelector('[data-settings-entry="usage"]') && !document.querySelector('[data-settings-entry="evaluation-calibration"]') && !document.querySelector('[data-settings-entry="diagnostics"]')`, 'ordinary-settings-six-rows');
     await click(primary, '键盘与无障碍', 'ordinary-keyboard-entry');
     await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
-    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
     await waitFor(primary, `document.documentElement.dataset.reducedMotion==='true' && localStorage.getItem('ai7.reducedMotion')==='true'`, 'ordinary-reduced-motion-applied');
-    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
     await click(primary, '模型服务', 'ordinary-model-entry');
@@ -848,7 +937,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
-    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-on');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'technical-mode-on');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'technical-mode-on-applied');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'developer-keyboard-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'developer-keyboard-settings-ready');
@@ -857,7 +946,7 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
-    await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`, 'global-agent-entry-no-work');
+    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`), 'global-agent-entry-no-work');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
@@ -1454,7 +1543,7 @@ async function main() {
     // 设置 › 本机 › 诊断 replaces 11a's 即将提供 row (Issue #938 restack onto #934).
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'diagnostics-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'diagnostics-open-settings-hub');
-    await assertRenderer(primary, `(() => { const row=document.querySelector('[data-settings-group="local"] [data-settings-entry="diagnostics"]'); const entry=row?.querySelector('[data-settings-route="diagnostics"]'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.textContent==='诊断' && row.dataset.settingsAvailability===undefined && !row.querySelector('.settings-coming-soon'); })()`, 'diagnostics-settings-row');
+    await assertRenderer(primary, `(() => { const row=document.querySelector('[data-settings-group="local"] [data-settings-entry="diagnostics"]'); const entry=row?.querySelector('[data-settings-route="diagnostics"]'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.getAttribute('aria-label')==='诊断' && row.dataset.settingsAvailability===undefined && !row.querySelector('.settings-coming-soon'); })()`, 'diagnostics-settings-row');
     await click(primary, '诊断', 'diagnostics-open');
     await waitFor(primary, `document.querySelector('[data-screen="diagnostics"] [data-crash-list-ready="true"]')`, 'diagnostics-ready');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 诊断' && document.querySelector('#app-sidebar [data-nav-settings]')?.getAttribute('aria-current')==='page'`, 'diagnostics-settings-place');
@@ -1485,7 +1574,7 @@ async function main() {
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .page-content', returnToScreen: async () => {
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .settings-layout > .model-service-settings.page-content', returnToScreen: async () => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
       await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
       // 设置 paints its hub after the click, so the 模型服务 row is waited for and followed once it is there (#935).
@@ -1575,7 +1664,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-mode-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-ordinary-mode-settings-ready');
     await click(primary, '帮助', 'model-memory-ordinary-mode-help');
-    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'model-memory-ordinary-mode-toggle-ready');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'model-memory-ordinary-mode-toggle-ready');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'model-memory-ordinary-mode-toggle');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'model-memory-ordinary-mode');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-settings');
@@ -1587,7 +1676,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-development-restored-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-development-restored-settings-ready');
     await click(primary, '帮助', 'model-memory-development-restored-help');
-    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===false`, 'model-memory-development-restored-toggle-ready');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===false && document.querySelector('.help-developer-mode input')?.disabled===false`, 'model-memory-development-restored-toggle-ready');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'model-memory-development-restored-toggle');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'model-memory-development-restored');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-return-settings');
@@ -1596,7 +1685,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-model-channel="deepseek-open-platform"] input')`, 'model-memory-return-models-ready');
     await primary.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
     // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
-    await assertRenderer(primary, `(async () => {
+    await requireJourney(await primary.evaluate(`(async () => {
       const refreshed=await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
       if(refreshed.modelDiscovery?.status!=='failure'||refreshed.modelDiscovery.code!=='MODEL_SERVICE_UNREACHABLE'||
         !refreshed.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.models.some(model=>model.modelId==='deepseek-flash'))return false;
@@ -1607,7 +1696,7 @@ async function main() {
       if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-fast')return false;
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
-    })()`, 'independent-role-models-without-test');
+    })()`), 'independent-role-models-without-test');
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(!(refresh instanceof HTMLButtonElement)||refresh.disabled||refresh.textContent!=='刷新模型列表')return false; refresh.click(); return true; })()`, 'model-refresh-click');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
@@ -1615,12 +1704,13 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-catalogue-settings-ready');
     await click(primary, '帮助', 'ordinary-catalogue-help');
-    await assertRenderer(primary, `(() => { document.querySelector('.help-developer-mode input').click(); return true; })()`, 'ordinary-catalogue-mode');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; toggle.click(); return true; })()`, 'ordinary-catalogue-mode');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-catalogue-mode-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-return-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-catalogue-return-ready');
     await click(primary, '模型服务', 'ordinary-catalogue-entry');
     await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelectorAll('[data-model-role]').length===2`, 'ordinary-catalogue-roles');
+    await assertProgressiveSelect(primary);
     await primary.evaluate(`globalThis.__j12PollOriginalRole=document.querySelector('[data-model-role="main-editorial"]').textContent`);
     for (let cycle=0;cycle<2;cycle++) {
       await assertRenderer(primary, `(() => {const heading=document.querySelector('[data-search-backends] h3');heading.focus();globalThis.__j12PollSettings=document.querySelector('.model-service-settings');globalThis.__j12PollRole=document.querySelector('[data-model-role="main-editorial"]').textContent;return document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'ordinary-poll-catalogue-focus');
@@ -1630,6 +1720,29 @@ async function main() {
     }
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole`, 'ordinary-poll-catalogue-restored');
+    // #1376 review F2: use the real model control, augmenting only its options with public synthetic labels.
+    requireJourney(await primary.evaluate(`(async()=>{
+      const owner=document.querySelector('.model-service-settings'),select=owner?.querySelector('select[aria-label="AI7 使用的模型"]');
+      if(!(select instanceof HTMLSelectElement))return false;
+      for(let i=0;i<150;i++)select.add(new Option('公开选项 '+i,'option-'+i));
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const trigger=select.nextElementSibling,popup=trigger?.nextElementSibling,filter=popup?.querySelector('input'),list=popup?.querySelector('[role="listbox"]');
+      if(!trigger?.matches('.ui-select-trigger')||!filter||!list)return false;
+      trigger.scrollIntoView({block:'center',behavior:'instant'});trigger.click();filter.value='公开';filter.dispatchEvent(new Event('input',{bubbles:true}));filter.focus();filter.setSelectionRange(0,1);list.scrollTop=128;
+      globalThis.__j12OpenSelect={owner,select,trigger,popup,filter,list,value:select.value};return !popup.hidden;
+    })()`), 'ordinary-select-poll-open');
+    for(let cycle=0;cycle<2;cycle++) {
+      const reads=await primary.evaluate(`Number(globalThis.__j12OpenSelect.owner.dataset.changedCataloguePolls)`);
+      await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-popup-poll-'+cycle)}})`);
+      await waitFor(primary, `Number(globalThis.__j12OpenSelect.owner.dataset.changedCataloguePolls)>${reads}`, 'ordinary-select-actual-changed-poll');
+      await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;return s.owner===document.querySelector('.model-service-settings')&&s.select.isConnected&&!s.popup.hidden&&s.trigger.getAttribute('aria-expanded')==='true'&&s.filter.value==='公开'&&document.activeElement===s.filter&&s.filter.selectionStart===0&&s.filter.selectionEnd===1&&s.list.scrollTop===128&&s.select.value===s.value;})()`, 'ordinary-select-filter-caret-scroll-poll-survival');
+    }
+    await assertRenderer(primary, `(()=>{const s=globalThis.__j12OpenSelect;s.filter.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return s.popup.hidden&&document.activeElement===s.trigger;})()`, 'ordinary-select-escape-trigger-focus');
+    await waitFor(primary, `(()=>{const s=globalThis.__j12OpenSelect,owner=document.querySelector('.model-service-settings'),native=owner?.querySelector('select[aria-label="AI7 使用的模型"]'),trigger=native?.nextElementSibling;return owner!==s.owner&&native?.value===s.value&&trigger?.matches('.ui-select-trigger')&&document.activeElement===trigger&&trigger.getAttribute('aria-expanded')==='false'&&document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('J12 Popup Poll 1');})()`, 'ordinary-select-latest-projection-trigger-focus');
+    await primary.evaluate(`globalThis.__j12AfterCloseOwner=document.querySelector('.model-service-settings')`);
+    await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    await waitFor(primary, `(()=>{const native=document.querySelector('select[aria-label="AI7 使用的模型"]');return document.querySelector('.model-service-settings')!==globalThis.__j12AfterCloseOwner&&document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole&&native?.value===globalThis.__j12OpenSelect.value&&document.activeElement===native?.nextElementSibling;})()`, 'ordinary-select-poll-role-restored');
+    await primary.evaluate(`delete globalThis.__j12OpenSelect;delete globalThis.__j12AfterCloseOwner`);
     await assertRenderer(primary, `(() => {const mode=document.querySelector('select[aria-label="网络代理方式"]');mode.value='proxy';mode.dispatchEvent(new Event('change',{bubbles:true}));const input=document.querySelector('input[aria-label="代理 URL"]');input.value='http://127.0.0.1:1';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(7,12,'backward');globalThis.__j12PollDraft=input;return true;})()`, 'ordinary-poll-draft-focus');
     for (let cycle=0;cycle<2;cycle++) {
       await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-poll-draft-'+cycle)}})`);
@@ -1672,12 +1785,13 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'catalogue-restore-settings-ready');
     await click(primary, '帮助', 'catalogue-restore-help');
-    await assertRenderer(primary, `(() => { document.querySelector('.help-developer-mode input').click(); return true; })()`, 'catalogue-restore-developer');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; toggle.click(); return true; })()`, 'catalogue-restore-developer');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'catalogue-developer-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-developer-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'catalogue-developer-settings-ready');
     await click(primary, '模型服务', 'catalogue-developer-entry');
     await waitFor(primary, `document.querySelector('[data-model-service-mode="developer"]')`, 'catalogue-developer-entry-ready');
+    await assertProgressiveSelect(primary);
     at('model-service-search-backends');
     const searchSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends)`);
     requireJourney(searchSettings.selectedBackendId === 'search-tinyfish' && JSON.stringify(searchSettings.backends.map((entry)=>entry.backendId)) === JSON.stringify(['search-tinyfish','search-deepseek','search-brave','search-parallel','search-bochaai']), 'search-backend-ranking-default');
