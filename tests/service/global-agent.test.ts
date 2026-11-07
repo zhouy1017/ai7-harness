@@ -1,6 +1,6 @@
 import {
   CURATION_SCHEMA_SQL,
-  FACTUAL_TASK_INTENTS_SQL,
+  FACTUAL_RANGE_TASK_INTENTS_SQL,
   LATEST_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
@@ -208,7 +208,7 @@ describe('revision 87 (Issue #1083)', () => {
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() as { sql: string }).sql)
         .toBe(SUPERVISION_SCHEMA_SQL.learning_supervision_directives);
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get() as { sql: string }).sql).toBe(DIALOGUE_SCHEMA_SQL.dialogue_tasks);
-      expect(objects(migrated)).toEqual(before.map((row) => row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_TASK_INTENTS_SQL } : CURATION_SCHEMA_SQL[row.name] === undefined ? row : { ...row, sql: CURATION_SCHEMA_SQL[row.name] }));
+      expect(objects(migrated)).toEqual(before.map((row) => row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_RANGE_TASK_INTENTS_SQL } : CURATION_SCHEMA_SQL[row.name] === undefined ? row : { ...row, sql: CURATION_SCHEMA_SQL[row.name] }));
       for (const trigger of Object.keys(SUPERVISION_TRIGGER_SQL)) migrated.exec(`DROP TRIGGER ${trigger}`);
       migrated.exec('DROP TABLE learning_supervision_directives');
     } finally { migrated.close(); }
