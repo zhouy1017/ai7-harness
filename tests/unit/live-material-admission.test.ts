@@ -1,3 +1,4 @@
+import { composeEditorialMemoryBlock, withEditorialMemoryDefinition } from '../../src/service/learning/editorial-memory.js';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { liveKindAdmission, liveKindContractCategories, liveMaterialRule } from '../../src/service/analysis/live-kind-admission.js';
@@ -44,6 +45,13 @@ describe('material-bearing live kind admission (#809)', () => {
     expect(policy.providerProcessing.version).toBe('v35');
     for (const definition of [wrap(review), wrap(initial), wrap(report), writing()]) {
       expect(liveKindAdmission(policy, definition, productionBinding)).not.toBeNull();
+      const memory = composeEditorialMemoryBlock([{ versionId: 'synthetic-rule', ordinal: 1, lineIndex: 0, text: '保留合成短句。',
+        bookId: null, categoryId: 'style-and-format', active: true, confidence: 1, recordedAt: '2026-11-07T00:00:00Z' }],
+      { bookId: null, taskKind: 'writing' })!;
+      const remembered = withEditorialMemoryDefinition(definition, memory);
+      expect(liveKindAdmission(policy, remembered, productionBinding)).not.toBeNull();
+      expect(liveMaterialContract(remembered)?.materials).toEqual(liveMaterialContract(definition)?.materials);
+      expect(liveKindContractCategories(remembered.kind, remembered)).toEqual(expect.arrayContaining(['house-review-preference-excerpt', 'frozen-material-reference-excerpt']));
       expect(liveKindAdmission(withRuleFor(policy, definition.kind, { materialReferencesAllowed: false }), definition, productionBinding)).toBeNull();
       const rule = liveMaterialRule(policy, definition.kind)!;
       expect(liveKindAdmission(withRuleFor(policy, definition.kind, {

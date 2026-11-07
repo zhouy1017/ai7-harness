@@ -210,7 +210,7 @@ export function preferenceLines(sources: readonly HousePreferenceSource[], names
     const key = source.eligibility === 'house' ? `0/${source.categoryId}` : `1/${source.bookId}/${source.categoryId}`;
     groups.set(key, [...(groups.get(key) ?? []), source]);
   }
-  // Provider Processing v20/v21 bound one request's block; a record never holds more than one block may carry.
+  // Library capacity is distinct from the smaller per-request recall budget.
   let remaining = EDITORIAL_MEMORY_LIBRARY_GRAPHEMES;
   const lines: HouseReviewPreferenceVersion['lines'][number][] = [];
   for (const [, group] of [...groups].sort(([a], [b]) => a.localeCompare(b, 'en'))) {

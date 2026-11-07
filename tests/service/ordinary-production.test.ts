@@ -1,3 +1,5 @@
+import * as egressGate from '../../src/service/provider/egress-gate.js';
+import { recordedMarkModel, markModelLabels } from '../../src/service/editorial-mark-source.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
@@ -1108,9 +1110,15 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(code(() => store.inspectBaselineAnalysis(bookId, () => null))).toBe('ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED');
   });
 
-  it('freezes enabled editorial memory on baseline requests and reconstructs the same contract after restart', async () => {
+  it.each([{ model: 'deepseek-flash', effort: undefined, label: 'DeepSeek V4.1 Flash' },
+    { model: 'deepseek-v4-pro', effort: 'high', label: 'deepseek-v4-pro@high' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
     const { store, production } = await openProductionStore();
-    await configure(store, production, 'deepseek-open-platform');
+    const credentialReference = await configure(store, production, 'deepseek-open-platform');
+    store.selectMainRoleModel('deepseek-open-platform', model);
+    const configured = { ...OFFICIAL, model, credentialReference };
+    production.live = { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' };
+    production.policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+    const egress = vi.spyOn(egressGate, 'evaluateEgress');
     const bookId = await sample1Book(store, '合成基线记忆');
     store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'academic-integrity',
       text: '对合成引用应区分作者观点和外部证据。', effect: 'guide' });
@@ -1121,7 +1129,17 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const settled = await run(store, owner(store, production, stubTransport(calls, await chainAnswers(prepared)), []), bookId, prepared);
     expect(settled.run?.state).toBe('completed');
     expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((call) => JSON.parse(call.body).model === model && JSON.parse(call.body).reasoning_effort === effort)).toBe(true);
     expect(calls.every((call) => JSON.parse(call.body).messages[0].content.includes('必须优先遵循以下本社偏好'))).toBe(true);
+    expect(egress.mock.calls.some(([, binding]) => binding.contractCategories?.has('house-review-preference-excerpt'))).toBe(true);
+    // Read the producing plan, after today's selection changes; no provider is called for author projection.
+    await configure(store, production, 'opencode-go');
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const author = recordedMarkModel(db, prepared.taskIntent!.taskIntentId, new Date().toISOString());
+      expect(author).toEqual({ route: 'deepseek-open-platform', model, reasoningEffort: effort });
+      expect(markModelLabels(author)).toEqual({ modelLabel: label, modelTechnicalLabel: `DeepSeek 开放平台（官方） · ${model}${effort ? `@${effort}` : ''}` });
+    } finally { db.close(); }
     const prior = store.baselineAnalysisLedger.definitionForDigest(digest).systemPrompt;
     store.markCleanShutdown(); store.close();
     const reopened = await openProductionStore();
