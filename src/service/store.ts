@@ -465,6 +465,7 @@ import {
   WORD_TRACKED_IMPORT_SCHEMA_VERSION,
   EDITORIAL_MEMORY_SCHEMA_VERSION,
   initializeTaskAuthorizationSchema,
+  initializeFactualRangeTaskSchema,
   EDITORIAL_LEARNING_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   TaskAuthorizationError,
@@ -3246,6 +3247,7 @@ export class EditorialStore {
         new SupervisionDirectives(authority).validate();
         new HouseReviewPreferenceLedger(authority).validate();
       }
+      initializeFactualRangeTaskSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
