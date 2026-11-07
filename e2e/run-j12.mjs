@@ -1616,7 +1616,8 @@ async function main() {
     requireJourney(typeof tasksBeforeFactualSheet === 'string', 'factual-first-scope-tasks-before');
     await assertRenderer(primary, `(() => { const open=document.querySelector('[data-review-action="new-review"]'); if(!open||open.disabled)return false; open.click(); return true; })()`, 'factual-first-scope-new');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-first-scope-sheet');
-    await assertRenderer(primary, `(() => {
+    // The first unmet step is named in the failure detail (step names only, no page content).
+    const factualRoundtrip = await primary.evaluate(`(() => {
       const sheet=document.querySelector('dialog.review-sheet');
       // A category toggle redraws the whole sheet, so every control is read fresh and none is held across a change.
       const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
@@ -1624,34 +1625,37 @@ async function main() {
       const chapter=which=>sheet.querySelector('[data-review-chapter="'+which+'"]');
       const checkedIds=()=>Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value);
       for(let step=0; step<20 && sheet.querySelector('input[name="review-category"]:checked'); step++)sheet.querySelector('input[name="review-category"]:checked').click();
-      if(checkedIds().length!==0)return false;
-      if(!factual()||factual().disabled||!scope('whole')||scope('whole').disabled||!scope('chapters')||scope('chapters').disabled)return false;
+      if(checkedIds().length!==0)return 'cleared';
+      if(!factual()||factual().disabled||!scope('whole')||scope('whole').disabled||!scope('chapters')||scope('chapters').disabled)return 'offered';
       // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
-      if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return false;
+      if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return 'selection-held';
       factual().click(); scope('whole').click();
-      if(!factual().checked||factual().disabled||!scope('whole').checked)return false;
+      if(!factual().checked||factual().disabled||!scope('whole').checked)return 'whole-chosen';
       scope('chapters').click();
-      if(!factual().checked||factual().disabled||!chapter('from')||!chapter('to')||chapter('from').disabled||chapter('to').disabled||chapter('from').options.length<3)return false;
+      if(!factual().checked||factual().disabled||!chapter('from')||!chapter('to')||chapter('from').disabled||chapter('to').disabled||chapter('from').options.length<3)return 'chapters-offered';
       const chosen=chapter('from').options[2].value;
       chapter('from').value=chosen; chapter('from').dispatchEvent(new Event('change',{bubbles:true}));
       chapter('to').value=chosen; chapter('to').dispatchEvent(new Event('change',{bubbles:true}));
       const kept=()=>checkedIds().join(',')==='factual-review'&&!factual().disabled&&chapter('from').value===chosen&&chapter('to').value===chosen;
-      if(!kept())return false;
+      if(!kept())return 'range-chosen';
       scope('whole').click();
-      if(!scope('whole').checked||!kept())return false;
+      if(!scope('whole').checked||!kept())return 'whole-kept';
       scope('chapters').click();
-      if(!scope('chapters').checked||!kept()||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+      if(!scope('chapters').checked||!kept()||document.documentElement.dataset.technicalLayerVisible!=='false')return 'chapters-kept';
       // The chosen factual review is told as the service's verdict reads it, and nothing is started either way.
       const blocked=${JSON.stringify(factualNetworkUnavailable)};
       const reason=factual().closest('label').querySelector('.review-category-reason');
       const notice=sheet.querySelector('.review-network-notice');
       const start=sheet.querySelector('[data-review-action="start"]'), prepare=sheet.querySelector('[data-review-action="prepare"]');
-      if(!reason||!notice||!start||!prepare)return false;
-      return blocked
-        ? !reason.hidden && reason.textContent==='此类别需要联网检索。' && !notice.hidden &&
-          notice.textContent==='联网检索尚未就绪，请到设置中配置后再开始。' && start.disabled && prepare.disabled
-        : reason.hidden && notice.hidden;
-    })()`, 'factual-first-category-range-roundtrip');
+      if(!reason||!notice||!start||!prepare)return 'controls';
+      if(blocked){
+        if(reason.hidden||reason.textContent!=='此类别需要联网检索。')return 'blocked-reason';
+        if(notice.hidden||notice.textContent!=='联网检索尚未就绪，请到设置中配置后再开始。')return 'blocked-notice';
+        return start.disabled&&prepare.disabled ? 'ok' : 'blocked-actions';
+      }
+      return reason.hidden&&notice.hidden ? 'ok' : 'open-reason-or-notice';
+    })()`);
+    requireJourney(factualRoundtrip === 'ok', 'factual-first-category-range-roundtrip', { step: factualRoundtrip, networkUnavailable: factualNetworkUnavailable });
     await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
     requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
