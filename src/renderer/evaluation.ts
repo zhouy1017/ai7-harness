@@ -1,4 +1,5 @@
-import { filterChoices, stateTerm } from './components/controls.js';
+import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
+import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
@@ -318,10 +319,13 @@ export function evaluationPlanReferenceField(options: {
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
+  const pageHeading = el('h2', 'evaluation-title', '评估'); pageHeading.tabIndex = -1;
+  root.append(pageHeading);
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
   let poll: number | null = null;
+  let paintDeferred = false;
 
   // 审稿意见's DOCX export (Issue #429, S81c): ④ 导出's own card, drawn into one slot every paint of the 审稿意见 block takes
   // back, so a card open across a repaint keeps its state.
@@ -394,7 +398,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const open = action(READERS_REPORT_ACTIONS.openPlan, 'primary', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-plan';
         open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
         row.append(open);
       } else if (entry.prepare.allowed) {
         const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => void prepareReport(entry.template));
@@ -408,7 +411,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-task';
         open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
         row.append(open);
       }
       if (row.childElementCount > 0) item.append(row);
@@ -500,7 +502,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     heading.tabIndex = -1;
     const latest = initial.latest;
     if (latest === null) {
-      section.append(el('h2', undefined, EVALUATION_AI7_HEADING), stateTerm(initial.task?.label ?? '尚未评估', initial.task?.state === 'settled' ? 'good' : initial.task?.state === 'failed' ? 'blocked' : initial.task?.state === 'executing' || initial.task?.state === 'queued' ? 'progress' : 'neutral'));
+      section.append(heading);
       section.append(el('p', 'lede evaluation-initial-none', EVALUATION_AI7_NONE));
       const consequences = el('dl', 'review-consequences evaluation-consequences');
       for (const [term, words] of [
@@ -719,7 +721,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (task !== null && task.state === 'prepared') {
       const open = action(EVALUATION_REWRITE_ACTIONS.openPlan, 'primary', 'open-rewrite-plan', () => options.openRewritePlan(task.taskIntentId));
       open.disabled = busy;
-      open.setAttribute('aria-controls', 'task-drawer');
       row.append(open);
     } else {
       if (rewrite.prepare.allowed) {
@@ -732,7 +733,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (task !== null) {
         const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
         open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
         row.append(open);
       }
     }
@@ -841,6 +841,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
 
   const paint = (focus: string | null, preserveForm = false): void => {
     if (workspace === null) return;
+    if (preserveForm && pollControlEngaged(root, false)) { paintDeferred = true; follow(); return; }
+    paintDeferred = false;
+    const restoreInteraction = retainPollInteraction(root, preserveForm);
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
     const parts: HTMLElement[] = [initialNode(workspace)];
@@ -919,7 +922,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     if (empty) {
       const more = el('details', 'evaluation-more');
-      more.append(el('summary', undefined, '更多 ▾'), start);
+      more.append(el('summary', undefined, '更多 ▾'), menuPanel(start));
       parts[0]!.append(more);
     } else parts.push(start);
     if (workspace.readersReport.basis !== null) parts.push(readersReportNode(workspace));
@@ -935,14 +938,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (keptForm !== null && workspace.record !== null && keptForm.parentElement === root) {
       // The form the editor is filling in never leaves the page — a 初评 read again while they type keeps their focus and
       // their place — and everything around it is drawn anew.
-      for (const child of Array.from(root.children)) if (child !== keptForm) child.remove();
+      for (const child of Array.from(root.children)) if (child !== keptForm && child !== pageHeading) child.remove();
       keptForm.before(...parts);
       keptForm.after(...after);
     } else {
       if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
-      root.replaceChildren(...parts, ...after);
+      root.replaceChildren(pageHeading, ...parts, ...after);
     }
     if (keptForm !== null && workspace.record !== null) refresh(keptForm, workspace.record);
+    restoreInteraction();
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
     follow();
   };
@@ -1225,7 +1229,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       levels.addEventListener('change', () => {
         const level = levels.querySelector<HTMLInputElement>('input:checked')?.value;
         reviewed.disabled = level !== 'high';
-        if (level !== 'high') reviewed.checked = false;
         refresh(node, record);
       });
       reviewed.addEventListener('change', () => refresh(node, record));
@@ -1328,6 +1331,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const lines = (name: string): string[] =>
       (node.querySelector<HTMLTextAreaElement>(`.evaluation-lists [data-evaluation-field="${name}"]`)?.value ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
     const optional = (value: string | undefined): string | null => (value === undefined || value.trim().length === 0 ? null : value);
+    const risks = record.profile.risks.map((risk) => {
+      const set = node.querySelector<HTMLElement>(`.evaluation-risk[data-risk-id="${risk.riskId}"]`)!;
+      const level = (set.querySelector<HTMLInputElement>('.evaluation-levels input:checked')?.value ?? null) as EvaluationRiskLevel | null;
+      return { riskId: risk.riskId, level,
+        statement: optional(set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="statement"]')!.value),
+        reviewed: level === 'high' && set.querySelector<HTMLInputElement>('[data-evaluation-field="reviewed"]')!.checked };
+    });
+    const conclusion = (node.querySelector<HTMLInputElement>('.evaluation-conclusion input:checked')?.value ?? null) as EvaluationConclusion | null;
     return {
       items: record.profile.items.map((item) => {
         const set = node.querySelector<HTMLElement>(`.evaluation-item[data-item-id="${item.itemId}"]`)!;
@@ -1342,21 +1353,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
           adjustment: adjustmentOf(set, record, item.itemId, score, notRated),
         };
       }),
-      risks: record.profile.risks.map((risk) => {
-        const set = node.querySelector<HTMLElement>(`.evaluation-risk[data-risk-id="${risk.riskId}"]`)!;
-        const level = (set.querySelector<HTMLInputElement>('.evaluation-levels input:checked')?.value ?? null) as EvaluationRiskLevel | null;
-        return {
-          riskId: risk.riskId,
-          level,
-          statement: optional(set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="statement"]')!.value),
-          reviewed: level === 'high' && set.querySelector<HTMLInputElement>('[data-evaluation-field="reviewed"]')!.checked,
-        };
-      }),
+      risks,
       readiness: lines('readiness'),
       strengths: lines('strengths'),
       weaknesses: lines('weaknesses'),
       verdict: optional(node.querySelector<HTMLTextAreaElement>('.evaluation-lists [data-evaluation-field="verdict"]')?.value),
-      conclusion: (node.querySelector<HTMLInputElement>('.evaluation-conclusion input:checked')?.value ?? null) as EvaluationConclusion | null,
+      conclusion: conclusion === 'recommend' && recommendationBlocked(risks) ? null : conclusion,
     };
   };
 
@@ -1392,7 +1394,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const note = node.querySelector<HTMLElement>('.evaluation-recommend-blocked');
     if (recommend !== null && note !== null) {
       recommend.disabled = record.state === 'finalized' || busy || blocked;
-      if (blocked && recommend.checked) recommend.checked = false;
       note.hidden = !blocked;
       if (blocked) recommend.setAttribute('aria-describedby', note.id);
       else recommend.removeAttribute('aria-describedby');
@@ -1470,6 +1471,10 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       node.before(note);
     }
   };
+
+  onPollControlEnd(root, () => {
+    if (paintDeferred && workspace !== null && root.isConnected && !busy && !pollControlEngaged(root, false)) paint(null, true);
+  });
 
   return {
     /** The drawer's bar started AI7's 初评: read it again now, keeping the form the editor is filling in. */

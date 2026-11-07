@@ -3,17 +3,64 @@ import { openTaskResultWindow } from '../../src/renderer/task-result-window.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { mountTaskOverview, taskOverviewCard } from '../../src/renderer/tasks-overview.js';
 import { mountTaskPanel } from '../../src/renderer/task-panel.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it, vi } from 'vitest';
 import { taskOverviewApi } from '../../src/renderer/task-overview-api.js';
 import { composeTaskOverview, estimateTaskStarts, controlOverviewTasks } from '../../src/service/task-overview.js';
 import type { BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../../src/shared/protocol.js';
 
 function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttentionItemProjection['state'], id: string): GlobalAttentionItemProjection {
-  return { itemId: id, group, state, blocked: false, at: '2026-11-05T01:00:00Z', book: { bookId: 'book', title: '任务总览' },
+  return { itemId: id, group, state, blocked: false, at: new Date().toISOString(), book: { bookId: 'book', title: '任务总览' },
     object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: null, categories: [], revisionOrdinal: null }, nextStep: 'view-run',
     target: { kind: 'analysis', bookId: 'book', taskIntentId: id }, technical: [{ key: 'run-record', label: '运行', value: id }] };
 }
 describe('task overview', () => {
+  it('keeps running task more and exact summary focus through two changed polls (#1375)', async () => {
+    const uninstall = installMiniDom(); vi.useFakeTimers(); setTechnicalLayerVisible(false);
+    vi.stubGlobal('window', { setInterval, clearInterval });
+    vi.stubGlobal('localStorage', { getItem: () => null });
+    let tick = 0;
+    const root = document.createElement('section'); miniDocument.body.append(root as never);
+    const surface = mountTaskOverview({ root, api: { inspectTaskOverview: async () => {
+      const item = task('active', 'analysis-running', 'running');
+      item.facts.progress = { stage: 'units', unitsSettled: ++tick, unitsTotal: 10 };
+      return composeTaskOverview({ groups: [{ key: 'active', items: [item], total: 1 }], actionableCount: 0, running: true, processing: { state: 'local' } }, 2, () => null);
+    } } as unknown as RendererApi, setStatus: vi.fn(), openTarget: vi.fn(), openBook: vi.fn(), openResult: vi.fn() });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      root.querySelector<HTMLDetailsElement>('.task-overview-more')!.open = true;
+      root.querySelector<HTMLElement>('.task-overview-more summary')!.focus();
+      for (let cycle = 0; cycle < 2; cycle++) {
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(root.querySelector<HTMLDetailsElement>('.task-overview-more')!.open).toBe(true);
+        expect(document.activeElement).toBe(root.querySelector('.task-overview-more summary'));
+      }
+      expect(tick).toBe(3);
+    } finally { surface.destroy(); vi.useRealTimers(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); uninstall(); }
+  });
+  it('keeps the Book task pane menu through its changed two-second reads (#1375)', async () => {
+    const uninstall = installMiniDom(); vi.useFakeTimers(); setTechnicalLayerVisible(false);
+    vi.stubGlobal('window', { setInterval, clearInterval, setTimeout, clearTimeout });
+    let tick = 0;
+    const panel = mountTaskPanel({ api: { inspectTaskOverview: async () => {
+      const item = task('active', 'analysis-running', 'running');
+      item.facts.progress = { stage: 'units', unitsSettled: ++tick, unitsTotal: 20 };
+      return composeTaskOverview({ groups: [{ key: 'active', items: [item], total: 1 }], actionableCount: 0, running: true, processing: { state: 'local' } }, 2, () => null);
+    }, inspectBookTasks: async () => ({ bookId: 'book', running: true, groups: [], tick: tick }), inspectBaselineAnalysis: async () => { throw new Error('no analysis'); } } as unknown as RendererApi,
+    setStatus: vi.fn(), errorMessage: () => '', parked: () => null } as unknown as Parameters<typeof mountTaskPanel>[0]);
+    miniDocument.body.append(panel.element as never);
+    try {
+      panel.show('book'); await vi.advanceTimersByTimeAsync(0);
+      panel.element.querySelector<HTMLDetailsElement>('.task-overview-more')!.open = true;
+      panel.element.querySelector<HTMLElement>('.task-overview-more summary')!.focus();
+      for (let cycle = 0; cycle < 2; cycle++) {
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(panel.element.querySelector<HTMLDetailsElement>('.task-overview-more')!.open).toBe(true);
+        expect(document.activeElement).toBe(panel.element.querySelector('.task-overview-more summary'));
+      }
+      expect(tick).toBeGreaterThanOrEqual(3);
+    } finally { panel.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); uninstall(); }
+  });
   it('shows a completed writing task without navigating away from the current plan', () => {
     const uninstall = installMiniDom();
     vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
@@ -58,8 +105,8 @@ describe('task overview', () => {
   });
   it('keeps context and controls in one header and repeats the selected original plan', async () => {
     const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {} });
-    vi.stubGlobal('localStorage', { getItem: () => 'all' });
-    const original = task('recent', 'analysis-completed', 'older');
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify({ book: 'all', type: 'all', time: 'all' }) });
+    const original = { ...task('recent', 'analysis-completed', 'older'), at: new Date().toISOString() };
     const projection = composeTaskOverview({ groups: [{ key: 'recent', items: [original], total: 1 }], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
     const startQuickTasks = vi.fn(async () => ({}));
     const root = document.createElement('section');

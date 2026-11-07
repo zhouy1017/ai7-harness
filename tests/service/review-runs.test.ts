@@ -1093,7 +1093,7 @@ describe('a Review Run over the real store on exact sample1', () => {
         const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
         expect(card.pinnedText === sliceGraphemes(blocks.get(finding.blockId)!, finding.fromGrapheme, finding.toGrapheme)).toBe(true);
         expect(card.kind).toBe(finding.output);
-        expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: finding.categoryLabel });
+        expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: finding.categoryLabel, modelLabel: 'AI7 本地检查' });
         const task = run.categories.find((category) => category.categoryId === finding.categoryId)!.taskIntentId;
         expect(card.source.taskId).toBe(task);
         if (finding.output === 'change-suggestion') {

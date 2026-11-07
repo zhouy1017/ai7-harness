@@ -1,6 +1,6 @@
 {
   "name": "ai7-harness",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "ai7": {
     "dataVersion": 1
   },
@@ -17,6 +17,7 @@
     "doctor": "node tools/doctor.mjs",
     "bootstrap": "node tools/bootstrap.mjs",
     "check": "node tools/check.mjs",
+    "validate:policies": "node tools/validate-policies.mjs",
     "docs:check": "node tools/check-docs.mjs",
     "test": "vitest run tests/unit",
     "test:service": "vitest run tests/service",

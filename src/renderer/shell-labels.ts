@@ -97,6 +97,7 @@ export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.fre
   'usage-run': '服务 · 用量 · 运行详情',
   keyboard: '本机 · 键盘与无障碍',
   notifications: '本机 · 通知',
+  help: '本机 · 帮助',
 });
 
 const SECTION_LABELS: Readonly<Record<ShellBookSection, string>> = Object.freeze(Object.fromEntries(
@@ -144,7 +145,7 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
     { route: 'keyboard', label: '键盘与无障碍', note: '快捷键列表与减少动效。' },
     { route: 'notifications', label: '通知', note: '窗口不在前台时的系统通知。' },
     { route: 'diagnostics', label: '诊断', note: '崩溃记录与诊断包。', developerOnly: true },
-    { route: 'help', label: '帮助', note: '使用说明、隐私与开发者模式。' },
+    { route: 'help', label: '帮助', note: '使用说明、隐私说明与第三方许可。' },
   ] },
 ]);
 

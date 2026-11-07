@@ -68,7 +68,7 @@ afterEach(async () => {
 
 function entry() { return reviewCategoryEntryForBook(reviewCategoryEntry(CATEGORY)!, db, book.bookId); }
 function reading() { return reviewDeliverables(db, book.bookId); }
-function document(id: string) { return store.inspectProductionDocuments(book.bookId).types.find((type) => type.document?.documentId === id)!.document!; }
+function document(id: string) { return store.inspectProductionDocuments(book.bookId).types.flatMap((type) => type.documents).find((doc) => doc.documentId === id)!; }
 
 async function create(typeId = 'news-release') {
   // Admit sample1 as source-only through the real import path, then create a separate Production Document.
@@ -158,6 +158,7 @@ async function execution(afterFirst?: () => Promise<void>, recorded?: ResolvedMo
 
 /** Reproduce the live item's exact sample1-derived words through the editor's bounded edit API; no file or model supplies them. */
 async function recordedDocument(id: string) {
+  store.renameProductionDocument({ bookId: book.bookId, documentId: id, title: store.baselineAnalysisLedger.readWorkingBlocks(document(id).branchId).some((block) => block.kind === 'title') ? 'sample1 新闻稿（合成比对）' : '新闻稿' });
   const passage = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((block) =>
     block.kind === 'paragraph' && block.text.length > 100 && /[一二三四五六七八〇○]/u.test(block.text))!;
   const composed = sliceGraphemes(passage.text, 0, 200).replace(/[一二三四五六七八〇○]/u, '九');
@@ -187,6 +188,21 @@ function rewrite(id: string, replacementOf: (kind: string) => string) {
 }
 
 describe('cross-deliverable participants and revision lineage', () => {
+  it('keeps peer titles and paragraph references distinct in a review', async () => {
+    const first = await create('promotion-article');
+    const second = await create('promotion-article');
+    store.renameProductionDocument({ bookId: book.bookId, documentId: first.documentId, title: '首发稿' });
+    store.renameProductionDocument({ bookId: book.bookId, documentId: second.documentId, title: '媒体稿' });
+    await finalize(first.documentId);
+    await finalize(second.documentId);
+    const participants = reading().participants;
+    expect(participants.map((entry) => entry.title).sort()).toEqual(['媒体稿', '首发稿']);
+    const refs = participants.flatMap((entry) => entry.paragraphs.map((paragraph) => paragraph.ref));
+    expect(new Set(refs).size).toBe(refs.length);
+    expect(refs.every((ref) => ref.length <= 64 && /^deliverable\/promotion-article\/[12]\/[1-9][0-9]*$/u.test(ref))).toBe(true);
+    expect(prepare().categories.map((category) => category.categoryId)).toContain(CATEGORY);
+  });
+
   it('keeps the built-in entry and exact absence reason; excludes created-only drafts', async () => {
     expect(reviewCategoryEntry(CATEGORY)!.executor).toBe('unavailable');
     expect(entry()).toEqual(reviewCategoryEntry(CATEGORY));

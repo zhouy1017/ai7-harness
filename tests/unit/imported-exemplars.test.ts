@@ -5,7 +5,7 @@ import { createContext, runInContext } from 'node:vm';
 import { createSourceFile, forEachChild, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { decodeRequest } from '../../src/service/request-frames.js';
-import { exemplarDesignation, exemplarLine } from '../../src/renderer/knowledge-base-labels.js';
+import { exemplarDesignation, exemplarFacts } from '../../src/renderer/knowledge-base-labels.js';
 import type { ExemplarProjection, ServiceRequest } from '../../src/shared/protocol.js';
 
 const request = (value: unknown) => decodeRequest(new TextEncoder().encode(JSON.stringify(value)));
@@ -32,8 +32,8 @@ describe('imported exemplar boundaries and editor words', () => {
     const entry: ExemplarProjection = { documentId: 'd', revisionId: 'r', revisionDigest: 'a'.repeat(64), typeId: 'news-release', typeLabel: '新闻稿',
       version: 2, deliveredTo: '', deliveredAt: 'T', archivedAt: 'T', eligibility: 'excluded', earlierVersions: [1], earlierVersionCount: 1,
       imported: { sourceName: '测试.txt', decisions: 2 } };
-    expect(exemplarLine(entry, (instant) => instant)).toBe('新闻稿 · 版本 2 · 导入于 T · 原件：测试.txt · 学习准入：明确排除 · 此前导入过 1 个版本');
-    expect(exemplarLine({ ...entry, eligibility: 'deferred' }, (instant) => instant)).toContain('稍后决定');
+    expect(exemplarFacts(entry, (instant) => instant)).toBe('版本 2 · 导入于 T · 原件：测试.txt · 此前导入过 1 个版本');
+
   });
 });
 

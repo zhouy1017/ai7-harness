@@ -322,6 +322,40 @@ describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK
 });
 
 describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TASK-028)', () => {
+  it('opens two same-type quick-start drafts independently without changing the first (#1378)', async () => {
+    await withSession(async (session) => {
+      const { store, owner } = session;
+      const { bookId, rule, reference } = await ruledBook(session, WRITING_BOOK_TITLE);
+      const draft = async (title: string) => {
+        const plan = prepare(store, bookId);
+        const quick = await store.quickStartWritingTask(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, rule.ruleVersionId, ONLINE());
+        expect(quick.outcome).toBe('started');
+        expect(store.inspectWriting(bookId)!.authorization).toMatchObject({ origin: 'default-execution-rule', ruleVersionId: rule.ruleVersionId, authority: 'standard-direct-dispatch' });
+        expect(quickOf(store, bookId)).toMatchObject({ available: false, rule: reference });
+        expect(owner.admitOrQueue(quick.dispatchRunRecordId!, quick.ledger!)).toBe('admitted');
+        await owner.whenIdle();
+        return store.createWritingDraft(bookId, store.inspectWriting(bookId)!.resultSetRevision!.revisionId, title).document;
+      };
+      const first = await draft('首篇宣传文章');
+      const firstWindow = store.getManuscriptWindow(first.documentId, first.branchId, null);
+      expect(quickOf(store, bookId)).toEqual({ available: true, reason: null, rule: reference });
+      const second = await draft('第二篇宣传文章');
+      expect(second.documentId).not.toBe(first.documentId);
+      expect(second.branchId).not.toBe(first.branchId);
+      expect(second.versions[0]!.revisionId).not.toBe(first.versions[0]!.revisionId);
+      const window = store.getManuscriptWindow(second.documentId, second.branchId, null);
+      const block = window.blocks[0]!;
+      store.flushJournalEdit({ manuscriptId: second.documentId, branchId: second.branchId, clientEditId: randomUUID(), baseRevisionId: window.revisionId, windowStartBlockId: block.blockId, expectedJournalSequence: window.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 0, insertText: '第二篇独立修改。' });
+      const saved = await store.saveProductionDocumentVersion({ bookId, documentId: second.documentId, branchId: second.branchId });
+      expect(saved.document!.versions).toHaveLength(2);
+      const documents = store.inspectProductionDocuments(bookId).types.find((type) => type.typeId === 'promotion-article')!.documents;
+      expect(documents.map((document) => document.title)).toEqual(['首篇宣传文章', '第二篇宣传文章']);
+      expect(documents[0]).toEqual(first);
+      expect(store.getManuscriptWindow(first.documentId, first.branchId, null)).toEqual(firstWindow);
+      expect(quickOf(store, bookId)).toEqual({ available: true, reason: null, rule: reference });
+    });
+  });
+
   it('stops at the plan, recording nothing, when the Task would send again a range an earlier one left 结果待确认 (Issue #757)', async () => {
     // The first Task's request for unit 3 is sent and its answer never comes back whole; the kind keeps no progress, so it reads on.
     const dropped: ResolvedModelFixture = {
@@ -393,11 +427,11 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
         expect(origins.map((row) => row.origin)).toEqual(['standard-direct', 'default-execution-rule']);
         expect((database.prepare('SELECT count(*) total FROM default_execution_rule_versions').get() as { total: number }).total).toBe(1);
       });
-      // The newest draft opens as before; the 宣传文章 now has its document, so its quick start says why it waits.
+      // Opening a draft keeps the next same-type quick start available (#1378).
       const drafted = store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted;
       expect(drafted?.revisionId).toBe(settled.resultSetRevision!.revisionId);
       expect(store.createWritingDraft(bookId, drafted!.revisionId).typeId).toBe('promotion-article');
-      expect(quickOf(store, bookId)).toEqual({ available: false, reason: '这本书已经有「宣传文章」；请在交付物中打开它继续修改。', rule: reference });
+      expect(quickOf(store, bookId)).toEqual({ available: true, reason: null, rule: reference });
     });
   }, 300_000);
 

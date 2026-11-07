@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   EVALUATION_ADJUSTMENT_LEGEND,
   EVALUATION_ADJUSTMENT_REASON_LABELS,
-  EVALUATION_AI7_LEDE,
   EVALUATION_AI7_PENDING,
   EVALUATION_AI7_PREPARE,
   EVALUATION_STATE_LABELS,
@@ -22,7 +21,6 @@ import {
   evaluationAi7EvidenceSummary,
   evaluationAi7UnreadLine,
   EVALUATION_FINALIZE_NEEDS_SCORE,
-  EVALUATION_LEDE,
   EVALUATION_RECOMMEND_BLOCKED,
   EVALUATION_STAY,
   evaluationBandLine,
@@ -47,7 +45,6 @@ import {
   EVALUATION_PRICING_BASIS,
   EVALUATION_PRICING_UNREADABLE,
   EVALUATION_COMPARABLES_UNREADABLE,
-  EVALUATION_REWRITE_LEDE,
   evaluationComparableLine,
   evaluationComparablesMoreLine,
   evaluationPredictionLine,
@@ -141,7 +138,6 @@ describe('评估 arithmetic', () => {
 
 describe('评估 words', () => {
   it('says the total, each item, the revision and 定稿 in the editor\'s words, never a weight', () => {
-    expect(EVALUATION_LEDE).toContain('只看满分与得分');
     expect(EVALUATION_AI7_PENDING).toBe('这一版不是从 AI7 初评开始的：由你打分。');
     expect([evaluationScore(18), evaluationScore(16.5)]).toEqual(['18', '16.5']);
     expect(evaluationTotalLine(PROFILE, { score: 66.5, fullMarks: 80, notRated: 1, unscored: 0 })).toBe('总分 66.5 / 80 · 优秀（1 项不评）');
@@ -216,7 +212,6 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
       .toBe('AI7 初评 没有给出分数 · 依据充分度 不足（没有引用段落）');
     expect(evaluationAi7SufficiencyLine({ sufficiency: 'fair', citedBlocks: 2, unitsCited: 1 })).toBe('依据充分度 一般（引用 2 个段落，分布在 1 个阅读范围）');
     expect(evaluationAi7RecordLine({ ordinal: 2, revisionLabel: 'r3' })).toBe('这一版从 AI7 第 2 次初评开始（读的是修订版 r3）：AI7 的分数列在每一项旁边，记录保存的是你的评分。');
-    expect(EVALUATION_AI7_LEDE).toContain('评分与结论由你决定');
     expect(EVALUATION_STATE_LABELS).toEqual({ draft: 'AI7 初稿', editing: '编辑评分中', finalized: '定稿' });
   });
 
@@ -292,7 +287,6 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   });
 
   it('says what 按我的评分重写评语 does, waits for and decided (S81b2)', () => {
-    expect(EVALUATION_REWRITE_LEDE).toContain('分数不变，评语经你采用后才记入这一版');
     expect(evaluationRewriteTaskLine({ taskIntentId: 't', recordId: 'r', recordOrdinal: 15, entryOrdinal: 2, state: 'settled', label: '已完成' }))
       .toBe('按我的评分重写评语 · 第 15 版 · 已完成');
     const reading = { unitsTotal: 8, unitsRead: 8 };

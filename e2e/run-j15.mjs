@@ -790,6 +790,7 @@ async function main() {
     // The anchors are positions: a Word file has no page numbers.
     const libraryIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-built');
     const layers = new Map(libraryIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('article.library-material'); const warning=card?.querySelector(':scope > .knowledge-file-summary .knowledge-file-index'); return warning?.textContent==='索引：已在本机建好' && !warning.closest('.knowledge-file-more'); })()`, 'library-folded-index-warning');
     requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 7 &&
       JSON.stringify(layers.get('original')) === JSON.stringify(['complete', '已原样保存在本机']) &&
       layers.get('metadata')?.[0] === 'complete' && /^中文 · \d+ 段 · \d+ 个标题/u.test(layers.get('metadata')?.[1] ?? '') &&
@@ -1031,7 +1032,13 @@ async function main() {
     manager = await launch(exemplarPath);
     renderer = await waitForRenderer(manager, 'earlier-exemplar-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'earlier-exemplar-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-ordinary-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-ordinary-settings-ready');
+    await click(renderer, '帮助', 'exemplar-ordinary-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'exemplar-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'earlier-exemplar-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'exemplar-category-copy');
     await click(renderer, '范例', 'earlier-exemplar-tab');
     await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'earlier-exemplar-open-ready');
     await click(renderer, '导入以前图书的范例', 'earlier-exemplar-open');
@@ -1048,7 +1055,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.exemplar-book .exemplar-designation')?.textContent.startsWith('以前出版的图书 · 导入于')`, 'earlier-exemplar-imported');
     await assertRenderer(renderer, `(() => {
       const card = document.querySelector('.exemplar-book');
-      return card.querySelector('h3')?.textContent==='《以前出版的测试图书》' &&
+      return card.querySelector('.exemplar-title')?.textContent==='《以前出版的测试图书》新闻稿' &&
+        card.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' &&
+        card.querySelector('.exemplar-context')?.textContent.startsWith('来自《以前出版的测试图书》') &&
+        !card.querySelector('.knowledge-file-more') &&
         card.querySelector('.exemplar-attribution')?.textContent==='作者：测试作者 · 责编：测试责编' &&
         card.querySelector('[data-exemplar-type="news-release"]')?.textContent.includes('版本 1') &&
         card.querySelector('[data-exemplar-type="news-release"]')?.textContent.includes('仅本社');
@@ -1056,6 +1066,16 @@ async function main() {
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
     await click(renderer, '记录学习准入', 'earlier-exemplar-eligibility');
     await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
+    await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
+    await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='工作文档 · 新闻稿'`, 'exemplar-combined-filters');
+    await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value=""]', 'exemplar-type-return');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="book"]').dataset.value!==''`, 'exemplar-book-selection-survives');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-restore-settings-ready');
+    await click(renderer, '帮助', 'exemplar-restore-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-restore-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(!input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'; })()`, 'exemplar-restore-developer');
 
     // ---- 外部 Skill 的更新 (Issue #89, S33; ADR 0090 §3, ADR 0045 § Update and rollback; REUSE-032 to REUSE-035) ----
     // Synthetic Skill packages only: tests/fixtures/skills/plain (and its v2/v3 variants). The picker answers one choice per

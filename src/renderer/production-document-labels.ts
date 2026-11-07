@@ -30,7 +30,7 @@ export const DOCUMENT_KEPT_NOTE = '文档与它的版本都保留；恢复后照
 /** The working text moved past the latest version. */
 export const DOCUMENT_CHANGED_SINCE_VERSION = '有修改尚未保存为版本';
 /** Why 从来源材料创建… cannot be offered: the Book holds no source material a document can start from. */
-export const DOCUMENT_NO_SOURCES = '先把文档的初稿作为来源材料导入：导入稿件时选「作为来源材料导入」。';
+export const DOCUMENT_NO_SOURCES = '暂无来源材料：可在这里导入文件，或新建空白文档。';
 
 /** The label of every `data-document-action` the block and the document surface carry. */
 export const DOCUMENT_ACTION_LABELS = {
@@ -63,7 +63,7 @@ export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草 · 范例只参照
 /** The first line of a document's card: its latest version and the material it was made from. */
 export function documentCardLine(document: ProductionDocumentProjection): string {
   const latest = document.versions[0];
-  return `${latest === undefined ? '' : `${latest.label} · `}${document.origin.drafted ? DOCUMENT_DRAFTED_ORIGIN : `由「${document.origin.displayName}」创建`}`;
+  return `${latest === undefined ? '' : `${latest.label} · `}${document.origin.blank === true ? '空白文档' : document.origin.drafted ? DOCUMENT_DRAFTED_ORIGIN : `由「${document.origin.displayName}」创建`}`;
 }
 
 /**

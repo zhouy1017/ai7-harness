@@ -1,4 +1,5 @@
 import { EditorialLearningLedger } from './learning/ledger.js';
+import { historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { proposalReviewPosition } from './editorial-workspace-profile.js';
@@ -881,6 +882,9 @@ export interface ProducedEditorialMarkInput {
   atomicGroupId: string | null;
   /** Required for an atomic group: names the inconsistency partial acceptance would cause. */
   atomicReason?: string | null;
+  /** Exact attempt for dialogue/workspace marks, or the completed fast-role answer's binding. */
+  sourceAttemptId?: string;
+  sourceModelBinding?: MarkModelBinding;
   source: { kind: 'ai7'; origin: 'task' | 'review-category' | 'analysis'; label: string; taskId: string | null }
     | { kind: 'imported-author'; label: string };
   basis: ReadonlyArray<EditorialMarkBasisProjection>;
@@ -1287,7 +1291,10 @@ export class EditorialMarkStore {
     const pinned = this.#requireRange(input.branchId, input.blockId, digest, input.fromGrapheme, input.toGrapheme, input.pinnedText, point);
     const now = new Date().toISOString();
     const source: EditorialMarkSourceProjection = input.source.kind === 'ai7'
-      ? { kind: 'ai7', origin: input.source.origin, label: input.source.label, taskId: input.source.taskId }
+      ? { kind: 'ai7', origin: input.source.origin, label: input.source.label, taskId: input.source.taskId,
+          ...markModelLabels(input.sourceModelBinding ?? (input.source.taskId === null
+            ? { route: 'ai7-local-deterministic', model: 'local-text-check' }
+            : recordedMarkModel(this.#db, input.source.taskId, now, input.sourceAttemptId))) }
       : { kind: 'imported-author', origin: null, label: input.source.label, taskId: null };
     this.#insertMark({
       markId, clientMarkId: randomUUID(), state, manuscriptId: input.manuscriptId, branchId: input.branchId,
@@ -1324,6 +1331,11 @@ export class EditorialMarkStore {
     const converted = row.converted_from_mark_id === null ? undefined : this.#db.prepare(
       'SELECT mark_id, kind, source_kind FROM editorial_marks WHERE mark_id = ?',
     ).get(text(row.converted_from_mark_id)) as SqlRow | undefined;
+    const evidence = readMarkEvidence(text(row.basis_json));
+    const editorName = row.source_kind === 'editor' ? this.#db.prepare(
+      'SELECT editors_text FROM book_people_versions WHERE book_id = ? ORDER BY version DESC LIMIT 1',
+    ).get(text(row.book_id))?.editors_text : null;
+    const modelLabels = row.source_kind === 'ai7' ? historicalMarkModelLabels(this.#db, markId) : {};
     return {
       markId,
       kind,
@@ -1339,10 +1351,11 @@ export class EditorialMarkStore {
         origin: nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'],
         label: nullableText(row.source_label),
         taskId: nullableText(row.source_task_id),
+        ...(row.source_kind === 'editor' ? { editorName: typeof editorName === 'string' ? editorName.trim().replace(/\n/g, '、') || null : null } : modelLabels),
       },
       body: text(row.body),
       replies,
-      basis: JSON.parse(text(row.basis_json)) as EditorialMarkBasisProjection[],
+      basis: evidence.basis,
       suggestion: kind === 'change-suggestion' ? this.#suggestion(markId) : null,
       convertedFrom: converted === undefined ? null : {
         markId: text(converted.mark_id),
@@ -1578,6 +1591,7 @@ export class EditorialMarkStore {
         origin: nullableText(mark.source_origin) as EditorialMarkSourceProjection['origin'],
         label: nullableText(mark.source_label),
         taskId: nullableText(mark.source_task_id),
+        ...historicalMarkModelLabels(this.#db, input.markId),
       };
     } else if (target === 'change-suggestion') {
       const content = this.#content(target, null, '', input.proposedText, input.rationale ?? (kind === 'annotation' ? text(mark.body) : null), pinnedText);
@@ -1597,7 +1611,7 @@ export class EditorialMarkStore {
       manuscriptId: input.manuscriptId, branchId: input.branchId, blockId: text(mark.block_id),
       blockDigest: text(mark.pinned_block_digest), fromGrapheme: integer(mark.pinned_from_grapheme),
       toGrapheme: integer(mark.pinned_to_grapheme), pinnedText, kind: target, highlightColor: null, body, source,
-      basis: JSON.parse(text(mark.basis_json)) as EditorialMarkBasisProjection[], convertedFrom: input.markId,
+      basis: readMarkEvidence(text(mark.basis_json)).basis, convertedFrom: input.markId,
       anchorState: 'exact', now, live: { fromGrapheme: integer(mark.from_grapheme), toGrapheme: integer(mark.to_grapheme), followed: integer(mark.followed_journal_sequence) },
     });
     if (target === 'change-suggestion') this.#insertItem(markId, pinnedText, proposedText!, rationale, null, now);
@@ -1786,7 +1800,7 @@ export class EditorialMarkStore {
       blockId: input.blockId, blockDigest: input.blockDigest, fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme,
       pinnedText: pinned, kind: 'change-suggestion', highlightColor: null, body: '',
       source: { kind: 'editor', origin: null, label: null, taskId: null },
-      basis: JSON.parse(input.basisJson) as EditorialMarkBasisProjection[], convertedFrom: input.convertedFrom,
+      basis: readMarkEvidence(input.basisJson).basis, convertedFrom: input.convertedFrom,
       anchorState: 'exact', now: input.now,
     });
     this.#insertItem(markId, pinned, content.proposedText!, content.rationale, null, input.now);
@@ -1930,7 +1944,9 @@ export class EditorialMarkStore {
       input.toGrapheme, input.pinnedText, sha256(input.pinnedText), input.live?.fromGrapheme ?? input.fromGrapheme,
       input.live?.toGrapheme ?? input.toGrapheme, input.anchorState, input.live?.followed ?? input.state.journalSequence,
       input.body, input.source.kind, input.source.origin, input.source.label, input.source.taskId,
-      JSON.stringify(input.basis), EXPORT_DISPOSITION[input.kind], input.status ?? 'open', input.convertedFrom, input.now, input.now,
+      JSON.stringify(input.source.modelLabel === undefined ? input.basis : { basis: input.basis,
+        source: { modelLabel: input.source.modelLabel, modelTechnicalLabel: input.source.modelTechnicalLabel } }),
+      EXPORT_DISPOSITION[input.kind], input.status ?? 'open', input.convertedFrom, input.now, input.now,
     );
   }
 

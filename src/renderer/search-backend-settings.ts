@@ -27,13 +27,13 @@ export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidatePro
   'transport-unknown': '传输结果未知',
 });
 
-/** Explain the resolver's current source using the selected Main route and only a saved, measured native backend. */
+/** Explain the resolver's current source using the selected Main route and a ready model channel admitted by the selected policy. */
 export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjection): string {
   const ready = projection.searchBackends.backends.filter((backend) => backend.connection.credentialOperationState === 'ready');
   const mainRoute = projection.routeChoice?.routes.find((route) => route.inUse);
   const native = mainRoute?.connection?.credentialOperationState !== 'ready' || projection.searchBackends.alwaysUseSelectedBackend ? undefined
-    : projection.searchBackends.backends.find((backend) => mainRoute.route.startsWith(`${backend.backendId.slice('search-'.length)}-`));
-  if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索`;
+    : projection.launchPolicy.providerProcessing.settingsSearchTools?.websearch.backends.find((backend) => mainRoute.route.startsWith(`${backend.id.slice('search-'.length)}-`));
+  if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索${native.id === 'search-openai' || native.id === 'search-anthropic' ? '（未实测）' : ''}`;
   const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
   return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
     : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}`
@@ -84,9 +84,10 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
   card.append(element('h4', undefined, `${candidate.name} · 未实测`));
-  const price = technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`;
+  const price = `单价 ${candidate.price} · 不可选择`;
   const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
   card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
+  if (technicalLayerVisible) card.append(element('p', 'field-note search-candidate-technical', `接口 ${candidate.endpoint} · 协议 ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest}`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
   const probe = button(SEARCH_CANDIDATE_PROBE_LABEL, 'quiet', async () => {
@@ -111,7 +112,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
   const heading = element('h3', undefined, '联网检索');
-  if (technicalLayerVisible) heading.dataset['developerOnly'] = 'true';
+  heading.tabIndex = -1;
   section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
@@ -137,7 +138,9 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     card.dataset['selected'] = String(selected);
     card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
     card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${selected ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
-      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%${backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
+      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；${technicalLayerVisible
+        ? `评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`
+        : '可配置为检索来源或备用来源'}${!technicalLayerVisible || backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
     const actions = element('div', 'button-row');
     const choose = button('选择后端', 'quiet', () => void (async () => {
       try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
@@ -150,7 +153,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       probe.disabled = true;
       try {
         const result = await api.probeSearchBackend({ backendId: backend.backendId });
-        output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}${result.failure === null ? '' : ` · ${result.failure}`}`));
+        output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'}${technicalLayerVisible ? ` · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}` : ''}${result.failure === null ? '' : ` · ${result.failure}`}`));
         output.append(resultList(result));
       } catch (error) { output.replaceChildren(element('p', 'attention-note', errorMessage(error, '测试检索未完成。'))); }
       finally { probe.disabled = !keyed; }
@@ -199,7 +202,8 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     section.append(element('h4', undefined, '候选接口 · 未实测'));
     for (const candidate of projection.searchBackends.candidates) section.append(candidateCard(candidate, options,
       candidate.protocol === 'deepseek-direct-search'
-        ? projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready')
+        ? projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready') ||
+          (projection.launchPolicy.providerProcessing?.searchConnectionTest?.credentialFallbackSlot !== undefined && projection.routeChoice.routes.some((route) => route.route === 'deepseek-open-platform' && route.connection?.credentialOperationState === 'ready'))
         : projection.routeChoice.routes.some((route) => route.route.startsWith(`${candidate.backendId.slice('search-'.length)}-`) && route.connection?.credentialOperationState === 'ready')));
   }
   return section;

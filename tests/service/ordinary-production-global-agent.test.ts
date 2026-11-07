@@ -145,7 +145,7 @@ describe('v30 Book-less Global Agent', () => {
     transport = async () => response();
     const continued = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
     await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
-    expect(continued.qualification?.providerProcessingVersion).toBe('v33');
+    expect(continued.qualification?.providerProcessingVersion).toBe('v34');
     expect(continued.message.question).toBe(first.message.question); expect(continued.message.globalSources).toEqual(first.message.globalSources);
     expect(calls[1]!.body).not.toContain('合成责编甲');
   });
@@ -157,7 +157,7 @@ describe('v30 Book-less Global Agent', () => {
     const ask = { ...input(), question: '合成责编甲的建议适用于何处？' };
     const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     expect(prepared).toMatchObject({ textProcessing: 'qualified-original-fields', question: ask.question,
-      selectedPolicyIdentity: { providerProcessingVersion: 'v33', activePolicySetVersion: 'v24' } });
+      selectedPolicyIdentity: { providerProcessingVersion: 'v34', activePolicySetVersion: 'v25' } });
     expect(prepared.sources[0]!.text).toBe('合成责编甲建议保留短句。');
     const turn = startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256);
     await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');

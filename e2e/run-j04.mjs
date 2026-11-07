@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
+import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice)
@@ -485,7 +485,12 @@ async function openReviewDestination(renderer, name) {
 
 /** Press one 审阅 action by its data attribute, refusing one that is missing or disabled. */
 async function reviewAction(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; const more=button.closest('details.editorial-mark-more'); if(more&&!more.open)more.querySelector('summary').click(); button.click(); return true; })()`, name);
+}
+
+async function openMarkMore(renderer, markId, name) {
+  await waitFor(renderer, `document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more')`, `${name}-ready`, 30_000);
+  await assertRenderer(renderer, `(() => { const more=document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more'); if(!(more instanceof HTMLDetailsElement))return false; if(!more.open)more.querySelector('summary').click(); return more.open; })()`, name);
 }
 
 /**
@@ -708,12 +713,14 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'edit-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'edit-ready');
   cancellation.throwIfRequested();
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, 'edit-scope');
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
   await click(renderer, '保存', 'edit-save');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
+  await waitFor(renderer, journalEditPersisted(before, suffix), 'edit-durable', 120_000);
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === ${expectedSequence}`, 'edit-sequence');
   await openAnalysisDestination(renderer, 'edit-return');
@@ -754,7 +761,7 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v24', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v25', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -850,7 +857,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v24', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v25', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -2924,6 +2931,15 @@ async function main() {
     modelAdapterIdentity = REVIEW_FIXTURE_IDENTITY;
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-ready');
+    // #1374: use the real persisted mode switch so this configuration regression exercises the ordinary UI branch.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-ordinary-mode-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-ordinary-mode-settings-ready');
+    await click(renderer, '帮助', 'review-memory-ordinary-mode-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-ordinary-mode-toggle-ready');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-ordinary-mode-toggle');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'review-memory-ordinary-mode');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-memory-ordinary-mode-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'review-memory-ordinary-mode-library-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'review-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-open-book-manuscript');
 
@@ -2932,15 +2948,42 @@ async function main() {
     // C1: no coverage, records or bare controls before the first review.
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewState==='empty' && card.classList.contains('surface-empty') && card.querySelector('h2')?.textContent==='审阅' && card.querySelector('.state-term')?.textContent==='尚未审阅' && card.querySelector('.lede')?.textContent==='按类别审读稿件，发现会同步到原文。' && card.querySelector('[data-review-action="new-review"]') && !card.querySelector('table, select, .review-coverage, .review-runs-section, [data-list-position]'); })()`, 'review-empty-card');
 
+    // #1370: exercise the actual review navigation in ordinary mode. The deterministic review route
+    // needs no provider search, but selecting a search category still offers its configuration entry.
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'review-search-ordinary-mode');
+    await openReviewDestination(renderer, 'review-search-ordinary-review');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'review-search-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-search-sheet');
+    // #1371: the ordinary configuration entry and selected-set identity remain visible under CI's provider-free policy.
+    // The real v34 Main-channel freeze for all three official routes is covered by search-backend-freeze service composition.
+    requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v25' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelector('input[name="review-category"][value="factual-review"]')?.disabled===false`, 'review-search-ordinary-category-available');
+
+    await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');
+    await waitFor(renderer, `(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); if(!(heading instanceof HTMLElement))return false; const box=heading.getBoundingClientRect(); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && document.querySelector('[data-model-service-proxy]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'review-search-settings-focused-visible');
+    await openReviewDestination(renderer, 'review-search-return');
+
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-open');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
-    // Nine review categories, remembered defaults, four pill scopes and reactive consequences (#1320).
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===9 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && !boxes.some(box=>box.value==='local-text-check') && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences dt').length===4 && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='先看计划'; })()`, 'review-sheet-contract');
+    // Nine model review categories plus the reversible local-only choice, remembered defaults and four pill scopes (#1374).
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.checked&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences dt').length===4 && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='先看计划'; })()`, 'review-sheet-contract');
 
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const before=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); const after=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); return before!==after && sheet.querySelector('.sheet-foot .review-sheet-procedure') && !sheet.querySelector('.review-materials') && !sheet.querySelector('.similar-materials') && [...sheet.querySelectorAll('.review-category-basis')].every(node=>!/第\s*[0-9]+\s*版|\bv[0-9]+|version/iu.test(node.textContent)); })()`, 'review-reactive-consequences');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=(id)=>sheet.querySelector('input[name="review-category"][value="'+id+'"]'); box('style-and-format').click(); const before=sheet.querySelector('[data-consequence="cost"]').textContent; const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('changed'); if(!box('style-and-format').disabled||box('style-and-format').checked||sheet.querySelector('[data-consequence="cost"]').textContent===before)return false; scope('whole'); if(!box('typos-and-usage').checked||!box('style-and-format').checked)return false; box('local-text-check').click(); if(!box('style-and-format').disabled||box('style-and-format').checked)return false; box('local-text-check').click(); const kept=box('typos-and-usage').checked&&box('style-and-format').checked; box('style-and-format').click(); return kept; })()`, 'review-category-selection-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-development-restored-settings-ready');
+    await click(renderer, '帮助', 'review-memory-development-restored-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-development-restored-toggle-ready');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-development-restored-toggle');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'review-memory-development-restored');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-memory-development-restored-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'review-memory-development-restored-library-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]').click(); return true; })()`, 'review-memory-book-reopen');
+    await waitFor(renderer, `document.querySelector('.editor-shell')`, 'review-memory-book-ready');
+    await openReviewDestination(renderer, 'review-memory-return');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-sheet-reopen');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-reopened');
 
@@ -3077,7 +3120,7 @@ async function main() {
       'review-no-preference-references-under-ci', reviewed.run.influence);
     await assertRenderer(renderer, `document.querySelectorAll('article.review-finding [data-referenced-rules]').length===0`, 'review-no-referenced-rules-chip-under-ci');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.startsWith('AI7 本地检查 · ') && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.includes('审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
     await assertRenderer(renderer, `(() => {const reject=document.querySelector('[data-mark-card] [data-mark-action="reject"]');if(!(reject instanceof HTMLButtonElement)||reject.disabled)return false;reject.click();return true;})()`, 'review-learning-reject');
     await waitFor(renderer, `document.querySelector('[data-mark-card] [data-learning-reason-ask]') !== null`, 'review-learning-ask');
     await assertRenderer(renderer, `(() => {const ask=document.querySelector('[data-learning-reason-ask]');return ask.querySelectorAll('input[type="radio"]').length===3&&ask.querySelectorAll('input:checked').length===0&&ask.querySelector('textarea')?.value===''&&ask.querySelector('[data-learning-ask-answer]')?.disabled===true&&document.querySelector('[data-mark-action="withdraw"]')?.disabled===false;})()`, 'review-learning-ask-unselected-nonblocking');
@@ -3126,9 +3169,26 @@ async function main() {
       findingsOffset = page.next;
     }
     requireJourney(!remainingFindings.some((item) => item.id === ignorable.findingId) && remainingFindings.some((item) => item.target.kind === 'review'), 'book-findings-disposition-reflected');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-ordinary-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-ordinary-settings-ready');
+    await click(renderer, '帮助', 'findings-poll-ordinary-help');
+    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`, 'findings-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
-    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-reread');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'book-findings-reread');
     await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
+    const pollFindings=remainingFindings.filter(item=>item.target.kind==='review').slice(0,2);
+    requireJourney(pollFindings.length===2,'findings-poll-two-records');
+    await renderer.evaluate(`document.querySelector('[data-findings-filter="category"] [data-filter-value=""]').focus()`);
+    for(const item of pollFindings) {
+      await renderer.evaluate(`globalThis.__j04PollFindings=document.querySelector('.findings-filters');globalThis.__j04PollTotal=Number(document.querySelector('.findings-center').dataset.findingsTotal)`);
+      await renderer.evaluate(`window.ai7.recordReviewFindingDisposition({reviewRunId:${JSON.stringify(item.target.reviewRunId)},findingId:${JSON.stringify(item.target.findingId)},disposition:'ignored',reason:'公开测试：轮询期间保留筛选焦点'})`);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer, `document.querySelector('.findings-filters')!==globalThis.__j04PollFindings && Number(document.querySelector('.findings-center').dataset.findingsTotal)===globalThis.__j04PollTotal-1 && document.activeElement===document.querySelector('[data-findings-filter="category"] [data-filter-value=""]')`, 'findings-filter-changed-poll-survival');
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-developer-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-developer-settings-ready');
+    await click(renderer,'帮助','findings-poll-developer-help');
+    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`, 'findings-poll-developer-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
     await waitFor(renderer, `document.querySelector('section.review-run')`, 'book-findings-review-ready');
 
@@ -3366,6 +3426,7 @@ async function main() {
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
     await waitFor(renderer, `${evidenceRows(factualCard)}===${JSON.stringify(expectedEvidence)}`, 'factual-card-evidence', 30_000);
     await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
+    await openMarkMore(renderer, sourced.markId, 'factual-mark-card-more');
     await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);
     await openReviewDestination(renderer, 'factual-card-evidence-back');
     await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-evidence-lens', 60_000);
@@ -3407,7 +3468,7 @@ async function main() {
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
     await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'factual-correction-choose');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'factual-correction-choose');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="save-correction"]')?.disabled===false`, 'factual-correction-ready');
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="save-correction"]`, 'factual-correction-save');
     await waitFor(renderer, `(document.querySelector('${workspaceSelector} .correction-saved')?.dataset.markIds ?? '').length===36`, 'factual-correction-saved');
@@ -3416,6 +3477,7 @@ async function main() {
     // from 事实核查 · 更正提案, nothing decided, and its 依据与核查 keeps 证据核查未完成 with the result it came from.
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="go-to-correction"]`, 'factual-correction-go');
     const correctionCardSelector = `.editorial-mark-card[data-mark-card=${JSON.stringify(correctionMarkId)}]`;
+    await openMarkMore(renderer, correctionMarkId, 'factual-correction-card-more');
     await waitFor(renderer, `document.querySelector('${correctionCardSelector} .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('${correctionCardSelector}'); const lineage=card?.querySelector('.editorial-mark-factual'); return card?.dataset.markKind==='change-suggestion' && lineage?.dataset.markFactualResult===${JSON.stringify(sourced.resultId)} && lineage.dataset.markFactualVersion==='1' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('事实核查 · 更正提案'); })()`, 'factual-correction-mark');
     cancellation.throwIfRequested();

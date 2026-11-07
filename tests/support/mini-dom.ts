@@ -49,6 +49,14 @@ export class MiniElement {
   rows = 0;
   maxLength = -1;
   tabIndex = 0;
+  scrollTop = 0;
+  scrollLeft = 0;
+  selectionStart: number | null = null;
+  selectionEnd: number | null = null;
+  selectionDirection: 'forward' | 'backward' | 'none' = 'none';
+  setSelectionRange(start: number, end: number, direction: 'forward' | 'backward' | 'none' = 'none'): void {
+    this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction;
+  }
   readonly dataset: Record<string, string>;
 
   constructor(tag: string) {
@@ -72,6 +80,7 @@ export class MiniElement {
   }
 
   get className(): string { return this.attributes.get('class') ?? ''; }
+  get childElementCount(): number { return this.children.filter((child) => child.tagName !== '#TEXT').length; }
   set className(value: string) { this.attributes.set('class', value); }
   get classList(): { contains(name: string): boolean; add(...names: string[]): void; remove(...names: string[]): void } {
     return {
@@ -133,6 +142,13 @@ export class MiniElement {
     else this.children.splice(this.children.indexOf(reference), 0, node);
     return node;
   }
+  replaceWith(...nodes: Array<MiniElement | string>): void {
+    const parent = this.parentElement;
+    if (parent === null) return;
+    const fragment = new MiniElement('fragment'); fragment.append(...nodes);
+    for (const node of [...fragment.children]) parent.insertBefore(node, this);
+    this.remove();
+  }
   replaceChildren(...nodes: Array<MiniElement | string>): void {
     for (const child of this.children) child.parentElement = null;
     this.children.length = 0;
@@ -144,6 +160,15 @@ export class MiniElement {
     if (parent === null) return;
     parent.children.splice(parent.children.indexOf(this), 1);
     this.parentElement = null;
+  }
+  before(...nodes: MiniElement[]): void {
+    for (const node of nodes) this.parentElement?.insertBefore(node, this);
+  }
+  after(...nodes: MiniElement[]): void {
+    const parent = this.parentElement;
+    if (parent === null) return;
+    const next = parent.children[parent.children.indexOf(this) + 1] ?? null;
+    for (const node of nodes) parent.insertBefore(node, next);
   }
   #adopt(node: MiniElement): void {
     node.remove();
@@ -250,6 +275,7 @@ function splitList(selector: string): string[] {
 }
 
 function compound(element: MiniElement, part: string): boolean {
+  if (part === "*") return element.tagName !== "#TEXT";
   const pattern = /([a-zA-Z][\w-]*)|\.([\w-]+)|\[([\w-]+)(?:="((?:[^"\\]|\\.)*)")?\]|(:[\w-]+(?:\([^)]*\))?)/gu;
   let match: RegExpExecArray | null;
   let consumed = 0;
@@ -264,6 +290,7 @@ function compound(element: MiniElement, part: string): boolean {
       if (value !== undefined && actual !== value.replace(/\\(.)/gu, '$1')) return false;
     }
     if (pseudo === ':disabled' && !element.disabled) return false;
+    if (pseudo === ':checked' && !element.checked) return false;
     if (pseudo === ':not(:disabled)' && element.disabled) return false;
   }
   if (consumed !== part.length) throw new Error(`mini-dom cannot read the selector part "${part}"`);

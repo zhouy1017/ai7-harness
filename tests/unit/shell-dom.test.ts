@@ -47,6 +47,14 @@ function mounted(notice: string | null = null) {
 }
 
 describe('mounted shell preferences', () => {
+  it('keeps only Settings in the sidebar footer and selects it for Help', () => {
+    const { sidebar, surface, position } = mounted();
+    surface.follow('help', null);
+    expect(sidebar.querySelector('[data-shell-slot="help"]')).toBeNull();
+    expect(sidebar.querySelector('[data-nav-help]')).toBeNull();
+    expect(sidebar.querySelector('[data-nav-settings]')?.getAttribute('aria-current')).toBe('page');
+    expect(position.textContent).toBe('本机 · 帮助');
+  });
   it('keeps focus on the same Book pin when pinning and unpinning moves it between lists', async () => {
     const { sidebar, preferences } = mounted();
     await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });
@@ -104,6 +112,20 @@ describe('mounted shell preferences', () => {
 
 // #1319: switching is a direct book row; the library contains the complete catalog.
 describe('sidebar book entries', () => {
+  it('reopens the Book from global attention through the library rather than hidden Book sections (#1394 J16)', async () => {
+    const { sidebar, preferences, surface, openDestination, openBook } = mounted();
+    await preferences.load();
+    surface.follow('editor', { bookId: 'book-a', title: '甲书', section: 'manuscript' });
+    await vi.waitFor(() => expect(preferences.current['shell.recentBooks'][0]?.bookId).toBe('book-a'));
+    surface.leaveBook(); surface.follow('global-attention', null); surface.follow('help', null);
+    expect(sidebar.querySelector<HTMLElement>('.sidebar-book')!.hidden).toBe(true);
+    expect(surface.currentBook()).toBeNull();
+    sidebar.querySelector<HTMLElement>('[data-nav-destination="library"]')!.click();
+    expect(openDestination).toHaveBeenCalledWith('library');
+    sidebar.querySelector<HTMLElement>('[data-nav-book="book-a"]')!.click();
+    expect(openBook).toHaveBeenCalledWith('book-a');
+  });
+
   it('opens a recent book directly and keeps the complete library reachable without a switcher', async () => {
     const { sidebar, preferences, surface, openBook, openDestination } = mounted();
     await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });

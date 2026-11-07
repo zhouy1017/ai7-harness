@@ -103,6 +103,9 @@ export interface SearchBackendProbeProjection {
  * the exact candidate, its fixed arguments and bounds, and the scopes that refuse it before ticket, credential or transport.
  */
 export interface SearchConnectionTestPolicy {
+  /** v34: additional native probes and the explicitly admitted DeepSeek model-slot reuse. */
+  readonly candidates?: ReadonlyArray<SearchConnectionTestPolicy>;
+  readonly credentialFallbackSlot?: string;
   readonly ruleId: 'ordinary-production-direct-search-connection-test';
   readonly purpose: 'fixed-public-search-connection-test';
   readonly backendId: string;

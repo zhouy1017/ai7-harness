@@ -2,9 +2,10 @@ import { performance } from 'node:perf_hooks';
 import { Schema, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, TextSelection, type Transaction } from 'prosemirror-state';
 import type { Decoration, DecorationSet, DecorationSource } from 'prosemirror-view';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EditorialMarkAnchorProjection } from '../../src/shared/protocol.js';
 import { buildMarkDecorations, markDecorationPlugin, MARK_DECORATIONS_META, type ActiveMark } from '../../src/renderer/mark-decorations.js';
+import { installMiniDom } from '../support/mini-dom.js';
 import { editorMotionPlugin, EDITOR_MOTION_META } from '../../src/renderer/editor-motion.js';
 
 // Unit (L1) benchmark for the marks drawn over the manuscript window (Issue #1178, F-10 outcome 3): 1,000 synthetic marks — four on
@@ -55,8 +56,8 @@ function marks(): EditorialMarkAnchorProjection[] {
 
 function setup() {
   const doc = schema.node('doc', null, Array.from({ length: BLOCKS }, (_, index) => schema.node('paragraph', { blockId: blockId(index) }, schema.text(TEXT))));
-  const source = { current: marks(), active: undefined as ActiveMark | undefined, generation: {} as object };
-  const drawn = { marks: () => source.current, baselineText: () => TEXT, active: () => source.active, generation: () => source.generation };
+  const source = { current: marks(), active: undefined as ActiveMark | undefined, linked: undefined as string | undefined, generation: {} as object };
+  const drawn = { marks: () => source.current, baselineText: () => TEXT, active: () => source.active, linked: () => source.linked, generation: () => source.generation };
   const plugin = markDecorationPlugin(drawn);
   let state = EditorState.create({ doc, plugins: [plugin] });
   const set = () => plugin.getState(state)!.set;
@@ -164,4 +165,49 @@ describe('1,000 marks over the manuscript window', () => {
     expect(perKey).toBeLessThan(10);
     console.info(`[#1178 benchmark] keystroke: ${worst()} of ${BLOCKS} paragraphs redrawn, ${perKey.toFixed(3)} ms per key`);
   });
+});
+
+function inlineClasses(set: DecorationSet, markId: string): string {
+  const attrs = set.find().map((decoration) => (decoration as unknown as { type: { attrs?: Record<string, string> } }).type.attrs)
+    .find((attributes) => attributes?.['data-mark-id'] === markId);
+  return attrs?.['class'] ?? '';
+}
+
+it('keeps the linked highlight in actual recomputed decorations across edits and generation reloads', () => {
+  const { source, set, apply, drawAll, state } = setup();
+  source.linked = 'm1'; source.active = { markId: 'm4', previewText: '独立建议预览' };
+  const before = state().doc, selection = state().selection;
+  expect(apply(state().tr.setMeta(MARK_DECORATIONS_META, true))).toBeLessThanOrEqual(2);
+  expect(inlineClasses(set(), 'm1')).toContain('manuscript-comments-anchor');
+  expect(inlineClasses(set(), 'm4')).toContain('editorial-mark-previewed');
+  expect(state().doc.eq(before)).toBe(true); expect(state().selection.eq(selection)).toBe(true);
+  apply(state().tr.insertText('新', 2));
+  expect(inlineClasses(set(), 'm1')).toContain('manuscript-comments-anchor');
+  expect(signature(set().find())).toEqual(signature(drawAll().find()));
+  source.generation = {}; apply(state().tr.setSelection(TextSelection.create(state().doc, 3)));
+  expect(inlineClasses(set(), 'm1')).toContain('manuscript-comments-anchor');
+  expect(inlineClasses(set(), 'm4')).toContain('editorial-mark-previewed');
+});
+
+it('removes only the linked highlight when cleared while preserving the independent proposal and selection', () => {
+  const { source, set, apply, state } = setup(); source.active = { markId: 'm4', previewText: '保留浮卡预览' };
+  source.linked = 'm1'; apply(state().tr.setMeta(MARK_DECORATIONS_META, true));
+  expect(inlineClasses(set(), 'm1')).toContain('manuscript-comments-anchor');
+  const doc = state().doc, selection = state().selection;
+  source.linked = undefined; expect(apply(state().tr.setMeta(MARK_DECORATIONS_META, true))).toBe(1);
+  expect(inlineClasses(set(), 'm1')).not.toContain('manuscript-comments-anchor');
+  expect(inlineClasses(set(), 'm4')).toContain('editorial-mark-previewed');
+  expect(state().doc.eq(doc)).toBe(true); expect(state().selection.eq(selection)).toBe(true);
+});
+
+it('updates an actual point widget through the decoration owner when its linked highlight changes', () => {
+  const restore = installMiniDom(); vi.stubGlobal('window', { document });
+  try {
+    const { source, set, apply, state } = setup(); source.linked = 'm2'; apply(state().tr.setMeta(MARK_DECORATIONS_META, true));
+    const point = () => set().find().find((decoration) => decoration.from === decoration.to && decoration.spec['blockId'] === blockId(0))!;
+    const render = (decoration: Decoration) => (decoration as unknown as { type: { toDOM(): HTMLElement } }).type.toDOM();
+    const highlighted = point(); expect(render(highlighted).classList.contains('manuscript-comments-anchor')).toBe(true);
+    source.linked = undefined; apply(state().tr.setMeta(MARK_DECORATIONS_META, true));
+    expect(point().spec['key']).not.toBe(highlighted.spec['key']); expect(render(point()).classList.contains('manuscript-comments-anchor')).toBe(false);
+  } finally { vi.unstubAllGlobals(); restore(); }
 });

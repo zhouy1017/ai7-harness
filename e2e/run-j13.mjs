@@ -839,6 +839,27 @@ async function main() {
     let manager = await launch();
     let renderer = await waitForRenderer(manager, 'initial-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'initial-ready');
+    // #1377 / J-13: ordinary navigation reaches the same preferences owner from both destinations.
+    for (const developer of ['false', 'true']) {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await click(renderer, '帮助', `quality-mode-${developer}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
+      if (developer === 'true') continue;
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-default');
+      await waitFor(renderer, `document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true' && document.querySelector('[data-learning-enabled]')`, 'ordinary-preferences-loaded');
+      await clickSelector(renderer, '#quality-tab-feedback', 'ordinary-feedback-tab');
+      await waitFor(renderer, `document.querySelectorAll('[data-feedback-filter]').length===2 && !document.querySelector('#feedback-filter-dimension, #feedback-filter-from, #feedback-filter-to, #feedback-group-by')`, 'ordinary-feedback-two-filters');
+      await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preferences-return');
+      await waitFor(renderer, `document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-preferences-roundtrip');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-house-knowledge');
+      await clickSelector(renderer, '[data-knowledge-category="memory"]', 'ordinary-house-entry');
+      await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]') && !document.querySelector('form')`, 'ordinary-house-same-owner');
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'ordinary-quality-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'ordinary-quality-library-ready');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await renderer.send('Page.setBypassCSP', { enabled: false });
@@ -1307,10 +1328,16 @@ async function main() {
       UUID_PATTERN.test(exactScope.knowledge[0].revisionId) && /^[0-9a-f]{64}$/.test(exactScope.knowledge[0].digest) && exactScope.exclusions.length === 0 &&
       seriesPlan.scope.reference.includes(`允许参考 · 书系《${SERIES}》的知识条目`), 'series-scope-pins');
 
+    // #1383: findings list, category count and list position refer to the same whole-book selection.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'consistency-findings-open');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'consistency-findings-ready');
+    await assertRenderer(renderer, `(() => { const filter=document.querySelector('[data-findings-filter="category"] [data-filter-value="review:series-consistency"]'); if(!filter)return false; filter.click(); return document.querySelectorAll('.findings-center [data-finding-id]').length===3 && document.querySelector('.findings-center [data-list-position]')?.value==='0'; })()`, 'consistency-findings-filter-count');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-findings-return');
+    await waitFor(renderer, `document.querySelector('article.review-finding')`, 'consistency-findings-return-ready');
     at('consistency-marks-on-manuscript');
     // A finding is the mark on the manuscript: 回到原文 opens the text at it, its card naming the category.
     await clickSelector(renderer, `article.review-finding[data-finding-id="${findings[0].findingId}"] [data-review-action="go-to-text"]`, 'consistency-go-to-text');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${findings[0].markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「书系一致性」')`, 'consistency-mark-and-card', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${findings[0].markId}"]')?.dataset.markSource==='ai7' && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.startsWith('AI7 本地检查 · ') && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.includes('审阅「书系一致性」')`, 'consistency-mark-and-card', 30_000);
 
     at('consistency-member-reviewed');
     // The Series page's 书系一致性审阅 column says when the member's findings reached its manuscript.
@@ -1940,7 +1967,7 @@ async function main() {
     const olderSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'exact-older-filled');
     requireJourney(olderSheet.latestEligible === 'false' && olderSheet.chosen === 1 && JSON.stringify(olderSheet.checked) === JSON.stringify(['style-and-format']) &&
       olderSheet.lines.includes('你选了第 1 版；最新可用的是第 2 版。'), 'exact-older-words', olderSheet);
-    await waitFor(renderer, `document.activeElement === document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]')`, 'exact-version-focused', 10_000);
+    await waitFor(renderer, `(() => { const native=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'),trigger=native?.nextElementSibling; return native instanceof HTMLSelectElement && !native.disabled && native.selectedIndex===1 && trigger instanceof HTMLButtonElement && trigger.matches('.ui-select-trigger') && !trigger.disabled && !trigger.hidden && trigger.getClientRects().length>0 && trigger.textContent.includes('第 1 版') && document.activeElement===trigger; })()`, 'exact-version-focused', 10_000);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'exact-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exact-prepared', 180_000);
     const exactRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
@@ -2063,11 +2090,14 @@ async function main() {
         `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划可按需查看。`,
         '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。',
       ]), 'series-sheet-chosen-apart', { sheet: seriesSheet, box: seriesBox });
-    // Left unticked, nothing is prepared: the sheet says to choose a category.
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare-empty');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-sheet-problem')?.textContent==='请至少选择一个审阅类别。' && document.querySelector('dialog.review-sheet')?.open===true`, 'series-sheet-nothing-chosen');
+    // Left unticked, both actions stay disabled (#1374): no new Run or authorization is created.
+    const READ_SERIES_RUN_STATE = `window.ai7.inspectReviewWorkspace().then((page) => ({ runs: page.runs.map((run) => [run.reviewRunId, run.state]), open: page.run === null ? null : [page.run.reviewRunId, page.run.state, page.run.authorization] }))`;
+    const beforeSeriesOptIn = await renderer.evaluate(READ_SERIES_RUN_STATE);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); return sheet instanceof HTMLDialogElement && sheet.open && ['prepare','start'].every((action) => { const button=sheet.querySelector('[data-review-action="'+action+'"]'); return button instanceof HTMLButtonElement && button.disabled; }); })()`, 'series-sheet-empty-actions-disabled');
+    requireJourney(JSON.stringify(await renderer.evaluate(READ_SERIES_RUN_STATE)) === JSON.stringify(beforeSeriesOptIn), 'series-sheet-empty-no-effect');
     await clickSelector(renderer, 'dialog.review-sheet input[name="review-category"][value="series-consistency"]', 'series-sheet-tick');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
+    await assertRenderer(renderer, `['prepare','start'].every((action) => { const button=document.querySelector('dialog.review-sheet [data-review-action="'+action+'"]'); return button instanceof HTMLButtonElement && !button.disabled; })`, 'series-sheet-selected-actions-enabled');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')===null && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
@@ -2241,6 +2271,35 @@ async function main() {
     manager = await launch(); renderer = await waitForRenderer(manager, 'skill-restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'skill-restart-ready');
     await assertRenderer(renderer, `(async () => { const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(importedSkillId)},before:null}); return read.revision.state==='enabled' && read.revision.enabledBooks[0]===${JSON.stringify(enabledSkillBook)} && read.revision.files[0].path==='SKILL.md'; })()`, 'skill-restart-keeps-snapshot');
+
+    at('exemplar-catalogue-ordinary');
+    await closeBrowser();
+    const exemplarPath = resolve(runRoot, 'catalogue-exemplar.txt');
+    await writeFile(exemplarPath, '书系范例目录验证使用的虚构新闻稿。', 'utf8');
+    manager = await launch(REVIEW_FIXTURE_IDENTITY, [], exemplarPath);
+    renderer = await waitForRenderer(manager, 'exemplar-catalogue-window');
+    // Preload readiness precedes renderer startup; wait for its completed landing paint before navigating or switching mode.
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'exemplar-catalogue-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'catalogue-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'catalogue-settings-ready');
+    await click(renderer, '帮助', 'catalogue-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'catalogue-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'catalogue-ordinary-mode');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'catalogue-category-copy');
+    await click(renderer, '范例', 'catalogue-open');
+    await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'catalogue-empty-ready');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社文档会自动加入。'`, 'catalogue-no-manuscripts');
+    // assertRenderer wraps Boolean(expression); await this async fixture command directly before refreshing the catalogue.
+    requireJourney(await renderer.evaluate(`(async () => { const preview=await window.ai7.previewImportedExemplar(); const book=await window.ai7.importEarlierExemplar({previewId:preview.previewId,bookId:null,bookTitle:'书系工作文档来源',authors:['测试作者'],editors:['测试责编'],typeId:'news-release',expectedVersion:0}); return book.bookTitle==='书系工作文档来源' && book.exemplars.length===1 && book.exemplars[0].typeId==='news-release'; })()`), 'catalogue-import-work-document');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-refresh-home');
+    // Sidebar navigation settles asynchronously; the previous page still has an already-selected 范例 tab meanwhile.
+    await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] .knowledge-category[data-knowledge-category="exemplars"]')`, 'catalogue-refresh-home-ready');
+    await clickSelector(renderer, '.knowledge-category[data-knowledge-category="exemplars"]', 'catalogue-refresh');
+    await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
+    await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'catalogue-kind-filter');
+    await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'catalogue-book-filter');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

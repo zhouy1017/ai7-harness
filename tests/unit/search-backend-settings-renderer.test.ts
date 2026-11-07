@@ -4,6 +4,7 @@ import { SEARCH_CANDIDATE_PROBE_LABEL, candidateProbeLines, effectiveSearchSourc
 import type { ModelServiceSettingsProjection, SearchBackendProbeProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
 // 设置 › 模型服务 › 联网检索 (Issue #1055 into W22-S10a #1181) over the real registry's projection and stubbed API calls: the
@@ -17,7 +18,7 @@ const projection = (): ModelServiceSettingsProjection => ({
   searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId, credentialReference: '11111111-1111-4111-8111-111111111111', credentialOperationState: 'ready',
     selected: backendId === 'search-tinyfish', selectedAt: '2026-10-29T00:00:00.000Z' }))),
   routeChoice: { routes: [], unsupportedProviders: [], effectLabel: '' },
-  launchPolicy: { operationalScope: 'development-ci' },
+  launchPolicy: resolveSourceCheckoutLaunchPolicySync(process.cwd(), 'ordinary-production'),
 } as unknown as ModelServiceSettingsProjection);
 
 const SUCCESS: SearchBackendProbeProjection = { backendId: 'search-deepseek', reachable: true, latencyMs: 12, resultCount: 7,
@@ -34,16 +35,32 @@ function section(probe: SearchBackendSettingsApi['probeSearchBackend']) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the direct-search candidate in 联网检索', () => {
+  it.each(['openai-platform', 'anthropic-claude'] as const)('shows %s admitted native source in ordinary mode and restores it after an override round trip', (route) => {
+    setTechnicalLayerVisible(false);
+    const settings = projection();
+    Object.assign(settings, { routeChoice: { routes: [{ route, inUse: true, binding: { providerLabel: '官方渠道' }, connection: { credentialOperationState: 'ready' } }] } });
+    const render = () => renderSearchBackendSettings(settings, { api: { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() }, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
+    for (const override of [false, true, false]) {
+      settings.searchBackends.alwaysUseSelectedBackend = override;
+      const node = render();
+      expect(node.textContent).toContain(override ? '编辑指定 · TinyFish' : '随模型渠道 · 官方渠道 自带搜索（未实测）');
+      expectNoTechnicalText(node);
+      expect(node.querySelectorAll('[data-search-backend]')).toHaveLength(5);
+    }
+  });
   it('keeps candidate decisions and test outcomes without technical identifiers in ordinary mode', async () => {
     setTechnicalLayerVisible(false);
     const { node, api } = section(async () => SUCCESS);
-    expect(node.textContent).toContain('不能用于任务');
+    expect(node.textContent).toContain('不作为独立排名默认后端或备用来源');
+    expect(node.textContent).toContain('尚未测量这一接口的命中率、延迟与可达性');
     expectNoTechnicalText(node);
+    expect(node.textContent).not.toMatch(/https?:\/\/|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|配置摘要|评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u);
     node.querySelector('button[data-action="probe-search-candidate"]')!.click();
     await settle();
     expect(node.querySelector('[data-search-candidate-probe]')!.textContent).toContain('连接成功');
     expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1' });
     expectNoTechnicalText(node);
+    expect(node.textContent).not.toContain(SUCCESS.candidate!.configurationDigest);
   });
   it('shows the effective source and why it is selected', () => {
     const settings = projection();
@@ -62,18 +79,20 @@ describe('the direct-search candidate in 联网检索', () => {
     settings.searchBackends.alwaysUseSelectedBackend = true;
     expect(effectiveSearchSourceLine(settings)).toContain('编辑指定 · TinyFish');
   });
-  it('offers both unmeasured native candidates with a connection test enabled by their model channel', async () => {
+  it.each([false, true])('offers native candidate connection tests with technical mode %s', async (technical) => {
+    setTechnicalLayerVisible(technical);
     const settings = projection();
     Object.assign(settings, { routeChoice: { routes: ['openai-platform', 'anthropic-claude'].map((route) => ({ route, connection: { credentialOperationState: 'ready' } })) } });
     const api = { probeSearchBackend: vi.fn().mockResolvedValue(SUCCESS), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     for (const service of ['openai', 'anthropic']) {
       const card = node.querySelector(`[data-search-candidate="${service}-native-search-v1"]`)!;
-      expect(card.textContent).toContain('未实测'); expect(card.textContent).toContain('不能用于任务');
+      expect(card.textContent).toContain('未实测'); expect(card.textContent).toContain('不作为独立排名默认后端或备用来源');
       const controls = card.querySelectorAll('button'); expect(controls).toHaveLength(1); expect(controls[0]!.disabled).toBe(false);
       controls[0]!.click(); await settle();
       expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: `search-${service}`, candidateId: `${service}-native-search-v1` });
     }
+    if (!technical) expectNoTechnicalText(node);
   });
   it('keeps keyless backends unselected, distinguishes measured references, and disables empty credential actions', () => {
     const settings = projection();
@@ -95,6 +114,7 @@ describe('the direct-search candidate in 联网检索', () => {
   });
 
   it('synchronizes the saved official DeepSeek model credential without exposing its value', async () => {
+    setTechnicalLayerVisible(false);
     const settings = projection();
     Object.assign(settings, { launchPolicy: { operationalScope: 'ordinary-production' }, routeChoice: { routes: [{ route: 'deepseek-open-platform', connection: { credentialOperationState: 'ready' } }] } });
     const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(async () => settings), removeSearchBackendCredential: vi.fn() };
@@ -104,13 +124,38 @@ describe('the direct-search candidate in 联网检索', () => {
     expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-deepseek', reuseModelCredential: true });
     expect(setStatus).toHaveBeenCalledWith('模型渠道凭据已同步到联网检索。', 'success');
   });
+  it('saves an ordinary search key, selects and tests its backend, then removes the key (#1370)', async () => {
+    setTechnicalLayerVisible(false);
+    const settings = projection(); Object.assign(settings.launchPolicy, { operationalScope: 'ordinary-production' });
+    const backend = settings.searchBackends.backends.find((entry) => entry.backendId === 'search-brave')!;
+    Object.assign(backend.connection, { credentialOperationState: 'missing', credentialReference: null });
+    const { candidate: _candidate, ...result } = SUCCESS;
+    const api = { probeSearchBackend: vi.fn(async () => result),
+      selectSearchBackend: vi.fn<SearchBackendSettingsApi['selectSearchBackend']>(async (input) => { if (input.backendId !== null) settings.searchBackends.selectedBackendId = input.backendId; return settings; }),
+      saveSearchBackendCredential: vi.fn(async () => { backend.connection.credentialOperationState = 'ready'; return settings; }),
+      removeSearchBackendCredential: vi.fn(async () => { backend.connection.credentialOperationState = 'missing'; return settings; }) };
+    let node: MiniElement;
+    const paint = () => { node = renderSearchBackendSettings(settings, { api, render: paint, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement; };
+    const card = () => node.querySelector('[data-search-backend="search-brave"]')!;
+    const press = async (label: string) => { card().querySelectorAll('button').find((control) => control.textContent === label)!.click(); await settle(); };
+    paint(); const input = card().querySelector('input')!;
+    input.value = 'synthetic-search-key'; input.dispatchEvent({ type: 'input' });
+    await press('保存密钥'); expect(input.value).toBe('');
+    expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-brave', secret: 'synthetic-search-key' });
+    await press('选择后端'); expect(card().dataset['selected']).toBe('true');
+    paint(); expect(card().dataset['selected']).toBe('true');
+    await press('测试检索'); expect(card().querySelector('[data-search-probe]')!.textContent).toContain('可达');
+    expect(card().querySelector('[data-search-probe]')!.textContent).not.toContain('延迟');
+    expectNoTechnicalText(node!);
+    await press('移除密钥'); expect(card().querySelectorAll('button').find((control) => control.textContent === '测试检索')!.disabled).toBe(true);
+  });
   it('lists it after the five ranked backends, 未实测, with 测试连接 as its only action', () => {
     const { node } = section(async () => SUCCESS);
     expect(node.querySelectorAll('[data-search-backend]').map((card) => card.dataset['searchBackend'])).toEqual(SHIPPED);
     const card = node.querySelector('[data-search-candidate="deepseek-direct-search-v1"]')!;
     expect(card.dataset['measurement']).toBe('not-measured');
     expect(card.textContent).toContain('未实测');
-    expect(card.textContent).toContain('不能用于任务');
+    expect(card.textContent).toContain('不作为独立排名默认后端或备用来源');
     expect(card.querySelectorAll('button').map((item) => item.textContent)).toEqual([SEARCH_CANDIDATE_PROBE_LABEL]);
     expect(card.querySelector('[data-search-candidate-probe]')!.textContent).toBe('');
   });
@@ -140,6 +185,7 @@ describe('the direct-search candidate in 联网检索', () => {
 
 describe('the 备用来源 control in 联网检索 (#1226)', () => {
   it('offers only a keyed non-default backend, sends role fallback, and clears the chosen one', async () => {
+    setTechnicalLayerVisible(false);
     const keyed = (backendId: string) => backendId === 'search-brave' || backendId === 'search-parallel';
     const settings = { ...projection(), searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId,
       credentialReference: keyed(backendId) ? `11111111-1111-4111-8111-11111111111${SHIPPED.indexOf(backendId)}` : null,

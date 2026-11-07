@@ -1,19 +1,22 @@
 import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
+import { filterChoices, stateTerm } from './components/controls.js';
+import { EXEMPLARS_FILTER_EMPTY, EXEMPLAR_ELIGIBILITY_LABELS, exemplarTitle, exemplarKind, exemplarKindFilter, exemplarFacts, readersReportExemplarFacts, readersReportExemplarAdmission } from './knowledge-base-labels.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { mountEditableProcedureLibrary } from './procedure-library.js';
-import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
+import { mountReviewPreferences } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import type { DefaultExecutionRulesProjection, ExemplarBookProjection, ExemplarsProjection, KnowledgeProceduresProjection } from '../shared/protocol.js';
+import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
-import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, visibleQualityLearningTabs, type QualityLearningTab } from './quality-learning-labels.js';
-import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, REVIEW_PREFERENCES_STATUS, visibleQualityLearningTabs, type QualityLearningTab } from './quality-learning-labels.js';
+import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, exemplarAttribution, exemplarDesignation, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
 import { mountImportedSkills } from './imported-skills.js';
@@ -95,14 +98,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
     // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
     if (tab === 'memory') {
-      const preferenceHost = element('div'); const memoryHost = element('div');
-      panelNode.append(preferenceHost, memoryHost);
       try {
-        renderHouseReviewPreference(preferenceHost, await window.ai7.inspectHouseReviewPreference(), window.ai7);
-        // 编辑记忆 (Issue #1082, F-05 part 1): explicit memory and the learning controls beside the delivered 本社审阅偏好.
-        await mountEditorialMemory(memoryHost, window.ai7, openWordSourceVersion).catch((error: unknown) => {
-          memoryHost.replaceChildren(element('p', 'field-note', rendererErrorMessage(error, '无法读取编辑记忆。')));
-        });
+        await mountReviewPreferences(panelNode, window.ai7, openWordSourceVersion);
         if (content.isConnected) setStatus('本社审阅偏好已打开');
       } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
       return;
@@ -120,7 +117,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (tab === 'exemplars') {
       setStatus(EXEMPLARS_STATUS.loading, 'busy');
       try {
-        renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
+        await renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
         if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
       } catch (error) {
         setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
@@ -158,103 +155,142 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
   /**
    * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): each published Book with who it is attributed to and when it was set as a
    * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility. The
-   * Books come a page at a time; moving forward or back to the first page replaces the current bounded page.
+   * Books are collected through bounded service reads; filters apply to that catalogue before displaying a bounded page.
    */
-  function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
+  async function renderExemplars(root: HTMLElement, projection: ExemplarsProjection,
+    filters = { kind: '', book: '' }, offset = 0): Promise<void> {
+    // Read metadata only through the existing bounded cursor API. An unvisited Book/type must remain findable.
+    let catalogue = [...projection.books];
+    let cursor = projection.nextCursor;
+    while (cursor !== null) {
+      const next = await window.ai7.inspectExemplars({ after: cursor });
+      if (!root.isConnected) return;
+      catalogue.push(...next.books);
+      cursor = next.nextCursor;
+    }
+    if (!root.isConnected) return;
     const surface = {
       api: window.ai7, status: setStatus, error: rendererErrorMessage,
       refresh: async () => {
         const next = await window.ai7.inspectExemplars({ after: null });
         if (!root.isConnected) return;
         root.replaceChildren();
-        renderExemplars(root, next);
+        await renderExemplars(root, next, filters, offset);
       },
     };
     const importRow = element('div', 'button-row');
-    if (projection.books.length === 0) importRow.append(element('span', 'exemplars-empty', EXEMPLARS_EMPTY));
     importRow.append(exemplarImportButton(surface));
     root.append(importRow);
+    const toolbar = element('div', 'exemplar-filters');
+    const empty = element('p', 'exemplars-empty');
+    root.append(toolbar);
     const list = element('div', 'exemplar-list');
-    const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
+    const kinds = new Map<string, string>();
+    const books = new Map<string, string>();
+    const drawFilters = () => {
+      for (const book of catalogue) {
+        books.set(book.bookId, book.bookTitle);
+        for (const entry of [...book.exemplars, ...book.readersReports]) {
+          const kind = exemplarKindFilter(entry);
+          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `工作文档 · ${entry.typeLabel}`);
+        }
+      }
+      toolbar.replaceChildren();
+      for (const [key, label, choices] of [
+        ['kind', '范例类型', [['', '全部类型'], ...kinds]],
+        ['book', '来源图书', [['', '全部图书'], ...books]],
+      ] as const) {
+        const control = filterChoices({ label, choices, value: filters[key], change: (value) => {
+          filters[key] = value;
+          offset = 0;
+          append();
+        } });
+        control.dataset['exemplarFilter'] = key;
+        toolbar.append(control);
+      }
+    };
+    const append = (): HTMLElement | null => {
+      const matching = catalogue.filter((book) => (!filters.book || filters.book === book.bookId) &&
+        (!filters.kind || [...book.exemplars, ...book.readersReports].some((entry) => exemplarKindFilter(entry) === filters.kind)));
+      offset = Math.min(offset, Math.max(0, Math.ceil(matching.length / MAX_EXEMPLAR_BOOKS_PAGE) - 1) * MAX_EXEMPLAR_BOOKS_PAGE);
+      firstPage.hidden = offset === 0;
+      more.hidden = offset + MAX_EXEMPLAR_BOOKS_PAGE >= matching.length;
+      moreRow.hidden = firstPage.hidden && more.hidden;
       list.replaceChildren();
       let first: HTMLElement | null = null;
-      for (const book of books) {
+      let firstContext: HTMLElement | null = null;
+      let count = 0;
+      for (const book of matching.slice(offset, offset + MAX_EXEMPLAR_BOOKS_PAGE)) {
+        const exemplars = book.exemplars.filter((entry) => !filters.kind || exemplarKindFilter(entry) === filters.kind);
+        const reports = book.readersReports.filter((entry) => !filters.kind || exemplarKindFilter(entry) === filters.kind);
+        if (filters.kind && exemplars.length === 0 && reports.length === 0) continue;
         const card = element('article', 'exemplar-book');
+        card.tabIndex = -1;
         card.dataset['bookId'] = book.bookId;
         card.dataset['exemplarCount'] = String(book.exemplars.length);
         card.dataset['exemplarWithdrawn'] = String(book.withdrawn);
-        const heading = element('h3', undefined, `《${book.bookTitle}》`);
-        heading.tabIndex = -1;
-        first ??= heading;
         const context = element('p', 'field-note');
         const skipped = book.skipped ?? [];
-        const hasExtra = book.exemplars.length === 0 || skipped.length > 0;
+        const hasExtra = book.exemplars.length + book.readersReports.length === 0 || skipped.length > 0;
         context.append(element('span', 'exemplar-attribution', exemplarAttribution(book).replace(/。$/u, '')), '；',
           element('span', 'exemplar-designation', hasExtra ? exemplarDesignation(book, localInstantLabel).replace(/。$/u, '') : exemplarDesignation(book, localInstantLabel)));
-        if (book.exemplars.length === 0 && skipped.length === 0) context.append(`；${EXEMPLARS_NONE_DELIVERED}`);
+        if (book.exemplars.length + book.readersReports.length === 0 && skipped.length === 0) context.append(`；来自《${book.bookTitle}》 · ${EXEMPLARS_NONE_DELIVERED}`);
         if (skipped.length > 0) context.append('；', element('span', 'exemplars-skipped', exemplarSkippedNote(skipped)));
-        card.append(heading, context);
-        const more = element('details', 'knowledge-file-more');
-        more.append(element('summary', undefined, '查看范例'));
         const items = element('ul', 'exemplar-items');
-        for (const exemplar of book.exemplars) {
-          const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
+        for (const exemplar of exemplars) {
+          const item = element('li', 'exemplar-entry');
+          const actions = element('div', 'exemplar-actions');
+          actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`));
+          if (exemplar.imported) actions.append(exemplarEligibility(surface, exemplar));
+          const heading = element('div', 'exemplar-heading');
+          const badge = stateTerm(exemplarKind(exemplar)); badge.classList.add('exemplar-kind-badge');
+          heading.append(badge, element('strong', 'exemplar-title', exemplarTitle(book, exemplar)), actions);
+          item.append(heading, element('p', 'field-note exemplar-context', `来自《${book.bookTitle}》（${exemplarAttribution(book)}） · ${exemplarFacts(exemplar, localInstantLabel)}`));
           item.dataset['exemplarDocument'] = exemplar.documentId;
           item.dataset['exemplarType'] = exemplar.typeId;
           item.dataset['exemplarVersion'] = String(exemplar.version);
-          if (exemplar.imported) item.append(exemplarEligibility(surface, exemplar));
+          item.tabIndex = -1;
+          first ??= item;
+          count++;
           items.append(item);
         }
-        if (book.exemplars.length > 0) more.append(items);
+        if (exemplars.length > 0) card.append(items);
         // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
-        more.append(readersReportExemplars(book));
-        if (book.imported) more.append(exemplarImportButton(surface, book));
-        card.append(more);
+        const reportItems = readersReportExemplars({ ...book, readersReports: reports }, (next) => {
+          catalogue = catalogue.map((entry) => entry.bookId === next.bookId ? next : entry);
+        });
+        card.append(reportItems, context);
+        count += reports.length;
+        first ??= reportItems.querySelector<HTMLElement>('li');
+        if (book.imported) card.append(exemplarImportButton(surface, book));
         list.append(card);
+        firstContext ??= card;
       }
       root.dataset['exemplarBooks'] = String(list.children.length);
-      return first;
+      empty.hidden = count > 0;
+      empty.textContent = filters.kind || filters.book ? EXEMPLARS_FILTER_EMPTY : EXEMPLARS_EMPTY;
+      return first ?? firstContext;
     };
-    append(projection.books);
-    let cursor = projection.nextCursor;
     const more = element('button', 'button secondary', EXEMPLARS_MORE);
     more.type = 'button';
     more.dataset['exemplarAction'] = 'more';
     const moreRow = element('div', 'button-row exemplars-more');
-    moreRow.hidden = cursor === null;
     const firstPage = element('button', 'button secondary', '回到第一页');
     firstPage.type = 'button';
     firstPage.dataset['exemplarAction'] = 'first';
-    firstPage.hidden = true;
-    more.hidden = cursor === null;
     moreRow.append(firstPage, more);
-    const turn = async (after: ExemplarsProjection['nextCursor']) => {
-      if (more.disabled) return;
-      more.disabled = true;
-      firstPage.disabled = true;
-      setStatus(EXEMPLARS_STATUS.loadingMore, 'busy');
-      try {
-        const next = await window.ai7.inspectExemplars({ after });
-        if (!root.isConnected) return;
-        const first = append(next.books);
-        cursor = next.nextCursor;
-        firstPage.hidden = after === null;
-        more.hidden = cursor === null;
-        moreRow.hidden = cursor === null && after === null;
-        setStatus(EXEMPLARS_STATUS.opened);
-        const focusTarget = first ?? root.closest('.knowledge-base')?.querySelector<HTMLElement>('h2');
-        if (focusTarget) { focusTarget.tabIndex = -1; focusTarget.focus(); }
-      } catch (error) {
-        if (!root.isConnected) return;
-        setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
-      } finally {
-        more.disabled = false;
-        firstPage.disabled = false;
-      }
+    const turn = (nextOffset: number) => {
+      offset = nextOffset;
+      const first = append();
+      setStatus(EXEMPLARS_STATUS.opened);
+      const focusTarget = first ?? root.closest('.knowledge-base')?.querySelector<HTMLElement>('h2');
+      if (focusTarget) { focusTarget.tabIndex = -1; focusTarget.focus(); }
     };
-    more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
-    firstPage.addEventListener('click', () => void turn(null));
-    root.append(list, moreRow);
+    more.addEventListener('click', () => turn(offset + MAX_EXEMPLAR_BOOKS_PAGE));
+    firstPage.addEventListener('click', () => turn(0));
+    drawFilters();
+    append();
+    root.append(list, empty, moreRow);
   }
 
   /**
@@ -262,11 +298,17 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * pins, each with `归入本社范例` until the editor admits that exact version. Admitting replaces only this list, from the Book
    * the service answers with, and focus lands on the line admitted.
    */
-  function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
+  function readersReportExemplars(book: ExemplarBookProjection, admitted?: (next: ExemplarBookProjection) => void): HTMLElement {
     const items = element('ul', 'exemplar-readers-reports');
     items.dataset['readersReports'] = String(book.readersReports.length);
     for (const entry of book.readersReports) {
-      const item = element('li', undefined, readersReportExemplarLine(entry, localInstantLabel));
+      const item = element('li', 'exemplar-entry');
+      const actions = element('div', 'exemplar-actions');
+      actions.append(stateTerm(`学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]}`));
+      const heading = element('div', 'exemplar-heading');
+      const badge = stateTerm(exemplarKind(entry)); badge.classList.add('exemplar-kind-badge');
+      heading.append(badge, element('strong', 'exemplar-title', exemplarTitle(book, entry)), actions);
+      item.append(heading, element('p', 'field-note exemplar-context', `来自《${book.bookTitle}》（${exemplarAttribution(book)}） · ${readersReportExemplarFacts(entry, localInstantLabel)} · ${readersReportExemplarAdmission(entry.admission, localInstantLabel)}`));
       item.dataset['exemplarDocument'] = entry.documentId;
       item.dataset['exemplarType'] = entry.typeId;
       item.dataset['exemplarVersion'] = String(entry.version);
@@ -285,7 +327,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
               bookId: book.bookId, template: entry.template, revisionDigest: entry.revisionDigest, expectedDecisions: entry.admission.decisions,
             });
             if (!items.isConnected) return;
-            const replaced = readersReportExemplars(next);
+            admitted?.(next);
+            const replaced = readersReportExemplars(next, admitted);
             items.replaceWith(replaced);
             setStatus(EXEMPLAR_READERS_REPORT_STATUS.admitted, 'success');
             replaced.querySelector<HTMLElement>(`li[data-exemplar-type="${entry.typeId}"]`)?.focus();
@@ -295,7 +338,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
             setStatus(rendererErrorMessage(error, EXEMPLAR_READERS_REPORT_STATUS.failed), 'error');
           }
         });
-        item.append(' ', admit);
+        actions.append(admit);
       }
       items.append(item);
     }
@@ -304,14 +347,13 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
 
   /**
    * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
-   * three tabs — 反馈历史, the passive history; 学习准入, the sidebar's entry (Issue #934), where a Book's 学习准入待处理 in
-   * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
-   * audit of every material's lineage and 停止今后使用.
+   * ordinary preferences and feedback records (#1377); developer mode also retains eligibility and lineage audit.
+   * A Book's 学习准入待处理 deep link still opens that exact Book in the developer eligibility view.
    */
-  async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'feedback', bookId: string | null = null, tabFocused = false,
+  async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'preferences', bookId: string | null = null, tabFocused = false,
     openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
     if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
-      await renderQualityLearning('feedback', null);
+      await renderQualityLearning('preferences', null);
       setStatus('该页在开发者模式下显示');
       return;
     }
@@ -347,7 +389,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     section.id = 'quality-panel';
     section.setAttribute('role', 'tabpanel');
     section.setAttribute('aria-labelledby', `quality-tab-${tab}`);
-    const heading = tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : tab === 'learning' ? LEARNING_HEADING : LEARNING_AUDIT_HEADING;
+    const heading = tab === 'preferences' ? '审阅偏好' : tab === 'feedback' ? technicalLayerVisible ? FEEDBACK_HISTORY_HEADING : '反馈记录' : tab === 'learning' ? LEARNING_HEADING : LEARNING_AUDIT_HEADING;
     section.append(element('h3', undefined, heading));
     const host = element('div');
     section.append(host);
@@ -371,16 +413,16 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     replaceScreen('quality-learning', content);
     options.rememberReturn(content, () => renderQualityLearning(tab, bookId, false, openMaterial, returnToReview));
     if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
-    const status = tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : tab === 'learning' ? LEARNING_STATUS : LEARNING_AUDIT_STATUS;
+    const status = tab === 'preferences' ? REVIEW_PREFERENCES_STATUS : tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : tab === 'learning' ? LEARNING_STATUS : LEARNING_AUDIT_STATUS;
     setStatus(status.loading, 'busy');
-    const surface = tab === 'feedback'
+    const surface = tab === 'preferences' ? { load: () => mountReviewPreferences(host, window.ai7, openWordSourceVersion) } : tab === 'feedback'
       ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
       : tab === 'learning'
         ? mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
         : mountLearningAudit({ root: host, api: window.ai7, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, openMaterial });
     try {
       await surface.load();
-      if (tab === 'feedback') {
+      if (tab === 'feedback' && technicalLayerVisible) {
         const metrics = element('div'); section.append(metrics);
         await mountEditQualitySignals(metrics, window.ai7);
       }
@@ -395,7 +437,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * class's panel, which says what the class holds and, for a class a later slice brings, why it shows nothing yet.
    */
   function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { content: HTMLElement; panelNode: HTMLElement } {
-    const view = knowledgeBaseTabView(tab);
+    const view = visibleKnowledgeBaseTabs(technicalLayerVisible).find((entry) => entry.tab === tab) ?? knowledgeBaseTabView(tab);
     const knowledgeTabs = visibleKnowledgeBaseTabs(technicalLayerVisible);
     const content = panel();
     content.classList.add('knowledge-base');

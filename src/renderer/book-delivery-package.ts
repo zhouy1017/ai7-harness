@@ -78,7 +78,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 const PACKAGE_EXPORT_OPTION_ORDER: ReadonlyArray<keyof BookDeliveryPackageExportOptions> = ['includeAnnotations', 'includeSuggestions'];
 
 /** Where a condition row's route leads: the 发稿 block, one type's card, or 审阅. */
-export type BookDeliveryPackageRoute = { kind: 'publication' } | { kind: 'document'; typeId: string } | { kind: 'review' };
+export type BookDeliveryPackageRoute = { kind: 'publication' } | { kind: 'document'; typeId: string; documentId?: string } | { kind: 'review' };
 
 export interface MountBookDeliveryPackageOptions {
   root: HTMLElement;
@@ -272,6 +272,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const item = el('li');
       item.dataset['conditionKey'] = condition.key;
       item.dataset['conditionId'] = condition.typeId === null ? condition.key : `${condition.key}:${condition.typeId}`;
+      if (condition.documentId !== undefined) item.dataset['documentId'] = condition.documentId;
       if (condition.typeId !== null) item.dataset['typeId'] = condition.typeId;
       item.dataset['conditionMet'] = String(condition.met);
       const line = el('p', 'package-condition-line');
@@ -290,7 +291,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         route.setAttribute('aria-label', `${condition.routeLabel}：${condition.label}`);
         route.disabled = busy();
         const target: BookDeliveryPackageRoute = condition.route === 'document' && condition.typeId !== null
-          ? { kind: 'document', typeId: condition.typeId }
+          ? { kind: 'document', typeId: condition.typeId, ...(condition.documentId === undefined ? {} : { documentId: condition.documentId }) }
           : condition.route === 'review' ? { kind: 'review' } : { kind: 'publication' };
         route.addEventListener('click', () => options.route(target));
         item.append(route);

@@ -1,7 +1,7 @@
 import { initializeTechnicalLayer, resetTechnicalLayer, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mountHelp, THIRD_PARTY_LICENSES, type ThirdPartyLicense } from '../../src/renderer/help.js';
+import { developerModeRow, mountHelp, THIRD_PARTY_LICENSES, type ThirdPartyLicense } from '../../src/renderer/help.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { SERVICE_PROTOCOL_VERSION } from '../../src/shared/protocol.js';
 import { HELP_ABOUT_FAILED } from '../../src/renderer/help-labels.js';
@@ -44,7 +44,8 @@ describe('the mounted 帮助 screen', () => {
   it('describes only the pages available in the selected mode', () => {
     const ordinary = helpUsageSections(false).map((section) => section.paragraphs.join(''));
     const developer = helpUsageSections(true).map((section) => section.paragraphs.join(''));
-    expect(ordinary.join('')).toContain('审阅规范文件、范例、资料库');
+    expect(ordinary.join('')).toContain('审阅规范文件、本社审阅偏好、范例、资料库');
+    expect(ordinary.join('')).toContain('审阅偏好、反馈记录');
     expect(ordinary.join('')).not.toContain('诊断');
     expect(ordinary.join('')).not.toContain('检索排除');
     expect(developer.join('')).toContain('外部来源留存');
@@ -128,6 +129,7 @@ it('scans Help in ordinary mode (#1315)', async () => {
 });
 
 it('applies developer mode immediately and persists the choice (#1315)', () => {
+  initializeTechnicalLayer('source-checkout', { getItem: () => null });
   const storage = { setItem: vi.fn() };
   vi.stubGlobal('window', { localStorage: storage, location: { reload: vi.fn() } });
   const view = mounted();
@@ -151,6 +153,22 @@ it('keeps early Help closed and its switch unavailable until initialization succ
     expect(failed.find('.help-developer-mode input').disabled).toBe(true);
     expect(failed.root.querySelector('.help-about')).toBeNull();
   } finally { initializeTechnicalLayer('source-checkout', { getItem: () => null }); }
+});
+
+it('shares the immediate persisted switch with Settings Local and ignores changes before readiness', () => {
+  const storage = { setItem: vi.fn() }, refresh = vi.fn();
+  vi.stubGlobal('window', { localStorage: storage });
+  resetTechnicalLayer();
+  let row = developerModeRow(refresh);
+  let toggle = row.querySelector<HTMLInputElement>('input')!;
+  toggle.checked = true; (toggle as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  expect(storage.setItem).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled();
+  initializeTechnicalLayer('packaged', { getItem: () => null });
+  row = developerModeRow(refresh); toggle = row.querySelector<HTMLInputElement>('input')!;
+  expect(toggle.disabled).toBe(false); expect(toggle.checked).toBe(false);
+  toggle.checked = true; (toggle as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  expect(storage.setItem).toHaveBeenCalledWith('ai7.technicalLayerVisible', 'true');
+  expect(refresh).toHaveBeenCalledOnce();
 });
 
 it('scans the shipped Help and licence catalogue in ordinary mode (#1315)', () => {

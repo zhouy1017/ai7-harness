@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { releaseHeldBaselineAfterPause, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a and S16b): the operations on a Run under way, told apart by
@@ -305,7 +305,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
 async function clickSelector(renderer, selector, name) {
@@ -923,8 +923,22 @@ async function main() {
     at('resumed');
     // CONT-015: 续行 goes on in the same Run and attempt from the fourth range, reading none of the first three again;
     // two more settle, and the sixth stays in flight.
-    await writeFile(holdPath, String(RESUMED_HOLD), 'utf8');
+    await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'resume');
+    await waitFor(renderer, runningWith(FIRST_HOLD + 1), 'resumed-held-before-poll', 120_000);
+    // #1375: keep the developer disclosure through two actual completed-unit projections, not an idle clock.
+    await clickSelector(renderer, '#task-drawer button[data-task-drawer-mode="full"]', 'poll-full-plan');
+    await assertRenderer(renderer, `(() => {const control=document.querySelector('[data-technical-collection]');const summary=control?.querySelector('summary');if(!control||!summary||summary.hidden)return false;globalThis.__j10TechnicalWasOpen=control.open;control.open=true;return document.documentElement.dataset.technicalLayerVisible==='true';})()`, 'drawer-poll-developer-disclosure');
+    await waitFor(renderer, `document.querySelector('#task-drawer details.task-plan-technical')?.hidden===false`, 'drawer-poll-visible-disclosure');
+    await assertRenderer(renderer, `(() => {const summary=document.querySelector('[data-technical-collection] > summary');summary?.focus();return summary && document.activeElement===summary;})()`, 'drawer-poll-visible-summary-focus');
+    for(const done of [FIRST_HOLD+2,RESUMED_HOLD]) {
+      await renderer.evaluate(`globalThis.__j10PollDetails=document.querySelector('#task-drawer details.task-plan-technical')`);
+      await writeFile(holdPath,String(done),'utf8');
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer, `(() => {const more=document.querySelector('#task-drawer details.task-plan-technical');const control=document.querySelector('[data-technical-collection]');return more!==globalThis.__j10PollDetails && more?.open && !more.hidden && control?.open && document.activeElement===control.querySelector('summary') && document.querySelector('#task-drawer .task-plan-activity')?.dataset.taskPlanActivityProgress===${JSON.stringify(`${done}/${SAMPLE1_UNITS}`)};})()`, 'drawer-details-changed-poll-survival');
+    }
+    await renderer.evaluate(`document.querySelector('[data-technical-collection]').open=globalThis.__j10TechnicalWasOpen`);
+    await clickSelector(renderer, '#task-drawer button[data-task-drawer-mode="compact"]', 'poll-return-running');
     await waitFor(renderer, runningWith(RESUMED_HOLD), 'sixth-range-in-flight', 120_000);
     const resumed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(resumed?.state === 'executing' && resumed.run?.runRecordId === executing.run.runRecordId && resumed.run.state === 'executing' &&
@@ -1687,11 +1701,14 @@ async function main() {
     await startFirstBaseline(renderer, 'ready', 'seventh-baseline');
     const seventhIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
     requireJourney(UUID_PATTERN.test(seventhIntentId), 'seventh-task');
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.bookId===${JSON.stringify(seventhBookId)} && analysis.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run?.state==='executing' && analysis.run.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    const unknownPauseTarget = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis)=>({bookId:analysis?.bookId,taskIntentId:analysis?.taskIntent?.taskIntentId,runRecordId:analysis?.run?.runRecordId,unitsSettled:analysis?.run?.progress?.unitsSettled,currentUnitOrdinal:analysis?.run?.progress?.currentUnitOrdinal}))`);
+    requireJourney(unknownPauseTarget.bookId === seventhBookId && unknownPauseTarget.taskIntentId === seventhIntentId && UUID_PATTERN.test(unknownPauseTarget.runRecordId ?? '') &&
+      unknownPauseTarget.unitsSettled === 4 && unknownPauseTarget.currentUnitOrdinal === 5, 'unknown-pause-scope');
     // The service observation can precede the drawer's own refresh; press pause only once this Task's control is enabled.
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='baseline-analysis'||drawer.dataset.taskPlanRef!==${JSON.stringify(seventhIntentId)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'unknown-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'unknown-pause');
-    await writeFile(holdPath, 'release', 'utf8');
+    await releaseHeldBaselineAfterPause(renderer, unknownPauseTarget, waitFor, () => writeFile(holdPath, 'release', 'utf8'));
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, 'unknown-explicitly-paused', 30_000);
     const unconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(unconfirmed?.run?.state === 'paused' && unconfirmed.run.progress === null &&
@@ -1858,6 +1875,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'review-controls-workspace');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'review-controls-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-controls-sheet');
+    // #1374: chapter endpoints survive a temporary whole-book scope, before the same run is prepared below.
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('chapters'); const from=sheet.querySelector('[data-review-chapter="from"]'); const to=sheet.querySelector('[data-review-chapter="to"]'); if(from.disabled||to.disabled||from.options.length<2)return false; from.value=from.options[1].value; from.dispatchEvent(new Event('change',{bubbles:true})); to.value=to.options[to.options.length-1].value; to.dispatchEvent(new Event('change',{bubbles:true})); const saved=[from.value,to.value]; scope('whole'); if(!from.disabled||!to.disabled)return false; scope('chapters'); const kept=from.value===saved[0]&&to.value===saved[1]&&!from.disabled&&!to.disabled; scope('whole'); return kept; })()`, 'review-controls-scope-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-controls-drawer', 120_000);
     const reviewRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef`);

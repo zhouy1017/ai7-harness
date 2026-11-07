@@ -22,9 +22,26 @@ import {
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { FACTUAL_REVIEW_KIND, LAUNCH_SELECTABLE_SCOPES, isRecordedProviderProcessingVersion, isResultSetPolicyPin, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
 import { liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
+import { platformToolsFromProjection } from '../../src/service/provider/search-service.js';
 import type { AdmittedLocalTools, AdmittedPlatformTools, AdmittedProviderRule, LaunchPolicyProjection, TrustedOperationalScope } from '../../src/shared/protocol.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+it('admits seven v34 tools while retaining exact five-backend v33 and developer-live v24 readings (#1371)', () => {
+  const read = (version: string) => JSON.parse(readFileSync(join(REPO_ROOT, `docs/policies/provider-processing-policy.${version}.json`), 'utf8'));
+  const old = verifyOrdinaryProductionPolicy(read('v33')).rules.find((rule) => rule.ruleId === 'ordinary-production-review')!.platformTools!;
+  const current = verifyOrdinaryProductionPolicy(read('v34')).rules.find((rule) => rule.ruleId === 'ordinary-production-review')!.platformTools!;
+  expect(old.websearch.backends).toHaveLength(5);
+  expect(verifyDeveloperLivePolicy(read('v24')).admittedRules.find((rule) => rule.platformTools !== null)!.platformTools!.websearch.backends).toHaveLength(5);
+  expect(current.websearch.backends.map((entry) => entry.id)).toEqual([...old.websearch.backends.map((entry) => entry.id), 'search-openai', 'search-anthropic']);
+  const project = (tools: AdmittedPlatformTools) => platformToolsFromProjection({ webSearchToolAllowed: true, platformTools: tools });
+  expect(project(old)).not.toBeNull(); expect(project(current)).not.toBeNull();
+  const changed = { ...current, websearch: { ...current.websearch, backends: [...current.websearch.backends.slice(0, 6), current.websearch.backends[5]!] } };
+  expect(project(changed)).toBeNull();
+  const wrongSlot = structuredClone(current);
+  Object.assign(wrongSlot.websearch.backends[6]!, { credentialSlot: 'openai-platform' });
+  expect(project(wrongSlot)).toBeNull();
+  expect(project({ ...current, websearch: { ...current.websearch, backends: current.websearch.backends.slice(0, 6) } })).toBeNull();
+});
 describe('accepted original-field declaration reading (#1161)', () => {
   const policy = (): Record<string, unknown> => JSON.parse(readFileSync(join(REPO_ROOT,
     'docs/policies/provider-processing-policy.v30.json'), 'utf8')) as Record<string, unknown>;
@@ -97,17 +114,17 @@ it('reads v32 search fallback and resend as bounded: one other measured backend,
   }
 });
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v24.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v25.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
-  'docs/policies/active-policy-set.v24.schema.json',
+  'docs/policies/active-policy-set.v25.schema.json',
   'docs/policies/provider-processing-policy.v30.json',
   'docs/policies/provider-processing-policy.v30.schema.json',
   'docs/policies/provider-processing-policy.v31.json',
   'docs/policies/provider-processing-policy.v31.schema.json',
-  'docs/policies/provider-processing-policy.v33.json',
-  'docs/policies/provider-processing-policy.v33.schema.json',
+  'docs/policies/provider-processing-policy.v34.json',
+  'docs/policies/provider-processing-policy.v34.schema.json',
   'docs/policies/provider-processing-policy.v1.json',
   'docs/policies/provider-processing-policy.v2.json',
   'docs/policies/provider-processing-policy.v3.json',
@@ -124,7 +141,7 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v33', 'docs/policies/provider-processing-policy.v33.json', '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184'],
+  'ordinary-production': ['v34', 'docs/policies/provider-processing-policy.v34.json', '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
@@ -162,7 +179,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641';
+const ACTIVE_SET_SHA256 = '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -555,8 +572,8 @@ describe('synchronous frozen-binding policy resolution (#1131)', () => {
       }
     });
 
-  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/active-policy-set.v24.schema.json',
-    'docs/policies/provider-processing-policy.v33.json', 'docs/policies/provider-processing-policy.v33.schema.json',
+  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/active-policy-set.v25.schema.json',
+    'docs/policies/provider-processing-policy.v34.json', 'docs/policies/provider-processing-policy.v34.schema.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v24.json', 'docs/policies/provider-processing-policy.v2.json', 'docs/policies/external-export-policy.v2.json'];
   it('matches explicit Fast bindings and the defaulted argument without caching another role', async () => {
@@ -832,9 +849,9 @@ afterEach(async () => {
 
 describe('active policy set v23', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
-    expect(ACTIVE_SET_VERSION).toBe('v24');
+    expect(ACTIVE_SET_VERSION).toBe('v25');
     expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v24');
-    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v33');
+    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v34');
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
       manifestType: 'ai7-source-checkout-launch-authority',
@@ -842,7 +859,7 @@ describe('active policy set v23', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live', 'ordinary-production'],
-      activePolicySet: { version: 'v24', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v25', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(LAUNCH_SELECTABLE_SCOPES).toEqual(carrier.launchSelectableScopes);
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
@@ -854,8 +871,8 @@ describe('active policy set v23', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v24');
-    expect(activeSet.predecessorVersion).toBe('v23');
+    expect(activeSet.version).toBe('v25');
+    expect(activeSet.predecessorVersion).toBe('v24');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -968,7 +985,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
     // One active set per launch: development-ci reports v16 while its Provider Processing pin stays v1.
-    expect(projection.activePolicySetVersion).toBe('v24');
+    expect(projection.activePolicySetVersion).toBe('v25');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.providerProcessing.bindingState).toBeUndefined();
@@ -984,7 +1001,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v24');
+    expect(projection.activePolicySetVersion).toBe('v25');
     expect(projection.providerProcessing).toEqual({
       version: 'v24',
       decision: 'eligible-only',
@@ -1380,11 +1397,16 @@ function readPolicySync(path: string): Record<string, unknown> {
 }
 
 /** The selected v31 `searchConnectionTest` as the launch projects it (Issue #1055): its typed terms, every switch omitted. */
-function searchConnectionTestReading(): Record<string, unknown> {
-  const block = readPolicySync('docs/policies/provider-processing-policy.v33.json')['searchConnectionTest'] as Record<string, unknown>;
-  return Object.fromEntries(['ruleId', 'purpose', 'backendId', 'candidateId', 'endpoint', 'method', 'protocol', 'credentialSlot', 'headerForm', 'arguments',
+function currentPlatformToolsProjection(): AdmittedPlatformTools {
+  const policy = readPolicySync('docs/policies/provider-processing-policy.v34.json');
+  return verifyOrdinaryProductionPolicy(policy).rules.find((rule) => rule.ruleId === 'ordinary-production-review')!.platformTools!;
+}
+
+function searchConnectionTestReading(block = readPolicySync('docs/policies/provider-processing-policy.v34.json')['searchConnectionTest'] as Record<string, unknown>): Record<string, unknown> {
+  return { ...(block['credentialFallbackSlot'] === undefined ? {} : { credentialFallbackSlot: block['credentialFallbackSlot'] }),
+    ...(Array.isArray(block['candidates']) ? { candidates: block['candidates'].map((entry) => searchConnectionTestReading(entry)) } : {}), ...Object.fromEntries(['ruleId', 'purpose', 'backendId', 'candidateId', 'endpoint', 'method', 'protocol', 'credentialSlot', 'headerForm', 'arguments',
     'argumentsCanonicalSha256', 'maximumRequests', 'timeoutMilliseconds', 'responseMaxBytes', 'resultsMaximum', 'titleMaximumCharacters', 'urlMaximumCharacters',
-    'rejectedOperationalScopes'].map((key) => [key, block[key]]));
+    'rejectedOperationalScopes'].map((key) => [key, block[key]])) };
 }
 
 type Mutation = { readonly path: readonly (string | number)[]; readonly kind: string; readonly apply: (policy: Record<string, unknown>) => void };
@@ -1595,14 +1617,14 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expect(projection.integrityState).toBe('verified');
       expect(projection.denialReason).toBeNull();
       expect(projection.operationalScope).toBe('ordinary-production');
-      expect(projection.activePolicySetVersion).toBe('v24');
+      expect(projection.activePolicySetVersion).toBe('v25');
       expect(projection.providerProcessing).toEqual({
-        version: 'v33',
+        version: 'v34',
         execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
         transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
         research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
         searchConnectionTest: searchConnectionTestReading(),
-        settingsSearchTools: platformToolsProjection(true),
+        settingsSearchTools: currentPlatformToolsProjection(),
         subAgents: readPolicySync('docs/policies/provider-processing-policy.v27.json').subAgents,
         backgroundProcessingEnrollment: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json')).at(-1)!.backgroundProcessingEnrollment,
         decision: 'eligible-only',
@@ -1629,12 +1651,12 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(projection.integrityState).toBe('verified');
     expect(projection.operationalScope).toBe('ordinary-production');
     expect(projection.providerProcessing).toEqual({
-      version: 'v33',
+      version: 'v34',
       execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
       transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
       research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
       searchConnectionTest: searchConnectionTestReading(),
-        settingsSearchTools: platformToolsProjection(true),
+        settingsSearchTools: currentPlatformToolsProjection(),
         subAgents: readPolicySync('docs/policies/provider-processing-policy.v27.json').subAgents,
         backgroundProcessingEnrollment: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json')).at(-1)!.backgroundProcessingEnrollment,
       decision: 'eligible-only',
@@ -1646,7 +1668,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       admittedRules: [...v30ProductionAdmittedRules(binding), expect.objectContaining({
         ruleId: 'ordinary-production-learning-curation', taskKinds: ['learning-curation'], route: binding.route, model: binding.model,
         outboundDataCategories: ['public-or-synthetic', 'editorial-learning-example', 'house-review-preference-excerpt'],
-        enabledLearningEnvelope: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v33.json'))
+        enabledLearningEnvelope: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v34.json'))
           .find((rule) => rule.ruleId === 'ordinary-production-learning-curation')!.enabledLearningEnvelope,
       }), factualRecheckRuleExpectation(binding), expect.objectContaining({ ruleId: 'ordinary-production-global-agent-scoped-dialogue',
         taskKinds: ['global-agent-scoped-dialogue'], modelRole: 'Fast Interaction Role', route: binding.route, model: binding.model,
@@ -1669,7 +1691,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
     // Production admission must retain every policy category, including all three unpublished classes.
-    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v33.json'));
+    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v34.json'));
     for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test')) {
       expect(rule.outboundDataCategories, rule.ruleId).toEqual(policyRules.find((candidate) => candidate.ruleId === rule.ruleId)!.allowedOutboundDataCategories);
     }
@@ -1708,7 +1730,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
 
   it('denies an ordinary-production launch whose v23 bytes drifted, under any binding, while the other scopes still verify', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...'docs/policies/provider-processing-policy.v33.json'.split('/'));
+    const target = join(codeRoot, ...'docs/policies/provider-processing-policy.v34.json'.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
     for (const binding of [null, GO_PRODUCTION_BINDING]) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding);
@@ -2098,7 +2120,7 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
     ['ordinary-production', V23_PATH],
   ] as const)('denies a %s launch after a one-byte change inside a backend host of its pinned bytes', async (scope, path) => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v33.json' : path).split('/'));
+    const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v34.json' : path).split('/'));
     const bytes = await readFile(target);
     const offset = bytes.indexOf('"api.search.tinyfish.ai"');
     expect(offset).toBeGreaterThan(0);
@@ -2193,7 +2215,7 @@ describe('Provider Processing v22 and v23: local targeted retrieval on every rul
   it.each([['developer-live', V24_PATH], ['ordinary-production', V23_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
     for (const [from, to] of [['"callsPerUnit": 5', '"callsPerUnit": 6'], ['"candidatesPerCall": 8', '"candidatesPerCall": 9'], ['"scope": "no-egress"', '"scope": "no-egrexs"'], ['"allowed": false', '"allowed": true']] as const) {
       await placeValidCheckout();
-      const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v33.json' : path).split('/'));
+      const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v34.json' : path).split('/'));
       const original = await readFile(target, 'utf8');
       expect(original.includes(from), from).toBe(true);
       await writeFile(target, original.replace(from, to));
@@ -2642,10 +2664,10 @@ describe('Provider Processing v24: the ADR 0091 Public SampleBooks (Issue #990)'
 /** Independent predecessor expectations plus the selected v27 additions. */
 function v30ProductionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedProviderRule[] {
   const declared = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json'));
-  const current = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v33.json'));
+  const current = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v34.json'));
   return productionAdmittedRules(binding).map((rule) => {
     const document = declared.find((entry) => entry.ruleId === rule.ruleId)!;
-    return { ...rule, localTools: document.localTools as AdmittedLocalTools,
+    return { ...rule, platformTools: rule.platformTools === null ? null : currentPlatformToolsProjection(), localTools: document.localTools as AdmittedLocalTools,
       ...(rule.ruleId === 'ordinary-production-editorial-polish'
         ? { outboundDataCategories: current.find((entry) => entry.ruleId === rule.ruleId)!.allowedOutboundDataCategories as AdmittedProviderRule['outboundDataCategories'] } : {}),
       ...(['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation'].includes(rule.ruleId)

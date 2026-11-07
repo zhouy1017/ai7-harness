@@ -1,4 +1,4 @@
-import { importSteps } from './components/import-steps.js';
+import { focusImportStep, importSteps } from './components/import-steps.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -693,6 +693,23 @@ export function createImportReview(options: ImportReviewOptions) {
       content.append(actions);
     }
 
+    const steps = content.querySelector('.import-steps');
+    steps?.replaceWith(importSteps('choices', {
+      fidelity: content.querySelector('.fidelity-list, .import-structure') !== null,
+      go: (step) => {
+        const target = content.querySelector<HTMLElement>(step === 'target' ? '[data-import-target-choices]' : '.fidelity-list, .import-structure');
+        if (target) focusImportStep(target);
+      },
+    }));
+    content.addEventListener('focusin', (event) => {
+      const target = event.target as HTMLElement;
+      const current = target.closest('.fidelity-list, .import-structure') ? '3' : target.closest('[data-import-target-choices], [data-import-title-for-relationship]') ? '2' : null;
+      if (current === null) return;
+      for (const step of content.querySelectorAll<HTMLElement>('[data-import-step]')) {
+        if (step.dataset['importStep'] === current) step.setAttribute('aria-current', 'step');
+        else step.removeAttribute('aria-current');
+      }
+    });
     appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
     queueMicrotask(() => {

@@ -377,6 +377,7 @@ export interface ProductionDocumentVersionProjection {
 
 /** A Production Document as it stands: its versions and whether its working text moved past the latest one. */
 export interface ProductionDocumentProjection {
+  title: string;
   documentId: string;
   branchId: string;
   createdAt: string;
@@ -384,9 +385,10 @@ export interface ProductionDocumentProjection {
    * The Book's source material it was made from, and how many of its 批注与修订 the document did not carry (Issue #547):
    * its text was read with every tracked change rejected and its comments left out. `null` for a document made before
    * the count was recorded. `drafted`: the document began as AI7's writing draft (Issue #432, S84a) — its words were read from
-   * no file, and the Source Version is the manuscript file of the revision its writing Task read.
+   * no file, and the Source Version is the manuscript file of the revision its writing Task read. A blank document likewise
+   * binds the primary source for provenance, while its own text starts with one empty paragraph.
    */
-  origin: { sourceVersionId: string; displayName: string; marksNotCarried: number | null; drafted: boolean };
+  origin: { sourceVersionId: string; displayName: string; marksNotCarried: number | null; drafted: boolean; blank?: boolean };
   /** Newest first, at most `MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED`. */
   versions: ReadonlyArray<ProductionDocumentVersionProjection>;
   versionsTruncated: boolean;
@@ -560,6 +562,7 @@ export interface ProductionDocumentTypeProjection {
   label: string;
   /** `本书不做` for this Book, as its latest decision records it. */
   notForThisBook: boolean;
+  documents: ReadonlyArray<ProductionDocumentProjection>;
   document: ProductionDocumentProjection | null;
 }
 
@@ -591,7 +594,14 @@ export interface ProductionDocumentsProjection {
 export interface CreateProductionDocumentInput {
   bookId: string;
   typeId: string;
-  sourceVersionId: string;
+  sourceVersionId?: string | null;
+  title?: string;
+}
+
+export interface RenameProductionDocumentInput {
+  bookId: string;
+  documentId: string;
+  title: string;
 }
 
 /** `本书不做` or `恢复` for one type of the route's Book. */
@@ -658,6 +668,7 @@ export const MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED = 20;
  * the condition failing: the manuscript changed after 发稿, or a document after its delivery.
  */
 export interface BookDeliveryPackageConditionProjection {
+  documentId?: string;
   key: 'publication' | 'document' | 'work-records';
   /** The house type a `document` row is about; `null` for the other two. */
   typeId: string | null;

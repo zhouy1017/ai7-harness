@@ -1,6 +1,7 @@
 import { recoveryIdentityRows } from '../../src/renderer/technical-layer-labels.js';
 import { globalAttentionObjectLabel } from '../../src/renderer/global-attention-labels.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { retainPollInteraction } from '../../src/renderer/poll-interaction.js';
 import { collectTechnicalDisclosures, initializeTechnicalLayer, technicalWords, modelLabelWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { reviewBasisWords } from '../../src/renderer/review-basis.js';
 import { modelConnectionTestDisclosure } from '../../src/renderer/model-service-roles.js';
@@ -78,5 +79,35 @@ describe('technical layer presentation (#1315)', () => {
     expect(root.textContent?.match(/查看技术详情/gu)).toHaveLength(1);
     page.remove(); collectTechnicalDisclosures(root);
     expect(root.querySelector('[data-technical-collection]')).toBeNull();
+  });
+
+  it('keeps the visible shared disclosure focused through two changed drawer projections (#1375 J10)', async () => {
+    vi.useFakeTimers(); setTechnicalLayerVisible(true);
+    const root = document.createElement('main'); document.body.append(root);
+    const drawer = document.createElement('section'); root.append(drawer);
+    const other = document.createElement('details'); other.append(document.createElement('summary')); root.append(technicalDisclosure(other));
+    let settled = 3;
+    const paint = () => {
+      const restoreInteraction = retainPollInteraction(drawer);
+      const more = document.createElement('details'); more.className = 'task-plan-technical';
+      const summary = document.createElement('summary'); const progress = document.createElement('p'); progress.textContent = `${settled}/8`;
+      more.append(summary, progress); drawer.replaceChildren(technicalDisclosure(more)); restoreInteraction(); collectTechnicalDisclosures(root);
+    };
+    try {
+      paint();
+      const control = root.querySelector<HTMLDetailsElement>('[data-technical-collection]')!;
+      control.open = true; collectTechnicalDisclosures(root);
+      const summary = control.querySelector<HTMLElement>('summary')!; summary.focus();
+      const timer = setInterval(() => { settled++; paint(); }, 2000);
+      for (const done of [4, 5]) {
+        const previous = drawer.querySelector('details'); await vi.advanceTimersByTimeAsync(2000);
+        const more = drawer.querySelector<HTMLDetailsElement>('details')!;
+        expect(more).not.toBe(previous); expect(more.textContent).toContain(`${done}/8`);
+        expect(more.open).toBe(true); expect(more.hidden).toBe(false);
+        expect(more.querySelector<HTMLElement>('summary')!.hidden).toBe(true);
+        expect(control.open).toBe(true); expect(summary.hidden).toBe(false); expect(document.activeElement).toBe(summary);
+      }
+      clearInterval(timer);
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); root.remove(); }
   });
 });

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { evaluateRunBudgetCeiling, type UsageFacts } from '../../src/service/provider/classification.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import {
   EgressTicketBook, OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE, assistantToolCallDigest, evaluateEgress, evaluateSearchServiceCall, toolResultKey, type EgressBindingFacts,
@@ -13,6 +14,9 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { armHostAllowanceSet, armPerTicketHostAdmission, admitTicketHost, hostAllowanceSet, allowanceAdmitsConnection, installNodeNetworkDenial, ticketHostHolds } from '../../src/shared/network-denial.js';
 import { searchToolsRule } from '../support/search-tools-policy.js';
+import { resolveSourceCheckoutLaunchPolicySync, ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
+import { searchBackend } from '../../src/service/provider/search-backends/index.js';
+import { buildRunReport, runReportReflectionNotRun, runReportUsageReconciles, type RunReportUsage } from '../../src/service/analysis/run-report.js';
 
 const frozen = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
 const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
@@ -32,7 +36,57 @@ const binding: EgressBindingFacts = { bindingDigest: 'a'.repeat(64), route: 'ope
 };
 const scope = { currentBindingDigest: () => 'a'.repeat(64), acceptedOutputDigests: new Set<string>(), ceilingState: () => 'within' as const };
 
+/** The report boundary after a native search spends the ceiling before the next model turn. */
+function budgetStoppedReport(platformTools: RunReportUsage) {
+  const empty = { requests: 0, inputTokens: 0, outputTokens: 0 };
+  return buildRunReport({ platformTools, runRecordId: 'run-native', taskIntentId: 'task-native', attemptId: 'attempt-native', resultSetRevisionId: null,
+    classification: 'failed', recordedAt: '2026-11-06T00:00:00.000Z', spans: new Map(),
+    usage: { units: empty, 'cross-unit-reduction': empty, 'assurance-sampling': empty }, unitRows: [], submitted: 0, adaptations: [], gaps: [],
+    crossUnit: { state: 'not-run', reason: '预算已达到' },
+    sample: { state: 'not-run', seed: null, size: 0, candidateCount: 0, strata: [], dispositions: [], precision: [], usage: null, reason: '预算已达到' },
+    findingCounts: [], terminalFailure: { code: 'run-budget-ceiling-reached', reason: '任务运行预算上限已达到' },
+  }, runReportReflectionNotRun('预算已达到'));
+}
+
 describe('frozen backend egress and per-Run tool accounting', () => {
+  it.each(['openai-platform', 'anthropic-claude', 'deepseek-open-platform'] as const)('accounts %s native search once in usage, the ceiling and Run Report', async (route) => {
+    const configured = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === route)!;
+    const reference = '11111111-1111-4111-8111-111111111111';
+    const policy = resolveSourceCheckoutLaunchPolicySync(process.cwd(), 'ordinary-production', { ...configured, credentialReference: reference });
+    const adapter = searchBackend(`search-${route.split('-')[0]}`);
+    const tools = platformToolsFromProjection(policy.providerProcessing.admittedRules.find((rule) => rule.ruleId === 'ordinary-production-review'));
+    const reads: string[] = []; let sends = 0;
+    const spent: UsageFacts[] = [];
+    const runScope = { ...scope, ceilingState: (): 'reached' | 'within' => evaluateRunBudgetCeiling(spent, { kind: 'tokens', maxTotalTokens: 120 }).state === 'reached' ? 'reached' : 'within' };
+    const broker = new CredentialBroker({ resolve: async (uuid) => { reads.push(uuid); return 'synthetic-key'; } }, { developmentReferences: 'refused' });
+    expect(await broker.checkPlanReadiness(adapter.declaration.credentialSlot, reference)).toBe('present');
+    const session = new PlatformToolSession({ binding: { ...binding, route, model: configured.model, platformTools: tools,
+      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v34', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+      searchBackend: { backendId: adapter.declaration.id, host: adapter.declaration.host!, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot, credentialReference: reference } },
+      scope: runScope, broker, onUsage: (usage) => spent.push(usage), purpose: 'provider-free-native-search', admitHost: admitTicketHost,
+      fetch: async (url, init) => {
+        sends += 1; expect(url).toBe(adapter.declaration.endpoint);
+        expect(JSON.parse(String(init.body)).model).toBe(configured.model);
+        const bearer = adapter.declaration.headerForm === 'authorization-bearer';
+        expect(init.headers[bearer ? 'authorization' : 'x-api-key']).toBe(bearer ? 'Bearer synthetic-key' : 'synthetic-key');
+        return new Response(JSON.stringify(route === 'openai-platform'
+          ? { output: [{ action: { sources: [{ title: 'Public source', url: 'https://example.org/source' }] } }], usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 70 }, output_tokens_details: { reasoning_tokens: 10 } } }
+          : { content: [{ type: 'web_search_tool_result', content: [{ type: 'web_search_result', title: 'Public source', url: 'https://example.org/source' }] }], usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 70, cache_creation_input_tokens: 20 } }));
+      } });
+    const signal = new AbortController().signal;
+    const call = { tool: 'websearch' as const, callId: 'native', arguments: { query: 'public fact' }, signal, dispatch: { token: Symbol(), active: () => true } };
+    expect((await session.execute(call)).text).toContain('https://example.org/source');
+    await session.execute({ ...call, callId: 'cached', dispatch: { token: Symbol(), active: () => true } });
+    expect({ sends, releases: broker.releaseCount, reads, holds: ticketHostHolds() }).toEqual({ sends: 1, releases: 1, reads: [reference, reference], holds: 0 });
+    expect(session.usage).toMatchObject({ inputTokens: 100, outputTokens: 20 });
+    expect(spent).toEqual([{ inputTokens: 100, outputTokens: 20 }]);
+    const report = budgetStoppedReport(session.usage);
+    expect(report.usagePerStage['platform-tools']).toMatchObject({ requests: 1, inputTokens: 100, outputTokens: 20 });
+    expect(runReportUsageReconciles(report, { requests: 1, inputTokens: 100, outputTokens: 20 })).toBe(true);
+    session.startUnit(true);
+    expect((await session.execute({ ...call, callId: 'after-ceiling', arguments: { query: 'another public fact' }, dispatch: { token: Symbol(), active: () => true } })).text).toContain('任务运行预算上限已达到');
+    expect(sends).toBe(1);
+  });
   it('holds exactly the model host at rest; no backend host and no global fetch is admitted', async () => {
     expect(hostAllowanceSet()).toEqual([MODEL]);
     expect(allowanceAdmitsConnection([MODEL])).toBe(true);

@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-09 (Issue #424, plan slice S78): 待我处理 — a cross-Book attention view (editor-surfaces §8.1, V2-UX-ATTN-001
@@ -287,7 +287,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
 async function clickSelector(renderer, selector, name) {
@@ -375,6 +375,8 @@ const MARK_HELPERS = `(() => {
     act: (action) => {
       const control = layer()?.querySelector('[data-mark-card] [data-mark-action="' + action + '"], [data-mark-composer] [data-mark-action="' + action + '"]');
       if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      const more=control.closest('details.editorial-mark-more');
+      if(more&&!more.open)more.querySelector('summary').click();
       control.click();
       return true;
     },
@@ -533,10 +535,12 @@ async function runHeldAt(renderer, bookId, settled, name) {
  */
 async function editAndSave(renderer, suffix, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, `${name}-editor-ready`);
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, `${name}-scope`);
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, `${name}-inserted`);
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, `${name}-dirty`);
   await click(renderer, '保存', `${name}-save`);
-  await waitFor(renderer, `document.querySelector('[data-toast]')?.dataset.tone==='success' && document.querySelector('[data-toast]')?.textContent.includes('修订日志')`, `${name}-durable`, 120_000);
+  await waitFor(renderer, journalEditPersisted(before, suffix), `${name}-durable`, 120_000);
   await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="editor"] .ProseMirror'); if(!(text instanceof HTMLElement))return false; text.focus(); return document.activeElement===text; })()`, `${name}-caret-back`);
 }
 
@@ -615,7 +619,7 @@ const FOCUS_STATE = `(() => {
 
 /** Press the enabled button with exactly these words inside one region of the screen. */
 async function clickIn(renderer, scope, label, name) {
-  await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll(${JSON.stringify(`${scope} button`)})).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll(${JSON.stringify(`${scope} button`)})).find((item)=>(item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)})); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
 }
 
 /** 待我处理 from the shell's header: the screen opens in the library state and paints the service's answer. */
@@ -1717,6 +1721,10 @@ async function main() {
       overviewBooks.push(await importSample1(renderer, title, true, 'overview-import'));
     }
     await writeFile(holdPath, '1', 'utf8');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-ordinary-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-ordinary-settings-ready');
+    await click(renderer,'帮助','overview-poll-ordinary-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
     await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
@@ -1740,14 +1748,23 @@ async function main() {
     const overviewPauseRecorded = async (id) => waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.flatMap(g=>g.items).some(i=>i.itemId===${JSON.stringify(id)} && ['analysis-pausing','analysis-paused'].includes(i.attention.state)))()`, 'overview-pause-recorded');
     await waitFor(renderer, `document.querySelector('.task-overview-card[data-task-item="${overviewIds[2]}"] .task-overview-card-line')?.textContent.startsWith('第 1 位')`, 'overview-first-position-visible');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
+    // #1375: release two real reading units; both changed cards must keep More and summary focus in ordinary mode.
+    const pollOverviewSelector=`.task-overview-card[data-task-item="${overviewIds[0]}"]`;
+    await assertRenderer(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card.querySelector('.task-overview-more');more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'overview-more-poll-open');
+    for(const done of [2,3]) {
+      await renderer.evaluate(`globalThis.__j09PollCard=document.querySelector(${JSON.stringify(pollOverviewSelector)})`);
+      await writeFile(holdPath,String(done),'utf8');
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card?.querySelector('.task-overview-more');return card!==globalThis.__j09PollCard&&card?.querySelector('progress')?.value===${done}&&more?.open&&document.activeElement===more.querySelector('summary');})()`,'overview-more-changed-poll-survival');
+    }
     await overviewAction(overviewIds[0], 'pause');
     await overviewPauseRecorded(overviewIds[0]);
-    await writeFile(holdPath, '2', 'utf8');
+    await writeFile(holdPath, '4', 'utf8');
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])} && i.attention.state==='analysis-paused') && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000);
     // Put the same third task back in the queue before adding the fourth, then prove 置顶 wins the next release.
     await overviewAction(overviewIds[2], 'pause');
     await overviewPauseRecorded(overviewIds[2]);
-    await writeFile(holdPath, '3', 'utf8');
+    await writeFile(holdPath, '5', 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}))()`, 'overview-third-paused', 60000);
     await overviewAction(overviewIds[0], 'resume');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}))()`, 'overview-first-resumed');
@@ -1763,13 +1780,18 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items[0]?.itemId===${JSON.stringify(fourth.itemId)})()`, 'overview-fourth-top');
     await overviewAction(overviewIds[0], 'pause');
     await overviewPauseRecorded(overviewIds[0]);
-    await writeFile(holdPath, '4', 'utf8');
+    await writeFile(holdPath, '6', 'utf8');
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
     await overviewAction(fourth.itemId, 'run');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
+
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');
+    await click(renderer,'帮助','overview-poll-developer-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'overview-poll-developer-mode');
 
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');

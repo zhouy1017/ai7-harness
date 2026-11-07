@@ -10,6 +10,7 @@ export function createCommandPalette(options: {
   openBook(bookId: string): Promise<void>;
   openResult(item: TaskOverviewItemProjection): void;
   openStart(): void;
+  openHelp(): void;
   beforeStart(): Promise<boolean>;
   status(message: string, tone?: 'busy' | 'success' | 'error'): void;
 }) {
@@ -47,6 +48,7 @@ export function createCommandPalette(options: {
     const ticket = ++generation;
     entries = booksOnly ? [] : Object.entries(COMMAND_NAMES).map(([id, name]) => ({ label: `${name}${shortcutLabel(id) ? ` · ${shortcutLabel(id)}` : ''}`, run: () => options.execute(id) }));
     if (!booksOnly) entries.push({ label: '发起任务 · 连续加入队列', run: options.openStart });
+    if (!booksOnly) entries.push({ label: '设置 · 帮助', run: options.openHelp });
     paint(); sheet.show(); input.focus();
     try {
       const [first, tasks] = await Promise.all([options.api.listBooks({ after: null }), options.api.inspectTaskOverview()]);

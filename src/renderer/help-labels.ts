@@ -1,12 +1,12 @@
-// 帮助's words (Issue #939, wave 11 slice 11f; Owner decision 27; editor-surfaces §0.3): the sidebar entry beside 设置, the
+// Settings › Help words (#1376 / #1382; editor-surfaces §0.3, §8.6): the
 // three tabs, the 关于 line and the 第三方许可 list's chrome. The tab content itself lives in help-text.ts; both name the
 // exact labels the rest of the UI uses, so a reader can follow a sentence straight to where it points.
 
-/** The 帮助 entry in the sidebar's bottom area, beside 设置 (11a left `[data-shell-slot="help"]`). */
+/** The 帮助 entry under Settings Local. */
 export const HELP_ENTRY = Object.freeze({ label: '帮助', icon: '帮' });
 
 export const HELP_TITLE = '帮助';
-export const HELP_BREADCRUMB = '帮助';
+export const HELP_BREADCRUMB = '设置 · 本机';
 export const HELP_LEDE = '使用说明、隐私说明与第三方许可都在本机读取，打开这里不会更改任何记录。';
 export const HELP_OPENED = '帮助已打开';
 export const HELP_BACK = '返回';

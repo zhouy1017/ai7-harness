@@ -1,3 +1,6 @@
+import { PRODUCTION_DOCUMENT_SCHEMA_SQL } from '../../src/service/production-document-ledger.js';
+import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
+
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -116,4 +119,34 @@ export function dropProductionDocumentRelations(database: DatabaseSync): void {
   } finally {
     database.exec('PRAGMA foreign_keys = ON');
   }
+}
+
+/** Historical single-document shapes, unchanged from revisions 37 and 65 through 108. */
+export const MULTI_DOCUMENT_REVISION_108_TABLE_SQL = {
+  production_documents: PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents.replace('created_at TEXT NOT NULL\n', 'created_at TEXT NOT NULL,\n  UNIQUE(book_id, type_id)\n'),
+  writing_drafts: WRITING_TASK_SCHEMA_SQL.writing_drafts.replace('sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)\n', 'sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n  UNIQUE(book_id, type_id)\n'),
+} as const;
+
+/** Plant the actual pre-109 table definitions, keeping the existing records and triggers. */
+export function asMultiDocumentRevision108(db: DatabaseSync): void {
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON; BEGIN IMMEDIATE');
+  try {
+    for (const [table, sql] of Object.entries(MULTI_DOCUMENT_REVISION_108_TABLE_SQL)) {
+      const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
+      db.exec(`ALTER TABLE ${table} RENAME TO ${table}_newer`);
+      db.exec(sql);
+      db.exec(`INSERT INTO ${table} SELECT * FROM ${table}_newer ORDER BY rowid; DROP TABLE ${table}_newer`);
+      for (const trigger of triggers) db.exec(String(trigger.sql));
+    }
+    db.exec('PRAGMA user_version = 108; COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { db.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON'); }
+}
+
+/** Digest bytes only: this never returns manuscript or contract content to an assertion. */
+export function productionDocumentDigestBytes(db: DatabaseSync): string {
+  return JSON.stringify([
+    db.prepare('SELECT document_id, record_digest FROM production_documents ORDER BY rowid').all(),
+    db.prepare('SELECT document_id, sha256 FROM writing_drafts ORDER BY rowid').all(),
+  ]);
 }

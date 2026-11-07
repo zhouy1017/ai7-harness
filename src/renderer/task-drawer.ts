@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
 import { createButton } from './components/controls.js';
@@ -387,6 +388,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const { root, shell, api } = options;
   let request: TaskPlanRequest | null = null;
   let plan: TaskPlanProjection | null = null;
+  let deferredPlan: TaskPlanProjection | null = null;
   /** The plan as last painted, so a read that brought nothing new repaints nothing the editor has open. */
   let painted = '';
   let returnFocus: () => HTMLElement | null = () => null;
@@ -737,17 +739,27 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     );
   }
 
+  onPollControlEnd(root, () => {
+    if (deferredPlan === null || plan === null || root.hidden || view !== 'plan' || interrupted || pollControlEngaged(root, false)) return;
+    if (deferredPlan.ref !== plan.ref || deferredPlan.kind !== plan.kind) { deferredPlan = null; return; }
+    const next = deferredPlan; deferredPlan = null; paint(next, false);
+  });
+
   // ---- painting ---------------------------------------------------------------------------------------
 
   function paint(next: TaskPlanProjection, force: boolean): void {
+    if (force && next === plan && deferredPlan !== null) next = deferredPlan;
     next = taskPlanWording(next);
     const key = JSON.stringify(next);
-    const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
+    const sameItem = plan !== null && plan.ref === next.ref && plan.kind === next.kind;
+    const sameVersion = sameItem && plan!.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
       if (next.runControl !== null) activityBlock(next.runControl);
       schedulePoll(next);
       return;
     }
+    if (sameItem && !force && pollControlEngaged(root, false)) { deferredPlan = next; schedulePoll(next); return; }
+    deferredPlan = null;
     if (!sameVersion) {
       diffShown = false;
       unconfirmedRecordShown = false;
@@ -773,7 +785,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       refusal = pendingNote;
       pendingNote = null;
     }
-    const technicalOpen = sameVersion && body.querySelector<HTMLDetailsElement>('details.task-plan-technical')?.open === true;
+    const restoreInteraction = sameItem ? retainPollInteraction(root, sameVersion) : () => {};
+    const technicalOpen = sameItem && body.querySelector<HTMLDetailsElement>('details.task-plan-technical')?.open === true;
     plan = next;
     painted = key;
     root.dataset['taskPlanKind'] = next.kind;
@@ -815,6 +828,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (details) details.open = true;
     }
     paintBar(next);
+    restoreInteraction();
     if (redoOnOpen) { redoOnOpen = false; bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
     footer.textContent = TASK_DRAWER_FOOTER;
     if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {
@@ -2787,6 +2801,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       request = next;
       returnFocus = finder;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = note ?? null;
@@ -2821,6 +2836,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       panelBookId = bookId;
       request = null;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = null;
@@ -2848,6 +2864,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       panelBookId = bookId;
       request = null;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = null;
@@ -2893,6 +2910,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       cancelOnOpen = false;
       request = null;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = null;

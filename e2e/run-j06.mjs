@@ -202,7 +202,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
@@ -261,6 +261,8 @@ const PAGE_HELPERS = `(() => {
   const draft = () => conflict()?.querySelector('[data-conflict-draft]') ?? null;
   const press = (control) => {
     if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+    const more=control.closest('details.editorial-mark-more');
+    if(more&&!more.open)more.querySelector('summary').click();
     control.click();
     return true;
   };
@@ -943,7 +945,7 @@ async function main() {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
       return card.dataset.markKind === 'change-suggestion' && card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
-        (card.querySelector('[data-mark-source]')?.textContent ?? '').includes(${JSON.stringify(NEW_VERSION_SOURCE)}) &&
+        (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(NEW_VERSION_SOURCE)}) &&
         card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j06Texts.current &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(MERGED)} &&
         (card.querySelector('[data-mark-region="rationale"]')?.textContent ?? '').includes(${JSON.stringify(FIRST_RATIONALE)}) &&
@@ -1010,10 +1012,11 @@ async function main() {
     await assertRenderer(renderer, `window.__j06.choosePath('defer')`, 'choose-defer');
     await assertRenderer(renderer, `window.__j06.conflictAct('confirm-defer')`, 'confirm-defer');
     await waitFor(renderer, `window.__j06.card()?.dataset.markCard === ${JSON.stringify(secondId)} && window.__j06.status().includes(${JSON.stringify(DEFER_DONE)})`, 'defer-returns', 60_000);
+    await assertRenderer(renderer, `(() => { const more=window.__j06.card().querySelector('.editorial-mark-more'); if(!more.open)more.querySelector('summary').click(); return more.open; })()`, 'deferred-more-open');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
-      return (card.querySelector('[data-mark-state]')?.textContent ?? '').startsWith('待你处理 · 原文已变 · 暂不处理 · ') && accept instanceof HTMLButtonElement && accept.disabled &&
+      return card.querySelector('[data-mark-state]')?.textContent==='待你处理 · 原文已变' && (card.querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').startsWith('待你处理 · 原文已变 · 暂不处理 · ') && accept instanceof HTMLButtonElement && accept.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null && window.__j06.markById(${JSON.stringify(secondId)})?.dataset.markAnchor === 'drifted';
     })()`, 'deferred-still-blocks-and-says-since-when');
     await openConflict(renderer, secondId, 'deferred-conflict');
@@ -1074,7 +1077,7 @@ async function main() {
     requireJourney(UUID_PATTERN.test(correctionId ?? ''), 'correction-identity');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
-      return (card.querySelector('[data-mark-source]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === window.__j06Replaced && window.__j06.text(${JSON.stringify(first)}) === window.__j06Reversal.now;
     })()`, 'correction-proposal-not-applied');
     const corrected = await renderer.evaluate(`(async () => { const binding = await ${BINDING}; const applied = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(versionId)} }); const correction = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(correctionId)} }); return { applied: applied.status, conflict: applied.conflict, resolvedFrom: correction.resolvedFrom, convertedFrom: correction.convertedFrom }; })()`);
@@ -1195,7 +1198,8 @@ async function main() {
     await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === ${JSON.stringify(KEPT_STATE)}`, 'restart-kept-still-kept');
     await press(renderer, 'Escape');
     await openCard(renderer, secondId, second, 'restart-deferred-card');
-    await assertRenderer(renderer, `(window.__j06.card().querySelector('[data-mark-state]')?.textContent ?? '').includes(' · 暂不处理 · ') && window.__j06.card().querySelector('[data-mark-action="resolve-conflict"]') !== null`, 'restart-deferred-still-deferred');
+    await assertRenderer(renderer, `(() => { const more=window.__j06.card().querySelector('.editorial-mark-more'); if(!more.open)more.querySelector('summary').click(); return more.open; })()`, 'restart-deferred-more-open');
+    await assertRenderer(renderer, `(window.__j06.card().querySelector('.editorial-mark-more [data-mark-state-detail]')?.textContent ?? '').includes(' · 暂不处理 · ') && window.__j06.card().querySelector('[data-mark-state]')?.textContent==='待你处理 · 原文已变' && window.__j06.card().querySelector('[data-mark-action="resolve-conflict"]') !== null`, 'restart-deferred-still-deferred');
     await press(renderer, 'Escape');
 
     at('zero-activity');

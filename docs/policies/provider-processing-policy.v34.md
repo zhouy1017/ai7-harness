@@ -1,0 +1,11 @@
+# Provider Processing Policy v34
+
+Status: immutable ordinary-production successor to v33, selected by active-policy-set v25 under [Issue #1371](https://github.com/zhouy1017/ai7-harness/issues/1371).
+
+The [canonical JSON](provider-processing-policy.v34.json) and [exact schema](provider-processing-policy.v34.schema.json) retain v33 authority, source, purpose, role, egress, instruction, learning and fallback limits. Only native search admission and fixed-public candidate connection tests change. Developer-live remains v24 with the exact existing binding; development-ci remains zero-transmission v1.
+
+Review, writing and evaluation name the five existing ranked search backends plus `search-openai` and `search-anthropic`. A ready Main official model channel freezes its corresponding backend and saved model credential UUID with `selectionSource: model-channel`, unless the editor explicitly uses the configured backend. OpenAI and Claude are still unmeasured and cannot be independently ranked, selected as manual defaults or used as manual backups. Unmeasured status is disclosed in settings, plans and Run Reports and never denies an otherwise admitted request.
+
+`searchConnectionTest` keeps the DeepSeek direct Search probe and adds two native candidates. Every explicit click sends one fixed public UNESCO query under a single-use ticket, with manual redirects, 25-second timeout, 2 MiB response bound and at most three bounded public titles/URLs. It sends no Book material and retains no response, result or measured promotion. OpenAI uses Responses `web_search`, Bearer and `openai-platform`; Claude uses Messages `web_search_20250305`, `x-api-key` and `anthropic-claude`; both reuse the corresponding selected model and request count 3. DeepSeek direct Search retains count 10, first uses `search-deepseek`, and only when that connection is not ready reuses `deepseek-api-key` from the official model channel. No credential reuse grants another host or scope. Non-production scopes deny before connections, credentials or transport.
+
+All predecessor policy JSON, schema and human projection bytes remain unchanged. This admission is not a live measurement: real external native tests are Owner manual and automated product tests remain provider-free. Apply, export, publication and main promotion authority stay separate.

@@ -34,7 +34,7 @@ import {
  *   frozen contract input and its digest, with the 定稿 evaluation version, the baseline Result Set Revision and the exemplar
  *   versions it was read from, by identity. A Task the analysis ledger revised in place for a later request may hold two; the
  *   one whose contract its frozen plan names is its own.
- * - `writing_drafts`: which drafted result became which type's document, once per type of a Book.
+ * - `writing_drafts`: which drafted result became which type's document, once per writing result, with multiple documents per type.
  */
 export const WRITING_TASK_SCHEMA_SQL = {
   writing_tasks: `CREATE TABLE writing_tasks (
@@ -57,8 +57,7 @@ export const WRITING_TASK_SCHEMA_SQL = {
   task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
   recorded_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
-  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
-  UNIQUE(book_id, type_id)
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
 ) STRICT`,
 } as const;
 
@@ -343,10 +342,6 @@ export const WRITING_LIVE_SEND_CONSEQUENCE =
 export const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。' as const;
 export const WRITING_COST_BEFORE_PLAN = '先看计划后显示' as const;
 export { WRITING_EXEMPLAR_MOVED } from './writing/writing-contract.js';
-
-export function writingDocumentExists(typeLabel: string): string {
-  return `这本书已经有「${typeLabel}」；请在交付物中打开它继续修改。`;
-}
 
 export function writingNotForThisBook(typeLabel: string): string {
   return `「${typeLabel}」已标为本书不做；先恢复，再起草。`;
@@ -656,7 +651,7 @@ export class WritingTasks {
     return (this.#db.prepare(
       `SELECT r.revision_id, r.ordinal, r.created_at, r.task_intent_id FROM analysis_result_set_revisions r
        JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
-       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal DESC`,
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.created_at DESC, r.rowid DESC`,
     ).all(bookId, WRITING_KIND) as SqlRow[]).map((row) => ({
       revisionId: text(row.revision_id),
       ordinal: Number(row.ordinal),
@@ -683,7 +678,7 @@ export class WritingTasks {
     };
   }
 
-  /** The Book's drafted documents, one per type at most. */
+  /** The Book's drafted documents, each bound to its own writing result. */
   drafts(bookId: string): StoredWritingDraft[] {
     return (this.#db.prepare('SELECT * FROM writing_drafts WHERE book_id = ? ORDER BY recorded_at, rowid').all(bookId) as SqlRow[])
       .map((row) => this.#draft(row));

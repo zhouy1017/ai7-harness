@@ -5,7 +5,7 @@ import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { PlatformToolCallItem, PlatformToolCallResult } from './live-transmission.js';
 import type { ResearchSnapshot } from './research-snapshot-cache.js';
-import { sha256Hex } from '../analysis/canonical.js';
+import { isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { HarnessTurnOutcome, PlatformToolDispatch, PlatformToolExecution, PlatformToolOwner } from '../harness/primary-agent-harness.js';
 import { AI7_FAILURE_CODES } from './classification.js';
 import {
@@ -74,6 +74,26 @@ export async function bindSearchFallback(frozen: FrozenWebToolsFallback, terms: 
   }
   return { backend: { backendId: frozen.backendId, host: frozen.host, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot,
     credentialReference: frozen.credentialReference }, resendableFailureClasses: terms.resendableFailureClasses };
+}
+
+/** Native search usage joins the same two inclusive counts used by the Run Report and budget callback.
+ * Responses input/output already include cache/reasoning details; Messages inputs exclude cache reads and creation.
+ * Charge only a real send (the caller is inside measured.send), never a reused query or Research Snapshot.
+ */
+function nativeSearchUsage(backendId: string | undefined, bytes: Uint8Array): { inputTokens: number; outputTokens: number } | null {
+  if (backendId !== 'search-openai' && backendId !== 'search-anthropic' && backendId !== 'search-deepseek') return null;
+  try {
+    const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!isRecord(body) || !isRecord(body['usage'])) return null;
+    const usage = body['usage'];
+    const inputs = backendId === 'search-openai' ? [usage['input_tokens']]
+      : [usage['input_tokens'], usage['cache_read_input_tokens'] ?? 0, usage['cache_creation_input_tokens'] ?? 0];
+    const outputTokens = usage['output_tokens'];
+    const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    if (!inputs.every(count) || !count(outputTokens)) return null;
+    const inputTokens = inputs.reduce((sum, value) => sum + value, 0);
+    return Number.isSafeInteger(inputTokens) ? { inputTokens, outputTokens } : null;
+  } catch { return null; } // No vendor payload leaves this boundary.
 }
 
 export interface FactualSearchAccounting {
@@ -470,15 +490,9 @@ export class PlatformToolSession implements PlatformToolOwner {
       if (item.kind === 'search-call' && result.status === 403 && backend !== undefined && searchFailureClass({ status: result.status,
         backendId: backend.backendId, body: new TextDecoder().decode(result.bytes) }) === 'quota') failureClass = 'quota';
       if (item.kind === 'fetch') this.usage.fetchBytes += result.bytes.byteLength;
-      if (backend?.backendId === 'search-deepseek' && item.kind === 'search-call') {
-        try {
-          const body = JSON.parse(new TextDecoder().decode(result.bytes)) as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number } };
-          const inputTokens = (body.usage?.input_tokens ?? 0) + (body.usage?.cache_read_input_tokens ?? 0);
-          const outputTokens = body.usage?.output_tokens ?? 0;
-          if (Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0) {
-            this.usage.inputTokens += inputTokens; this.usage.outputTokens += outputTokens; this.#onUsage?.({ inputTokens, outputTokens });
-          }
-        } catch { /* No vendor payload leaves this boundary. */ }
+      const usage = item.kind === 'search-call' ? nativeSearchUsage(backend?.backendId, result.bytes) : null;
+      if (usage !== null) {
+        this.usage.inputTokens += usage.inputTokens; this.usage.outputTokens += usage.outputTokens; this.#onUsage?.(usage);
       }
       this.provenance.push({ sourceKind: 'tool', backendId: item.kind === 'fetch' ? null : backend?.backendId ?? null,
         host: item.host, capturedAt: new Date().toISOString(), argumentsDigest: item.argumentsDigest, responseDigest: sha256Hex(result.bytes) });

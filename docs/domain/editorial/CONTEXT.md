@@ -549,7 +549,7 @@ _中文_: 范例
 _Avoid_: Source Version of a Book, template, training data
 
 **Production Document**:
-An Editorial Deliverable other than the primary Manuscript — a news release, promotion article, review article, launch materials, marketing points, or another house-configured type — with its own versions, Workflow Instance, gates and Delivery Records; it never carries Milestone Version, Signoff or Publication Version language ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+An Editorial Deliverable other than the primary Manuscript — a news release, promotion article, review article, launch materials, marketing points, or another house-configured type — with its own identity, editable title, versions, Workflow Instance, gates and Delivery Records; a Book may hold multiple documents of the same type (Owner #1378), and each is independently edited, delivered and exported; it never carries Milestone Version, Signoff or Publication Version language ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
 _中文_: 生产文档
 _Avoid_: the Manuscript, an Editorial Artifact of a document, a Delivery Package, a Task Outcome
 

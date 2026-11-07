@@ -1,3 +1,5 @@
+import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
+import { initializeMultiDocumentSchema } from '../../src/service/production-document-ledger.js';
 import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
@@ -216,6 +218,54 @@ async function run(session: Session, bookId: string, prepared: WritingProjection
   return session.store.inspectWriting(bookId)!;
 }
 
+it.each(['before migration', 'after relations commit'] as const)('preserves a historical writing draft and admits a peer after reopening 108→109 %s', async (interruption) => {
+  const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+  let bookId = '', documentId = '';
+  await withSession(fixture, async (session) => {
+    bookId = await sample1Book(session.store, WRITING_BOOK_TITLE);
+    const settled = await run(session, bookId, prepare(session.store, bookId));
+    documentId = session.store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '独立写作题目').document.documentId;
+  });
+  const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+  const old = new DatabaseSync(path);
+  asMultiDocumentRevision108(old);
+  const before = productionDocumentDigestBytes(old);
+  if (interruption === 'after relations commit') initializeMultiDocumentSchema(old);
+  expect(old.prepare('PRAGMA user_version').get()!.user_version).toBe(108);
+  old.close();
+  await withSession(fixture, async (session) => {
+    const store = session.store;
+    const check = new DatabaseSync(path);
+    try {
+      expect(productionDocumentDigestBytes(check) === before).toBe(true);
+      expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
+      expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      for (const table of ['production_documents', 'writing_drafts']) {
+        expect(() => check.prepare(`UPDATE ${table} SET document_id = document_id WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
+        expect(() => check.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
+      }
+    } finally { check.close(); }
+    const settled = await run(session, bookId, prepare(store, bookId));
+    const second = store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '后续写作').document;
+    expect(second.documentId).not.toBe(documentId);
+    expect(store.inspectProductionDocuments(bookId).types.find((type) => type.typeId === 'promotion-article')!.documents.map((doc) => doc.title)).toEqual(['独立写作题目', '后续写作']);
+  });
+});
+
+it('does not resurface a superseded draft after the newest result becomes a document', async () => {
+  const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+  await withSession(fixture, async (session) => {
+    const bookId = await sample1Book(session.store, WRITING_BOOK_TITLE);
+    await run(session, bookId, prepare(session.store, bookId));
+    const newest = await run(session, bookId, prepare(session.store, bookId));
+    expect(session.store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId).toBe(newest.resultSetRevision!.revisionId);
+    session.store.createWritingDraft(bookId, newest.resultSetRevision!.revisionId);
+    const type = session.store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!;
+    expect(type.drafted).toBeNull();
+    expect(type.prepare.allowed).toBe(true);
+  });
+});
+
 describe('写作任务 over the real store on exact sample1', () => {
   it('drafts J-07\'s 宣传文章 from the plan, and 打开草稿 makes it the Book\'s 宣传文章 in its 起草 phase', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
@@ -287,13 +337,10 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(window.blocks.map((block) => [block.kind, block.text])).toEqual(writingDraftBlocks(DRAFT_WORDS).map((block) => [block.kind, block.text]));
       expect(created.writing.types.find((type) => type.typeId === 'promotion-article')).toMatchObject({
         drafted: null,
-        prepare: { allowed: false, reason: '这本书已经有「宣传文章」；请在交付物中打开它继续修改。' },
+        prepare: { allowed: true },
       });
-      // Once per type: the same result, or the type's document made another way, refuses another.
-      expect(await refusal(() => store.createWritingDraft(bookId, drafted!.revisionId)))
-        .toBe('WRITING_DOCUMENT_EXISTS:这本书已经有「宣传文章」；请在交付物中打开它继续修改。');
-      expect(await refusal(() => prepare(store, bookId)))
-        .toBe('WRITING_DOCUMENT_EXISTS:这本书已经有「宣传文章」；请在交付物中打开它继续修改。');
+      // Opening the same result is idempotent; another task may draft a peer document.
+      expect(store.createWritingDraft(bookId, drafted!.revisionId).document.documentId).toBe(document.documentId);
       // 交付物's card names it as drafted.
       const card = store.inspectProductionDocuments(bookId).types.find((type) => type.typeId === 'promotion-article')!;
       expect(card.document).toMatchObject({ documentId: document.documentId, origin: { drafted: true } });

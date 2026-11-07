@@ -227,11 +227,11 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
 async function clickSelector(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; const more=button.closest('details.editorial-mark-more'); if(more&&!more.open)more.querySelector('summary').click(); button.click(); return true; })()`, name);
 }
 /**
  * Wait until the open manuscript's Position Rail has drawn a marker of `kind` (Issue #690). The rail reads its places from
@@ -941,6 +941,22 @@ async function main() {
         !visible.includes('@base') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/i.test(visible);
     })()`, 'global-agent-unified-readable-memory');
 
+    // #1377 / J-16: an existing preference stays reachable in ordinary quality without its engineering forms.
+    for (const developer of ['false', 'true']) {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
+      await click(renderer, '帮助', `quality-mode-${developer}-help`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
+      if (developer === 'true') continue;
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
+      await waitFor(renderer, `document.querySelector('[data-review-preference]')?.textContent.includes('保留作者有意使用的短句。')`, 'ordinary-existing-preference-visible');
+      await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); return row.textContent.includes('已启用') && Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用') && !root.querySelector('form') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-preference-return-global');
+    await waitFor(renderer, `document.querySelector('[data-global-agent-item]') && document.querySelector('[data-global-agent-save]')`, 'ordinary-preference-developer-preserved');
+
     await assertRenderer(renderer, `(() => { const item = document.querySelector('[data-global-agent-item]'); const operation = document.querySelector('[data-global-agent-operation]'); const effect = document.querySelector('[data-global-agent-effect]'); const text = document.querySelector('[data-global-agent-text]'); if (!(item instanceof HTMLInputElement) || !(operation instanceof HTMLSelectElement) || !(effect instanceof HTMLSelectElement) || !(text instanceof HTMLTextAreaElement)) return false; item.click(); operation.value = 'supervise'; operation.dispatchEvent(new Event('change', { bubbles: true })); effect.value = 'freeze'; text.value = '先冻结这条概括，等更多判断后再归纳。'; return true; })()`, 'global-agent-supervision-written');
     await clickSelector(renderer, '[data-global-agent-save]', 'global-agent-supervision-record');
     await waitFor(renderer, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.directives.length === 2 && state.items.length === 1 && state.items[0].state === 'frozen' && state.history.length === 0; })()`, 'global-agent-governance-local');
@@ -1038,6 +1054,31 @@ async function main() {
     // 续行 on the card: the same Run goes on, and runs to its end — 已完成 in 最近完成, with 查看结果.
     await cardAction(renderer, 'analysis-paused', 'resume', 'panel-resume');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running', 'panel-resumed', 60_000);
+    // #1375: keep the original panel pause/resume checks, then advance its real held Run twice on ordinary attention.
+    const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
+    await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
+    await click(renderer,'帮助','poll-attention-ordinary-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
+    const pollAttentionId=await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis'&&item.target.taskIntentId===${JSON.stringify(pollTaskId)}).itemId)`);
+    const pollAttentionSelector=`[data-attention-item="${pollAttentionId}"]`;
+    await waitFor(renderer,`document.querySelector(${JSON.stringify(pollAttentionSelector)})?.dataset.attentionState==='analysis-running' && document.documentElement.dataset.technicalLayerVisible==='false'`,'poll-attention-running');
+    await renderer.evaluate(`document.querySelector(${JSON.stringify(pollAttentionSelector)}).querySelector('[data-attention-open]').focus()`);
+    for(const done of [FIRST_HOLD+2,FIRST_HOLD+3]) {
+      await renderer.evaluate(`globalThis.__j16PollAttention=document.querySelector(${JSON.stringify(pollAttentionSelector)});globalThis.__j16PollAttentionText=globalThis.__j16PollAttention.textContent`);
+      await writeHold(done);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer,`(() => {const current=document.querySelector(${JSON.stringify(pollAttentionSelector)});return current!==globalThis.__j16PollAttention&&current?.textContent!==globalThis.__j16PollAttentionText&&current?.dataset.attentionState==='analysis-running'&&document.activeElement===current.querySelector('[data-attention-open]');})()`,'attention-changed-unit-paint');
+      requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
+    }
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
+    await click(renderer,'帮助','poll-attention-developer-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'poll-attention-developer-mode');
+    await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
+    await openPanel(renderer,'poll-attention-return-pane');
     await writeHold(SAMPLE1_UNITS);
     const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-completed', 180_000);
     const doneCard = cardsOf(done, 'recent')[0];
@@ -1471,7 +1512,7 @@ async function main() {
     await assertRenderer(renderer, `(async () => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); if (!(proposed instanceof HTMLTextAreaElement)) return false; proposed.dispatchEvent(new CompositionEvent('compositionstart', { data: '平缓', bubbles: true })); proposed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', isComposing: true, bubbles: true, cancelable: true })); proposed.dispatchEvent(new CompositionEvent('compositionend', { data: '平缓', bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 100)); return form.isConnected && document.querySelector('#task-drawer')?.hidden === false && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue'; })()`, 'dialogue-convert-ime-escape');
     await assertRenderer(renderer, `(() => { const proposed = document.querySelector('#task-drawer .dialogue-convert textarea[name="proposedText"]'); proposed.value = ${JSON.stringify(DIALOGUE_PROPOSAL)}; proposed.dispatchEvent(new Event('input', { bubbles: true })); return proposed.value === ${JSON.stringify(DIALOGUE_PROPOSAL)}; })()`, 'dialogue-convert-write');
     await clickSelector(renderer, '#task-drawer .dialogue-convert [data-dialogue-action="convert-submit"]', 'dialogue-convert-submit');
-    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 · 任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
+    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 本地检查 · ') && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
     const converted = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 })`);
     const convertedAttempt = converted?.attempts?.at(-1);
     const markId = convertedAttempt?.convertedMarkIds?.[0] ?? null;
