@@ -32,6 +32,15 @@ export type RequestShape =
 /** What parameters control reasoning. `deepseek-thinking` is the production route's `thinking` plus `reasoning_effort`. */
 export type ReasoningControl = 'none' | 'deepseek-thinking';
 
+/** The explicit wire effort of the implemented deepseek-thinking request control. */
+export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
+
+/** Capture at execution binding time; never infer an old record's effort from today's profile. */
+export function effectiveModelReasoningEffort(profile: ProviderModelProfile | null): string | null {
+  return profile?.capabilities.requestShape === 'openai-chat-completions' &&
+    profile.capabilities.reasoningControl === 'deepseek-thinking' ? DEEPSEEK_REASONING_EFFORT : null;
+}
+
 /**
  * How a JSON answer is *required* of the model, as opposed to merely asked for in the prompt.
  * `json-object` is the chat-completions `response_format` constraint the adapter assembles, and only
