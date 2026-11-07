@@ -70,7 +70,24 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const first=cards[0]; first.focus(); first.dispatchEvent(new PointerEvent('pointerenter'));
     return clear && pane.scrollHeight>=sorted[sorted.length-1].bottom-pane.getBoundingClientRect().top-1 && document.documentElement.dataset.technicalLayerVisible==='false' && cards.every(card=>!card.textContent.match(/[0-9a-f]{8}-[0-9a-f-]{27}|[0-9a-f]{64}/i));
   })()`), 'comments-five-measured-no-overlap');
-  await waitFor(renderer, `document.querySelector('[data-comment-leader="'+__comments.ids[0]+'"]') && document.querySelector('.manuscript-comments-anchor') && document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]').dataset.active==='true'`, 'comments-anchor-and-leader');
+  try {
+    await waitFor(renderer, `document.querySelector('[data-comment-leader="'+__comments.ids[0]+'"]') && document.querySelector('.manuscript-comments-anchor') && document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]').dataset.active==='true'`, 'comments-anchor-and-leader');
+  } catch {
+    // Payload-free diagnosis only: keep the complete acceptance conjunction above and real focus/pointer triggers.
+    const flags = await renderer.evaluate(`(() => {
+      const id=__comments.ids[0], card=document.querySelector('[data-comment-card="'+id+'"]');
+      const anchors=Array.from(document.querySelectorAll('.editorial-mark[data-mark-id="'+id+'"]'));
+      const viewport=document.querySelector('.editor-window').getBoundingClientRect();
+      const leader=document.querySelector('[data-comment-leader="'+id+'"]'), svg=leader?.ownerSVGElement;
+      const bounds=svg?.getBoundingClientRect();
+      return {'focused-card':card?.contains(document.activeElement)===true,'active-card':card?.dataset.active==='true',
+        'anchor-present':anchors.length>0,'anchor-highlighted':anchors.some(node=>node.classList.contains('manuscript-comments-anchor')),
+        'anchor-viewport':anchors.some(node=>{const box=node.getBoundingClientRect();return box.bottom>=viewport.top-200&&box.top<=viewport.bottom+200;}),
+        'leader-present':leader!==null,'leader-visible':!!bounds&&bounds.width>0&&bounds.height>0&&getComputedStyle(svg).display!=='none'};
+    })()`);
+    const missing = Object.entries(flags).filter(([, present]) => !present).map(([name]) => name).join('-');
+    check(false, 'comments-anchor-and-leader-' + (missing || 'state'), flags);
+  }
   check(await renderer.evaluate(`(async () => {
     const scroll=document.querySelector('.editor-window'); const before=scroll.scrollTop;
     scroll.scrollTop=before+12; await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));

@@ -513,14 +513,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     inlinePreviewId = undefined;
     if (openCardId === undefined) editor.setActiveMark(null);
   };
+  const paintCommentAnchors = (): void => {
+    for (const node of options.host.querySelectorAll('.manuscript-comments-anchor')) node.classList.remove('manuscript-comments-anchor');
+    if (activeComment) {
+      for (const node of options.host.querySelectorAll(`[data-mark-id="${CSS.escape(activeComment)}"]`)) node.classList.add('manuscript-comments-anchor');
+    }
+  };
   const activateComment = (markId: string | undefined): void => {
     if (inlinePreviewId !== undefined && inlinePreviewId !== markId) clearInlinePreview();
     activeComment = markId;
     for (const [id, entry] of commentNodes) entry.node.dataset['active'] = String(id === markId);
-    for (const node of options.host.querySelectorAll('.manuscript-comments-anchor')) node.classList.remove('manuscript-comments-anchor');
-    if (markId) {
-      for (const node of options.host.querySelectorAll(`[data-mark-id="${CSS.escape(markId)}"]`)) node.classList.add('manuscript-comments-anchor');
-    }
+    paintCommentAnchors();
     scheduleCommentsLayout();
   };
   const returnToCommentAnchor = (card: Pick<EditorialMarkCardProjection, 'blockId' | 'fromGrapheme'>): void => {
@@ -694,6 +697,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (commentsCanvas.children[index] !== item.node) commentsCanvas.insertBefore(item.node, commentsCanvas.children[index] ?? null);
     }
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
+    // Focus/selection transactions can replace the editor's decoration nodes between activation and this frame.
+    paintCommentAnchors();
     const active = placed.find((item) => item.mark.markId === activeComment);
     if (active) {
       const origin = options.comments!.host.parentElement!.getBoundingClientRect();
@@ -739,7 +744,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   commentsResize.observe(options.host);
   if (options.comments) commentsResize.observe(commentsScroll);
   const commentSelection = (): void => {
-    if (!options.comments?.enabled() || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
+    if (!options.comments?.enabled()) return;
+    scheduleCommentsLayout();
+    // Focusing a card leaves the editor's native selection in place; that retained selection does not own activation.
+    if (!options.host.contains(document.activeElement) || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
     const point = editor.captureContinuity().head;
     activateComment(editor.currentWindow().marks.find((mark) => mark.kind !== 'personal-highlight' && mark.blockId === point.blockId &&
       point.grapheme >= mark.fromGrapheme && point.grapheme <= mark.toGrapheme)?.markId);

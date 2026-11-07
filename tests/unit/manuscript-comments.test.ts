@@ -98,6 +98,7 @@ describe('comments command parity and refresh continuity', () => {
     vi.stubGlobal('requestAnimationFrame', (fn: () => void) => { frames.push(fn); return frames.length; });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    Object.assign(miniDocument.body, { getBoundingClientRect: () => ({ top: 0, left: 0, right: 1000, bottom: 700, width: 1000, height: 700 }) });
     vi.stubGlobal('matchMedia', () => ({ matches: true }));
     vi.stubGlobal('HTMLDetailsElement', MiniElement);
     vi.stubGlobal('HTMLFormElement', MiniElement);
@@ -105,7 +106,7 @@ describe('comments command parity and refresh continuity', () => {
   afterEach(() => { mounted?.destroy(); mounted = undefined; setTechnicalLayerVisible(technicalBefore); vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
   async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
   function mount(value = card) {
-    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value)] }; let latest = value; let enabled = true;
+    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value)] }; let latest = value; let enabled = true; let caret = 10;
     const host = document.createElement('div'); const scroll = document.createElement('div'); const pane = document.createElement('aside');
     miniDocument.body.append(host as unknown as MiniElement, scroll as unknown as MiniElement, pane as unknown as MiniElement);
     const block = document.createElement('p'); block.dataset['blockId'] = 'block'; host.append(block);
@@ -121,14 +122,14 @@ describe('comments command parity and refresh continuity', () => {
     const outcome = vi.fn(async (_input: Record<string, unknown>): Promise<unknown> => { throw new Error('outcome unavailable'); });
     const receipt = vi.fn(async (input: Record<string, unknown>) => ({ state: input['recovery'] === 'confirming' ? 'confirming' : 'unresolved', clientEffectId: input['clientEffectId'], reason: '结果待确认' }));
     const options = { host, scroll, comments: { host: pane, enabled: () => enabled },
-      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
+      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
       api: { getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
     mounted = mountEditorialMarks(options);
     return { host, pane, block, scroll, get, update, decide, apply, write, status, active, outcome, receipt,
-      open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
+      setCaret: (next: number) => { caret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
       setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
     };
@@ -263,6 +264,34 @@ describe('comments command parity and refresh continuity', () => {
     expect(full.querySelector('[data-mark-state]')?.textContent).toBe('已应用');
     expect(full.textContent).not.toContain('effect-private-id'); expect(full.textContent).not.toContain('receipt-private-id');
     expect(full.textContent).not.toContain(application.receiptDigest);
+  });
+
+  it('keeps the real focused-card activation when a retained editor selection emits selectionchange', async () => {
+    const ui = mount(); await paint();
+    const decorator = document.createElement('span'); decorator.className = 'editorial-mark'; decorator.dataset['markId'] = card.markId; ui.block.append(decorator);
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card]')!; node.focus();
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true }); await paint();
+    expect(node.dataset['active']).toBe('true');
+    expect(miniDocument.body.querySelector('[data-comment-leader]') !== null).toBe(true);
+    vi.stubGlobal('document', Object.assign(Object.create(document), { getSelection: () => ({ anchorNode: ui.block }) }));
+    miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    expect(document.activeElement).toBe(node); expect(node.dataset['active']).toBe('true');
+    expect(miniDocument.body.querySelector('[data-comment-leader]') !== null).toBe(true);
+    ui.host.focus(); miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    expect(node.dataset['active']).toBe('false');
+    ui.setCaret(1); miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    expect(node.dataset['active']).toBe('true');
+  });
+  it('reattaches the active anchor highlight after the editor redraws its decoration before a layout frame', async () => {
+    const ui = mount(); await paint();
+    const decorator = document.createElement('span'); decorator.className = 'editorial-mark'; decorator.dataset['markId'] = card.markId; ui.block.append(decorator);
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card]')!; node.focus();
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true }); await paint();
+    expect(decorator.classList.contains('manuscript-comments-anchor')).toBe(true);
+    const replacement = document.createElement('span'); replacement.className = 'editorial-mark'; replacement.dataset['markId'] = card.markId; ui.block.replaceChildren(replacement);
+    (ui.scroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(node.dataset['active']).toBe('true'); expect(replacement.classList.contains('manuscript-comments-anchor')).toBe(true);
+    expect(miniDocument.body.querySelector('[data-comment-leader]') !== null).toBe(true);
   });
 
 });
