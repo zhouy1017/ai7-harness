@@ -1656,7 +1656,7 @@ async function main() {
       return reason.hidden&&notice.hidden ? 'ok' : 'open-reason-or-notice';
     })()`);
     requireJourney(factualRoundtrip === 'ok', factualRoundtrip === 'ok' ? 'factual-first-category-range-roundtrip'
-      : `factual-first-category-range-roundtrip/${factualNetworkUnavailable ? 'network-blocked' : 'open'}/${String(factualRoundtrip)}`);
+      : `factual-first-category-range-roundtrip-${factualNetworkUnavailable ? 'network-blocked' : 'open'}-${String(factualRoundtrip)}`);
     await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
     requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
