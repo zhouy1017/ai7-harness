@@ -1626,7 +1626,9 @@ async function main() {
       const checkedIds=()=>Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value);
       for(let step=0; step<20 && sheet.querySelector('input[name="review-category"]:checked'); step++)sheet.querySelector('input[name="review-category"]:checked').click();
       if(checkedIds().length!==0)return 'cleared';
-      if(!factual()||factual().disabled||!scope('whole')||scope('whole').disabled||!scope('chapters')||scope('chapters').disabled)return 'offered';
+      if(!factual())return 'offered-factual-missing';
+      if(factual().disabled)return factual().dataset.unavailableReason ? 'offered-factual-disabled-with-reason' : 'offered-factual-disabled';
+      for(const kind of ['whole','chapters']){ if(!scope(kind))return 'offered-'+kind+'-missing'; if(scope(kind).disabled)return 'offered-'+kind+'-disabled'; }
       // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
       if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return 'selection-held';
       factual().click(); scope('whole').click();
