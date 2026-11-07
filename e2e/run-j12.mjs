@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -1607,7 +1607,8 @@ async function main() {
         networkUnavailable: blocked,
         // The sheet's scope choices are the manuscript's: 全书 and 选章 are offered, 当前选区 needs a real selection.
         scopeChoices: workspace.scopeOptions.whole.available && workspace.scopeOptions.chapters.available && !workspace.scopeOptions.selection.available,
-        factualScopes: factual===undefined ? '' : ['whole','chapters','changed','selection'].map(kind=>factual.scopes[kind]?.available ? '1' : '0').join(''),
+        factualAvailable: factual?.available === true,
+        factualReason: factual?.unavailableReason ?? null,
       };
     })`);
     requireJourney(factualVerdict?.empty === true && factualVerdict.consistent === true, 'factual-first-scope-verdict');
@@ -1630,7 +1631,7 @@ async function main() {
       if(!factual())return 'offered-factual-missing';
       if(factual().disabled){
         const checkedScope=sheet.querySelector('input[name="review-scope"]:checked')?.value ?? 'none';
-        return 'offered-factual-disabled-'+checkedScope+'-scopes'+${JSON.stringify(String(factualVerdict.factualScopes ?? ''))};
+        return 'offered-factual-disabled-'+checkedScope+${JSON.stringify(factualVerdict.factualAvailable ? '-available' : `-unavailable-${createHash('sha256').update(String(factualVerdict.factualReason)).digest('hex').slice(0, 16)}`)};
       }
       for(const kind of ['whole','chapters']){ if(!scope(kind))return 'offered-'+kind+'-missing'; if(scope(kind).disabled)return 'offered-'+kind+'-disabled'; }
       // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
