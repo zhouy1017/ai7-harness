@@ -334,13 +334,15 @@ async function assertProgressiveSelect(renderer) {
     const select=document.createElement('select'); select.id='j12-native-select'; select.name='choice';
     select.dataset.contract='native'; select.setAttribute('aria-label','公开合成选项'); select.required=true;
     for(let index=0;index<150;index++)select.add(new Option('选项 '+String(index).padStart(3,'0'),'v'+index,index===4,index===4));
-    fieldset.append(label,select); form.append(fieldset); document.querySelector('.model-service-settings').append(form); select.focus();
+    const status=document.createElement('p');status.setAttribute('role','status');
+    fieldset.append(label,select); form.append(fieldset,status); document.querySelector('.model-service-settings').append(form); select.focus();
     let changes=0; form.addEventListener('change',()=>changes++);
     const untouched=document.createElement('select');
     const originalDescriptor=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');
     try {
       await frame();
       const trigger=select.nextElementSibling, popup=trigger?.nextElementSibling, list=popup?.querySelector('[role="listbox"]'), filter=popup?.querySelector('input');
+      if(form.querySelector('[role="status"]')!==status)return false;
       if(!trigger?.matches('.ui-select-trigger')||document.activeElement!==trigger||!list||!filter||select.id!=='j12-native-select'||select.name!=='choice'||select.dataset.contract!=='native'||select.getAttribute('aria-label')!=='公开合成选项'||select.options.length!==150||select.value!=='v4'||select.tabIndex!==-1||select.getAttribute('aria-hidden')!=='true')return false;
       select.value='v13'; if(!trigger.textContent.includes('013')||changes)return false;
       select.selectedIndex=17; if(!trigger.textContent.includes('017'))return false;

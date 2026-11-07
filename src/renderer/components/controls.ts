@@ -74,7 +74,9 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
   const empty = doc.createElement('p');
   empty.className = 'field-note';
   empty.textContent = '没有匹配的选项';
-  empty.setAttribute('role', 'status');
+  // Announce filtering without shadowing the owning form's existing status region.
+  empty.setAttribute('aria-live', 'polite');
+  empty.setAttribute('aria-atomic', 'true');
   popup.append(filter, list, empty);
   const validation = doc.createElement('span');
   validation.id = `${trigger.id}-error`;
