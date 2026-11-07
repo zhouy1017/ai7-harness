@@ -856,7 +856,8 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-preferences-roundtrip');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-house-knowledge');
       await clickSelector(renderer, '[data-knowledge-category="memory"]', 'ordinary-house-entry');
-      await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]') && !document.querySelector('form')`, 'ordinary-house-same-owner');
+      // #1408: the ordinary rule editor is the one form here; no engineering form joins it.
+      await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]') && Array.from(document.querySelectorAll('form')).every(form=>form.matches('[data-editorial-memory] form.preference-editor[data-preference-editor]')) && document.querySelectorAll('[data-editorial-memory] form[data-preference-editor="new"]').length===1`, 'ordinary-house-same-owner');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'ordinary-quality-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'ordinary-quality-library-ready');
