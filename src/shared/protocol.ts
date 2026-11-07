@@ -319,7 +319,7 @@ export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
 
-export const SERVICE_PROTOCOL_VERSION = 198 as const;
+export const SERVICE_PROTOCOL_VERSION = 199 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -7169,7 +7169,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 交付 · 生产文档 of that Book (Issue #415): one card per house type and the materials a document can start from. */
   inspectProductionDocuments(): Promise<ProductionDocumentsProjection>;
   /** 图书交付包 of that Book (Issue #416): its conditions, what a package would hold, and its versions. */
-  inspectBookDeliveryPackage(): Promise<BookDeliveryPackageProjection>;
+  inspectBookDeliveryPackage(input?: Omit<InspectBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageProjection>;
   /** `准备图书交付包`: freeze exactly the content read, with its purpose; it creates no file and sends nothing. */
   prepareBookDeliveryPackage(input: Omit<PrepareBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageResultProjection>;
   /** `导出…` of one version of that Book's package (Issue #416, S67b): the files it would write. */

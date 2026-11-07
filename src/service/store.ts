@@ -134,6 +134,7 @@ import {
   type RecordProductionDocumentDeliveryInput,
   type TransitionProductionDocumentPhaseInput,
   type BookDeliveryPackageProjection,
+  type BookDeliveryPackageDocumentChoice,
   type BookDeliveryPackageResultProjection,
   type PrepareBookDeliveryPackageInput,
   type ApproveBookDeliveryPackageExportInput,
@@ -1114,7 +1115,7 @@ import { graphemesOf } from '../shared/mark-anchor.js';
 import { SeriesKnowledgeError, SeriesKnowledgeLedger, initializeSeriesKnowledgeSchema } from './series-knowledge.js';
 import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
-import { readExemplarBook, type ExemplarSources } from './exemplars.js';
+import { readExemplarBook, withPackagedVersions, type ExemplarSources } from './exemplars.js';
 import * as capturedProcedureOperations from './captured-procedures.js';
 import { CapturedProcedures, initializeCapturedProcedureSchema } from './captured-procedures.js';
 import {
@@ -6964,7 +6965,11 @@ export class EditorialStore {
     return {
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
       archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
-      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
+      // Delivered versions, and since Issue #1405 the saved versions ticked into a frozen 图书交付包.
+      documents: (bookId) => {
+        const packaged = this.#packageCall(() => this.#bookDeliveryPackages.packagedDocumentVersions(bookId));
+        return this.#productionDocuments.deliveryReadings(bookId).map((document) => withPackagedVersions(document, packaged.get(document.documentId) ?? []));
+      },
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
       readersReports: (bookId, designation) => this.#readersReportExemplarsOf(bookId, designation),
     };
@@ -14663,8 +14668,8 @@ export class EditorialStore {
   }
 
   /** 图书交付包 of one Book (Issue #416, S67a): the condition table, the Manifest Preview and the frozen versions. */
-  inspectBookDeliveryPackage(bookId: string): BookDeliveryPackageProjection {
-    return this.#packageCall(() => this.#bookDeliveryPackages.inspect(bookId));
+  inspectBookDeliveryPackage(bookId: string, documents?: ReadonlyArray<BookDeliveryPackageDocumentChoice>): BookDeliveryPackageProjection {
+    return this.#packageCall(() => this.#bookDeliveryPackages.inspect(bookId, documents));
   }
 
   /**
@@ -14674,7 +14679,7 @@ export class EditorialStore {
    */
   prepareBookDeliveryPackage(input: PrepareBookDeliveryPackageInput): BookDeliveryPackageResultProjection {
     const outcome = this.#packageCall(() => this.#transaction(this.#authority, () => this.#bookDeliveryPackages.prepare(input)));
-    return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId) };
+    return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId, input.documents) };
   }
 
   /** `导出…` of one package version (Issue #416, S67b): the files it writes, each reviewed as S64 reviews a file. */

@@ -56,6 +56,7 @@ describe('the words of 图书交付包', () => {
       notForThisBook: '本书不做',
       documentMissing: '尚未创建',
       documentUndelivered: '尚未交付',
+      documentUnchosen: '未选入本包',
       documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
       documentCreateRoute: '前往生产文档',
       documentDeliverRoute: '交付…',
@@ -80,6 +81,7 @@ describe('the words of 图书交付包', () => {
     expect(evaluationUnreadableDetail('评估记录已损坏。')).toBe('评估记录无法读取：评估记录已损坏。');
     expect(BOOK_DELIVERY_PACKAGE_REFUSALS).toEqual({
       changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
+      selection: '所选稿件或版本已不在本书中，请重新勾选。',
       purpose: '请写明交付包用途（1–80 个字）。',
     });
     expect(bookDeliveryPackageNotReady(['营销要点'])).toBe('还不能准备图书交付包：营销要点未满足。');

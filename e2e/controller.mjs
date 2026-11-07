@@ -1278,6 +1278,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'multi-documents-ordinary-rename',
     'multi-documents-ordinary-import',
     'multi-documents-ordinary-identities',
+    'multi-documents-ordinary-package',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
