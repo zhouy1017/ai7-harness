@@ -365,15 +365,15 @@ describe('the market section and 按我的评分重写评语 over the real store
     });
   }, 300_000);
 
-  it('requires a saved departure from AI7’s initial scores before preparing a rewrite', async () => {
+  it('requires a saved change to AI7’s report before preparing a rewrite', async () => {
     await withBook(async (book) => {
       await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
       finalizeAsJ11(book.store, book.bookId);
       const draft = book.store.startEvaluation(book.bookId, true).record!;
       expect(book.store.inspectEvaluation(book.bookId, draft.recordId).rewrite.prepare)
-        .toEqual({ allowed: false, reason: '先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。' });
+        .toEqual({ allowed: false, reason: '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' });
       expect(await refusal(() => book.store.createEvaluationRewritePreparationWork(book.bookId, draft.recordId, launchPolicy)))
-        .toBe('EVALUATION_REWRITE_UNAVAILABLE:先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。');
+        .toBe('EVALUATION_REWRITE_UNAVAILABLE:先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。');
       const adjusted = book.store.saveEvaluation({
         bookId: book.bookId, recordId: draft.recordId, expectedEntries: 1, finalize: false,
         content: { ...draft.content, items: draft.content.items.map((item) => {

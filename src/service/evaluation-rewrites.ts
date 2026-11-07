@@ -4,6 +4,7 @@ import { clarificationPromptContractDigest } from './provider/clarification-cont
 import {
   EVALUATION_REWRITE_KIND,
   MAX_EVALUATION_EVIDENCE_NOTES,
+  MAX_EVALUATION_LINES,
   type EvaluationContent,
   type EvaluationProfileProjection,
   type EvaluationRewriteWorkspaceProjection,
@@ -127,6 +128,8 @@ type SqlRow = Record<string, SQLOutputValue>;
 const TASK_SCHEMA = 'ai7.evaluation-rewrite-task/1';
 const DECISION_SCHEMA = 'ai7.evaluation-rewrite-decision/1';
 const CORRUPT = '评语重写记录已损坏。';
+/** Why a regeneration waits on the report as AI7 wrote it (Issue #1407): it follows the editor's saved changes. */
+export const EVALUATION_REWRITE_NEEDS_EDIT = '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。';
 const corrupt = (): EvaluationRewriteError => new EvaluationRewriteError('EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_rewrite_tasks'";
 
@@ -166,9 +169,14 @@ export function evaluationRewriteRefusal(version: Pick<RewritableEvaluation, 'st
   if (version.state === 'finalized') return `第 ${version.ordinal} 版已经定稿：评语不再重写；要改就重新评估。`;
   if (version.initial === null) return '这一版不是从 AI7 初评开始的：没有 AI7 的评语可以按你的评分重写。';
   const initial = version.initial;
-  const adjusted = version.content.items.some((item) =>
-    evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, initial.items.find((entry) => entry.itemId === item.itemId)?.score ?? null));
-  if (!adjusted) return '先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。';
+  // Any saved change to AI7's report is what a regeneration follows (Issue #1407): a score, a 评语, a line or the 总评.
+  const sameLines = (own: ReadonlyArray<string>, ai7: ReadonlyArray<string>): boolean =>
+    own.length === Math.min(ai7.length, MAX_EVALUATION_LINES) && own.every((line, index) => line === ai7[index]);
+  const edited = version.content.items.some((item) => {
+    const ai7 = initial.items.find((entry) => entry.itemId === item.itemId);
+    return evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, ai7?.score ?? null) || item.comment !== (ai7?.comment ?? null);
+  }) || !sameLines(version.content.strengths, initial.strengths) || !sameLines(version.content.weaknesses, initial.weaknesses) || version.content.verdict !== null;
+  if (!edited) return EVALUATION_REWRITE_NEEDS_EDIT;
   if (version.content.items.every((item) => item.score === null)) return '至少要给一项打分并保存，才有评语可以重写。';
   return null;
 }

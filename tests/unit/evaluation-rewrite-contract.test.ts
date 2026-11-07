@@ -241,8 +241,14 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
     expect(evaluationRewriteRefusal(version)).toBeNull();
     expect(evaluationRewriteRefusal({ ...version, state: 'finalized' })).toBe('第 3 版已经定稿：评语不再重写；要改就重新评估。');
     expect(evaluationRewriteRefusal({ ...version, initial: null })).toBe('这一版不是从 AI7 初评开始的：没有 AI7 的评语可以按你的评分重写。');
-    const agreeing = { ...content, items: content.items.map((item, index) => ({ ...item, score: initial.items[index]!.score, notRated: null })) };
-    expect(evaluationRewriteRefusal({ ...version, content: agreeing })).toBe('先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。');
+    // The report exactly as AI7 wrote it: nothing for a regeneration to follow (Issue #1407).
+    const agreeing = { ...content, strengths: [], weaknesses: [], verdict: null,
+      items: content.items.map((item, index) => ({ ...item, score: initial.items[index]!.score, notRated: null, comment: initial.items[index]!.comment })) };
+    expect(evaluationRewriteRefusal({ ...version, content: agreeing })).toBe('先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。');
+    // A changed 评语, line or 总评 is a saved change even where every score agrees with AI7's.
+    expect(evaluationRewriteRefusal({ ...version, content: { ...agreeing, items: agreeing.items.map((item, index) => (index === 0 ? { ...item, comment: '编辑改写的评语。' } : item)) } })).toBeNull();
+    expect(evaluationRewriteRefusal({ ...version, content: { ...agreeing, weaknesses: ['节奏偏慢'] } })).toBeNull();
+    expect(evaluationRewriteRefusal({ ...version, content: { ...agreeing, verdict: '编辑的总评。' } })).toBeNull();
     // 不评 departs from AI7's score too; but with nothing scored there is no 评语 to rewrite.
     const allNotRated = { ...content, items: content.items.map((item) => ({ ...item, score: null, notRated: '不评。' })) };
     expect(evaluationRewriteRefusal({ ...version, content: allNotRated })).toBe('至少要给一项打分并保存，才有评语可以重写。');
