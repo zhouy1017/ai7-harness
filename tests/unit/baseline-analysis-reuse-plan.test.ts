@@ -162,6 +162,19 @@ describe('deriveReusePlan', () => {
 });
 
 describe('deriveScopePlan', () => {
+  it('limits new factual ranges to own blocks while retaining historical overlap closure', () => {
+    const whole = manifestOf(baseBlocks);
+    const selectedRange = { startPosition: 1, endPosition: 2 };
+    const exact = deriveCoverageManifest({ ...whole.manuscript, blocks: baseBlocks, exactRange: selectedRange });
+    const prior: ScopePlanPredecessor = { ...predecessorOf(whole), contractVersion: 'ai7.factual-review/1',
+      schemaDigest: 'd'.repeat(64), unreviewedUnitOrdinals: [] };
+    const counts = (manifest: CoverageManifestProjection) => deriveScopePlan({ kind: 'factual-review',
+      contractVersion: prior.contractVersion, schemaDigest: prior.schemaDigest, mode: 'review-range', recompute: 'selected-range',
+      selectedRange, manifest, predecessor: prior }).counts;
+    expect(counts(whole)).toMatchObject({ recomputed: 2, reused: 1 });
+    expect(counts(exact)).toMatchObject({ recomputed: 1, reused: 2, unreviewed: 0 });
+  });
+
   const scopePredecessor = (manifest: CoverageManifestProjection, unreviewed: number[], changedUnread?: number[]): ScopePlanPredecessor => ({
     ...predecessorOf(manifest, unreviewed),
     contractVersion: 'ai7.editorial-review/1',

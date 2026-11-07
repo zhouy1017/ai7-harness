@@ -43,6 +43,9 @@ describe('deriveCoverageManifest', () => {
     const blocks = [block(1, 'heading', 0, 1), block(2, 'paragraph', 700), block(3, 'paragraph', 600), block(4, 'paragraph', 500)];
     const input = { ...identity(), blocks };
     const whole = deriveCoverageManifest(input);
+    const firstUnit = deriveCoverageManifest({ ...input, exactRange: { startPosition: 1, endPosition: 2 } });
+    // An untouched later unit keeps its existing context and content identity for reuse; it is never sent.
+    expect(firstUnit.units[1]!.digest).toBe(whole.units[1]!.digest);
     const manifest = deriveCoverageManifest({ ...input, exactRange: { startPosition: 2, endPosition: 3 } });
     const selected = manifest.units.filter(unit => unit.startPosition >= 2 && unit.endPosition <= 3);
     expect(selected.flatMap(unit => unit.blockIds)).toEqual([blocks[1]!.blockId, blocks[2]!.blockId]);

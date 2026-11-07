@@ -2043,6 +2043,10 @@ describe('a Review Run over the real store on exact sample1', () => {
       const after = workspace(session, book);
       expect(after.categories.find((category) => category.categoryId === FACTUAL)).toMatchObject({ available: true, scopes: { chapters: { available: true }, selection: { available: true } } });
       expect(after.coverage.find((row) => row.categoryId === FACTUAL)!.state).toBe('current');
+        const chapter = after.scopeOptions.chapters.chapters[0]!;
+        const ranged = prepare(session, book, [FACTUAL], { kind: 'chapters', fromChapterBlockId: chapter.blockId, toChapterBlockId: chapter.blockId });
+        expect(ranged.categories[0]!.plan).toMatchObject({ recomputed: 1, reused: 7, unreviewed: 0 });
+        expect((await authorizeAndDrive(session, book, ranged)).state).toBe('settled');
       expect(prepare(session, book, [FACTUAL], selectionAt(session, book, 29)).state).toBe('prepared');
     });
   }, 300_000);
