@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { captureJournalEdit, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -680,7 +680,7 @@ async function waitFor(renderer, expression, location) {
   let latestEvaluationError;
   while (Date.now() < deadline) {
     try {
-      const matched = await renderer.evaluate(`Boolean(${expression})`);
+      const matched = await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`);
       latestEvaluationError = undefined;
       if (matched) return;
     } catch (error) {
@@ -1252,6 +1252,8 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
 async function createDurableJournalEdit(renderer) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'reimport-dirty-open-editor');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'reimport-dirty-editor');
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, 'reimport-dirty-scope');
   await assertRenderer(
     renderer,
     `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.querySelector('[data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, '，重新导入前本地编辑'); return block.textContent?.endsWith('，重新导入前本地编辑'); })()`,
@@ -1259,7 +1261,7 @@ async function createDurableJournalEdit(renderer) {
   );
   await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'reimport-dirty-save-ready');
   await clickExactButton(renderer, '保存', 'reimport-dirty-save');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('已写入修订日志')`, 'reimport-dirty-durable');
+  await waitFor(renderer, journalEditPersisted(before, '，重新导入前本地编辑'), 'reimport-dirty-durable');
   await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === 1`, 'reimport-dirty-sequence');
 }
 
@@ -1782,6 +1784,8 @@ async function runJourney(
     `(() => { const forward = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && ${MANUSCRIPT_RAIL_POSITION} === 0 && !document.querySelector('.editor-meta')?.textContent.includes('%') && forward && !forward.disabled; })()`,
     'bounded-window',
   );
+  const beforeShortcutEdit = await renderer.evaluate(captureJournalEdit(3));
+  requireJourney(beforeShortcutEdit !== null, 'shortcut-edit-scope');
   const editAndShortcut = await renderer.evaluate(
     `(async () => {
       const status = document.querySelector('#persistence-status');
@@ -1850,6 +1854,7 @@ async function runJourney(
   requireJourney(editAndShortcut === true, 'bounded-edit-and-save-shortcut');
   const persisted = await renderer.evaluate('globalThis.__ai7JournalProbe');
   requireJourney(persisted?.busy === true && persisted?.durable === true, 'durable-journal-ack');
+  await waitFor(renderer, journalEditPersisted(beforeShortcutEdit, '，新增编辑'), 'shortcut-edit-durable');
   await assertRenderer(
     renderer,
     `document.querySelector('.editor-meta')?.textContent.includes('修订版 1') && ${MANUSCRIPT_JOURNAL_SEQUENCE} === 1 && !document.querySelector('.editor-meta')?.textContent.includes('稿件修订版 r1')`,
