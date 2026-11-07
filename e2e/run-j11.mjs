@@ -3136,7 +3136,7 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-ordinary-settings');
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-ordinary-settings-ready');
       await click(renderer, '帮助', 'poll-evaluation-ordinary-help');
-      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input?.checked)return false; input.click();return true;})()`, 'poll-evaluation-ordinary-mode');
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input?.checked||input.disabled)return false; input.click();return true;})()`, 'poll-evaluation-ordinary-mode');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-return');
       await waitFor(renderer, `document.querySelector('.evaluation-more') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'poll-evaluation-empty-ready');
       await writeFile(unitHoldPath, '0', 'utf8');
@@ -3163,7 +3163,7 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-developer-settings');
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-developer-settings-ready');
       await click(renderer,'帮助','poll-evaluation-developer-help');
-      await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`, 'poll-evaluation-developer-mode');
+      await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`, 'poll-evaluation-developer-mode');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-developer-return');
       await waitFor(renderer, `document.querySelector('.evaluation-initial')?.dataset.initialState==='settled' && document.documentElement.dataset.technicalLayerVisible==='true'`, 'poll-evaluation-developer-return-ready');
     };
@@ -3368,8 +3368,8 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
       await click(renderer, '帮助', `${name}-help`);
-      await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `${name}-switch-ready`);
-      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `${name}-switch`);
       await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `${name}-applied`);
     };
     const createCandidate = async (title, name) => {

@@ -227,7 +227,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
 async function clickSelector(renderer, selector, name) {
@@ -946,8 +946,8 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
-      await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `quality-mode-${developer}-switch-ready`);
-      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
       await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
       if (developer === 'true') continue;
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
@@ -1060,7 +1060,7 @@ async function main() {
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
     await click(renderer,'帮助','poll-attention-ordinary-help');
-    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
     const pollAttentionId=await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis'&&item.target.taskIntentId===${JSON.stringify(pollTaskId)}).itemId)`);
     const pollAttentionSelector=`[data-attention-item="${pollAttentionId}"]`;
@@ -1076,7 +1076,7 @@ async function main() {
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
     await click(renderer,'帮助','poll-attention-developer-help');
-    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`,'poll-attention-developer-mode');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'poll-attention-developer-mode');
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
     await openPanel(renderer,'poll-attention-return-pane');
     await writeHold(SAMPLE1_UNITS);

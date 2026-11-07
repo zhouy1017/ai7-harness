@@ -1,5 +1,6 @@
 import { importSteps } from './components/import-steps.js';
 import { icon } from './components/icon-sprite.js';
+import { mountMenuControls, mountSelectControls } from './components/controls.js';
 import { createStatusSurface } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
@@ -199,8 +200,8 @@ import {
 } from './plan-preview-labels.js';
 import { MAX_PINNED_BOOKS, showOnboardingCard, readSampleGuidance, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
-import { mountHelp } from './help.js';
-import { HELP_ENTRY, HELP_OPENED } from './help-labels.js';
+import { developerModeRow, mountHelp } from './help.js';
+import { HELP_OPENED } from './help-labels.js';
 import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
 import { SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
@@ -216,6 +217,10 @@ function requiredElement(selector: string): HTMLElement {
 }
 
 const screen = requiredElement('#screen');
+const unmountSelectControls = mountSelectControls(document.body);
+window.addEventListener('pagehide', unmountSelectControls, { once: true });
+const unmountMenuControls = mountMenuControls(document.body);
+window.addEventListener('pagehide', unmountMenuControls, { once: true });
 const persistenceStatus = requiredElement('#persistence-status');
 const updateStatusSurface = createStatusSurface(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
@@ -738,6 +743,7 @@ const commandPalette = createCommandPalette({
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void openOverviewResult(item),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
+  openHelp: () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   beforeStart: settleScreen,
   status: setStatus,
 });
@@ -905,25 +911,6 @@ if (taskNavigationLink !== null) {
   globalAttentionReader.subscribe((reading) => { if (reading.kind === 'projection') refreshTaskBadge(); });
 }
 
-/**
- * 帮助's sidebar entry (Issue #939, wave 11 slice 11f; Owner decision 27): slice 11a left the bottom slot beside 设置, and
- * the screen it opens is the last of the wave's shell surfaces. It is an ordinary sidebar row, so it keeps the shell's
- * icon, hover name and interrupted behavior without the shell needing to know about it.
- */
-(() => {
-  const link = element('a', 'sidebar-link');
-  link.href = '#';
-  link.dataset['navIcon'] = HELP_ENTRY.icon;
-  link.dataset['navHelp'] = 'hub';
-  link.title = HELP_ENTRY.label;
-  link.append(icon('i-kb'), element('span', 'nav-label', HELP_ENTRY.label));
-  link.addEventListener('click', (event) => {
-    event.preventDefault();
-    if (authorityInterrupted || link.getAttribute('aria-disabled') === 'true') return;
-    void leaveThen(async () => renderHelp());
-  });
-  requiredElement('[data-shell-slot="help"]').replaceChildren(link);
-})();
 // Another window may have pinned or opened a Book: the list is read again whenever this one gains focus.
 window.addEventListener('focus', () => void shellPreferences.load().catch(() => undefined));
 void shellPreferences.load().then(
@@ -1062,6 +1049,7 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   if (restore !== undefined) return restore;
   const state = screen.dataset['screen'];
   if (state === 'settings') return renderSettingsHub;
+  if (state === 'help') return renderHelp;
   if (state === 'data-storage') return renderDataAndStorage;
   if (state === 'quality-learning') return () => renderQualityLearning();
   if (state === 'knowledge-base') return () => renderKnowledgeBase();
@@ -1107,7 +1095,11 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
-  screen.replaceChildren(content);
+  if (state === 'settings' || SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) {
+    const layout = element('div', 'settings-layout');
+    layout.append(settingsNavigation(state), content);
+    screen.replaceChildren(layout);
+  } else screen.replaceChildren(content);
   if (authorityInterrupted) {
     for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
       control.disabled = true;
@@ -3968,15 +3960,8 @@ function renderKeyboardSettings(): void {
  * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
  */
 
-function renderSettingsHub(): void {
-  const content = panel();
-  content.classList.add('settings-hub');
-  content.append(
-    element('p', 'section-label', SETTINGS_HUB_WORDS.section),
-    element('h2', undefined, SETTINGS_HUB_WORDS.title),
-    element('p', 'lede', SETTINGS_HUB_WORDS.lede),
-  );
-  const pages: Partial<Record<SettingsRoute, () => void>> = {
+function settingsPages(): Partial<Record<SettingsRoute, () => void>> {
+  return {
     'model-service': () => void renderModelServiceSettings(),
     'evaluation-calibration': () => void renderEvaluationCalibration(null),
     'data-storage': () => void renderDataAndStorage(),
@@ -3987,6 +3972,45 @@ function renderSettingsHub(): void {
     keyboard: renderKeyboardSettings,
     notifications: () => void renderNotificationSettings(),
   };
+}
+
+function settingsNavigation(state: string): HTMLElement {
+  const nav = element('nav', 'settings-navigation');
+  nav.setAttribute('aria-label', '设置分类');
+  const hub = button('全部设置', 'quiet', renderSettingsHub);
+  if (state === 'settings') hub.setAttribute('aria-current', 'page');
+  nav.append(hub);
+  const pages = settingsPages();
+  for (const group of SETTINGS_HUB_GROUPS) {
+    const section = element('section');
+    section.append(element('h3', undefined, group.label));
+    for (const row of group.rows.filter((row) => technicalLayerVisible || !row.developerOnly)) {
+      const entry = button(row.label, 'quiet', () => pages[row.route]?.());
+      entry.dataset['settingsNav'] = row.route;
+      if (state === row.route) entry.setAttribute('aria-current', 'page');
+      section.append(entry);
+    }
+    if (group.key === 'local') {
+      const developer = button('开发者模式', 'quiet', () => {
+        renderSettingsHub();
+        screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
+      });
+      section.append(developer);
+    }
+    nav.append(section);
+  }
+  return nav;
+}
+
+function renderSettingsHub(): void {
+  const content = panel();
+  content.classList.add('settings-hub');
+  content.append(
+    element('p', 'section-label', SETTINGS_HUB_WORDS.section),
+    element('h2', undefined, SETTINGS_HUB_WORDS.title),
+    element('p', 'lede', SETTINGS_HUB_WORDS.lede),
+  );
+  const pages = settingsPages();
   for (const group of SETTINGS_HUB_GROUPS) {
     const rows = group.rows.filter((row) => technicalLayerVisible || row.developerOnly !== true);
     if (rows.length === 0) continue;
@@ -4000,21 +4024,33 @@ function renderSettingsHub(): void {
       const item = element('li', 'settings-row');
       item.dataset['settingsEntry'] = row.route;
       const open = pages[row.route];
-      const entry = button(row.label, 'secondary', () => open?.());
+      const entry = button('打开', 'secondary', () => open?.());
+      entry.classList.add('settings-hub-row');
+      entry.setAttribute('aria-label', row.label);
       entry.dataset['settingsRoute'] = row.route;
       if (technicalLayerVisible && row.developerOnly === true) entry.dataset['developerOnly'] = 'true';
       const note = element('p', 'field-note', row.note);
       note.id = `settings-note-${row.route}`;
       entry.setAttribute('aria-describedby', note.id);
-      item.append(entry, note);
+      const copy = element('div', 'settings-row-copy');
+      copy.append(element('strong', undefined, row.label), note);
+      item.append(copy, entry);
       if (open === undefined) {
         entry.disabled = true;
         item.dataset['settingsAvailability'] = 'coming-soon';
         const soon = element('span', 'settings-coming-soon', SETTINGS_HUB_WORDS.comingSoon);
         soon.id = `settings-soon-${row.route}`;
         entry.setAttribute('aria-describedby', `${soon.id} ${note.id}`);
-        item.insertBefore(soon, note);
+        copy.append(soon);
       }
+      list.append(item);
+    }
+    if (group.key === 'local') {
+      const item = element('li');
+      item.append(developerModeRow(() => {
+        renderSettingsHub();
+        screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
+      }));
       list.append(item);
     }
     section.append(heading, list);
@@ -4026,7 +4062,7 @@ function renderSettingsHub(): void {
 }
 
 /**
- * 帮助 (Issue #939, wave 11 slice 11f; Owner decision 27): the sidebar entry's screen, beside 设置 in the bottom area — a
+ * Settings › Help (#1376 / #1382): a
  * 使用帮助 · 隐私说明 · 第三方许可 tab set and the 关于 line. Its versions come from the same service read 设置 › 数据与存储
  * uses, so the two screens cannot disagree.
  */
@@ -4036,7 +4072,11 @@ function renderHelp(): void {
   mountHelp({
     root: content,
     loadVersions: () => window.ai7.inspectDataVersion(),
-    back: () => void initializeStartup(),
+    back: renderSettingsHub,
+    modeChanged: () => {
+      renderHelp();
+      screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
+    },
   });
   replaceScreen('help', content);
   content.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
@@ -4407,7 +4447,9 @@ function renderLanding(
           setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');
         }
       });
-      onboarding.append(steps, skip);
+      const help = button('帮助', 'quiet', () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); });
+      help.dataset['onboardingHelp'] = 'true';
+      onboarding.append(steps, help, skip);
     }, () => undefined);
   }
   if (books.items.length > 0 || filter !== null) {

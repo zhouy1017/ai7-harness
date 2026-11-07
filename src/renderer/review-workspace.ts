@@ -2,7 +2,7 @@ import { technicalWords, identityWords, technicalLayerVisible } from './technica
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { showToast } from './components/toast.js';
-import { filterChoices } from './components/controls.js';
+import { filterChoices, menuPanel } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
@@ -977,7 +977,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     repeat.disabled = !next.newReview.available || working;
     repeat.addEventListener('click', () => void openSheet(null, repeat, null, true));
     const more = el('details', 'review-more');
-    more.append(el('summary', undefined, '更多 ▾'), repeat, local);
+    more.append(el('summary', undefined, '更多 ▾'), menuPanel(repeat, local));
     row.append(start, more);
     if (!next.newReview.available) {
       start.disabled = true;

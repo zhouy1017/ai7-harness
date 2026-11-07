@@ -2933,7 +2933,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-ordinary-mode-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-ordinary-mode-settings-ready');
     await click(renderer, '帮助', 'review-memory-ordinary-mode-help');
-    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true`, 'review-memory-ordinary-mode-toggle-ready');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-ordinary-mode-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-ordinary-mode-toggle');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'review-memory-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-memory-ordinary-mode-library');
@@ -2974,7 +2974,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-development-restored-settings-ready');
     await click(renderer, '帮助', 'review-memory-development-restored-help');
-    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false`, 'review-memory-development-restored-toggle-ready');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && document.querySelector('.help-developer-mode input')?.disabled===false`, 'review-memory-development-restored-toggle-ready');
     await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-development-restored-toggle');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'review-memory-development-restored');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-memory-development-restored-library');
@@ -3170,7 +3170,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-ordinary-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-ordinary-settings-ready');
     await click(renderer, '帮助', 'findings-poll-ordinary-help');
-    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`, 'findings-poll-ordinary-mode');
+    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`, 'findings-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'book-findings-reread');
     await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
@@ -3186,7 +3186,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-developer-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-developer-settings-ready');
     await click(renderer,'帮助','findings-poll-developer-help');
-    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`, 'findings-poll-developer-mode');
+    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`, 'findings-poll-developer-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
     await waitFor(renderer, `document.querySelector('section.review-run')`, 'book-findings-review-ready');
 
@@ -3466,7 +3466,7 @@ async function main() {
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
     await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'factual-correction-choose');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'factual-correction-choose');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="save-correction"]')?.disabled===false`, 'factual-correction-ready');
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="save-correction"]`, 'factual-correction-save');
     await waitFor(renderer, `(document.querySelector('${workspaceSelector} .correction-saved')?.dataset.markIds ?? '').length===36`, 'factual-correction-saved');

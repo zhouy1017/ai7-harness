@@ -844,8 +844,8 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
-      await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `quality-mode-${developer}-switch-ready`);
-      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
+      await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
       await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `quality-mode-${developer}-applied`);
       if (developer === 'true') continue;
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-default');

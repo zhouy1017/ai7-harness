@@ -13,7 +13,7 @@ import { HELP_PRIVACY_SECTIONS, helpUsageSections, type HelpSection } from './he
 import { dataVersionStateLine } from './data-version-labels.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 
-// 帮助 (Issue #939, wave 11 slice 11f; Owner decision 27; editor-surfaces §0.3): the screen the sidebar's 帮助 entry opens —
+// Settings › Help (Issues #1376 / #1382; editor-surfaces §0.3, §8.6) —
 // three tabs (使用帮助 · 隐私说明 · 第三方许可) with keyboard-complete tab switching and a filter on the generated license
 // list, plus the 关于 line stating the software version, the Data Version and the service protocol. It reads nothing but the
 // committed license list and the versions main already serves; nothing here changes a record.
@@ -41,6 +41,7 @@ export interface HelpSurfaceOptions {
   /** Reads the software version and the Data Version exactly as 设置 › 数据与存储 does. */
   readonly loadVersions: () => Promise<Pick<DataVersionProjection, 'softwareVersion' | 'dataVersion' | 'frozen'>>;
   readonly back: () => void;
+  readonly modeChanged?: () => void;
   readonly licenses?: ReadonlyArray<ThirdPartyLicense>;
   readonly protocolVersion?: number;
 }
@@ -58,6 +59,27 @@ function helpSection(section: HelpSection): HTMLElement {
   block.append(el('h4', undefined, section.heading));
   for (const paragraph of section.paragraphs) block.append(el('p', 'help-paragraph', paragraph));
   return block;
+}
+
+/** Shared one-step presentation preference in Settings Local and at the top of Help. */
+export function developerModeRow(refresh: () => void): HTMLElement {
+  const row = el('div', 'settings-row help-developer-mode');
+  const copy = el('div', 'settings-row-copy');
+  copy.append(el('strong', undefined, '开发者模式'), el('p', 'field-note', '显示诊断信息与高级设置。'));
+  const label = el('label', 'settings-switch');
+  const toggle = el('input');
+  toggle.type = 'checkbox';
+  toggle.checked = technicalLayerVisible;
+  toggle.disabled = !technicalLayerReady;
+  toggle.setAttribute('aria-label', '开发者模式');
+  toggle.addEventListener('change', () => {
+    if (toggle.disabled) return;
+    saveTechnicalLayerVisible(toggle.checked, window.localStorage);
+    refresh();
+  });
+  label.append(toggle);
+  row.append(copy, label);
+  return row;
 }
 
 export function mountHelp(options: HelpSurfaceOptions): void {
@@ -83,21 +105,13 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const aboutDetails = el('p');
   aboutDetails.append(aboutLine, buildContext);
   about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutDetails);
-  if (technicalLayerVisible) root.append(about);
-  const developer = el('label', 'help-developer-mode');
-  const toggle = el('input');
-  toggle.type = 'checkbox';
-  toggle.checked = technicalLayerVisible;
-  toggle.disabled = !technicalLayerReady;
-  toggle.setAttribute('aria-label', '开发者模式');
-  toggle.addEventListener('change', () => {
-    saveTechnicalLayerVisible(toggle.checked, window.localStorage);
+  root.append(developerModeRow(() => {
+    if (options.modeChanged) { options.modeChanged(); return; }
     root.replaceChildren();
     mountHelp(options);
     root.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
-  });
-  developer.append(toggle, el('span', undefined, '开发者模式'));
-  root.append(developer);
+  }));
+  if (technicalLayerVisible) root.append(about);
   void options.loadVersions().then(
     (versions) => {
       const identity = currentBuildIdentity();
