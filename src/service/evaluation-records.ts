@@ -550,6 +550,8 @@ export const evaluationAdoptionsNotice = (named: string): string =>
  * editor may go on by skipping it (`从第 M 版重新评估`); a start that does not say so is still refused with this.
  */
 export const evaluationDamagedLatestReason = (ordinal: number): string => `第 ${ordinal} 版评估记录已损坏，不能重新评估。`;
+/** Why AI7's latest report begins no second version while the unfinished one already holds it (Issue #1406). */
+export const evaluationReportOpenReason = (ordinal: number): string => `第 ${ordinal} 版已经是这份 AI7 评估报告，直接在报告上修改即可。`;
 /** Why a start that would skip the latest version is refused when that version reads after all (Issue #726). */
 export const evaluationLatestReadsReason = (ordinal: number | null): string =>
   ordinal === null ? '这本书的评估版本刚有变化；请看过现在的页面再重新评估。' : `第 ${ordinal} 版评估记录现在可以读取，没有要跳过的版本；请看过现在的页面再重新评估。`;
@@ -1421,8 +1423,9 @@ export class EvaluationRecords {
     } else {
       requireEvaluation(!skipDamaged, 'EVALUATION_MOVED', evaluationLatestReadsReason(null));
     }
-    requireEvaluation(last === undefined || lastEntry!.kind === 'finalized', 'EVALUATION_OPEN',
-      `第 ${last?.ordinal ?? 0} 版还没有定稿；定稿后才能重新评估。`);
+    // An unfinished version never locks AI7's newer report away (Issue #1406): a start from it leaves that version as it stands.
+    const open = last !== undefined && lastEntry!.kind !== 'finalized';
+    requireEvaluation(!open || fromInitial, 'EVALUATION_OPEN', `第 ${last?.ordinal ?? 0} 版还没有定稿；定稿后才能重新评估。`);
     const profile = this.profile();
     const { sha256: profileSha256, ...snapshot } = profile;
     const carried = last === undefined
@@ -1433,6 +1436,10 @@ export class EvaluationRecords {
     if (fromInitial) {
       const startable = this.#startableInitial(bookId, profileSha256, manuscript.revisionId);
       requireEvaluation('facts' in startable, 'EVALUATION_INITIAL_UNAVAILABLE', 'reason' in startable ? startable.reason : '');
+      if (open) {
+        requireEvaluation(this.#initialDraft(last!)?.draft.revisionId !== startable.facts.draft.revisionId, 'EVALUATION_OPEN',
+          evaluationReportOpenReason(last!.ordinal));
+      }
       initial = startable.facts;
       // The house offset applied to AI7's starting scores (EVAL-011a): as the house's 定稿 evaluations give it now, past the
       // gate and while the switch is on; an item AI7 did not score, or whose offset is 0, is left as it is.
@@ -1941,7 +1948,10 @@ export class EvaluationRecords {
     const start: EvaluationWorkspaceProjection['start'] = manuscript === null
       ? { allowed: false, reason: '这本书还没有稿件，没有可以评估的内容。' }
       : newest !== undefined && newest.latest.kind !== 'finalized'
-        ? { allowed: false, reason: `第 ${newest.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
+        // AI7's newer report may still begin a version; only a start of the editor's own waits on the unfinished one.
+        ? fromInitial !== null && this.#initialDraft(newest.record)?.draft.revisionId !== fromInitial.revisionId
+          ? { allowed: true, kind: 'again', fromInitial, skipDamaged: null, blankReason: `第 ${newest.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
+          : { allowed: false, reason: `第 ${newest.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
       : lastDamage !== null
         // The latest cannot be read: the next version may skip it and every version after the latest 定稿 that reads.
         ? { allowed: true, kind: 'again', fromInitial, skipDamaged: { skipped: unreadableRecords.filter((ordinal) => newest === undefined || ordinal > newest.record.ordinal), seedOrdinal: newest?.record.ordinal ?? null } }

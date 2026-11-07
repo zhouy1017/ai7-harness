@@ -701,6 +701,11 @@ export interface EvaluationWorkspaceProjection {
         readonly kind: 'first' | 'again';
         readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number };
         readonly skipDamaged: null | { readonly skipped: ReadonlyArray<number>; readonly seedOrdinal: number | null };
+        /**
+         * Set while the latest version is unfinished and only AI7's newer report may begin the next (Issue #1406): why a start of
+         * the editor's own still waits. The unfinished version stays as it is.
+         */
+        readonly blankReason?: string;
       }
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
