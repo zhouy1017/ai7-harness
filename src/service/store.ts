@@ -1115,7 +1115,7 @@ import { graphemesOf } from '../shared/mark-anchor.js';
 import { SeriesKnowledgeError, SeriesKnowledgeLedger, initializeSeriesKnowledgeSchema } from './series-knowledge.js';
 import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
-import { readExemplarBook, type ExemplarSources } from './exemplars.js';
+import { readExemplarBook, withPackagedVersions, type ExemplarSources } from './exemplars.js';
 import * as capturedProcedureOperations from './captured-procedures.js';
 import { CapturedProcedures, initializeCapturedProcedureSchema } from './captured-procedures.js';
 import {
@@ -6965,7 +6965,11 @@ export class EditorialStore {
     return {
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
       archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
-      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
+      // Delivered versions, and since Issue #1405 the saved versions ticked into a frozen 图书交付包.
+      documents: (bookId) => {
+        const packaged = this.#packageCall(() => this.#bookDeliveryPackages.packagedDocumentVersions(bookId));
+        return this.#productionDocuments.deliveryReadings(bookId).map((document) => withPackagedVersions(document, packaged.get(document.documentId) ?? []));
+      },
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
       readersReports: (bookId, designation) => this.#readersReportExemplarsOf(bookId, designation),
     };

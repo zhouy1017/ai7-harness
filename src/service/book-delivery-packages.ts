@@ -736,6 +736,27 @@ export class BookDeliveryPackages {
     return { packages: held, total: integer(total) };
   }
 
+  /**
+   * The saved document versions the editor ticked into this Book's frozen package versions (Issue #1405), by document, each with
+   * the package version and when it was prepared; a version that held the earlier delivered reading names its Delivery Record
+   * instead and is read through it. Every record is verified against its digest.
+   */
+  packagedDocumentVersions(bookId: string): Map<string, Array<{ version: number; versionLabel: string; revisionId: string; revisionDigest: string; recipientLabel: string; recordedAt: string }>> {
+    const byDocument = new Map<string, Array<{ version: number; versionLabel: string; revisionId: string; revisionDigest: string; recipientLabel: string; recordedAt: string }>>();
+    const rows = this.#db.prepare('SELECT * FROM book_delivery_package_versions WHERE book_id = ? ORDER BY version').all(bookId) as SqlRow[];
+    for (const row of rows) {
+      const { record } = verifiedVersion(row);
+      for (const entry of record.content.documents) {
+        if (entry.disposition !== 'included' || entry.deliveryId !== undefined) continue;
+        const list = byDocument.get(entry.documentId) ?? [];
+        list.push({ version: entry.version, versionLabel: `版本 ${entry.version}`, revisionId: entry.revisionId, revisionDigest: entry.revisionDigest,
+          recipientLabel: `图书交付包 v${record.version}`, recordedAt: record.preparedAt });
+        byDocument.set(entry.documentId, list);
+      }
+    }
+    return byDocument;
+  }
+
   /** One frozen version of this Book's package, its record verified against its digest, or `null` when it is none of it. */
   record(bookId: string, packageVersionId: string): { record: PackageVersionRecord; digest: string } | null {
     if (!UUID_PATTERN.test(bookId) || !UUID_PATTERN.test(packageVersionId)) return null;
