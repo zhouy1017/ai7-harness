@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -42,6 +42,31 @@ function requireJourney(condition, name, detail) {
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
+}
+
+/** Seed synthetic author metadata through the real mark owner while Electron is closed; never edit ledger rows. */
+async function seedModelAuthor(dataRoot, runRoot, book) {
+  const { build } = await import('esbuild');
+  const outfile = resolve(runRoot, 'model-author-store.mjs');
+  await build({ entryPoints: [resolve(ROOT, 'src/service/store.ts')], outfile, bundle: true, platform: 'node',
+    format: 'esm', target: 'node24', logLevel: 'silent', plugins: [{ name: 'runner-packages', setup(builder) {
+      builder.onResolve({ filter: /^[^./]/ }, ({ path }) => isAbsolute(path) ? undefined
+        : { path: import.meta.resolve(path), external: true });
+    } }] });
+  const { EditorialStore } = await import(pathToFileURL(outfile).href);
+  const store = await EditorialStore.open(dataRoot, await realpath(ROOT));
+  try {
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const block = window.blocks.find((entry) => entry.kind === 'paragraph' && Array.from(entry.text).length >= 4);
+    requireJourney(block !== undefined, 'model-author-seed-anchor');
+    const markId = store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 0, toGrapheme: 4,
+      pinnedText: Array.from(block.text).slice(0, 4).join(''), kind: 'annotation', body: '公开合成模型批注',
+      proposedText: null, rationale: null, atomicGroupId: null, basis: [],
+      source: { kind: 'ai7', origin: 'task', label: '公开合成任务', taskId: randomUUID() },
+      sourceModelBinding: { route: 'openai-platform', model: 'gpt-6-luna', reasoningEffort: 'high' } });
+    store.markCleanShutdown();
+    return markId;
+  } finally { store.close(); }
 }
 
 async function awaitCdpOperation(operation, deadline) {
@@ -1459,6 +1484,7 @@ async function main() {
 
     at('restart-and-data-location');
     await close();
+    const modelAuthorMark = await seedModelAuthor(dataRoot, runRoot, bookAWork);
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'restart-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-landing');
@@ -1473,6 +1499,30 @@ async function main() {
       const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
       return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
+    // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-author-settings-ready');
+    await click(primary, '帮助', 'model-author-help');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle)return false; if(toggle.checked)toggle.click(); return true; })()`, 'model-author-ordinary-toggle');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-ordinary-mode');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'model-author-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-author-library-ready');
+    await clickBook(primary, bookA, 'model-author-book');
+    await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]')`, 'model-author-anchor');
+    await assertRenderer(primary, `(() => { document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]').scrollIntoView({block:'center'}); const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`, 'model-author-comments');
+    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ')`, 'model-author-comments-label');
+    await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
+    await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
+    await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-restore-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-author-restore-settings-ready');
+    await click(primary, '帮助', 'model-author-restore-help');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle.checked)toggle.click(); return true; })()`, 'model-author-restore-development');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'model-author-development-mode');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'model-author-return-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-author-return-library-ready');
+    await clickBook(primary, bookA, 'model-author-return-book');
+    await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'model-author-return-editor');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('overview')), 'restart-back-overview');
     await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'restart-overview');
     // V2-UX-BOOK-001: the overview leads with the manuscript anchor — 修订版 · 上次位置 · 保存状态 —
