@@ -930,7 +930,7 @@ async function main() {
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
     // #1371: ordinary mode keeps the native source explanation and unmeasured disclosure, with five manual cards.
     // Production admission/request construction is exercised by composed ordinary-production service tests; this Journey sends nothing.
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v25' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v26' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backend]').length===5 && ['openai-native-search-v1','anthropic-native-search-v1'].every(id => { const card=document.querySelector('[data-search-candidate="'+id+'"]'); return card?.textContent.includes('未实测') && card.textContent.includes('自动用于随渠道检索') && !card.textContent.includes('不能用于任务'); })`, 'ordinary-native-source-disclosure');
 
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
@@ -961,6 +961,82 @@ async function main() {
     await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
+    // #1408: an editor's own rule is an active rule the moment it is saved. Ordinary mode, public synthetic text; the rule is
+    // created, edited as the same rule, then stopped, so this stage leaves no active preference behind.
+    const preferenceText = 'J12 合成偏好：保留有意使用的短句。';
+    const editedPreferenceText = 'J12 合成偏好：短句保持原样，不机械合并。';
+    const memorySection = `document.querySelector('[data-screen="quality-learning"] [data-editorial-memory]')`;
+    const preferenceRow = (itemId) => `${memorySection}.querySelector('[data-review-preference="${itemId}"]')`;
+    const preferenceState = (text) => `window.ai7.inspectGlobalAgent().then(state=>({
+      directives: state.directives.length,
+      label: state.categories.find(category=>category.categoryId==='style-and-format')?.label ?? null,
+      items: state.items.filter(item=>item.text===${JSON.stringify(text)}).map(item=>({itemId:item.itemId,kind:item.kind,state:item.state,bookId:item.bookId,categoryId:item.categoryId})),
+    }))`;
+    const directivesBeforePreference = await primary.evaluate(`window.ai7.inspectGlobalAgent().then(state=>state.directives.length)`);
+    await assertRenderer(primary, `(() => {
+      const section=${memorySection}; const form=section?.querySelector('[data-preference-editor="new"]');
+      if(!form||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+      const category=form.querySelector('select[aria-label="适用维度"]'), scope=form.querySelector('select[aria-label="适用范围"]');
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      const save=Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='新增并启用偏好');
+      return Boolean(category&&scope&&text&&save)&&save.type==='submit'&&!save.disabled&&text.required&&text.value===''&&
+        Array.from(category.options).some(option=>option.value==='style-and-format')&&
+        scope.options[0].value===''&&scope.options[0].textContent==='全社'&&
+        Array.from(scope.options).slice(1).every(option=>option.textContent.startsWith('本书：《'));
+    })()`, 'ordinary-preference-editor-shape');
+    await assertRenderer(primary, `(() => {
+      const form=${memorySection}.querySelector('[data-preference-editor="new"]');
+      form.querySelector('select[aria-label="适用维度"]').value='style-and-format';
+      form.querySelector('select[aria-label="适用范围"]').value='';
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      text.value=${JSON.stringify(preferenceText)}; text.dispatchEvent(new Event('input',{bubbles:true}));
+      Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='新增并启用偏好').click();
+      return true;
+    })()`, 'ordinary-preference-create');
+    await waitFor(primary, `Array.from(${memorySection}.querySelectorAll('[data-review-preference]')).some(row=>row.querySelector('p')?.textContent===${JSON.stringify(preferenceText)})`, 'ordinary-preference-created-row');
+    const createdPreference = await primary.evaluate(preferenceState(preferenceText));
+    const createdRule = createdPreference.items[0];
+    requireJourney(createdPreference.items.length === 1 && createdRule.kind === 'preference' && createdRule.state === 'active' &&
+      createdRule.bookId === null && createdRule.categoryId === 'style-and-format' && typeof createdRule.itemId === 'string' &&
+      typeof createdPreference.label === 'string' && createdPreference.directives === directivesBeforePreference + 1, 'ordinary-preference-created-active');
+    // The saved rule reads as active and whole-house on the page, with its two controls, and the editor starts empty again.
+    await waitFor(primary, `(() => {
+      const row=${preferenceRow(createdRule.itemId)}; const section=${memorySection};
+      const names=Array.from(row?.querySelectorAll('.preference-actions > button')??[], node=>node.textContent+(node.disabled?':disabled':''));
+      const fresh=section?.querySelector('[data-preference-editor="new"] textarea');
+      return Boolean(row)&&row.querySelectorAll('p')[1]?.textContent===${JSON.stringify(`${createdPreference.label} · 本社 · 已启用`)}&&
+        names.join(',')==='停用,编辑偏好'&&fresh?.value===''&&section.querySelector('[role="status"]')?.textContent==='学习记录已更新。'&&
+        !/ordinary-production|developer-live|查看技术详情|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/u.test(section.textContent);
+    })()`, 'ordinary-preference-active-row');
+    await assertRenderer(primary, `(() => { const edit=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='编辑偏好'); if(!edit||edit.disabled)return false; edit.click(); return true; })()`, 'ordinary-preference-edit-open');
+    await waitFor(primary, `(() => {
+      const form=${preferenceRow(createdRule.itemId)}?.querySelector('[data-preference-editor="${createdRule.itemId}"]');
+      if(!form)return false;
+      const category=form.querySelector('select[aria-label="适用维度"]'), scope=form.querySelector('select[aria-label="适用范围"]');
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      const save=Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='保存偏好');
+      // An edit changes the sentence of the same rule; its dimension and scope are the rule's and stay fixed.
+      return Boolean(category&&scope&&text&&save)&&category.value==='style-and-format'&&category.disabled&&scope.value===''&&scope.disabled&&
+        text.value===${JSON.stringify(preferenceText)}&&!save.disabled&&form.parentElement.children.length===1;
+    })()`, 'ordinary-preference-edit-fields');
+    await assertRenderer(primary, `(() => {
+      const form=${preferenceRow(createdRule.itemId)}.querySelector('[data-preference-editor="${createdRule.itemId}"]');
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      text.value=${JSON.stringify(editedPreferenceText)}; text.dispatchEvent(new Event('input',{bubbles:true}));
+      Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='保存偏好').click();
+      return true;
+    })()`, 'ordinary-preference-edit-save');
+    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return Boolean(row)&&!row.querySelector('form')&&row.querySelector('p')?.textContent===${JSON.stringify(editedPreferenceText)}&&row.querySelectorAll('p')[1]?.textContent===${JSON.stringify(`${createdPreference.label} · 本社 · 已启用`)}; })()`, 'ordinary-preference-edited-row');
+    const editedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
+    const replacedPreference = await primary.evaluate(preferenceState(preferenceText));
+    requireJourney(editedPreference.items.length === 1 && editedPreference.items[0].itemId === createdRule.itemId && editedPreference.items[0].state === 'active' &&
+      editedPreference.items[0].bookId === null && editedPreference.items[0].categoryId === 'style-and-format' &&
+      replacedPreference.items.every((item) => item.state !== 'active') && editedPreference.directives === directivesBeforePreference + 2, 'ordinary-preference-edited-same-rule');
+    await assertRenderer(primary, `(() => { const stop=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='停用'); if(!stop||stop.disabled)return false; stop.click(); return true; })()`, 'ordinary-preference-stop');
+    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return !row||(row.querySelectorAll('p')[1]?.textContent.endsWith('已停用')&&!Array.from(row.querySelectorAll('.preference-actions > button')).some(node=>node.textContent==='停用'||node.textContent==='编辑偏好')); })()`, 'ordinary-preference-stopped-row');
+    const stoppedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
+    requireJourney(stoppedPreference.items.every((item) => item.state !== 'active') && stoppedPreference.directives === directivesBeforePreference + 3, 'ordinary-preference-stopped');
+    const directivesAfterPreference = stoppedPreference.directives;
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
@@ -976,7 +1052,7 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
-    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`), 'global-agent-entry-no-work');
+    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`), 'global-agent-entry-no-work');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
@@ -1682,7 +1758,7 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v25.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v26.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
     requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 198 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
@@ -2007,8 +2083,8 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-        firstConnection.policy?.activePolicySetVersion === 'v25' &&
+        // Synchronized delta with Issue #1408: selected active set v26; new local Plans use Provider Processing v1.
+        firstConnection.policy?.activePolicySetVersion === 'v26' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
