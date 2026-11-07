@@ -1624,7 +1624,7 @@ async function main() {
     requireJourney(typeof tasksBeforeFactualSheet === 'string', 'factual-first-scope-tasks-before');
     await assertRenderer(primary, `(() => { const open=document.querySelector('[data-review-action="new-review"]'); if(!open||open.disabled)return false; open.click(); return true; })()`, 'factual-first-scope-new');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-first-scope-sheet');
-    // The first unmet step is named in the failing check (step names only, no page content).
+    // The first unmet step is recorded as the failure detail (step names only, no page content).
     const factualRoundtrip = await primary.evaluate(`(() => {
       const sheet=document.querySelector('dialog.review-sheet');
       // A category toggle redraws the whole sheet, so every control is read fresh and none is held across a change.
@@ -1672,8 +1672,8 @@ async function main() {
       if(${JSON.stringify(!factualChoosable)})return factual().disabled&&!factual().checked&&notice.hidden ? 'ok' : 'refused-kept';
       return reason.hidden&&notice.hidden ? 'ok' : 'open-reason-or-notice';
     })()`);
-    requireJourney(factualRoundtrip === 'ok', factualRoundtrip === 'ok' ? 'factual-first-category-range-roundtrip'
-      : `factual-first-category-range-roundtrip-${factualNetworkUnavailable ? 'network-blocked' : factualChoosable ? 'open' : 'refused'}-${String(factualRoundtrip)}`);
+    requireJourney(factualRoundtrip === 'ok', 'factual-first-category-range-roundtrip',
+      { step: factualRoundtrip, verdict: factualNetworkUnavailable ? 'network-blocked' : factualChoosable ? 'open' : 'refused' });
     await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
     await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
     requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
