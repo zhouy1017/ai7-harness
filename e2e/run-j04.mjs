@@ -3353,8 +3353,7 @@ async function main() {
     // which answers contract /2 at 标准核查 and layers v1's own answers beneath it. The deterministic route fetches nothing, so
     // every relation the fixture states stays 候选来源 · 尚未核对 and no result can be 证据支持 or 疑似错误 here; checked
     // evidence, 严格核查's independence gate, the offline downgrade and Apply/reversal of a Correction Proposal are proven over
-    // the real store on a socket-free transport by tests/service/factual-verification.test.ts. A Book holds one 事实核查 Run until
-    // the factual update modes land (#905).
+    // the real store on a socket-free transport by tests/service/factual-verification.test.ts.
     at('factual-level-plan');
     await closeOwnedBrowser();
     cancellation.throwIfRequested();
@@ -3481,6 +3480,53 @@ async function main() {
     await waitFor(renderer, `document.querySelector('${correctionCardSelector} .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('${correctionCardSelector}'); const lineage=card?.querySelector('.editorial-mark-factual'); return card?.dataset.markKind==='change-suggestion' && lineage?.dataset.markFactualResult===${JSON.stringify(sourced.resultId)} && lineage.dataset.markFactualVersion==='1' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('事实核查 · 更正提案'); })()`, 'factual-correction-mark');
     cancellation.throwIfRequested();
+
+    // #1401: first factual chapter review in ordinary mode, with no preceding whole-book result.
+    at('factual-evidence-workspace');
+    const rangeBook = await importSample1(renderer, cancellation, true);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-settings-ready');
+    await click(renderer, '帮助', 'factual-range-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-toggle-ready');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(toggle.checked)toggle.click(); return true; })()`, 'factual-range-ordinary');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'factual-range-ordinary-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'factual-range-library');
+    await waitFor(renderer, `document.querySelector('button[data-book-id=${JSON.stringify(rangeBook.bookId)}]')`, 'factual-range-library-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('button[data-book-id=${JSON.stringify(rangeBook.bookId)}]').click(); return true; })()`, 'factual-range-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(rangeBook.bookId)}]')`, 'factual-range-book-ready');
+    await openReviewDestination(renderer, 'factual-range-review');
+    for (let pass = 0; pass < 2; pass += 1) {
+      await reviewAction(renderer, '[data-review-action="new-review"]', `factual-range-new-${pass}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `factual-range-sheet-${pass}`);
+      await assertRenderer(renderer, `(() => {
+        const sheet=document.querySelector('dialog.review-sheet');
+        for(const box of sheet.querySelectorAll('input[name="review-category"]:checked'))box.click();
+        const factual=sheet.querySelector('input[name="review-category"][value="factual-review"]');
+        if(!factual||factual.disabled)return false; factual.click();
+        const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
+        scope('chapters').click();
+        const from=sheet.querySelector('[data-review-chapter="from"]'), to=sheet.querySelector('[data-review-chapter="to"]');
+        if(!from||!to||from.options.length<2)return false;
+        from.value=from.options[1].value; from.dispatchEvent(new Event('change',{bubbles:true}));
+        to.value=from.value; to.dispatchEvent(new Event('change',{bubbles:true}));
+        const chosen=from.value; scope('whole').click(); scope('chapters').click();
+        if(!factual.checked||factual.disabled||from.value!==chosen||to.value!==chosen||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+        const start=sheet.querySelector('[data-review-action="start"]'); if(!start||start.disabled)return false; start.click(); return true;
+      })()`, `factual-range-memory-start-${pass}`);
+      await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, `factual-range-settled-${pass}`, 180_000);
+      const ranged = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+      requireJourney(ranged?.ordinal===pass+1 && ranged.scope.selectedRange.startPosition===1 && ranged.scope.selectedRange.endPosition===15 &&
+        ranged.categories.length===1 && ranged.categories[0].state==='settled' && ranged.categories[0].plan.recomputed===1 &&
+        ranged.categories[0].plan.unreviewed===7, `factual-range-exact-${pass}`);
+    }
+    cancellation.throwIfRequested();
+
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'factual-range-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'factual-range-restore-ready');
+    await click(renderer, '帮助', 'factual-range-restore-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'factual-range-restore-toggle');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement))return false; if(!toggle.checked)toggle.click(); return true; })()`, 'factual-range-restore-development');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'factual-range-restored');
 
     // ---- 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4) ----
     // Synchronized delta with Issue #922: a fresh, unedited sample1 Book on the provider-free `sample1-custom-analysis-authored`

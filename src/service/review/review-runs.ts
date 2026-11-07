@@ -1442,8 +1442,7 @@ export class ReviewRunStore {
         if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
           requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry, input.launchPolicy)}`);
         }
-        const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope,
-          { ...reading.facts, factualSupplement: input.factualDecision !== undefined });
+        const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts);
         requireReview(plan.kind !== 'refused', 'REVIEW_SCOPE_UNAVAILABLE', `「${entry.label}」：${plan.kind === 'refused' ? plan.reason : ''}`);
         return { position: position + (local === null ? 1 : 2), entry, plan };
       });

@@ -1,4 +1,5 @@
 import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
+import { effectiveModelReasoningEffort, modelProfileFor } from '../provider/model-profile.js';
 import * as requestAdmissionOperations from './request-admission-operations.js';
 import * as clarificationOperations from './clarification-operations.js';
 import * as runCheckpointOperations from './run-checkpoint-operations.js';
@@ -566,14 +567,9 @@ export class BaselineAnalysisStore {
   }
 
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
-  #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
+  #planDefinition(edits: PlanEdits, _mode?: string): AnalysisKindDefinition {
     if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
-    // A whole-book repeat keeps the admitted claim pipeline; historical range updates retain their frozen contract.
-    if (mode !== undefined && mode !== 'whole-manuscript' && mode !== 'review-again' && this.#definition.factualClaims !== undefined) {
-      const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
-      return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
-        modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };
-    }
+    // New range tasks use the same admitted claim pipeline as whole-book tasks. Frozen plans resolve by digest.
     return this.#factualDefinitionFor(planEditAssuranceLevel(edits));
   }
 
@@ -1994,7 +1990,8 @@ export class BaselineAnalysisStore {
   /** History keeps its intent vocabulary when today's model/policy is unconfigured.
    * Preparation still uses the current definition's admitted modes and update controls. */
   #recordedMode(mode: AnalysisTaskMode) {
-    return (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
+    return this.#definition.modes.find(entry => entry.mode === mode)
+      ?? (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
       ?? this.#definition.mode(mode);
   }
 
@@ -2023,7 +2020,7 @@ export class BaselineAnalysisStore {
     selectedRange: BaselineAnalysisSelectedRange | null,
     manifest: CoverageManifestProjection,
     predecessor: ReusePlanPredecessor | ScopePlanPredecessor | null,
-    definition = this.#selectedDefinition(this.#definition, manifest.manuscript.bookId),
+    definition = this.#selectedDefinition(this.#planDefinition(NO_PLAN_EDITS, mode), manifest.manuscript.bookId),
   ): AnalysisPlanRecord {
     const prior = predecessor === null ? null : this.#revisionBody(this.#revisionRowById(predecessor.revisionId));
     const priorDefinition = prior === null ? null : this.definitionForDigest(String((prior.bindingPin as Record<string, unknown>).promptContractDigest));
@@ -2035,7 +2032,7 @@ export class BaselineAnalysisStore {
         procedureCompatible,
         kind: this.#definition.kind,
         contractVersion: this.#definition.contractVersion,
-        schemaDigest: this.#definition.schemaDigest,
+        schemaDigest: this.#definition.kind === FACTUAL_REVIEW_KIND ? definition.schemaDigest : this.#definition.schemaDigest,
         ...(this.#definition.contractIdentity?.categoryConfiguration === undefined ? {} : { categoryConfigurationIdentity: canonicalJson(this.#definition.contractIdentity.categoryConfiguration) }),
         mode,
         recompute: this.#definition.mode(mode).recompute,
@@ -2062,7 +2059,9 @@ export class BaselineAnalysisStore {
     const intentDraftVersionId = isRecord(record) && typeof record.intentDraftVersionId === 'string' && UUID_PATTERN.test(record.intentDraftVersionId)
       ? record.intentDraftVersionId : null;
     requireAnalysis(isRecord(record) && (record.intentDraftVersionId === undefined || intentDraftVersionId !== null) &&
-      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal : isDraftGoal(goal) && record.goal === goal),
+      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal ||
+        this.#definition.kind === FACTUAL_REVIEW_KIND && goal === FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode)?.goal
+        : isDraftGoal(goal) && record.goal === goal),
     'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
@@ -3448,6 +3447,10 @@ export class BaselineAnalysisStore {
     // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
     const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
     const blocks = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
+    const factualRange = this.#definition.kind === FACTUAL_REVIEW_KIND && input.selectedRange !== null;
+    const priorManifest = !factualRange || intent.predecessorRevisionId === null ? null
+      : this.#planPredecessor(this.#revisionRowById(intent.predecessorRevisionId)).manifest;
+    const positions = new Map(blocks.map(block => [block.blockId, block.position]));
     const manifest = deriveCoverageManifest({
       bookId: checkpoint.bookId,
       manuscriptId: checkpoint.manuscriptId,
@@ -3456,6 +3459,9 @@ export class BaselineAnalysisStore {
       revisionLabel: checkpoint.revisionLabel,
       revisionDigest: checkpoint.revisionDigest,
       blocks,
+      ...(factualRange ? { exactRange: input.selectedRange!, priorRangeBoundaries: priorManifest?.units
+        .filter(unit => unit.overlapBlockIds.length === 0)
+        .flatMap(unit => { const position = positions.get(unit.blockIds[0]!); return position === undefined ? [] : [position]; }) ?? [] } : {}),
     });
     const live = this.#launch.live;
     const production = live !== null && live.scope === 'ordinary-production' ? live : null;
@@ -3599,7 +3605,9 @@ export class BaselineAnalysisStore {
               : { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
-        ? { kind: live.route, model: live.model, endpoint: live.endpoint }
+        ? { kind: live.route, model: live.model, endpoint: live.endpoint,
+            ...(effectiveModelReasoningEffort(modelProfileFor(live.route, live.model)) === null ? {} :
+              { reasoningEffort: effectiveModelReasoningEffort(modelProfileFor(live.route, live.model)) }) }
         : this.#route === null
           ? { kind: 'none', reason: 'j04-model-adapter-control-absent' }
           : {

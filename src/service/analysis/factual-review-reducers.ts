@@ -278,8 +278,11 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
   };
 
   const unitsReused = closed.filter((outcome) => (input.reusedUnitOrdinals ?? new Set<number>()).has(outcome.unitOrdinal)).length;
+  const unitsOutOfScope = gaps.filter(gap => gap.code === 'out-of-scope').length;
+  const coverage = coverageAxis({ unitsTotal: manifest.units.length, unitsClosed: closed.length, unitsReused, gapCount: gaps.length });
   return {
-    coverage: coverageAxis({ unitsTotal: manifest.units.length, unitsClosed: closed.length, unitsReused, gapCount: gaps.length }),
+    coverage: unitsOutOfScope === 0 ? coverage : { ...coverage, unitsOutOfScope,
+      label: `覆盖：部分 · ${closed.length}/${manifest.units.length} 单元 · ${unitsOutOfScope} 个范围外未核查 · ${gaps.length - unitsOutOfScope} 处缺口` },
     reducerClosure,
     assurance,
     gaps,

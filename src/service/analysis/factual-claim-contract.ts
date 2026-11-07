@@ -75,15 +75,13 @@ export const FACTUAL_CLAIM_UPDATE_MODES: AnalysisKindDefinition['modes'] = [
     { mode: 'review-range', goal: '按编辑最新要求补充证据的决定，对所选原文补充核查。', label: '补充核查', meaning: '对决定所绑定的原文与核查级别补充证据，保留原结果。', initial: false, rangeBound: true, recompute: 'selected-range' },
 ];
 
-/** The whole-manuscript successor. Separate policy admission selects it; legacy and range prompts stay pinned. */
+/** The claim successor for whole and range tasks; frozen legacy plans keep their prompt pins. */
 export function factualClaimKindDefinition(level: 'standard' | 'strict'): AnalysisKindDefinition {
   const base = factualReviewLevelDefinition(level);
   const verification = factualClaimVerificationPrompt(level);
   const verificationPromptDigest = sha256Hex(canonicalJson(verification));
   const promptContractDigest = sha256Hex(canonicalJson({ extraction: FACTUAL_CLAIM_EXTRACTION_PROMPT, verification }));
-  const updates = FACTUAL_CLAIM_UPDATE_MODES;
-  return { ...base, outOfScope: 'leave-unreviewed', modes: [...base.modes, ...updates], updateModes: ['review-again', 'review-range'],
-    mode: (mode) => updates.find((entry) => entry.mode === mode) ?? base.mode(mode),
+  return { ...base,
     factualClaims: { level, verificationPrompt: verification.systemPrompt, verificationPromptDigest },
     systemPrompt: FACTUAL_CLAIM_EXTRACTION_PROMPT.systemPrompt, promptContractDigest,
     unitResultSchema: FACTUAL_CLAIM_EXTRACTION_CONTRACT,
