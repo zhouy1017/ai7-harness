@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialCardCache, mountEditorialMarks, stackEditorialComments } from '../../src/renderer/editorial-marks.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkCardProjection, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
+import { collectTechnicalDisclosures, setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
 const card: EditorialMarkCardProjection = {
@@ -80,9 +81,10 @@ it('coalesces explicit retries and fences a stale retry failure after a returned
 
 // The real pane owner with measured boundary doubles: no Electron or manuscript persistence.
 describe('comments command parity and refresh continuity', () => {
+  let technicalBefore: boolean;
   let restore: () => void; let frames: Array<() => void>; let mounted: ReturnType<typeof mountEditorialMarks> | undefined;
   beforeEach(() => {
-    restore = installMiniDom(); frames = [];
+    restore = installMiniDom(); frames = []; technicalBefore = technicalLayerVisible; setTechnicalLayerVisible(false);
     const create = miniDocument.createElement;
     vi.spyOn(miniDocument, 'createElement').mockImplementation((tag) => {
       const node = create(tag);
@@ -100,7 +102,7 @@ describe('comments command parity and refresh continuity', () => {
     vi.stubGlobal('HTMLDetailsElement', MiniElement);
     vi.stubGlobal('HTMLFormElement', MiniElement);
   });
-  afterEach(() => { mounted?.destroy(); mounted = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
+  afterEach(() => { mounted?.destroy(); mounted = undefined; setTechnicalLayerVisible(technicalBefore); vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
   async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
   function mount(value = card) {
     let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value)] }; let latest = value; let enabled = true;
@@ -245,6 +247,22 @@ describe('comments command parity and refresh continuity', () => {
     expect(ui.receipt).toHaveBeenLastCalledWith(expect.objectContaining({ clientEffectId: effect, recovery: 'recheck' }));
     expect(ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="accept-and-apply"]')?.disabled).toBe(false);
     expect(ui.scroll.querySelector('[data-apply-receipt-state="unresolved"]')).toBeNull(); expect(ui.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps applied proof readable while the real ordinary-mode collector removes credential identities', async () => {
+    const application = { effectId: 'effect-private-id', kind: 'apply' as const, interaction: 'accept-and-apply' as const,
+      approvalId: 'approval', dispatchId: 'dispatch', receiptId: 'receipt-private-id', changeCount: 1, payloadDigest: 'a'.repeat(64), receiptDigest: 'b'.repeat(64),
+      before: { revisionId: 'revision', journalSequence: 0, workingDigest: 'c'.repeat(64) }, after: { revisionId: 'revision', journalSequence: 1, workingDigest: 'd'.repeat(64) },
+      committedAt: card.createdAt, reversesEffectId: null, reversedByEffectId: null };
+    const value: EditorialMarkCardProjection = { ...suggestion, status: 'applied', suggestion: { ...suggestion.suggestion!, application } };
+    const ui = mount(value); await paint(); await ui.open(); await paint();
+    collectTechnicalDisclosures(document.body);
+    const full = ui.scroll.querySelector('[data-mark-card]')!;
+    expect(full.querySelector('[data-mark-receipt]')).toBeNull();
+    expect(full.querySelector('[data-mark-application]')?.textContent).toContain('已应用 · 已写入稿件');
+    expect(full.querySelector('[data-mark-state]')?.textContent).toBe('已应用');
+    expect(full.textContent).not.toContain('effect-private-id'); expect(full.textContent).not.toContain('receipt-private-id');
+    expect(full.textContent).not.toContain(application.receiptDigest);
   });
 
 });
