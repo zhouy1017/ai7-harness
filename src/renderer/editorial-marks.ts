@@ -507,23 +507,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let commentCardReads = 0;
   let commentsIdentity = '';
   const commentAnchor = (mark: EditorialMarkAnchorProjection): HTMLElement | null =>
-    options.host.querySelector<HTMLElement>(`.editorial-mark[data-mark-id="${CSS.escape(mark.markId)}"]`) ?? blockElement(mark.blockId);
+    options.host.querySelector<HTMLElement>(`[data-mark-id="${CSS.escape(mark.markId)}"]`) ?? blockElement(mark.blockId);
   const clearInlinePreview = (): void => {
     if (inlinePreviewId === undefined) return;
     inlinePreviewId = undefined;
     if (openCardId === undefined) editor.setActiveMark(null);
   };
-  const paintCommentAnchors = (): void => {
-    for (const node of options.host.querySelectorAll('.manuscript-comments-anchor')) node.classList.remove('manuscript-comments-anchor');
-    if (activeComment) {
-      for (const node of options.host.querySelectorAll(`[data-mark-id="${CSS.escape(activeComment)}"]`)) node.classList.add('manuscript-comments-anchor');
-    }
-  };
   const activateComment = (markId: string | undefined): void => {
     if (inlinePreviewId !== undefined && inlinePreviewId !== markId) clearInlinePreview();
     activeComment = markId;
     for (const [id, entry] of commentNodes) entry.node.dataset['active'] = String(id === markId);
-    paintCommentAnchors();
+    editor.setLinkedMark(activeComment ?? null);
     scheduleCommentsLayout();
   };
   const returnToCommentAnchor = (card: Pick<EditorialMarkCardProjection, 'blockId' | 'fromGrapheme'>): void => {
@@ -697,8 +691,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (commentsCanvas.children[index] !== item.node) commentsCanvas.insertBefore(item.node, commentsCanvas.children[index] ?? null);
     }
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
-    // Focus/selection transactions can replace the editor's decoration nodes between activation and this frame.
-    paintCommentAnchors();
     const active = placed.find((item) => item.mark.markId === activeComment);
     if (active) {
       const origin = options.comments!.host.parentElement!.getBoundingClientRect();
@@ -2600,7 +2592,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
       leaders.remove();
-      for (const node of options.host.querySelectorAll('.manuscript-comments-anchor')) node.classList.remove('manuscript-comments-anchor');
+      editor.setLinkedMark(null);
       reflow.disconnect();
       options.scroll.removeEventListener('wheel', onReaderScroll);
       options.scroll.removeEventListener('touchmove', onReaderScroll);
