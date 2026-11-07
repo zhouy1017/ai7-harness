@@ -3220,13 +3220,20 @@ async function main() {
       await clickSelector(renderer,'#task-drawer [data-task-drawer-control="resume"]','poll-evaluation-resume');
       await rm(unitHoldPath,{force:true});
       const settled = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.initial?.state), `${name}-ended`);
-      // One click generated it in ordinary mode, and the full report leads the page at once (Issue #1406, #1407).
-      const reportRead = await readEvaluation(renderer, (page) => page.view === 'report', `${name}-report`);
-      requireJourney(settled.initial.state === 'settled' && reportRead.editReport === '修改报告' && reportRead.report.technical === 0 &&
-        JSON.stringify(reportRead.report.comments) === JSON.stringify(AI7_COMMENTS) && JSON.stringify(reportRead.market.lists) === JSON.stringify(MARKET_LISTS),
-      `${name}-settled`, reportRead);
+      requireJourney(settled.initial.state === 'settled', `${name}-settled-state`, settled.initial);
       await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`,'poll-evaluation-resume-settled');
-      await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-evaluation-resume-close');
+      // The task return in ordinary mode (Issue #1406): the settled Task's 查看评估 in the drawer opens 评估 anew, and the full report
+      // leads it — every item's 评语 and evidence, the market section and 修改报告 — with no form to fill in first.
+      await assertRenderer(renderer, `(() => { globalThis.__j11EvaluationBeforeReturn=document.querySelector('[data-screen="book-evaluation"] .evaluation'); const link=document.querySelector('#task-drawer [data-task-drawer-control="run-link"]'); return link instanceof HTMLButtonElement && !link.disabled && link.textContent==='查看评估'; })()`, `${name}-return-offered`);
+      await clickSelector(renderer, '#task-drawer [data-task-drawer-control="run-link"]', `${name}-return`);
+      await waitFor(renderer, `(() => { const host=document.querySelector('[data-screen="book-evaluation"] .evaluation'); return host instanceof HTMLElement && host!==globalThis.__j11EvaluationBeforeReturn && host.dataset.evaluation==='ready'; })()`, `${name}-returned`, 60_000);
+      const reportRead = await readEvaluation(renderer, (page) => page.view === 'report', `${name}-report`);
+      requireJourney(reportRead.editReport === '修改报告' && reportRead.record === null && reportRead.report.technical === 0 &&
+        JSON.stringify(reportRead.report.comments) === JSON.stringify(AI7_COMMENTS) &&
+        JSON.stringify(reportRead.report.evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
+        reportRead.market.ai7 === 'true' && JSON.stringify(reportRead.market.lists) === JSON.stringify(MARKET_LISTS),
+      `${name}-settled`, reportRead);
+      await assertRenderer(renderer, `(() => { const close=document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (close instanceof HTMLButtonElement && !close.disabled) close.click(); return true; })()`, 'poll-evaluation-resume-close');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-developer-settings');
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-developer-settings-ready');
       await click(renderer,'帮助','poll-evaluation-developer-help');
