@@ -47,6 +47,17 @@ export function journalEditPersisted(before, suffix) {
       page.blocks.find(block => block.blockId === before.blockId)?.text === expectedText;
   })().catch(() => false)`;
 }
+
+/** A fixture must not release its in-flight unit merely because the renderer dispatched a pause click. */
+export async function releaseHeldBaselineAfterPause(renderer, scope, waitFor, release) {
+  await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then(analysis => {
+    const expected = ${JSON.stringify(scope)};
+    return analysis?.bookId === expected.bookId && analysis.taskIntent?.taskIntentId === expected.taskIntentId &&
+      analysis.run?.runRecordId === expected.runRecordId && analysis.run.state === 'pausing' &&
+      analysis.run.progress?.unitsSettled === expected.unitsSettled && analysis.run.progress.currentUnitOrdinal === expected.currentUnitOrdinal;
+  })`, 'unknown-pause-recorded', 30_000);
+  await release();
+}
 // The loaded window's position, rather than a pointer's preview while its jump is still in flight.
 export const MANUSCRIPT_RAIL_POSITION = `Number(document.querySelector('#manuscript-position')?.dataset.windowPosition)`;
 export function manuscriptRailJump(proportionExpression) {

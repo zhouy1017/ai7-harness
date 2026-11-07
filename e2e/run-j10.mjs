@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { releaseHeldBaselineAfterPause, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a and S16b): the operations on a Run under way, told apart by
@@ -1701,11 +1701,14 @@ async function main() {
     await startFirstBaseline(renderer, 'ready', 'seventh-baseline');
     const seventhIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
     requireJourney(UUID_PATTERN.test(seventhIntentId), 'seventh-task');
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.bookId===${JSON.stringify(seventhBookId)} && analysis.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run?.state==='executing' && analysis.run.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    const unknownPauseTarget = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis)=>({bookId:analysis?.bookId,taskIntentId:analysis?.taskIntent?.taskIntentId,runRecordId:analysis?.run?.runRecordId,unitsSettled:analysis?.run?.progress?.unitsSettled,currentUnitOrdinal:analysis?.run?.progress?.currentUnitOrdinal}))`);
+    requireJourney(unknownPauseTarget.bookId === seventhBookId && unknownPauseTarget.taskIntentId === seventhIntentId && UUID_PATTERN.test(unknownPauseTarget.runRecordId ?? '') &&
+      unknownPauseTarget.unitsSettled === 4 && unknownPauseTarget.currentUnitOrdinal === 5, 'unknown-pause-scope');
     // The service observation can precede the drawer's own refresh; press pause only once this Task's control is enabled.
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='baseline-analysis'||drawer.dataset.taskPlanRef!==${JSON.stringify(seventhIntentId)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'unknown-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'unknown-pause');
-    await writeFile(holdPath, 'release', 'utf8');
+    await releaseHeldBaselineAfterPause(renderer, unknownPauseTarget, waitFor, () => writeFile(holdPath, 'release', 'utf8'));
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, 'unknown-explicitly-paused', 30_000);
     const unconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(unconfirmed?.run?.state === 'paused' && unconfirmed.run.progress === null &&
