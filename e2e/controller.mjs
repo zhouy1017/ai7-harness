@@ -8,23 +8,33 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 // Manuscript control projections shared by the synchronized #1322 Journey delta.
 export const MANUSCRIPT_JOURNAL_SEQUENCE = `Number(document.querySelector('[data-editor-persistence]')?.dataset.journalSequence)`;
-/** Capture the open primary manuscript and exact block before a Journey edits it; never log the returned content. */
-export const CAPTURE_JOURNAL_EDIT = `(async () => {
+/** Capture the open manuscript/document and exact block before a Journey edits it; never log the returned content. */
+export function captureJournalEdit(blockIndex = 0) { return `(async () => {
   const shell = document.querySelector('[data-screen="editor"] .editor-shell');
   const editor = shell?.querySelector('[data-editor-persistence]');
-  const block = editor?.querySelector('[data-block-id]');
+  const block = editor?.querySelectorAll('[data-block-id]')[${blockIndex}];
   const bookId = shell?.dataset.bookId;
+  const documentId = shell?.dataset.documentId ?? null;
   const journalSequence = Number(editor?.dataset.journalSequence);
   if (!bookId || !block?.dataset.blockId || editor.dataset.editorPersistence !== 'confirmed' || !Number.isSafeInteger(journalSequence)) return null;
   const overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
-  const scope = overview.primaryAction;
+  let scope = overview.primaryAction;
+  if (documentId !== null) {
+    const documents = await window.ai7.inspectProductionDocuments();
+    const document = documents.types.flatMap(type => type.documents).find(item => item.documentId === documentId);
+    if (documents.bookId !== bookId || !document) return null;
+    scope = { kind: 'open-manuscript', manuscriptId: document.documentId, branchId: document.branchId };
+  }
   if (overview.book.bookId !== bookId || scope.kind !== 'open-manuscript') return null;
   const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: scope.manuscriptId, branchId: scope.branchId, target: { kind: 'block', blockId: block.dataset.blockId } });
   const saved = page.blocks.find(item => item.blockId === block.dataset.blockId);
   if (page.bookId !== bookId || page.manuscriptId !== scope.manuscriptId || page.branchId !== scope.branchId || page.journalSequence !== journalSequence ||
-      !saved || saved.text !== block.textContent || !shell.isConnected || editor.dataset.editorPersistence !== 'confirmed' || Number(editor.dataset.journalSequence) !== journalSequence) return null;
-  return { bookId, manuscriptId: scope.manuscriptId, branchId: scope.branchId, blockId: saved.blockId, journalSequence, text: saved.text };
-})()`;
+      !saved || saved.text !== block.textContent || !shell.isConnected || (shell.dataset.documentId ?? null) !== documentId ||
+      editor.dataset.editorPersistence !== 'confirmed' || Number(editor.dataset.journalSequence) !== journalSequence) return null;
+  return { bookId, manuscriptId: scope.manuscriptId, branchId: scope.branchId, blockId: saved.blockId, journalSequence, text: saved.text,
+    documentId, revisionId: page.revisionId, workingDigest: page.workingDigest };
+})()`; }
+export const CAPTURE_JOURNAL_EDIT = captureJournalEdit();
 
 /** Expression evaluated and awaited inside the renderer, not a truthy Promise in the controller. */
 export function journalEditPersisted(before, suffix) {
@@ -34,17 +44,50 @@ export function journalEditPersisted(before, suffix) {
     const shell = document.querySelector('[data-screen="editor"] .editor-shell');
     const editor = shell?.querySelector('[data-editor-persistence]');
     const confirmed = () => shell?.isConnected && shell.dataset.bookId === before.bookId &&
+      (shell.dataset.documentId ?? null) === before.documentId &&
       editor?.dataset.editorPersistence === 'confirmed' && Number.isSafeInteger(Number(editor.dataset.journalSequence)) &&
-      Number(editor.dataset.journalSequence) > before.journalSequence && editor.querySelector('[data-block-id]')?.dataset.blockId === before.blockId;
+      Number(editor.dataset.journalSequence) > before.journalSequence && Array.from(editor.querySelectorAll('[data-block-id]')).some(block =>
+        block.dataset.blockId === before.blockId && block.textContent === expectedText);
     if (!confirmed()) return false;
     const overview = await window.ai7.getBookOverview({ bookId: before.bookId, historyCursor: null });
-    const scope = overview.primaryAction;
+    let scope = overview.primaryAction;
+    if (before.documentId !== null) {
+      const documents = await window.ai7.inspectProductionDocuments();
+      const document = documents.types.flatMap(type => type.documents).find(item => item.documentId === before.documentId);
+      if (documents.bookId !== before.bookId || !document) return false;
+      scope = { kind: 'open-manuscript', manuscriptId: document.documentId, branchId: document.branchId };
+    }
     if (overview.book.bookId !== before.bookId || scope.kind !== 'open-manuscript' ||
         scope.manuscriptId !== before.manuscriptId || scope.branchId !== before.branchId) return false;
     const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: before.manuscriptId, branchId: before.branchId, target: { kind: 'block', blockId: before.blockId } });
     return confirmed() && page.bookId === before.bookId && page.manuscriptId === before.manuscriptId && page.branchId === before.branchId &&
       page.journalSequence === Number(editor.dataset.journalSequence) && page.journalSequence > before.journalSequence &&
       page.blocks.find(block => block.blockId === before.blockId)?.text === expectedText;
+  })().catch(() => false)`;
+}
+
+/** A milestone must be the requested immutable revision of this exact working state, not a journal acknowledgement. */
+export function milestonePersisted(before, revisionLabel) {
+  return `(async () => {
+    const before = ${JSON.stringify(before)};
+    const shell = document.querySelector('[data-screen="editor"] .editor-shell');
+    const editor = shell?.querySelector('[data-editor-persistence]');
+    const confirmed = () => shell?.isConnected && shell.dataset.bookId === before.bookId &&
+      !shell.dataset.documentId && editor?.dataset.editorPersistence === 'confirmed' &&
+      editor.querySelector('[data-block-id]')?.dataset.blockId === before.blockId && editor.querySelector('[data-block-id]')?.textContent === before.text;
+    if (!confirmed()) return false;
+    const overview = await window.ai7.getBookOverview({ bookId: before.bookId, historyCursor: null });
+    const anchor = overview.manuscriptAnchor;
+    if (overview.book.bookId !== before.bookId || anchor?.manuscriptId !== before.manuscriptId || anchor.branchId !== before.branchId ||
+        anchor.revisionId === before.revisionId || anchor.revisionLabel !== ${JSON.stringify(revisionLabel)}) return false;
+    const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: before.manuscriptId, branchId: before.branchId, target: { kind: 'block', blockId: before.blockId } });
+    if (!confirmed() || page.bookId !== before.bookId || page.manuscriptId !== before.manuscriptId || page.branchId !== before.branchId ||
+        page.revisionId !== anchor.revisionId || page.revisionLabel !== anchor.revisionLabel || page.workingDigest !== before.workingDigest ||
+        page.journalSequence !== before.journalSequence || page.journalSequence !== anchor.journalSequence || page.journalSequence !== Number(editor.dataset.journalSequence) ||
+        page.blocks.find(block => block.blockId === before.blockId)?.text !== before.text) return false;
+    const revision = overview.records.find(record => record.kind === 'revision' && record.revisionId === anchor.revisionId);
+    return confirmed() && revision?.manuscriptId === before.manuscriptId && revision.branchId === before.branchId &&
+      revision.revisionLabel === anchor.revisionLabel && revision.revisionDigest === before.workingDigest;
   })().catch(() => false)`;
 }
 

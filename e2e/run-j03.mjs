@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -558,12 +558,14 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'edit-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'edit-ready');
   cancellation.throwIfRequested();
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, 'edit-scope');
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
   await click(renderer, '保存', 'edit-save');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
+  await waitFor(renderer, journalEditPersisted(before, suffix), 'edit-durable', 120_000);
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === ${expectedSequence}`, 'edit-sequence');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'edit-return');
@@ -573,7 +575,7 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-03', name);

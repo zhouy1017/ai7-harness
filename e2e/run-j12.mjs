@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -267,7 +267,7 @@ async function createRendererManager(browser) {
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+    if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-12', name);
@@ -503,14 +503,18 @@ async function importFirstManuscript(renderer, bookId) {
 }
 
 async function saveEdit(renderer, suffix) {
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, 'edit-scope');
   const inserted = await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`);
   requireJourney(inserted === true, 'edit-inserted');
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   await click(renderer, '保存', 'edit-save');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
+  await waitFor(renderer, journalEditPersisted(before, suffix), 'edit-durable', 120_000);
 }
 
 async function saveMilestone(renderer) {
+  const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
+  requireJourney(before !== null, 'milestone-scope');
   // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
   await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
   await assertRenderer(renderer, `(() => { const menu=document.querySelector('[data-save-menu="manuscript"]'),details=document.querySelector('.milestone-section'); if(!(menu instanceof HTMLDetailsElement)||!(details instanceof HTMLDetailsElement))return false; menu.open=true; details.open=true; return true; })()`, 'milestone-open');
@@ -534,7 +538,8 @@ async function saveMilestone(renderer) {
     key('Home');summary.click();return section.open&&!save.disabled&&document.activeElement===summary;
   })()`, 'milestone-collapsed-menu-keyboard');
   await click(renderer, '保存里程碑版本', 'milestone-save');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-saved', 120_000);
+  await waitFor(renderer, milestonePersisted(before, 'r2'), 'milestone-saved', 120_000);
+  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-revision-caption');
 }
 
 /**
@@ -1056,6 +1061,8 @@ async function main() {
     const retakenCapability = await primary.evaluate(`window.ai7.getManuscriptWindow({manuscriptId:${JSON.stringify(bookAWork.manuscriptId)},branchId:${JSON.stringify(bookAWork.branchId)},cursor:null}).then((page)=>page.bookId,()=>null)`);
     requireJourney(retakenCapability === bookA, 'book-a-editor-capability-retaken-under-the-current-route');
     at('close-risk-route-preservation');
+    const beforeRiskEdit = await primary.evaluate(CAPTURE_JOURNAL_EDIT);
+    requireJourney(beforeRiskEdit !== null, 'close-risk-edit-scope');
     const routeRiskSuffix = '，J12 路由风险保护';
     const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
     requireJourney(riskyEditInserted === true, 'close-risk-edit-inserted');
@@ -1113,7 +1120,8 @@ async function main() {
     );
     at('background-journal-non-focus-steal');
     await click(primary, '保存', 'background-risk-edit-save');
-    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志') && document.documentElement.dataset.ai7CloseRisk==='false'`, 'background-risk-edit-durable', 120_000);
+    await waitFor(primary, journalEditPersisted(beforeRiskEdit, routeRiskSuffix), 'background-risk-edit-durable', 120_000);
+    await assertRenderer(primary, `document.documentElement.dataset.ai7CloseRisk==='false'`, 'background-risk-cleared');
     await assertRenderer(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'background-journal-kept-book-b-focus');
     await assertRenderer(primary, `!document.hasFocus()`, 'background-journal-did-not-focus-book-a');
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
