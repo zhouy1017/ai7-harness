@@ -3500,7 +3500,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `factual-range-sheet-${pass}`);
       await assertRenderer(renderer, `(() => {
         const sheet=document.querySelector('dialog.review-sheet');
-        for(const box of sheet.querySelectorAll('input[name="review-category"]:checked'))box.click();
+        for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click();
         const factual=sheet.querySelector('input[name="review-category"][value="factual-review"]');
         if(!factual||factual.disabled)return false; factual.click();
         const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
@@ -3510,9 +3510,17 @@ async function main() {
         from.value=from.options[1].value; from.dispatchEvent(new Event('change',{bubbles:true}));
         to.value=from.value; to.dispatchEvent(new Event('change',{bubbles:true}));
         const chosen=from.value; scope('whole').click(); scope('chapters').click();
-        if(!factual.checked||factual.disabled||from.value!==chosen||to.value!==chosen||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
-        const start=sheet.querySelector('[data-review-action="start"]'); if(!start||start.disabled)return false; start.click(); return true;
-      })()`, `factual-range-memory-start-${pass}`);
+        const remembered=sheet.querySelector('input[name="review-category"][value="factual-review"]');
+        if(!remembered.checked||remembered.disabled||from.value!==chosen||to.value!==chosen||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+        const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!prepare||prepare.disabled)return false; prepare.click(); return true;
+      })()`, `factual-range-memory-prepare-${pass}`);
+      await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, `factual-range-prepared-${pass}`, 120_000);
+      const rangePrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+      requireJourney(rangePrepared?.scope.selectedRange.startPosition===1 && rangePrepared.scope.selectedRange.endPosition===15 &&
+        rangePrepared.categories.length===1 && rangePrepared.categories[0].plan.recomputed===1 && rangePrepared.categories[0].plan.unreviewed===7,
+        `factual-range-plan-${pass}`);
+      await drawerShowing(renderer, rangePrepared.reviewRunId, 'ready', `factual-range-drawer-${pass}`);
+      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', `factual-range-start-${pass}`);
       await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, `factual-range-settled-${pass}`, 180_000);
       const ranged = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
       requireJourney(ranged?.ordinal===pass+1 && ranged.scope.selectedRange.startPosition===1 && ranged.scope.selectedRange.endPosition===15 &&

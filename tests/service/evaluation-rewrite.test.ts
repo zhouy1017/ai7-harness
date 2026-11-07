@@ -1,4 +1,4 @@
-import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
@@ -808,7 +808,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     withDatabase((database) => {
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql)
-          .toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+          .toBe(table === 'analysis_task_intents' ? FACTUAL_RANGE_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(Object.keys(EVALUATION_REWRITE_TRIGGER_SQL).every((name) => database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
     });
