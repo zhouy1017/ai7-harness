@@ -779,9 +779,10 @@ export class BaselineAnalysisStore {
     // Preserve own fields for callers that spread/rebind the launch. Its policy/live accessors must still read the
     // caller's current connection with their original receiver; the retained reader alone falls back to the Store's.
     const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
-    const editorialMemory = launch.editorialMemory ?? this.#launch.editorialMemory;
-    if ((launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) &&
-        (launch.editorialMemory !== undefined || editorialMemory === undefined)) this.#launch = launch;
+    // Editorial memory is read from the Store that owns this ledger, which binds its reader first: a launch carried over from
+    // another (possibly closed) Store never redirects a plan's memory read to that Store's database.
+    const editorialMemory = this.#launch.editorialMemory ?? launch.editorialMemory;
+    if ((launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) && launch.editorialMemory === editorialMemory) this.#launch = launch;
     else {
       const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(launch);
       for (const key of Reflect.ownKeys(descriptors)) {

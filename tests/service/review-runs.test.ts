@@ -2562,9 +2562,10 @@ describe('house preference review consumption (#911)', () => {
       expect(version.sourceCount).toBe(2);
       expect(version.lines).toHaveLength(1);
       const text = version.lines[0]!.text;
-      expect(text).toContain('采纳1、未采纳1');
-      expect(text).toContain('应用后常再改，注意编辑改写偏好');
+      // #1408: the line is the editors' confirmed reasons alone; no mechanical tally or survival prefix reaches the model.
+      for (const tally of ['采纳', '未采纳', '应用后', '注意编辑改写偏好']) expect(text).not.toContain(tally);
       expect(text).toContain('认为按规范改');
+      expect(text).toContain('说不必改');
       for (const absent of ['周一', '郑三', '王四', '排除的理由']) expect(text).not.toContain(absent);
       expect(version.lines[0]!.sources[0]!.attribution).toMatchObject({ authors: ['周一'], editors: ['郑三'] });
       const original = session.store.baselineAnalysisLedger.launch;
