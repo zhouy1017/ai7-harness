@@ -373,6 +373,23 @@ async function chooseMenuItem(renderer, action, name) {
  */
 async function openMarkCard(renderer, kind, blockId, name) {
   const deadline = Date.now() + 20_000;
+  // ✎ 已改 (Issue #1411): a click on applied words brings their card forward in the 批注栏, so an applied mark's floating card opens
+  // from the mark's own menu (打开修改建议), as a reader without a pointer would.
+  while (Date.now() < deadline && await renderer.evaluate(`(() => { const mark = window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0]; return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`)) {
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j05.rightClick(window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0])`, `${name}-menu`);
+    const menu = Date.now() + 1_500;
+    while (Date.now() < menu && !(await renderer.evaluate(`window.__j05.menu()?.dataset.markMenu === 'mark' && window.__j05.item('open-card')?.disabled === false`))) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    await renderer.evaluate(`window.__j05.item('open-card')?.click()`);
+    const settle = Date.now() + 1_500;
+    while (Date.now() < settle) {
+      if (await renderer.evaluate(`window.__j05.card()?.dataset.markKind === ${JSON.stringify(kind)}`)) return;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+  }
   while (Date.now() < deadline) {
     await assertRenderer(renderer, `window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)}).length > 0 && window.__j05.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 80));

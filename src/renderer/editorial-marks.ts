@@ -2706,7 +2706,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     if (editor.selectedRange().kind !== 'none') return;
     const mark = markAt(event.target, false);
-    if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied') { void revealRevision(mark.markId); return; }
+    // A drifted one still opens its floating card, where its conflict is resolved.
+    if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied' && mark.anchorState === 'exact') { void revealRevision(mark.markId); return; }
     if (mark !== undefined && mark.markId !== openCardId) void openCard(mark.markId);
   };
   const onDocumentMouseDown = (event: MouseEvent): void => {
