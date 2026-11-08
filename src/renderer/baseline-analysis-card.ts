@@ -1022,24 +1022,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (quickStart?.rule) quick.dataset['ruleVersionId'] = quickStart.rule.ruleVersionId;
       // Only a quick start on offer joins the actions a preparation holds and gives back.
       actionButtons.push(quick);
-      const choice = element('div', 'analysis-update-choice');
-      choice.id = `analysis-update-choice-${mode}`;
-      choice.hidden = true;
-      const choiceActions = element('div', 'button-row analysis-actions');
-      choiceActions.append(quick, start);
-      choice.append(choiceActions);
-      const chooser = button(action.label, mode === 'sync-current' ? 'primary' : 'secondary', () => {
-        choice.hidden = !choice.hidden;
-        chooser.setAttribute('aria-expanded', choice.hidden ? 'false' : 'true');
-      });
-      chooser.dataset['analysisAction'] = `choose-${mode}`;
-      chooser.setAttribute('aria-expanded', 'false');
-      chooser.setAttribute('aria-controls', choice.id);
-      chooser.disabled = !action.available;
-      actionButtons.push(chooser);
+      // The mode's start and 查看计划 stand on the card at once (Issue #1410 item 15): no button only unfolds them.
+      if (mode !== 'sync-current') quick.classList.replace('primary', 'secondary');
       const actions = element('div', 'button-row analysis-actions');
-      actions.append(chooser);
-      block.append(actions, choice);
+      actions.append(quick, start);
+      block.append(actions);
       section.append(block);
     }
     section.append(cancel);

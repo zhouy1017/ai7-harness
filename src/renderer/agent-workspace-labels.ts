@@ -23,7 +23,7 @@ export const AGENT_WORKSPACE_WORDS = Object.freeze({
   position: (from: number, to: number) => `第 ${from + 1}–${to} 字`,
   dropped: '没有提供的提议',
   droppedLine: (ordinal: number, reason: string) => `第 ${ordinal} 项：${reason}`,
-  promote: '提交为修改建议',
+  promote: '提交并在稿件中查看',
   discard: '放弃这组提议',
   discarded: '已放弃这组提议；没有新建修改建议，这轮提问的记录仍保留。',
   openMarks: '在稿件中查看',

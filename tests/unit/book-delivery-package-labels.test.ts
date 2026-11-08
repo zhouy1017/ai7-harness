@@ -34,7 +34,8 @@ describe('the words of 图书交付包', () => {
     expect(labels.PACKAGE_PURPOSE_LABEL).toBe('交付包用途');
     expect(labels.PACKAGE_PURPOSE_HINT).toBe('写明为什么准备这一版，例如「交出版社存档」。');
     expect(labels.PACKAGE_PREPARE).toBe('准备图书交付包');
-    expect(labels.PACKAGE_PURPOSE_NEEDED).toBe('先写明交付包用途。');
+    expect(labels.PACKAGE_PURPOSE_NEEDED).toBe('交付包用途过长。');
+    expect(labels.PACKAGE_PURPOSE_DEFAULT).toBe('常规交付打包');
     expect([labels.PACKAGE_VERSIONS_HEADING, labels.PACKAGE_VERSIONS_TRUNCATED, labels.PACKAGE_CURRENT_MARK, labels.PACKAGE_PREPARED])
       .toEqual(['已准备的版本', '更早的版本保留在记录中。', '当前', '图书交付包已准备']);
     expect(labels.PACKAGE_STATUS_LINES).toEqual({ preparing: '正在准备图书交付包…', prepareFailed: '无法准备图书交付包。', refreshFailed: '无法读取图书交付包。' });
@@ -111,7 +112,7 @@ describe('the words of 图书交付包', () => {
       reviewFailed: '无法准备图书交付包的导出。',
       choosing: '正在打开系统的文件夹对话框…',
       cancelled: '已取消选择位置，没有写入任何文件。',
-      prepared: '已准备好导出文件，等待你确认。',
+      prepared: '已准备好导出文件，正在写入。',
       chooseFailed: '未能准备导出文件。',
       writing: '正在写入所选文件夹…',
       approveFailed: '未能导出图书交付包。',

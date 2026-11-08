@@ -43,8 +43,6 @@ import {
   TASK_PLAN_CEILING_NOTE,
   TASK_PLAN_COMPACT_TERMS,
   TASK_PLAN_DEFAULT_RULE,
-  TASK_PLAN_DEFAULT_RULE_CANCEL,
-  TASK_PLAN_DEFAULT_RULE_CONFIRM,
   TASK_PLAN_DEFAULT_RULE_FAILED,
   TASK_PLAN_DEFAULT_RULE_HEADING,
   TASK_PLAN_DEFAULT_RULE_LEAD,
@@ -340,17 +338,17 @@ describe('精简 and 完整 (D6)', () => {
     expect(TASK_PLAN_SCOPE_TERMS).toEqual(['要处理', '允许参考', '可能发送', '不会读']);
     expect(TASK_PLAN_SERVICE_TERMS).toEqual(['模型角色', '提供方', '提供方状态', '会发送', '发送内容类别', '用量上限', '所需时间', '预算上限', '账户限额']);
     expect(TASK_PLAN_BOUNDARY_COLUMNS).toEqual(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']);
-    expect(TASK_PLAN_DEFAULT_RULE).toBe('设为快速开始默认…');
+    expect(TASK_PLAN_DEFAULT_RULE).toBe('设为快速开始默认');
   });
 
   // Issue #421 (plan slice S75): 设为快速开始默认…'s confirmation, the rule named beside it, and the two quick-start notes.
   it('says what setting the quick-start default means, and what quick start did', () => {
-    expect(TASK_PLAN_DEFAULT_RULE_HEADING).toBe('设为快速开始默认');
+    expect(TASK_PLAN_DEFAULT_RULE_HEADING).toBe('这条默认规则会绑定的内容');
     expect(TASK_PLAN_DEFAULT_RULE_LEAD).toBe('以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。');
     // A writing plan's (S84b): the rule covers every 新建文档 of the Book.
     expect(taskPlanDefaultRuleLead('writing')).toBe('以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。');
     expect(taskPlanDefaultRuleLead('baseline-analysis')).toBe(TASK_PLAN_DEFAULT_RULE_LEAD);
-    expect([TASK_PLAN_DEFAULT_RULE_CONFIRM, TASK_PLAN_DEFAULT_RULE_CANCEL, TASK_PLAN_DEFAULT_RULE_FAILED]).toEqual(['设为默认', '取消', '无法设为快速开始默认。']);
+    expect(TASK_PLAN_DEFAULT_RULE_FAILED).toBe('无法设为快速开始默认。');
     expect(taskPlanDefaultRuleSet('开始同步 · 第 1 版')).toBe('已设为快速开始默认：开始同步 · 第 1 版');
     const current = { ruleId: 'r', ruleVersionId: 'v', ordinal: 2, name: '开始同步 · 第 2 版' };
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中，由这份计划设定）');

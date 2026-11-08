@@ -26,7 +26,7 @@ export const DATABASE_EXPORT_ACTIONS = {
 export const DATABASE_EXPORT_STATUS_LINES = {
   choosing: '正在打开系统的保存对话框…',
   cancelled: '已取消选择保存位置，没有写入任何文件。',
-  prepared: '数据库已打包好，等待你确认导出。',
+  prepared: '数据库已打包好，正在写入所选位置。',
   prepareFailed: '未能打包数据库。',
   writing: '正在写入所选位置…',
   approveFailed: '未能导出数据库。',

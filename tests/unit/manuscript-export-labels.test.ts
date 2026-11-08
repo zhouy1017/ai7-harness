@@ -61,7 +61,7 @@ function row(overrides: Partial<ExportFidelityRowProjection>): ExportFidelityRow
 describe('the words of 导出', () => {
   it('name the actions, the options and their defaults as the specification words them', () => {
     expect(EXPORT_ACTION_LABELS).toEqual({
-      open: '导出…', choose: '选择保存位置…', chooseAgain: '重新选择保存位置…', approve: '按上述方式导出', cancel: '取消', close: '完成',
+      open: '导出…', close: '完成',
       reveal: '在文件夹中显示',
     });
     expect(EXPORT_OPTION_ORDER.map((key) => [EXPORT_OPTION_LABELS[key], DEFAULT_MANUSCRIPT_EXPORT_OPTIONS[key]])).toEqual([
@@ -118,7 +118,7 @@ describe('the words of 导出', () => {
     expect(exportShownRows(rows).map((entry) => entry.key)).toEqual(['annotations', 'editor-notes']);
     expect(exportAbsentLine(rows)).toBe('未检测到：行内样式、表格。');
     expect(exportAbsentLine([rows[1]!])).toBeNull();
-    expect(EXPORT_DEGRADED_NOTE).toBe('标为「降级导出」或「无法导出」的内容会按上面所说的方式处理；选择「按上述方式导出」即表示只对这一次导出接受这些处理。');
+    expect(EXPORT_DEGRADED_NOTE).toBe('标为「降级导出」或「无法导出」的内容会按上面所说的方式处理；选择保存位置即表示只对这一次导出接受这些处理。');
   });
 
   it('leave the destination and its collisions to the system dialog, and wait for it before the approval', () => {
