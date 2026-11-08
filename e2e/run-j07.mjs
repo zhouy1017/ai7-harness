@@ -2851,14 +2851,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-plan-default-rule="offered"] [data-task-drawer-control="default-rule"]')?.disabled === false`, 'writing-rule-offered');
     const writingRulesBefore = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => page.rules.filter((rule) => rule.taskKind === 'writing').length)`);
     requireJourney(writingRulesBefore === 0, 'writing-rule-none', writingRulesBefore);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-open');
-    const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer .task-plan-default-rule-confirm'); if (!(confirm instanceof HTMLElement) || confirm.hidden) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
+    // What the rule binds is one closed disclosure beside the action, and the one click sets it (Issue #1410 item 19).
+    const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer details.task-plan-default-rule-detail'); if (!(confirm instanceof HTMLElement) || confirm.open) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
     const confirmRead = typeof writingConfirm === 'string' ? JSON.parse(writingConfirm) : null;
     requireJourney(confirmRead !== null && confirmRead[0] === WRITING_RULE_LEAD &&
       confirmRead[1].map(([label]) => label).join('|') === '模型服务|工序|预算上限|发送内容类别|会得到|适用于' &&
       confirmRead[1][1][1].startsWith('写作任务 · ') && confirmRead[1][2][1] === '未设置任务预算上限' &&
       confirmRead[1][5][1] === '新建文档「宣传文章」', 'writing-rule-confirm', writingConfirm);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule-confirm"]', 'writing-rule-set');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-set');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-default-rule-current')?.textContent === ${JSON.stringify(`这本书的默认执行规则：${WRITING_RULE_NAME}（使用中，由这份计划设定）`)}`, 'writing-rule-set-shown');
     const writingRules = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => JSON.stringify(page.rules.filter((rule) => rule.taskKind === 'writing').map((rule) => [rule.name, rule.pattern, rule.state, rule.bookTitle])))`);
     requireJourney(writingRules === JSON.stringify([[WRITING_RULE_NAME, WRITING_RULE_PATTERN, 'active', WRITING_TITLE]]), 'writing-rule-record', writingRules);
