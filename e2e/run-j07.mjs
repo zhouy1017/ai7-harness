@@ -82,7 +82,9 @@ const SCOPED_HELPERS = `(() => {
   const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
   const texts = (root) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode); return nodes; };
   const point = (root, offset) => { let left = offset; for (const node of texts(root)) { if (left <= node.data.length) return [node, left]; left -= node.data.length; } return null; };
-  const all = () => Object.fromEntries(Array.from(editor()?.children ?? []).filter((node) => node.dataset.blockId).map((node) => [node.dataset.blockId, node.textContent]));
+  // A paragraph's own words: an open suggestion's preview (预览 · 未应用) drawn beside them is not part of them.
+  const words = (root) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT }); let text = ''; while (walker.nextNode()) text += walker.currentNode.data; return text; };
+  const all = () => Object.fromEntries(Array.from(editor()?.children ?? []).filter((node) => node.dataset.blockId).map((node) => [node.dataset.blockId, words(node)]));
   window.__j07Scoped = {
     state: null, before: null, block,
     locate: () => {
