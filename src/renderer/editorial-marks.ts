@@ -1265,7 +1265,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (destroyed) return;
     if (options.revealComments?.() !== true) { await openCard(markId); return; }
     refreshComments();
-    for (let frame = 0; frame < 90 && !destroyed; frame++) {
+    // Its card is read and laid out in the pane within a few frames; a slow machine is given five seconds before it floats instead.
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && !destroyed) {
       const entry = commentNodes.get(markId);
       if (entry !== undefined && !entry.node.hidden && entry.node.dataset['revalidating'] !== 'true') {
         for (const other of commentNodes.values()) {
