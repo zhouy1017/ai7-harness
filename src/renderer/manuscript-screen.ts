@@ -1654,6 +1654,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       lockedSections = new Set(locks.sectionHeadingBlockIds);
     } catch { /* the outline still shows; its lock buttons say what was last read */ }
   }
+  /** The section locks read again — on arrival and after a lock change, never per keystroke — and the outline drawn with them. */
+  async function refreshSectionLocks(): Promise<void> {
+    await readSectionLocks();
+    if (!destroyed) paintOutline();
+  }
   /** The heading whose section holds `blockId`: the nearest outline heading at or above it in the window, else before the window. */
   function sectionOf(blockId: string): string | null {
     if (outlineEntries === undefined || outlineEntries.length === 0) return null;
@@ -1692,6 +1697,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     manuscriptRail?.refresh();
     await invalidateSearchIfStale('稿件已由 AI 局部修改；先前搜索结果和返回位置已失效。');
     await loadOutline();
+    await refreshSectionLocks();
   }
   /** The whole outline, read page after page (Issue #1409): the filter and the current chapter see every heading of the Book. */
   async function loadOutline(propagateFailure = false): Promise<void> {
@@ -1710,8 +1716,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       outlineEntries = entries;
       outlineTruncated = cursor !== null;
       paintOutline();
-      // The section locks follow without holding the outline back.
-      void readSectionLocks().then(() => { if (!destroyed && request === outlineRead) paintOutline(); });
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取稿件结构。'), 'error');
       if (propagateFailure) throw error;
@@ -2676,6 +2680,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   showNavigationMode('outline');
   updateWindowChrome();
   void loadOutline();
+  void refreshSectionLocks();
   editor.focus();
   // Arriving is itself a position worth remembering: a manuscript opened and then left by closing the
   // product never reaches an exit this surface can see, and the entry is what should answer then.
