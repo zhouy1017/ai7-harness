@@ -2113,7 +2113,7 @@ async function main() {
     await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
 
     at('package-not-for-this-book');
-    // The four other types 本书不做 on their own cards: every condition holds, 准备 waits only for a purpose, and the
+    // The four other types 本书不做 on their own cards: every condition holds, 准备 is available on the routine purpose, and the
     // preview lists the 发稿版本 and the 新闻稿 at its delivered 版本 3 as included, the four types and the fixed
     // exclusions as left out, and what the package cannot say.
     for (const typeId of OTHER_TYPES) {
@@ -2131,7 +2131,8 @@ async function main() {
         ]))} &&
         bundle.querySelector('ul.package-excluded > li[data-item-kind="readers-report"] .package-item-detail')?.textContent === '本书没有审稿意见' &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
-        bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '先写明交付包用途。';
+        !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
+        bundle.querySelector('[data-package-field="purpose"]')?.value === '';
     })()`, 'package-preview-lists-what-it-holds');
 
     at('package-prepare');

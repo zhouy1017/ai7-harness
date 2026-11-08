@@ -3108,41 +3108,54 @@ async function main() {
 
     at('j14-learning-audit-keyboard');
     // Without a pointer: Escape leaves the explorer for the row it came from; Enter opens it again at its heading; Enter on
-    // 停止今后使用… opens the preview at its heading, and Escape closes it with the focus back where it was.
+    // 停止今后使用 records the exclusion in one step (Issue #1410 item 31) with the focus on the explorer's heading; Enter on
+    // 重新纳入… opens its choices on the Book's own, and Escape closes them with the focus back and nothing recorded.
     await pressEscape(renderer);
     await readAudit(renderer, (page) => page.view === 'list' && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'open', false]), 'learning-audit-keyboard-back');
     await pressEnter(renderer);
     await readAudit(renderer, (page) => page.lineage?.key === auditFirst && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'H4', false]), 'learning-audit-keyboard-open');
     await assertRenderer(renderer, `(() => { const stop = document.querySelector('.learning-lineage [data-learning-audit-action="stop"]'); if (!(stop instanceof HTMLButtonElement)) return false; stop.focus(); return document.activeElement === stop; })()`, 'learning-audit-keyboard-stop-focused');
     await pressEnter(renderer);
-    await readAudit(renderer, (page) => page.preview !== null && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'H4', true]), 'learning-audit-keyboard-preview');
+    await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-keyboard-stop-status');
+    const keyboardStopped = await readAudit(renderer, (page) => page.lineage?.decisions.length === 5 && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'H4', false]), 'learning-audit-keyboard-preview');
+    requireJourney(keyboardStopped.preview === null && keyboardStopped.lineage.standing === 'excluded' &&
+      JSON.stringify(keyboardStopped.lineage.decisions[0]) === JSON.stringify(['current', 'learning-audit', '明确排除', '现在的决定 · 在学习回溯中停止今后使用']) &&
+      JSON.stringify(keyboardStopped.lineage.decisions[1].slice(0, 3)) === JSON.stringify(['superseded', 'learning-eligibility', '纳入出版社经验']) &&
+      JSON.stringify(keyboardStopped.lineage.actions) === JSON.stringify(['reinclude', 'back']), 'learning-audit-keyboard-stopped-words', keyboardStopped);
+    const keyboardService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => [read.standing, read.decisions.map((entry) => entry.choice).join('>')])`);
+    requireJourney(JSON.stringify(keyboardService) === JSON.stringify(['excluded', 'book>excluded>book>house>excluded']), 'learning-audit-keyboard-records-one-exclusion', keyboardService);
+    await assertRenderer(renderer, `(() => { const again = document.querySelector('.learning-lineage [data-learning-audit-action="reinclude"]'); if (!(again instanceof HTMLButtonElement) || again.disabled) return false; again.focus(); return document.activeElement === again; })()`, 'learning-audit-keyboard-reinclude-focused');
+    await pressEnter(renderer);
+    const keyboardReinclude = await readAudit(renderer, (page) => page.reinclude !== null && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'INPUT', false]), 'learning-audit-keyboard-reinclude-open');
+    requireJourney(JSON.stringify(keyboardReinclude.reinclude.choices) === JSON.stringify([['book', true], ['house', false]]) && keyboardReinclude.reinclude.record === true, 'learning-audit-keyboard-reinclude-words', keyboardReinclude.reinclude);
     await pressEscape(renderer);
-    await readAudit(renderer, (page) => page.preview === null && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'stop', false]), 'learning-audit-keyboard-preview-closed');
-    const keyboardService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.length)`);
-    requireJourney(keyboardService === 4, 'learning-audit-keyboard-records-nothing', keyboardService);
+    await readAudit(renderer, (page) => page.reinclude === null && page.lineage?.key === auditFirst && JSON.stringify(page.focus) === JSON.stringify([auditFirst, 'reinclude', false]), 'learning-audit-keyboard-reinclude-closed');
+    const keyboardAfterEscape = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.length)`);
+    requireJourney(keyboardAfterEscape === 5, 'learning-audit-keyboard-escape-records-nothing', keyboardAfterEscape);
 
     at('j14-learning-audit-reflow-forced-colors');
-    // At 200% the explorer, its steps and an open preview reflow into the width; without colour each keeps its border.
-    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-reflow-stop');
-    await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-reflow-preview');
+    // At 200% the explorer, its steps and its open 重新纳入 choices reflow into the width; without colour the explorer and its
+    // steps keep their borders. (停止今后使用 no longer opens a preview to hold open: it records in one step, Issue #1410 item 31.)
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'learning-audit-reflow-stop');
+    await readAudit(renderer, (page) => page.reinclude !== null, 'learning-audit-reflow-preview');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.learning-lineage'), document.querySelector('.learning-lineage-steps'), document.querySelector('.learning-lineage-forward'), document.querySelector('.learning-remediation-preview')]; return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'learning-audit-reflow', 10_000);
+    await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [document.querySelector('.learning-lineage'), document.querySelector('.learning-lineage-steps'), document.querySelector('.learning-lineage-forward'), document.querySelector('.learning-reinclude')]; return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'learning-audit-reflow', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(renderer, `(() => {
       if (!matchMedia('(forced-colors: active)').matches) return false;
-      const parts = [document.querySelector('.learning-lineage'), document.querySelector('.learning-lineage-step'), document.querySelector('.learning-remediation-preview')];
+      const parts = [document.querySelector('.learning-lineage'), document.querySelector('.learning-lineage-step')];
       const decision = document.querySelector('.learning-lineage-decision[data-decision-state="superseded"]');
       return parts.every((part) => part instanceof HTMLElement && getComputedStyle(part).borderTopStyle === 'solid') &&
         decision instanceof HTMLElement && getComputedStyle(decision).borderLeftStyle === 'dashed';
     })()`, 'learning-audit-forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
-    await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="cancel-preview"]', 'learning-audit-reflow-cancel');
-    await readAudit(renderer, (page) => page.preview === null, 'learning-audit-reflow-closed');
+    await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-cancel"]', 'learning-audit-reflow-cancel');
+    await readAudit(renderer, (page) => page.reinclude === null && page.lineage?.decisions.length === 5, 'learning-audit-reflow-closed');
 
     // ---- 从第 M 版重新评估 past a damaged latest version (Issue #726), and the house calibration offset (Issue #429, EVAL-011a) ----
     at('evaluation-damaged-route');
