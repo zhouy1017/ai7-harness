@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as labels from '../../src/renderer/book-delivery-package-labels.js';
+import { mountBookDeliveryPackage } from '../../src/renderer/book-delivery-package.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import type { BookDeliveryPackageProjection } from '../../src/shared/protocol.js';
+import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 import {
   BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS,
   BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST,
@@ -196,5 +200,54 @@ describe('the version a Captured Procedure version link focuses (Issue #66, S31b
   it('focuses no version when the card was opened without a link', () => {
     expect(new labels.LinkedPackageVersionFocus(null).take(versions)).toBeNull();
     expect(new labels.LinkedPackageVersionFocus('v1').take([])).toBeNull();
+  });
+});
+
+// Issue #1410 item 1: 准备图书交付包 prepares under the routine purpose when the editor writes none.
+describe('准备图书交付包 with the routine purpose', () => {
+  const BOOK = '11111111-1111-4111-8111-111111111111';
+  let uninstall: () => void;
+  beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); });
+  afterEach(() => uninstall());
+
+  const reading = (): BookDeliveryPackageProjection => ({
+    bookId: BOOK, statement: '', conditions: [], ready: true, unmet: [], versions: [], versionsTruncated: false, changedSinceLatest: false, documents: [],
+    content: { digest: 'c'.repeat(64), included: [], includedTruncated: false, excluded: [], limitations: [], limitationsTruncated: false },
+  });
+  const settle = async (): Promise<void> => { for (let index = 0; index < 8; index += 1) await Promise.resolve(); };
+  async function mount() {
+    const root = miniDocument.createElement('section');
+    miniDocument.body.append(root);
+    const prepareBookDeliveryPackage = vi.fn(async (_input: unknown) => ({ bookId: BOOK, outcome: 'prepared', version: 1, package: reading() }));
+    const api = { inspectBookDeliveryPackage: vi.fn(async () => reading()), prepareBookDeliveryPackage };
+    const surface = mountBookDeliveryPackage({ root: root as unknown as HTMLElement, bookId: BOOK, api: api as never,
+      technicalDetails: () => miniDocument.createElement('details') as unknown as HTMLElement,
+      setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, route: vi.fn() });
+    surface.refresh();
+    await settle();
+    const purpose = root.querySelector('[data-package-field="purpose"]') as MiniElement & { value: string; placeholder: string };
+    const prepare = root.querySelector('[data-package-action="prepare"]') as MiniElement;
+    return { purpose, prepare, prepareBookDeliveryPackage };
+  }
+
+  it('prepares an empty purpose as 常规交付打包, and nothing else is asked first', async () => {
+    const { purpose, prepare, prepareBookDeliveryPackage } = await mount();
+    expect(purpose.value).toBe('');
+    expect(purpose.placeholder).toBe('常规交付打包（可改写）');
+    expect(prepare.disabled).toBe(false);
+    prepare.click();
+    await settle();
+    expect(prepareBookDeliveryPackage.mock.calls).toEqual([[{ purpose: '常规交付打包', expectedContentDigest: 'c'.repeat(64) }]]);
+  });
+
+  it('holds an over-long purpose with its reason and sends nothing', async () => {
+    const { purpose, prepare, prepareBookDeliveryPackage } = await mount();
+    purpose.value = '长'.repeat(81);
+    purpose.dispatchEvent({ type: 'input' });
+    expect(prepare.disabled).toBe(true);
+    expect(prepare.textContent).toContain('交付包用途过长。');
+    prepare.click();
+    await settle();
+    expect(prepareBookDeliveryPackage).not.toHaveBeenCalled();
   });
 });
