@@ -1656,7 +1656,8 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="add-more"]', 'chooser-next');
     await readSeries(renderer, (page) => page.chooser?.length === 4 && page.chooser.filter(([, checked]) => checked).length === 1 && page.lookDisabled === false, 'chooser-bounded-selection');
     await clickSelector(renderer, '[data-series-action="add-first"]', 'chooser-reset');
-    await readSeries(renderer, (page) => page.chooser?.length === 50 && page.chooser.every(([, checked]) => !checked), 'chooser-reset-bounded');
+    // Back on the first page the chooser starts again at its first Book, chosen (Issue #1410 item 30).
+    await readSeries(renderer, (page) => page.chooser?.length === 50 && page.chooser.filter(([, checked]) => checked).length === 1 && page.chooser[0][1] === true, 'chooser-reset-bounded');
     await clickSelector(renderer, '[data-series-action="add-more"]', 'chooser-next-again');
     await readSeries(renderer, (page) => page.chooser?.length === 3, 'chooser-last-page');
     await clickSelector(renderer, '[data-series-action="add-cancel"]', 'chooser-close');
