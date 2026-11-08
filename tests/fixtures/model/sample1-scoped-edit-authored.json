@@ -1,0 +1,23 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-scoped-edit-authored",
+  "description": "Authored 就选中部分让 AI 修改 answer (Issue #1412) for the one 润色这段 sentence of exact sample1 selected inside its paragraph, keyed under unit ordinal 0 by the ai7.scoped-edit/1 request digest of that selection, its paragraph edges and its neighbours' edges: the sentence rewritten, plus a target id never given and a whole-document rewrite, which the splice drops.",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "ee188a92bfe307f25d4ee8e09480651f1998488a355349ced722a9cde198f584",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.scoped-edit.result/1\",\"targets\":[{\"id\":\"T1\",\"text\":\"当然，并非每个男人都被众人视为有福之人。\"},{\"id\":\"T2\",\"text\":\"这一段不是修改目标，越界的改写会被丢弃。\"}],\"document\":\"整篇稿件的重写：不属于任何修改目标，绝不会被读取。\"}",
+        "usage": {
+          "inputTokens": 480,
+          "outputTokens": 70
+        }
+      }
+    }
+  ]
+}
