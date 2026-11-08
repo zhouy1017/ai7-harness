@@ -1841,7 +1841,7 @@ async function main() {
       requireJourney(await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]') === null`), 'selection-task-gone-mappings-valid');
       if (await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`)) {
         const before = await reviewVersion();
-        await click(renderer, '明确接受完整降级集合', 'selection-task-gone-degradation');
+        await clickSelector(renderer, '[data-accept-reimport-degradation]', 'selection-task-gone-degradation');
         await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)}`, 'selection-task-gone-degradation-persisted', 60_000);
         continue;
       }
