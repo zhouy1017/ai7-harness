@@ -918,13 +918,13 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="preview"]', 'add-commit');
 
     at('membership-added');
-    // The member row with its people, when it joined and 尚未审阅, focus on its 移出书系…, and one record that keeps the four
+    // The member row with its people, when it joined and 尚未审阅, focus on its one-click 移出书系, and one record that keeps the four
     // groups of its impact; the service and the Book's own side agree.
     await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${FIRST}》`)}`, 'added-status');
     const added = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'added');
     requireJourney(added.memberPills[0] === 2 &&
       added.members[0][0] === first && added.members[0][1] === `《${FIRST}》` && added.members[0][2] === '未填写' && added.members[0][3] === '未填写' &&
-      added.members[0][4].length > 0 && added.members[0][5] === `尚未审阅 · 暂不能审阅：${NO_KNOWLEDGE}` && added.members[0][6] === '移出书系…' && added.focus === 'remove-open' &&
+      added.members[0][4].length > 0 && added.members[0][5] === `尚未审阅 · 暂不能审阅：${NO_KNOWLEDGE}` && added.members[0][6] === '移出书系' && added.focus === 'remove-open' &&
       JSON.stringify(added.history) === JSON.stringify([['add', first, `加入书系 · 《${FIRST}》`, 4]]), 'added-words', added);
     const addedService = await renderer.evaluate(`Promise.all([window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} }), window.ai7.inspectBookSeries({ bookId: ${JSON.stringify(first)} })])
       .then(([series, side]) => [series.members.map((member) => member.bookId), series.history.map((change) => [change.kind, change.bookId, change.priorMember, change.newMember, change.impact.length]),
