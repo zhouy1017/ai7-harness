@@ -1090,8 +1090,8 @@ async function main() {
       full.terms['用量上限'] === '不发送，没有模型用量' && full.terms['所需时间'] === '暂无可靠估计' &&
       full.terms['预算上限'] === '未设置任务预算上限' && full.terms['账户限额'] === '未知 · 提供方未返回' &&
       JSON.stringify(full.outcomes) === JSON.stringify(['一条运行记录：只记录这次运行授权，不派发，不产出重点清单']) &&
-      // 不会做 is the technical layer's alone (Issue #1413 cluster 4): the ordinary plan lists none.
-      JSON.stringify(full.notDo) === '[]' &&
+      // 不会做 shows on the technical layer this Journey runs with (Issue #1413 cluster 4 hides it in ordinary mode).
+      JSON.stringify(full.notDo) === JSON.stringify(['不会开始运行（只记录）', '不会直接修改稿件', '不导出或发布', '不存里程碑版本', '不读这本书以外的内容']) &&
       JSON.stringify(full.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(full.adaptable) === JSON.stringify(['无']) &&
       JSON.stringify(full.askFirst) === JSON.stringify(['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作']) &&

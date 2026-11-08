@@ -2081,11 +2081,13 @@ async function main() {
         ['author', '给作者的修改意见', null, [['prepare', '起草', false]]],
         ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
       ]), 'readers-report-offered-words', reportOffered);
+    // 起草 prepares the plan and starts it at once (Issue #1410 item 11); the plan stays one disclosure away (查看任务).
     await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]', 'readers-report-prepare');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'readers-report' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'readers-report-plan', 120_000);
+    const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
+    requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
     // The plan in the editor's words: the 定稿 version and template it drafts from, no exemplar, its two steps, and that it writes
-    // no marketing points and delivers nothing; no button of the drawer carries 授权.
-    const reportPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'readers-report', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
+    // no marketing points and delivers nothing.
+    const reportPlan = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => window.ai7.inspectTaskPlan({ kind: 'readers-report', ref: page.readersReport.task.taskIntentId }))
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label),
         plan.notDo.editorial.includes('不写营销要点：营销要点由交付物中的写作任务生成'), plan.notDo.editorial.includes('不交付、不发送：草稿在稿件编辑面上由你修改')]))`);
     requireJourney(reportPlan === JSON.stringify([
@@ -2093,18 +2095,6 @@ async function main() {
       ['评估记录第 14 版定稿（审稿评估方案 第 1 版）：各项得分与评语、主要优点与问题、风险与结论', NO_EXEMPLAR],
       ['逐章读取，找出可以引用的段落', '按模板写出审稿意见'], true, true,
     ]), 'readers-report-plan-words', reportPlan);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'readers-report-full-plan');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-evaluation-plan-references] [data-evaluation-materials="readersReport"]')`, 'readers-report-plan-references');
-    await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes(${JSON.stringify(NO_EXEMPLAR)}) && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'readers-report-plan-shown');
-    const preparedReport = await readReport((page) => page.state === 'prepared', 'readers-report-prepared');
-    requireJourney(preparedReport.task === '审稿意见「给作者的修改意见」 · 尚未开始' &&
-      JSON.stringify(preparedReport.templates[0][3]) === JSON.stringify([['open-plan', '查看计划并开始', false]]), 'readers-report-prepared-words', preparedReport);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'readers-report-run');
-    const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
-    requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'readers-report-drawer-settled', 30_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'readers-report-drawer-close');
-    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'readers-report-drawer-closed');
 
     at('readers-report-drafted');
     // AI7's draft waits to be opened; the other template can still be drafted; the 定稿 version it drafted from is unchanged.
@@ -2179,13 +2169,7 @@ async function main() {
     const rewriteOffered = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.rewrite?.actions.length === 2, 'evaluation-rewrite-offered-read');
     requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
       JSON.stringify(rewriteOffered.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']), 'evaluation-rewrite-offered-words', rewriteOffered.rewrite);
-    // A rewrite reads only what is saved: with the form holding an unsaved 总评 it is refused, and nothing is prepared.
-    await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="verdict"]', '（旅程未保存的总评）', 'evaluation-rewrite-unsaved');
-    await clickSelector(renderer, '[data-evaluation-action="prepare-rewrite"]', 'evaluation-rewrite-unsaved-ask');
-    const unsavedAsk = await readEvaluation(renderer, (page) => page.refusal !== null, 'evaluation-rewrite-unsaved-refused');
-    requireJourney(unsavedAsk.refusal === '先保存修改，再按你的修改重新生成：重新生成只读已保存的内容。' && unsavedAsk.rewrite.task === null,
-      'evaluation-rewrite-unsaved-words', unsavedAsk);
-    await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="verdict"]', '', 'evaluation-rewrite-unsaved-cleared');
+    // A rewrite reads only what is saved; edits still in the form are saved first by the same click (Issue #1410 item 12).
 
     at('evaluation-rewrite-run');
     // 按我的修改重新生成 is one click (Issue #1407): it prepares and starts at once over the saved changes, the manuscript, AI7's report
@@ -2412,17 +2396,17 @@ async function main() {
 
     at('learning-review-card');
     // 查看… opens the Review Card in place at its heading: the bounded material, where it came from, why it is one, the basis,
-    // what it could later influence, and no decision yet; the choice unselected, 仅纳入当前图书 marked 建议, 纳入当前书系 shown
-    // with why it is not there, and 记录学习准入决定 closed until a choice is made.
+    // what it could later influence, and no decision yet; 仅纳入当前图书 marked 建议 and chosen to begin with (Issue #1410
+    // item 31), 纳入当前书系 shown with why it is not there, and 记录学习准入决定 ready.
     await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="open"]`, 'learning-open-card');
     const learningCard = await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-card');
     requireJourney(learningCard.card.heading === '修改建议 · 拒绝' && JSON.stringify(learningCard.card.excerptHeads) === JSON.stringify(['原文', '建议', '你的原因']) &&
       learningCard.card.excerptTail === '你的原因：证据不足' && learningCard.card.facts.rationale === '你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。' &&
       learningCard.card.facts.basis === undefined && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
       learningCard.card.facts.task === undefined &&
-      JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', false, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
+      JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', true, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
       learningCard.card.recommended === 'book' && learningCard.card.seriesReason === '还没有书系：书系接通后，才能把材料纳入书系。' &&
-      learningCard.card.consequence === null && learningCard.card.record === 'disabled' && JSON.stringify(learningCard.focus) === JSON.stringify(['proposal-decision', 'H4']),
+      learningCard.card.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。` && learningCard.card.record === 'enabled' && JSON.stringify(learningCard.focus) === JSON.stringify(['proposal-decision', 'H4']),
     'learning-card-words', learningCard);
 
     at('learning-decide');
@@ -3011,24 +2995,12 @@ async function main() {
       JSON.stringify(lineageOpened.lineage.details) === JSON.stringify(['审计详情', false]) &&
       JSON.stringify(lineageOpened.focus) === JSON.stringify([auditFirst, 'H4', false]), 'learning-audit-lineage-words', lineageOpened);
 
-    at('learning-audit-stop-preview');
-    // 停止今后使用… first shows the 学习补救影响预览 in its four groups, and records nothing.
-    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stop');
-    const stopPreview = await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-preview');
-    requireJourney(JSON.stringify(stopPreview.preview.groups) === JSON.stringify([
-      ['future', '1', '未来使用 · 1', `1 条学习材料今后不再可用于学习（原来是仅纳入《${THIRD.title}》）；它们会显示为明确排除。`],
-      ['running', '0', '正在运行 · 0', '没有正在运行的任务使用它们。'],
-      ['memory', '0', '候选或已启用记忆 · 0', '没有引用这些材料的编辑记忆候选或已启用记忆。'],
-      ['completed', '0', '已完成历史 · 0', '没有已完成的任务用过它们，因此没有结果需要标记；它们来自的反馈与改动，以及此前的 1 个准入决定，都原样保留。'],
-    ]) && stopPreview.preview.leftOut.length === 0 && stopPreview.preview.confirm === true &&
-      stopPreview.preview.included.length === 1 && stopPreview.preview.included[0].startsWith('修改建议 · 拒绝 · ') && stopPreview.preview.included[0].endsWith(' · 你的原因：分页原因0') &&
-      JSON.stringify(stopPreview.focus) === JSON.stringify([auditFirst, 'H4', true]), 'learning-audit-preview-words', stopPreview);
-    const unrecorded = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.length)`);
-    requireJourney(unrecorded === 1, 'learning-audit-preview-records-nothing', unrecorded);
-
     at('learning-audit-stop-recorded');
-    // 确认停止今后使用 appends one exclusion: the explorer shows it standing over the decision it superseded, which stays.
-    await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="confirm"]', 'learning-audit-confirm');
+    // 停止今后使用 is one step (Issue #1410 item 31): the impact is read and the exclusion appended against exactly it; the
+    // explorer shows it standing over the decision it superseded, which stays.
+    const unrecorded = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.length)`);
+    requireJourney(unrecorded === 1, 'learning-audit-before-stop', unrecorded);
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stop');
     await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-recorded-status');
     const stopped = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.preview === null, 'learning-audit-recorded');
     requireJourney(stopped.lineage.standing === 'excluded' && JSON.stringify(stopped.lineage.decisions) === JSON.stringify([
@@ -3069,15 +3041,8 @@ async function main() {
       .then((read) => window.ai7.decideLearningMaterial({ bookId: ${JSON.stringify(thirdId)}, materialKey: read.material.materialKey, materialDigest: read.material.digest,
         expectedDecisions: read.material.decisions, choice: 'house', note: null })).then((decided) => decided.decision?.choice ?? null)`);
     requireJourney(drifted === 'house', 'learning-audit-drifted', drifted);
+    // One step too: the one that changed after it was selected is left out and counted (Issue #1410 item 31).
     await clickSelector(renderer, '.learning-audit-batch [data-learning-audit-action="batch-stop"]', 'learning-audit-batch-stop');
-    const batchPreview = await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-batch-preview');
-    // Each is named by its own line, so the one left out and the one included are told apart though both are 修改建议 · 拒绝.
-    requireJourney(batchPreview.preview.groups[0][1] === '1' && batchPreview.preview.included.length === 1 &&
-      batchPreview.preview.included[0].endsWith(' · 你的原因：分页原因1') && batchPreview.preview.leftOut.length === 1 &&
-      batchPreview.preview.leftOut[0][0] === 'changed' && batchPreview.preview.leftOut[0][1].startsWith('修改建议 · 拒绝 · ') &&
-      batchPreview.preview.leftOut[0][1].endsWith(' · 你的原因：分页原因2：在你选中之后改过，不在本次之列') &&
-      batchPreview.preview.confirm === true, 'learning-audit-batch-preview-words', batchPreview.preview);
-    await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="confirm"]', 'learning-audit-batch-confirm');
     await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料；另有 1 条未处理。'`, 'learning-audit-batch-status');
     const afterBatch = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 0 && page.batch === null, 'learning-audit-batch-done');
     requireJourney(afterBatch.none === '没有符合的学习材料。', 'learning-audit-batch-done-words', afterBatch);
@@ -3093,9 +3058,9 @@ async function main() {
     await readAudit(renderer, (page) => page.lineage?.key === auditFirst, 'learning-audit-reopened');
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'learning-audit-reinclude-open');
     const reincluding = await readAudit(renderer, (page) => page.reinclude !== null, 'learning-audit-reinclude-card');
-    requireJourney(reincluding.reinclude.boundary === '重新纳入的范围 · 重新纳入会追加一个新的准入决定；之前的排除仍留在记录里，不会被改写。' && JSON.stringify(reincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) && reincluding.reinclude.record === false &&
-      reincluding.reinclude.consequence === null, 'learning-audit-reinclude-card-words', reincluding.reinclude);
-    await tick(renderer, '.learning-reinclude input[value="book"]', 'learning-audit-reinclude-book');
+    requireJourney(reincluding.reinclude.boundary === '重新纳入的范围 · 重新纳入会追加一个新的准入决定；之前的排除仍留在记录里，不会被改写。' && JSON.stringify(reincluding.reinclude.choices) === JSON.stringify([['book', true], ['house', false]]) && reincluding.reinclude.record === true,
+      'learning-audit-reinclude-card-words', reincluding.reinclude);
+    // The Book's own is chosen to begin with (Issue #1410 item 31), its consequence said at once.
     const reincludeChosen = await readAudit(renderer, (page) => page.reinclude?.record === true, 'learning-audit-reinclude-chosen');
     requireJourney(reincludeChosen.reinclude.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。`, 'learning-audit-reinclude-consequence', reincludeChosen.reinclude);
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'learning-audit-reinclude-record');
@@ -3106,18 +3071,17 @@ async function main() {
     ]) && JSON.stringify(reincluded.lineage.actions) === JSON.stringify(['stop', 'back']), 'learning-audit-reincluded-words', reincluded);
 
     at('learning-audit-stale-refused');
-    // A preview the material moved past is refused: nothing is appended, the explorer reads the chain as it stands, and the
-    // refusal says to look again.
-    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stale-stop');
-    await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-stale-preview');
+    // A material moved past what the page shows is refused at its one step: nothing is appended, the explorer reads the chain
+    // as it stands, and the refusal says to look again. (Preview and record are one click since Issue #1410 item 31, so the
+    // move happens before the click.)
     const moved = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} })
       .then((read) => window.ai7.decideLearningMaterial({ bookId: ${JSON.stringify(thirdId)}, materialKey: read.material.materialKey, materialDigest: read.material.digest,
         expectedDecisions: read.material.decisions, choice: 'house', note: null })).then((decided) => decided.decisions)`);
     requireJourney(moved === 4, 'learning-audit-stale-moved', moved);
-    await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="confirm"]', 'learning-audit-stale-confirm');
-    const refused = await readAudit(renderer, (page) => page.lineage?.refusal !== null && page.lineage?.decisions.length === 4, 'learning-audit-stale-read');
-    requireJourney(refused.lineage.refusal === AUDIT_STALE && refused.preview === null && refused.lineage.standing === 'house' &&
-      refused.lineage.decisions[0][2] === '纳入出版社经验' && JSON.stringify(refused.focus) === JSON.stringify([auditFirst, 'P', false]), 'learning-audit-stale-words', refused);
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stale-stop');
+    // The material moved after the page read it: nothing is appended, and the explorer reads the chain as it stands.
+    const refused = await readAudit(renderer, (page) => page.view === 'lineage' && page.busy === false && page.lineage?.decisions.length === 4 && page.lineage?.standing === 'house', 'learning-audit-stale-read');
+    requireJourney(refused.preview === null && refused.lineage.decisions[0][2] === '纳入出版社经验', 'learning-audit-stale-words', refused);
     const staleService = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.map((entry) => entry.choice).join('>'))`);
     requireJourney(staleService === 'book>excluded>book>house', 'learning-audit-stale-service', staleService);
 

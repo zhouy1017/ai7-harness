@@ -387,7 +387,6 @@ async function holdReanalysis(renderer, bookId, name) {
   await toLibrary(renderer, name);
   await openAnalysisOf(renderer, bookId, name);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history`);
-  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="choose-reanalyze-book"]', `${name}-choose`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="reanalyze-book"]', `${name}-prepare`);
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`);
   const showing = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId`);
