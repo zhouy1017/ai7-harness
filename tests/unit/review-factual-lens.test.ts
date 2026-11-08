@@ -489,3 +489,76 @@ it('scans the review results and evidence in ordinary mode (#1315)', async () =>
 });
 
 vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
+
+// Issue #1410 items 5 and 6: one-step batch apply with 撤销本批应用, and one-click 忽略, against the real surface.
+describe('one-step review actions (#1410)', () => {
+  const suggestion = (markId: string, ordinal: number): ReviewFindingProjection => ({ ...finding(), findingId: `rvf_${markId}`, categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语',
+    ordinal, output: 'change-suggestion', markId, replacement: '改后', quote: '原文', blockId: `blk_${String(ordinal).repeat(24)}` });
+  const annotation = (): ReviewFindingProjection => ({ ...finding(), findingId: 'rvf_note', categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语', markId: null, markStatus: null });
+  function typos(findings: ReviewFindingProjection[], status: ReviewFindingProjection['status'] = 'pending'): ReviewWorkspaceProjection {
+    const base = workspace(RUN, 'settled' as ReviewRunCategoryState, findings.length);
+    const run = base.run!;
+    return { ...base, run: { ...run, categories: [{ ...run.categories[0]!, categoryId: 'typos-and-usage', label: '错别字与规范用语', output: 'change-suggestion', batchApply: true,
+      state: 'settled' as ReviewRunCategoryState, stateLabel: '已完成', findingsCount: findings.length }], findings: findings.map((entry) => ({ ...entry, status })) } };
+  }
+  async function view(findings: ReviewFindingProjection[], extra: Partial<Record<keyof RendererApi, unknown>>) {
+    const mounted = mount();
+    Object.assign(mounted.api, extra);
+    mounted.inspectReviewWorkspace.mockImplementation(async () => typos(findings));
+    mounted.surface.refresh(); await flush();
+    return mounted;
+  }
+  const button = (root: MiniElement, action: string) => root.querySelector(`[data-review-action="${action}"]`) as MiniElement | null;
+
+  it('applies the whole batch in one click and takes it back, newest first, with 撤销本批应用', async () => {
+    const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));
+    const reverse = vi.fn(async (_input: { markId: string }) => ({ application: { effectId: 'reverse' } }));
+    const { root, status } = await view([suggestion('m1', 1), suggestion('m2', 2)], {
+      applyChangeSuggestionBatch: applyBatch, reverseAppliedChangeSuggestion: reverse, getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn(),
+    });
+    button(root, 'batch-prepare')!.click(); await flush();
+    expect(applyBatch).toHaveBeenCalledOnce();
+    expect(applyBatch).toHaveBeenCalledWith(expect.objectContaining({ markIds: ['m1', 'm2'] }));
+    expect(button(root, 'batch-confirm')).toBeNull();
+    const applied = root.querySelector('section.review-batch-applied') as MiniElement;
+    expect(applied.dataset['reviewBatchState']).toBe('applied');
+    expect(applied.textContent).toContain('已把 2 条修改建议写入稿件。');
+    button(root, 'batch-undo')!.click(); await flush();
+    expect(reverse.mock.calls.map(([input]) => input.markId)).toEqual(['m2', 'm1']);
+    expect(status).toHaveBeenLastCalledWith('已撤销本批应用的 2 条修改建议，原文已写回稿件。', 'success');
+    expect(root.querySelector('section.review-batch-applied')).toBeNull();
+  });
+
+  it('stops 撤销本批应用 at the first suggestion whose words moved on, and says how far it came', async () => {
+    const reverse = vi.fn(async (input: { markId: string }) => { if (input.markId === 'm1') throw new Error('anchor moved'); return { application: { effectId: 'reverse' } }; });
+    const outcome = vi.fn(async () => ({ state: 'not-committed' }));
+    const { root, status } = await view([suggestion('m1', 1), suggestion('m2', 2)], {
+      applyChangeSuggestionBatch: vi.fn(async () => ({ application: { effectId: 'effect' } })), reverseAppliedChangeSuggestion: reverse,
+      getManuscriptApplyOutcome: outcome, inspectApplyReceipt: vi.fn(),
+    });
+    button(root, 'batch-prepare')!.click(); await flush();
+    button(root, 'batch-undo')!.click(); await flush();
+    expect(reverse).toHaveBeenCalledTimes(2);
+    expect(outcome).toHaveBeenCalledOnce();
+    expect(status).toHaveBeenLastCalledWith('已撤销 1 条；其余 1 条的文字已经变过，不能直接撤销，可在稿件中逐条处理。', 'error');
+  });
+
+  it('ignores a finding in one click with the routine reason, and keeps 忽略并备注… for a reason of the editor\'s own', async () => {
+    const record = vi.fn(async () => typos([annotation()], 'ignored'));
+    const { root, status } = await view([annotation()], { recordReviewFindingDisposition: record });
+    expect(button(root, 'ignore-now')!.textContent).toBe('忽略');
+    expect(button(root, 'ignore')!.textContent).toBe('忽略并备注…');
+    button(root, 'ignore-now')!.click(); await flush();
+    expect(record).toHaveBeenCalledWith({ reviewRunId: RUN, findingId: 'rvf_note', disposition: 'ignored', reason: '编辑决定忽略' });
+    expect(status).toHaveBeenCalledWith(expect.any(String), 'success');
+  });
+
+  it('records the routine reason when 忽略并备注… is confirmed with the note left empty', async () => {
+    const record = vi.fn(async () => typos([annotation()], 'ignored'));
+    const { root } = await view([annotation()], { recordReviewFindingDisposition: record });
+    button(root, 'ignore')!.click(); await flush();
+    expect((root.querySelector('[data-review-field="ignore-reason"]') as MiniElement & { required?: boolean }).required).not.toBe(true);
+    button(root, 'ignore-confirm')!.click(); await flush();
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ disposition: 'ignored', reason: '编辑决定忽略' }));
+  });
+});
