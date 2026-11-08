@@ -18,7 +18,7 @@ import type {
 export const SELECTION_TASK_MENU_LABEL = '就这段发起任务…';
 export const SELECTION_TASK_TITLE = '就这段发起任务';
 export const SELECTION_TASK_FIELD = '工序';
-export const SELECTION_TASK_PREPARE = '发起任务';
+export const SELECTION_TASK_PREPARE = '开始任务';
 /**
  * What the Task is given, said before anything is prepared (TASK-002, TASK-003): the paragraph and nothing around it, read the
  * way every range Task reads it, with the plan seen before the start and no quick start.
@@ -132,7 +132,7 @@ export const SELECTION_TASK_DOCUMENT_REASON = '在交付物工具栏点击「发
 export const SELECTION_TASK_STATUS = {
   reading: '正在读取可以就这段发起的工序…',
   unreadable: '无法读取可以就这段发起的工序。',
-  choose: '选择工序后即可发起任务。',
+  choose: '已选好第一项工序，可直接开始任务，也可改选。',
   pickFirst: '请先选择一项工序。',
   gone: '所选文字所在的段落已不在当前稿件中；请重新选择。',
   preparing: '正在为任务保存修订版…',

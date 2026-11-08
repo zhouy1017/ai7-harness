@@ -698,9 +698,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     const run = (): void => {
       pendingRestore = undefined;
       if (destroyed) return;
-      const scrollId = selectionRestored ? continuity?.scrollAnchor.blockId : focusBlockId;
+      // Paging keeps the paragraph being read where it stood on screen even while the caret waits off-window
+      // (Issue #1413 cluster 2): the next window overlaps this one by half, so the reading continues without a jump.
+      const keepsAnchor = continuity !== undefined && (selectionRestored || deferMissing)
+        && view.dom.querySelector(`[data-block-id="${continuity.scrollAnchor.blockId}"]`) !== null;
+      const scrollId = keepsAnchor ? continuity?.scrollAnchor.blockId : focusBlockId;
       const target = scrollId ? view.dom.querySelector<HTMLElement>(`[data-block-id="${scrollId}"]`) : undefined;
-      if (target && continuity && selectionRestored) {
+      if (target && continuity && keepsAnchor) {
         const containerTop = options.scrollContainer.getBoundingClientRect().top;
         options.scrollContainer.scrollTop += target.getBoundingClientRect().top - containerTop - continuity.scrollAnchor.offset;
       } else if (target) {

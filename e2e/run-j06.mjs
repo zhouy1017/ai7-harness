@@ -1063,7 +1063,7 @@ async function main() {
     await openCard(renderer, versionId, first, 'reversal-card');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
-      const reverse = card.querySelector('[data-mark-action="prepare-reverse"]');
+      const reverse = card.querySelector('[data-mark-action="reverse-revision"]');
       return card.querySelector('[data-mark-state]')?.textContent === '已应用 · 之后又改过' && reverse instanceof HTMLButtonElement && reverse.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null;
     })()`, 'reversal-blocked-and-offers-resolve-conflict');

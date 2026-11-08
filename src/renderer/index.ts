@@ -44,7 +44,6 @@ import type {
   DefaultExecutionRuleReference,
   QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult,
   BaselineAnalysisUpdateRequest,
-  BookCreationReviewProjection,
   BookManuscriptAnchorProjection,
   BookRecordPresentation,
   BookSummaryFilter,
@@ -3623,52 +3622,11 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   host.replaceChildren(card);
 }
 
-function renderBookCreationReview(review: BookCreationReviewProjection): void {
-  const content = panel();
-  content.append(
-    element('p', 'section-label', '新建图书 · 复核'),
-    element('h2', undefined, '新建空图书'),
-  );
-  const identity = element('section', 'source-card');
-  const values = element('dl');
-  values.append(
-    element('dt', undefined, '书名'), element('dd', undefined, review.proposed.title),
-    element('dt', undefined, '内部编号'), element('dd', undefined, review.proposed.internalNumber ?? '未设置'),
-  );
-  identity.append(element('h3', undefined, '拟创建图书'), values, technicalDetails(
-    undefined,
-    element('dt', undefined, '拟用图书 ID'), element('dd', 'technical-identity', review.proposed.bookId),
-    element('dt', undefined, '拟用稳定标识'), element('dd', 'technical-identity', review.proposed.stableIdentity),
-  ));
-  content.append(identity);
-  if (technicalLayerVisible) content.append(listSection('将创建的记录', review.recordsToCreate));
-  content.append(listSection('不会做', technicalLayerVisible ? review.nonEffects : [
-    '不创建稿件、来源文件或导入记录，也不创建或加入书系；不决定学习准入或授权模型传输；不发稿、导出、发送、交付、发布或授予发布权限。',
-  ]));
-  const actions = element('div', 'button-row');
-  const commit = button('新建图书', 'primary', async () => {
-    commit.disabled = true;
-    setStatus('正在创建图书…', 'busy');
-    try {
-      const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
-      setStatus(result.completionLabel, 'success');
-      renderBookOverview(result.overview);
-    } catch (error) {
-      commit.disabled = false;
-      setStatus(rendererErrorMessage(error, '图书未创建。'), 'error');
-    }
-  });
-  actions.append(commit, button('取消', 'quiet', () => void initializeStartup()));
-  content.append(actions);
-  replaceScreen('book-create-review', content);
-}
-
 function renderBookCreationForm(): void {
   const content = panel();
   content.append(
-    element('p', 'section-label', '独立创建'),
+    element('p', 'section-label', '书库'),
     element('h2', undefined, '新建图书'),
-    element('p', 'lede', '先建立空图书；不会同时创建稿件、来源或工作流实例。'),
   );
   const form = element('section', 'form-row');
   const titleLabel = element('label', undefined, '书名');
@@ -3703,7 +3661,9 @@ function renderBookCreationForm(): void {
   };
   title.addEventListener('input', () => clearFieldError(title, titleError));
   internalNumber.addEventListener('input', () => clearFieldError(internalNumber, numberError));
-  const review = button('复核创建', 'primary', async () => {
+  // 新建图书 (Issue #1410 item 20): one click prepares and commits the empty Book and opens its 工作概览; the service's
+  // review digest still binds the commit to what was prepared, with no separate review page in between.
+  const create = button('新建图书', 'primary', async () => {
     clearFieldError(title, titleError);
     clearFieldError(internalNumber, numberError);
     const normalizedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -3716,27 +3676,29 @@ function renderBookCreationForm(): void {
       showFieldError(internalNumber, numberError, '内部编号不得包含控制字符，且最多 80 个字符；也可以留空。');
       return;
     }
-    review.disabled = true;
-    setStatus('正在准备空图书创建复核…', 'busy');
+    create.disabled = true;
+    setStatus('正在创建图书…', 'busy');
     try {
-      renderBookCreationReview(await window.ai7.prepareBookCreation({
+      const review = await window.ai7.prepareBookCreation({
         title: normalizedTitle,
         internalNumber: normalizedNumber || null,
-      }));
-      setStatus('图书创建复核已准备', 'success');
+      });
+      const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
+      setStatus(result.completionLabel, 'success');
+      renderBookOverview(result.overview);
     } catch (error) {
-      review.disabled = false;
+      create.disabled = false;
       if (hasErrorCode(error, 'TITLE_INVALID')) {
         showFieldError(title, titleError, rendererErrorMessage(error, '请修正书名。'));
       } else if (hasErrorCode(error, 'INTERNAL_NUMBER_INVALID') || hasErrorCode(error, 'INTERNAL_NUMBER_CONFLICT')) {
         showFieldError(internalNumber, numberError, rendererErrorMessage(error, '请修正内部编号。'));
       } else {
-        setStatus(rendererErrorMessage(error, '无法准备图书创建复核。'), 'error');
+        setStatus(rendererErrorMessage(error, '图书未创建。'), 'error');
       }
     }
   });
   const actions = element('div', 'button-row');
-  actions.append(review, button('取消', 'quiet', () => void initializeStartup()));
+  actions.append(create, button('取消', 'quiet', () => void initializeStartup()));
   form.append(titleLabel, title, titleError, numberLabel, internalNumber, numberError, actions);
   content.append(form);
   replaceScreen('book-create', content);

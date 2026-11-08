@@ -257,8 +257,6 @@ async function createEmptyBook(renderer, title, name) {
   await click(renderer, '新建图书', `${name}-open`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
   await fill(renderer, '#empty-book-title', title, `${name}-title`);
-  await click(renderer, '复核创建', `${name}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
   await click(renderer, '新建图书', `${name}-commit`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${name}-created`, 120_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);

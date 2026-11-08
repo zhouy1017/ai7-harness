@@ -1869,8 +1869,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     await clickExactButton(renderer, '新建图书', 'word-empty-book-open');
     await waitFor(renderer, `document.querySelector('#empty-book-title')`, 'word-empty-book-form');
     await assertRenderer(renderer, `(() => { const title = document.querySelector('#empty-book-title'); title.value = 'Word 首稿图书'; title.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'word-empty-book-title');
-    await clickExactButton(renderer, '复核创建', 'word-empty-book-review');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'word-empty-book-reviewed');
+    // Issue #1410 item 20: 新建图书 on the form prepares and commits in one click.
     await clickExactButton(renderer, '新建图书', 'word-empty-book-commit');
     await waitFor(renderer, `document.querySelector('.book-overview[data-manuscript-state="empty"]')`, 'word-empty-book-created');
     await clickExactButton(renderer, '导入首份稿件', 'word-empty-book-stage');
@@ -1994,7 +1993,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'help-library-return');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
-  await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');
+  await clickExactButton(renderer, '新建图书', 'empty-book-missing-title');
   await assertRenderer(
     renderer,
     `(() => { const title = document.querySelector('#empty-book-title'); const error = document.querySelector('#empty-book-title-error'); const number = document.querySelector('#empty-book-number'); return title?.getAttribute('aria-invalid') === 'true' && title.getAttribute('aria-describedby') === error?.id && error?.textContent.includes('请输入书名') && document.activeElement === title && title.value === '' && number?.value === ''; })()`,
@@ -2005,7 +2004,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = ${JSON.stringify(title)}; title.dispatchEvent(new Event('input')); number.value = 'BAD' + String.fromCharCode(1); number.dispatchEvent(new Event('input')); return true; })()`,
     'empty-book-invalid-number-values',
   );
-  await clickExactButton(renderer, '复核创建', 'empty-book-invalid-number');
+  await clickExactButton(renderer, '新建图书', 'empty-book-invalid-number');
   await assertRenderer(
     renderer,
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); const error = document.querySelector('#empty-book-number-error'); return number?.getAttribute('aria-invalid') === 'true' && number.getAttribute('aria-describedby') === error?.id && error?.textContent.includes('内部编号') && document.activeElement === number && title?.value === ${JSON.stringify(title)} && number.value.length === 4; })()`,
@@ -2016,13 +2015,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const number = document.querySelector('#empty-book-number'); if (!number) return false; number.value = ${JSON.stringify(internalNumber)}; number.dispatchEvent(new Event('input')); return !number.hasAttribute('aria-invalid'); })()`,
     'empty-book-form-values',
   );
-  await clickExactButton(renderer, '复核创建', 'empty-book-review-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-book-review');
-  await assertRenderer(
-    renderer,
-    `(() => { const screen = document.querySelector('[data-screen="book-create-review"]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && screen.textContent.includes('拟用稳定标识') && !screen.querySelector('.dimension-list') && screen.textContent.includes('不创建稿件、来源、修订版、工作流实例或导入记录'); })()`,
-    'empty-book-review-contract',
-  );
+  // Issue #1410 item 20: no review page between the form and the new Book's 工作概览.
   await clickExactButton(renderer, '新建图书', 'empty-book-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-book-overview');
   await assertRenderer(
@@ -2069,7 +2062,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = '另一本书'; title.dispatchEvent(new Event('input')); number.value = ${JSON.stringify(internalNumber)}; number.dispatchEvent(new Event('input')); return true; })()`,
     'duplicate-number-values',
   );
-  await clickExactButton(renderer, '复核创建', 'duplicate-number-review');
+  await clickExactButton(renderer, '新建图书', 'duplicate-number-review');
   await waitFor(
     renderer,
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); const error = document.querySelector('#empty-book-number-error'); return number?.getAttribute('aria-invalid') === 'true' && number.getAttribute('aria-describedby') === error?.id && error?.textContent.includes('内部编号') && document.activeElement === number && title?.value === '另一本书' && number.value === ${JSON.stringify(internalNumber)}; })()`,
@@ -3394,8 +3387,6 @@ async function main() {
       `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = '来源材料现有空图书'; title.dispatchEvent(new Event('input')); number.value = 'SRC-EMPTY-39'; number.dispatchEvent(new Event('input')); return true; })()`,
       'source-empty-book-fields',
     );
-    await clickExactButton(renderer, '复核创建', 'source-empty-book-review');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'source-empty-book-review-screen');
     await clickExactButton(renderer, '新建图书', 'source-empty-book-commit');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'source-empty-book-overview');
     const sourceEmptyBookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);

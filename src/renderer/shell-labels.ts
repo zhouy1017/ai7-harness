@@ -24,7 +24,7 @@ export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination;
   { key: 'series', label: '书系', icon: 'i-series' },
   { key: 'knowledge', label: '知识库', icon: 'i-kb' },
   { key: 'quality', label: '质量与学习', icon: 'i-learn' },
-  { key: 'global-agent', label: '全域智能体', icon: 'i-learn' },
+  { key: 'global-agent', label: '全域智能体', icon: 'i-agent' },
 ]);
 
 /** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */
@@ -55,7 +55,7 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
  * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
  * section, and nothing opens it on its own.
  */
-export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-ms', state: 'agent-workspace' } as const);
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-workspace', state: 'agent-workspace' } as const);
 
 export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
 

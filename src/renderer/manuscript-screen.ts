@@ -47,6 +47,7 @@ import {
   milestoneFormBlockers,
   milestoneSaveReason,
 } from './deliverables-labels.js';
+import { DEFAULT_MILESTONE_PURPOSE, defaultMilestoneLabel } from './milestone-defaults.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 import { focusMode, mountEditorModes, type EditorModes } from './editor-modes.js';
 import { mountProtectionSurface, type ProtectionSurface } from './editor-protection.js';
@@ -349,7 +350,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   journal.dataset['editorTechnical'] = 'true';
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
-  meta.append(revision, position, recoveredState);
+  // The toolbar's left side says where the reader is and how long the text is (Issue #1413 cluster 2).
+  const wordCountWords = (windowNow: ManuscriptWindowProjection): string => `${windowNow.position.totalCharacters.toLocaleString('zh-CN')} 字`;
+  const wordCount = element('span', 'editor-word-count', wordCountWords(initialWindow));
+  meta.append(revision, position, wordCount, recoveredState);
   // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;
@@ -553,10 +557,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     replacementReview,
   );
 
-  // 保存为里程碑版本 (V2-UX-MILE-003; interaction spec › Milestone rules): 标签, an unselected purpose card set
-  // — the four frozen purposes and 自行输入, which asks for the editor's own words — and an optional 说明.
-  // Nothing is preselected, and 保存里程碑版本 stays unavailable, its reason in words beside it, until a label
-  // and a purpose are given. A purpose states the next use only and grants nothing (MILE-009).
+  // 保存为里程碑版本 (V2-UX-MILE-003; Issue #1410 item 21): 标签, the purpose cards — the four frozen purposes and
+  // 自行输入, which asks for the editor's own words — and an optional 说明. 阶段留档 is chosen to begin with and an empty
+  // 标签 saves under a generated name, so opening the form and pressing 保存里程碑版本 is one step; every field stays
+  // editable. A purpose states the next use only and grants nothing (MILE-009).
   const milestoneSection = element('details', 'navigator-section milestone-section');
   const milestoneSummary = element('summary', undefined, SAVE_MENU_WORDS.milestone);
   const milestoneLabel = element('label', undefined, MILESTONE_FORM_WORDS.label);
@@ -573,6 +577,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     radio.type = 'radio';
     radio.name = 'milestone-purpose';
     radio.value = kind;
+    radio.checked = kind === DEFAULT_MILESTONE_PURPOSE;
     option.append(radio, element('span', undefined, MILESTONE_PURPOSE_LABELS[kind]));
     purposeOptions.append(option);
     return radio;
@@ -600,8 +605,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const checked = purposeRadios.find((radio) => radio.checked);
     return checked === undefined ? null : checked.value as MilestonePurposeKind;
   };
+  // An empty 标签 takes the purpose and the minute it is saved, e.g. 「阶段留档 · 2026-11-08 14:05」.
+  const milestoneLabelValue = (): string => {
+    const typed = milestoneName.value.trim();
+    if (typed.length > 0) return milestoneName.value;
+    const purpose = chosenPurpose();
+    const words = purpose === null ? MILESTONE_PURPOSE_LABELS[DEFAULT_MILESTONE_PURPOSE]
+      : purpose === 'custom' && customPurpose.value.trim().length > 0 ? customPurpose.value.trim().slice(0, 40) : MILESTONE_PURPOSE_LABELS[purpose];
+    return defaultMilestoneLabel(words, new Date());
+  };
   const milestoneBlockers = (): string[] =>
-    milestoneFormBlockers({ label: milestoneName.value, purposeKind: chosenPurpose(), customWords: customPurpose.value });
+    milestoneFormBlockers({ label: milestoneLabelValue(), purposeKind: chosenPurpose(), customWords: customPurpose.value });
   // Whether the form is complete, and why not; it reads nothing and writes nothing.
   const syncMilestoneForm = (busy: boolean): void => {
     const custom = chosenPurpose() === 'custom';
@@ -613,11 +627,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     milestoneReasonLabel.hidden = reason === null;
     milestoneReasonPrefix.textContent = reason === null ? '' : ' · ';
     milestoneButton.disabled = busy || reason !== null;
+    milestoneName.placeholder = milestoneLabelValue();
   };
-  // Each milestone starts again from an unselected purpose (interaction spec › Milestone rules).
+  // Each milestone starts again from 阶段留档 and a generated 标签.
   const resetMilestoneForm = (busy: boolean): void => {
     milestoneName.value = '';
-    for (const radio of purposeRadios) radio.checked = false;
+    for (const radio of purposeRadios) radio.checked = radio.value === DEFAULT_MILESTONE_PURPOSE;
     customPurpose.value = '';
     note.value = '';
     syncMilestoneForm(busy);
@@ -785,7 +800,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     editorialMarks?.refreshComments(open);
   }
   const edgeEntries = element('div', 'edge-entries');
-  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-nav']] as const) {
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
     const badge = element('span', 'edge-badge');
     badge.setAttribute('aria-hidden', 'true');
@@ -1103,6 +1118,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     position.textContent = positionWords(currentWindow);
     position.setAttribute('title', currentWindow.position.structureLabel ?? positionWords(currentWindow));
     revision.textContent = revisionWords(currentWindow);
+    wordCount.textContent = wordCountWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
     editorHost.dataset['journalSequence'] = String(currentWindow.journalSequence);
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
@@ -2242,7 +2258,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const blockers = milestoneBlockers();
     if (purposeKind === null || blockers.length > 0) {
       setStatus(milestoneSaveReason(blockers) ?? '里程碑未保存。', 'error');
-      (milestoneName.value.trim() === '' ? milestoneName : purposeKind === null ? purposeRadios[0]! : customPurpose).focus();
+      (purposeKind === null ? purposeRadios[0]! : customPurpose).focus();
       return;
     }
     try {
@@ -2252,7 +2268,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         return api.saveMilestone({
           manuscriptId: binding.manuscriptId,
           branchId: binding.branchId,
-          label: milestoneName.value,
+          label: milestoneLabelValue(),
           purposeKind,
           purpose: purposeKind === 'custom' ? customPurpose.value : null,
           note: note.value,
@@ -2534,6 +2550,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       analysisBadge.hidden = !rail.uncovered?.length;
       analysisBadge.title = '分析未覆盖处';
       updateEdgeName(analysisEntry);
+      // 批注's badge counts the marks the rail carries (Issue #1413 cluster 2); a truncated rail says 「N+」.
+      const commentsBadge = commentsEntry.querySelector<HTMLElement>('.edge-badge')!;
+      commentsBadge.dataset['count'] = `${rail.marks.length}${rail.marksTruncated ? '+' : ''}`;
+      commentsBadge.hidden = rail.marks.length === 0;
+      commentsBadge.title = '待处理的批注与修改建议';
+      updateEdgeName(commentsEntry);
     },
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });

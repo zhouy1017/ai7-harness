@@ -340,8 +340,6 @@ async function createEmptyBook(renderer, title, name) {
   await click(renderer, '新建图书', `${name}-open`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
   await fill(renderer, '#empty-book-title', title, `${name}-title`);
-  await click(renderer, '复核创建', `${name}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
   await click(renderer, '新建图书', `${name}-commit`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${name}-created`, 120_000);
   const created = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);
@@ -1597,15 +1595,13 @@ async function main() {
     const position = context?.[5] ?? null;
     const offered = new Map(composer?.options ?? []);
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
-      composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
+      // Issue #1410 item 17: the first offered Task is chosen, and the button says 开始任务.
+      composer.chosen !== '' && composer.chosen === composer.options[1]?.[0] && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
       offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
       // #1401: a first 事实核查 may read just this selection, so it is offered beside the other range reviews.
-      offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '发起任务' &&
+      offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '开始任务' &&
       composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
-    // Nothing is prepared before a Task is chosen.
-    await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-submit-empty');
-    await waitFor(renderer, `window.__j16.composer()?.querySelector('.editorial-mark-problem')?.textContent === '请填写「工序」。' && document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-pick-first', 10_000);
 
     at('selection-task-review-prepare');
     // 审阅这段 · 「情节逻辑与前后一致」: 准备任务 prepares a 审阅 of 当前选区 — that one paragraph, kept by its identity — and its plan
