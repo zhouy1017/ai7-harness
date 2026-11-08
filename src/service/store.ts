@@ -1,3 +1,4 @@
+import { commitReplacementAsRevisions } from './replacement-revisions.js';
 import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
@@ -13351,11 +13352,13 @@ export class EditorialStore {
 
   /**
    * 全部替换 as per-occurrence revision cards (Issue #1411): Lane 3A's `commitReplacementAsRevisions` in
-   * `./replacement-revisions.js` with `{ bounded: this.#bounded, marks: this.#editorialMarks, apply: this.#manuscriptApply }`.
-   * Until that owner is composed into this branch the operation refuses, writing nothing.
+   * `./replacement-revisions.js`, on the authority connection the marks and the Apply records write through, so every
+   * occurrence's revision is written in one transaction or none is.
    */
-  commitReplacementRevisions(_input: CommitReplacementRevisionsInput): ReplacementRevisionsProjection {
-    throw new StoreError('REPLACEMENT_REVISIONS_UNAVAILABLE', '这次运行还不能把全部替换记为修订卡片；稿件没有改动。');
+  commitReplacementRevisions(input: CommitReplacementRevisionsInput): ReplacementRevisionsProjection {
+    return this.#markCall(() => this.#boundedCall(() => commitReplacementAsRevisions({
+      db: this.#authority, manuscript: this.#boundedAuthority, marks: this.#editorialMarks, apply: this.#manuscriptApply,
+    }, input)));
   }
 
   /** 🔒 锁定 (Issue #1412): a manuscript branch's AI edit locks. */

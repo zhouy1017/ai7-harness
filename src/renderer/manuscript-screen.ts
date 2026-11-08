@@ -18,7 +18,6 @@ import type {
   ManuscriptRailProjection,
   OutlineProjection,
   ReplacementPreviewProjection,
-  ReplacementCommitProjection,
   SearchResultsProjection,
   ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
@@ -2031,10 +2030,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
   }
 
-  // TEMPORARY until Lane 3B's protocol 200 lands commitReplacementRevisions on RendererApi (Issue #1411); then `api` itself.
-  const replacementRevisions = (): { commitReplacementRevisions(input: { previewId: string; windowStartBlockId: string }): Promise<Omit<ReplacementCommitProjection, 'committedCount'> & { replaced: number; markIds: ReadonlyArray<string> }> } =>
-    api as unknown as ReturnType<typeof replacementRevisions>;
-
   /** The replacement as it stands now, or why it cannot be sent. */
   const replacementWords = (): { query: string; replacement: string } | null => {
     const query = searchInput.value.normalize('NFC');
@@ -2131,7 +2126,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         const validated = await runOwnedServiceJob(() => api.startReplacementCommit({ previewId: frozenId }));
         if (validated.state === 'cancelled') throw new Error('替换已在写入前取消；稿件未发生替换。');
         if (validated.kind !== 'replacement' || validated.result !== null) throw new Error('冻结匹配复核结果绑定无效。');
-        return replacementRevisions().commitReplacementRevisions({ previewId: frozenId, windowStartBlockId: editor!.currentWindow().blocks[0]!.blockId });
+        return api.commitReplacementRevisions({ previewId: frozenId, windowStartBlockId: editor!.currentWindow().blocks[0]!.blockId });
       }, async (result) => {
         committed = true;
         await invalidateSearchState('稿件已替换；先前搜索结果和返回位置已失效。', result.previewId);

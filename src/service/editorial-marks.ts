@@ -51,6 +51,7 @@ import {
   resolvedFromOf,
 } from './proposal-conflicts.js';
 import { DecisionFeedbackLedger } from './decision-feedback.js';
+import { aiLocksOfWindow } from './ai-edit-locks.js';
 
 /**
  * Editorial Marks and the Proposal Change Items behind 修改建议 (Issue #407, schema revision 22).
@@ -1825,6 +1826,7 @@ export class EditorialMarkStore {
     return {
       markId,
       ...marksOfWindow(this.#db, binding.branchId, integer(start.position)),
+      ...aiLocksOfWindow(this.#db, binding.branchId, integer(start.position)),
       card: live === undefined ? null : this.card(binding.manuscriptId, binding.branchId, markId),
     };
   }
