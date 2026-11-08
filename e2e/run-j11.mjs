@@ -784,7 +784,14 @@ async function openMarkCard(renderer, kind, blockId, name) {
   while (Date.now() < deadline) {
     await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)}).length > 0 && window.__j11.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
+    // ✎ 已改 (Issue #1411): a click on exact applied words brings their card forward in the 批注栏; the floating card opens from
+    // the mark's own menu (打开修改建议).
+    if (await renderer.evaluate(`(() => { const mark = window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0]; return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`)) {
+      await assertRenderer(renderer, `window.__j11.rightClick(window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0])`, `${name}-menu`);
+      const menu = Date.now() + 1_500;
+      while (Date.now() < menu && !(await renderer.evaluate(`window.__j11.item('open-card')?.disabled === false`))) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      await renderer.evaluate(`window.__j11.item('open-card')?.click()`);
+    } else await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
     const settle = Date.now() + 1_500;
     while (Date.now() < settle) {
       if (await renderer.evaluate(`window.__j11.card()?.dataset.markKind === ${JSON.stringify(kind)}`)) return;
