@@ -182,6 +182,9 @@ describe('就选中部分让 AI 修改: the scoped splice guard', () => {
     const now = allBlocks(target);
     const fresh = [a, b, c].map((block) => ({ ...block, text: now.get(block.blockId)!.text, digest: now.get(block.blockId)!.digest })) as [Block, Block, Block];
     expect(() => frozen(base(target, '再改一次', spanOver(fresh)))).toThrow(expect.objectContaining({ code: 'AI_EDIT_SCOPE_LOCKED' }));
+    // With no model route at all the refusal is still the lock's: the route is never asked and nothing is sent.
+    const unrouted = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: null });
+    expect(() => prepareScopedEdit(unrouted, store, book.bookId, base(target, '再改一次', spanOver(fresh)))).toThrow(expect.objectContaining({ code: 'AI_EDIT_SCOPE_LOCKED' }));
     // An AI7 suggestion made before the lock (here: a scoped-edit card taken back, then re-applied) is refused onto the locked block.
     store.reverseAppliedChangeSuggestion({ ...target, windowStartBlockId: a.blockId, markId: result.markIds[0]!, clientEffectId: randomUUID() });
     expect(() => store.applyChangeSuggestion({ ...target, windowStartBlockId: a.blockId, markId: result.markIds[0]!, clientEffectId: randomUUID(),

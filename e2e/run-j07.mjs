@@ -96,13 +96,21 @@ const SCOPED_HELPERS = `(() => {
       return true;
     },
     firstText: () => Array.from(editor()?.querySelectorAll(':scope > p[data-block-id]') ?? []).find((node) => (node.textContent ?? '').length >= 8)?.dataset.blockId ?? null,
-    select: (id, from, to) => {
+    // The selection a reader makes, settled once the editor has read it: the editor reads the page's selection in its own
+    // selectionchange listener, registered before this one, so the event this waits for has been read by then. A selection
+    // equal to the one already there fires no event, and is already read. Bounded at two seconds.
+    select: async (id, from, to) => {
       const root = block(id); if (!root) return false;
       editor().focus();
       const start = point(root, from); const end = point(root, to); if (!start || !end) return false;
       const range = document.createRange(); range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]);
-      const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-      return selection.toString().length === to - from;
+      const read = new Promise((resolve) => { const done = () => resolve(true); document.addEventListener('selectionchange', done, { once: true }); setTimeout(() => { document.removeEventListener('selectionchange', done); resolve(false); }, 2000); });
+      const selection = getSelection(); const same = selection.rangeCount === 1 && selection.getRangeAt(0).compareBoundaryPoints(Range.START_TO_START, range) === 0 && selection.getRangeAt(0).compareBoundaryPoints(Range.END_TO_END, range) === 0;
+      selection.removeAllRanges(); selection.addRange(range);
+      const settled = (await read) || same;
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      const now = getSelection();
+      return settled && now.rangeCount === 1 && root.contains(now.anchorNode) && now.toString().length === to - from;
     },
     // The right click comes once the editor has read the selection, a task after it was made, as a reader's would.
     rightClick: () => {
@@ -3080,7 +3088,6 @@ async function main() {
     await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')==='true') nav.click(); return window.__j07Scoped.locate(); })()`, 'scoped-navigation-closed');
     // 🔒 the next paragraph from the selection menu: it is drawn locked, and the request below does not change because of it.
     await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-select');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-lock-menu');
     await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-lock-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-lock-item');
@@ -3094,7 +3101,6 @@ async function main() {
     }
     await assertRenderer(renderer, `window.__j07Scoped.snapshot()`, 'scoped-snapshot');
     await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-select');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-edit-menu');
     await waitFor(renderer, `window.__j07Scoped.menuSays(window.__j07Scoped.state.to - window.__j07Scoped.state.from)`, 'scoped-edit-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false`, 'scoped-edit-item');
@@ -3116,7 +3122,6 @@ async function main() {
     await assertRenderer(renderer, `(() => { const item=Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]')).find((entry)=>entry.textContent.includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})); if(!(item instanceof HTMLElement))return false; item.click(); return true; })()`, 'scoped-derivative-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] [data-testid="manuscript-editor"] > p[data-block-id]') !== null && window.__j07Scoped.firstText() !== null`, 'scoped-derivative-ready', 120_000);
     await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-select');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-derivative-menu');
     await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-derivative-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false && window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-derivative-entries');
