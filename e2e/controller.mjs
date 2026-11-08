@@ -1078,6 +1078,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
     'comments-inline-apply',
+    'editor-revision',
     'selected-fast-text-scope-refusal',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',

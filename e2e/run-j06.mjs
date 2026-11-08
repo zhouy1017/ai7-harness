@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 // J-06 (Issue #57, plan slice S22; ADR 0085): 稿件冲突 of a single 修改建议. An editor types inside the words
 // a suggestion would replace; the suggestion says 原文已变, 接受并应用 is blocked, and 解决冲突… opens 稿件冲突
@@ -650,7 +650,7 @@ async function suggest(renderer, blockId, proposedText, rationale, name) {
 async function typeAt(renderer, blockId, offset, text, name) {
   if (await renderer.evaluate(`window.__j06.card() !== null || window.__j06.menu() !== null`)) await press(renderer, 'Escape');
   await waitFor(renderer, `window.__j06.card() === null && window.__j06.menu() === null`, `${name}-card-closed`, 10_000);
-  await assertRenderer(renderer, `window.__j06.place(${JSON.stringify(blockId)}, ${offset}, ${offset}) && document.execCommand('insertText', false, ${JSON.stringify(text)})`, `${name}-typed`);
+  await assertRenderer(renderer, `window.__j06.place(${JSON.stringify(blockId)}, ${offset}, ${offset}) && ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(text)})`, `${name}-typed`);
   await settled(renderer, `${name}-settled`);
 }
 

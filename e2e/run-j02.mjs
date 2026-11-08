@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -580,7 +580,7 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
       if (!selection) return false;
       selection.removeAllRanges();
       selection.addRange(range);
-      if (!document.execCommand('insertText', false, ${JSON.stringify(suffix)})) return false;
+      if (!(${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(suffix)}))) return false;
       const dirty = await dirtyReady;
       const liveBlock = Array.from(editor.children).find((item) => item.getAttribute('data-block-id') === blockId);
       if (!dirty || (save.dataset.editorPersistence === 'confirmed') || !(liveBlock instanceof HTMLElement) || liveBlock.textContent !== before + ${JSON.stringify(suffix)} ||
@@ -658,7 +658,7 @@ async function assertSupportingOverlays(renderer) {
 
 async function clickButton(renderer, label, location) {
   if (label === '向前浏览' || label === '向后浏览') await assertRenderer(renderer, manuscriptBoundary(label), location);
-  if (label === '预览替换') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
+  if (label.startsWith('全部替换') || label === '替换当前处') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
@@ -1050,6 +1050,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7BeforeForward`, 'forward-window-resolved');
   await assertRenderer(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; globalThis.__ai7DeferredWindowText = editor.textContent; globalThis.__ai7DeferredJournal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; return editor.getAttribute('contenteditable') === 'false' && editor.getAttribute('aria-readonly') === 'true' && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && !document.querySelector('[data-block-id="' + expected.blockId + '"]') && !document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); })()`, 'forward-non-overlap-readonly-endpoints-unrendered');
   await waitFor(renderer, `document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'forward-non-overlap-focus-continuity');
+  await renderer.evaluate(DIRECT_EDIT);
   await renderer.send('Input.insertText', { text: '拒' });
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return editor?.getAttribute('contenteditable') === 'false' && editor.getAttribute('aria-readonly') === 'true' && editor.textContent === globalThis.__ai7DeferredWindowText && ${MANUSCRIPT_JOURNAL_SEQUENCE} === globalThis.__ai7DeferredJournal && document.activeElement === editor; })()`, 'forward-non-overlap-insert-blocked');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
@@ -1060,20 +1061,17 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'back-non-overlap-selection-continuity',
   );
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-  await assertRenderer(renderer, `document.querySelectorAll('.outline-list button').length === 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结构')?.hidden`, 'outline-first-page-bounded');
-  await assertRenderer(renderer, `(() => { const rows=[...document.querySelectorAll('.outline-list button')];return rows.length>0&&rows.every((row,index)=>{const title=row.querySelector('.outline-title');const range=document.createRange();range.selectNodeContents(title);return row.clientHeight>0&&getComputedStyle(title).textOverflow==='ellipsis'&&range.getBoundingClientRect().height<=row.clientHeight+1&&(index===0||row.getBoundingClientRect().top>=rows[index-1].getBoundingClientRect().bottom-1);});})()`, 'outline-long-headings-do-not-overlap');
-  await clickButton(renderer, '下一组结构', 'outline-next-page');
-  await waitFor(renderer, `document.querySelectorAll('.outline-list button').length > 0 && document.querySelectorAll('.outline-list button').length <= 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '上一组结构')?.hidden`, 'outline-next-page-bounded');
-  await clickButton(renderer, '上一组结构', 'outline-previous-page');
-  await waitFor(renderer, `document.querySelectorAll('.outline-list button').length === 64`, 'outline-previous-page-bounded');
-  await clickButton(renderer, '下一组结构', 'outline-last-page');
-  await waitFor(
-    renderer,
-    `(() => { const items = document.querySelectorAll('.outline-list button'); const buttons = Array.from(document.querySelectorAll('button')); const previous = buttons.find((button) => button.textContent === '上一组结构'); const next = buttons.find((button) => button.textContent === '下一组结构'); return items.length > 0 && items.length <= 64 && previous instanceof HTMLButtonElement && !previous.hidden && next instanceof HTMLButtonElement && next.hidden; })()`,
-    'outline-last-page-bounded',
-  );
-  await assertRenderer(renderer, `(() => { const items = document.querySelectorAll('.outline-list button'); const target = items[items.length - 1]; if (!target) return false; target.click(); return true; })()`, 'outline-jump');
-  await waitFor(renderer, `${MANUSCRIPT_RAIL_POSITION} === 999980`, 'outline-exact-resolve');
+  // 大纲 (Issue #1409): every heading of the Book at once — no paging — at the panel's height, each title clamped in its row.
+  await assertRenderer(renderer, `document.querySelectorAll('.outline-list .outline-entry').length > 64 && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '下一组结构' || button.textContent === '上一组结构')`, 'outline-whole-book');
+  await assertRenderer(renderer, `(() => { const rows=[...document.querySelectorAll('.outline-list .outline-entry')];return rows.length>0&&rows.every((row,index)=>{const title=row.querySelector('.outline-title');return row.clientHeight>0&&getComputedStyle(title).textOverflow==='ellipsis'&&title.getBoundingClientRect().height<=row.clientHeight+1&&(index===0||row.getBoundingClientRect().top>=rows[index-1].getBoundingClientRect().bottom-1);});})()`, 'outline-long-headings-do-not-overlap');
+  // Its own filter: Enter moves to a chapter it leaves and never starts a whole-manuscript search.
+  await assertRenderer(renderer, `(() => { const rows=[...document.querySelectorAll('.outline-list .outline-entry')]; const title=rows.at(-1)?.querySelector('.outline-title')?.textContent; const filter=document.querySelector('.outline-filter-input'); if(!title||!(filter instanceof HTMLInputElement))return false; filter.focus(); filter.value=title; filter.dispatchEvent(new Event('input',{bubbles:true})); const shown=[...document.querySelectorAll('.outline-list .outline-entry')]; return shown.length>0 && shown.length<rows.length && shown.every((row)=>row.querySelector('.outline-title')?.textContent.includes(title)); })()`, 'outline-filter');
+  await press(renderer, 'Enter');
+  await waitFor(renderer, `!document.querySelector('.outline-section')?.hidden && document.querySelector('.search-section')?.hidden && document.querySelector('.search-section .field-note')?.textContent === '查找范围：全稿。' && document.querySelector('.outline-list .outline-entry[data-filter-cursor="true"]') !== null && document.activeElement?.classList.contains('outline-filter-input')`, 'outline-filter-enter-stays-in-outline');
+  await assertRenderer(renderer, `(() => { const filter=document.querySelector('.outline-filter-input'); filter.value=''; filter.dispatchEvent(new Event('input',{bubbles:true})); return document.querySelectorAll('.outline-list .outline-entry').length > 64; })()`, 'outline-filter-cleared');
+  // The jump is asked again while the filter's own arrival still holds the window, as a reader clicking twice would.
+  await waitFor(renderer, `(() => { if (${MANUSCRIPT_RAIL_POSITION} === 999980) return true; const items = document.querySelectorAll('.outline-list .outline-entry'); items[items.length - 1]?.click(); return false; })()`, 'outline-exact-resolve');
+  await waitFor(renderer, `[...document.querySelectorAll('.outline-list .outline-entry')].at(-1)?.getAttribute('aria-current') === 'location' && document.querySelectorAll('.outline-list [aria-current="location"]').length === 1`, 'outline-current-chapter');
   at('cooperative-position-stabilize');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await assertRenderer(renderer, `${MANUSCRIPT_RAIL_POSITION} === 999980`, 'outline-exact-stable');
@@ -1162,6 +1160,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     })()`,
     'sustained-first-block-selection-ready',
   );
+  await renderer.evaluate(DIRECT_EDIT);
   await renderer.send('Input.insertText', { text: firstCooperativeEdit });
   await waitForChecks(
     renderer,
@@ -1220,6 +1219,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     })()`,
     'sustained-second-block-selection-ready',
   );
+  await renderer.evaluate(DIRECT_EDIT);
   await renderer.send('Input.insertText', { text: secondCooperativeEdit });
   await waitForChecks(
     renderer,
@@ -1325,11 +1325,12 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await fill(renderer, '#manuscript-search', OVERLAP_QUERY, 'overlap-search-fill');
   await clickButton(renderer, '查找全稿', 'overlap-search-start');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 1 处')`, 'overlap-leftmost-nonoverlap', 120_000);
-  await fill(renderer, '#manuscript-replacement', '界', 'dismiss-preview-fill');
-  await clickButton(renderer, '预览替换', 'dismiss-preview-start');
-  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'true'`, 'dismiss-preview-reviewing');
-  await clickButton(renderer, '取消并关闭替换预览', 'dismiss-preview');
-  await waitFor(renderer, `document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && document.querySelector('[data-toast]')?.textContent.includes('稿件未发生替换')`, 'dismiss-preview-reclaimed');
+  // 查找 (Issue #1409): the matches alone — no 纳入替换 — each query occurrence marked, the hit count on 导航 and nowhere else.
+  await assertRenderer(renderer, `(() => { const rows=[...document.querySelectorAll('.search-result')]; const badge=document.querySelector('[data-edge-entry="navigation"] .edge-badge'); return rows.length===1 && rows.every((row)=>row.querySelector('.match-inclusion')?.hidden===true) && [...document.querySelectorAll('[data-replace-action]')].every((control)=>control.hidden) && document.querySelector('.search-replace-row')?.hidden===true && rows[0].querySelector('mark.search-match-highlight')?.textContent===${JSON.stringify(OVERLAP_QUERY)} && badge?.hidden===false && badge.dataset.count==='1' && badge.title==='查找命中 1 处'; })()`, 'find-mode-matches-only');
+  await assertRenderer(renderer, `(() => { const input=document.querySelector('#manuscript-search'); input.focus(); return document.activeElement===input; })()`, 'find-enter-focus');
+  await press(renderer, 'Enter');
+  await waitFor(renderer, `document.querySelector('.search-match-position')?.textContent==='1 / 1' && document.querySelector('.search-result')?.dataset.activeMatch==='true' && document.activeElement?.id==='manuscript-search' && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden`, 'find-enter-takes-match');
+  await assertRenderer(renderer, `(() => { Array.from(document.querySelectorAll('.navigation-modes button')).find((button) => button.textContent === '替换')?.click(); const find=document.querySelector('.search-find-row'); const replace=document.querySelector('.search-replace-row'); return replace?.hidden===false && find?.nextElementSibling===replace && document.querySelector('.match-inclusion')?.hidden===false && [...document.querySelectorAll('[data-replace-action]')].every((control)=>!control.hidden); })()`, 'replace-mode-fields-adjacent');
 
   at('bounded-exclusions');
   await fill(renderer, '#manuscript-search', EXCLUSION_TEXT, 'exclusion-search-fill');
@@ -1356,10 +1357,9 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'exclusion-cap-and-retain-one',
   );
   await fill(renderer, '#manuscript-replacement', '边界保留校验', 'exclusion-replacement-fill');
-  await clickButton(renderer, '预览替换', 'exclusion-preview');
-  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.replacement-review')?.textContent.includes('纳入 1 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1000 处')`, 'exclusion-preview-exact', 120_000);
-  await clickButton(renderer, '取消并关闭替换预览', 'exclusion-preview-dismiss');
-  await waitFor(renderer, `document.querySelector('.replacement-review')?.hidden`, 'exclusion-preview-dismissed');
+  await clickButton(renderer, '全部替换（1 处）', 'exclusion-replace-all');
+  await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.includes('已替换 1 处')`, 'exclusion-replaced-exactly-one', 120_000);
+  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === 7`, 'exclusion-replacement-journal');
 
   at('search-replace');
   await fill(renderer, '#manuscript-search', SEARCH_TEXT, 'search-fill');
@@ -1399,17 +1399,14 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await waitFor(renderer, `document.querySelectorAll('.search-result').length === 24`, 'search-previous-results');
   await assertRenderer(renderer, `(() => { const result = document.querySelector('.search-result'); const include = result?.querySelector('input[type="checkbox"]'); const context = result?.querySelector('.search-result-context')?.textContent; if (!include || !context || !include.dataset.matchId) return false; globalThis.__ai7ExcludedContext = context; globalThis.__ai7ExcludedMatchId = include.dataset.matchId; include.click(); return !include.checked; })()`, 'replacement-exclusion');
   await fill(renderer, '#manuscript-replacement', REPLACEMENT_TEXT, 'replacement-fill');
-  await clickButton(renderer, '预览替换', 'replacement-preview');
-  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.replacement-review')?.textContent.includes('纳入 24 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1 处') && document.querySelector('.replacement-review')?.textContent.includes(globalThis.__ai7ExcludedMatchId) && !document.querySelector('.replacement-review ul')?.textContent.includes(globalThis.__ai7ExcludedContext) && document.querySelector('.replacement-review')?.textContent.includes('绑定修订版 r1') && document.querySelector('.replacement-review')?.textContent.includes('重叠时保留最早匹配')`, 'replacement-preview-exact-inclusion');
-  await clickButton(renderer, '冻结并重新验证', 'replacement-freeze');
-  await waitFor(renderer, `document.querySelector('.replacement-review')?.textContent.includes('已冻结替换集') && document.querySelector('.replacement-review')?.textContent.includes('纳入 24 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1 处') && !document.querySelector('.replacement-review')?.textContent.includes(globalThis.__ai7ExcludedContext)`, 'replacement-frozen-included-contexts');
-  await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('.match-inclusion input[type="checkbox"]')); const before = controls.map((control) => control.checked); controls[0]?.click(); return document.querySelector('.search-results')?.dataset.inclusionLocked === 'true' && controls.length === 24 && controls.every((control, index) => control.disabled && control.checked === before[index]) && document.querySelector('.replacement-review')?.textContent.includes('匹配集已冻结，纳入控件保持锁定'); })()`, 'replacement-frozen-visible-inclusion-lock');
-  await clickButton(renderer, '原子提交替换', 'replacement-commit');
+  // 全部替换（N 处） (Issue #1409, #1411): one click prepares, freezes, re-validates and writes; the count excludes the unticked match.
+  await clickButton(renderer, '全部替换（24 处）', 'replacement-all');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'true' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'false'`, 'replacement-editor-locked');
-  await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!block) return false; const before = block.textContent; block.focus(); document.execCommand('insertText', false, '竞态'); return block.textContent === before; })()`, 'replacement-typing-blocked');
-  await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.includes('已原子替换 24 处')`, 'replacement-atomic', 120_000);
+  await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!block) return false; const before = block.textContent; block.focus(); ${DIRECT_EDIT} && document.execCommand('insertText', false, '竞态'); return block.textContent === before; })()`, 'replacement-typing-blocked');
+  await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.includes('已替换 24 处')`, 'replacement-atomic', 120_000);
   await assertRenderer(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'false' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true'`, 'replacement-editor-unlocked-after-refresh');
-  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === 7`, 'replacement-journal');
+  // One Apply Effect per occurrence: each is its own revision card, undone on its own.
+  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === 31`, 'replacement-journal');
 
   await fill(renderer, '#manuscript-search', REPLACEMENT_TEXT, 'milestone-stale-search-fill');
   await clickButton(renderer, '查找全稿', 'milestone-stale-search-start');
@@ -1417,9 +1414,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await assertRenderer(renderer, `(() => { const row = document.querySelector('.search-result'); const include = row?.querySelector('input[type="checkbox"]'); const open = row?.querySelector('button'); if (!include || !open) return false; include.click(); open.click(); return !include.checked; })()`, 'milestone-stale-search-state');
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden`, 'milestone-stale-return-visible');
   await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(REPLACEMENT_TEXT)}`, 'milestone-stale-search-jump');
-  await fill(renderer, '#manuscript-replacement', '临时预览', 'milestone-stale-preview-fill');
-  await clickButton(renderer, '预览替换', 'milestone-stale-preview-start');
-  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'true'`, 'milestone-stale-preview-ready');
+  await waitFor(renderer, `(() => { const badge=document.querySelector('[data-testid="manuscript-editor"] .editorial-mark-applied-badge'); return badge?.textContent==='✎ 已改' && document.querySelector('[data-testid="manuscript-editor"] .editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="editor"]') !== null; })()`, 'replaced-occurrence-revision-badge');
 
   at('milestone-form');
   await assertRenderer(renderer, `(() => { const menu = document.querySelector('#context-actions details[data-save-menu="manuscript"]'); const details = menu?.querySelector('.milestone-section'); const status = document.querySelector('#persistence-status'); if (!(menu instanceof HTMLDetailsElement) || !(details instanceof HTMLDetailsElement) || status?.getAttribute('role') !== 'button' || document.querySelector('#manuscript-navigation-panel .milestone-section') || !menu.querySelector('summary')?.textContent.startsWith('已写入修订日志')) return false; status.click(); details.open = true; return menu.open && details.open; })()`, 'milestone-open');
@@ -1460,7 +1455,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('milestone-search-state-stale');
   // Synchronized delta with Issue #1177 (ADR 0096 §3): the result set is marked stale, not discarded — its rows stay, read as
   // past, with every jump and inclusion control disabled until 查找全稿 runs again; the preview and the way back are gone.
-  await waitFor(renderer, `(() => { const results = document.querySelector('.search-results'); const rows = Array.from(results?.querySelectorAll('.search-result') ?? []); return rows.length > 0 && results.dataset.searchStale === 'true' && results.dataset.inclusionLocked === 'true' && rows.every((row) => Array.from(row.querySelectorAll('button, input')).every((control) => control.disabled)) && document.querySelector('.replacement-review')?.hidden && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '预览替换')?.disabled && document.querySelector('.search-section .field-note')?.textContent.startsWith('稿件已变化；以下结果已过时，请重新查找。') && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化'); })()`, 'milestone-revision-stales-all-search-state');
+  await waitFor(renderer, `(() => { const results = document.querySelector('.search-results'); const rows = Array.from(results?.querySelectorAll('.search-result') ?? []); return rows.length > 0 && results.dataset.searchStale === 'true' && results.dataset.inclusionLocked === 'true' && rows.every((row) => Array.from(row.querySelectorAll('button, input')).every((control) => control.disabled)) && document.querySelector('.replacement-review')?.hidden && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && document.querySelector('[data-replace-action="all"]')?.textContent === '全部替换' && document.querySelector('.search-section .field-note')?.textContent.startsWith('稿件已变化；以下结果已过时，请重新查找。') && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化'); })()`, 'milestone-revision-stales-all-search-state');
   at('milestone-authoritative-ready');
   await waitForChecks(
     renderer,
@@ -1471,7 +1466,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await clickButton(renderer, '撤销', 'undo');
   await waitForChecks(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence9: journal === 9, authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden, closeRiskCleared: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence33: journal === 33, authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden, closeRiskCleared: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`,
     'undo-drained-before-close',
     120_000,
   );
@@ -1492,7 +1487,7 @@ async function runRestartJourney(renderer) {
   await clickButton(renderer, '重做', 'restart-redo');
   await waitForChecks(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const searchInput = document.querySelector('#manuscript-search'); const search = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence10: journal === 10, authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', searchInputReady: searchInput instanceof HTMLInputElement && !searchInput.disabled, searchStartReady: search instanceof HTMLButtonElement && !search.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const searchInput = document.querySelector('#manuscript-search'); const search = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence34: journal === 34, authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', searchInputReady: searchInput instanceof HTMLInputElement && !searchInput.disabled, searchStartReady: search instanceof HTMLButtonElement && !search.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
     'restart-redo-durable',
     120_000,
   );
@@ -1547,6 +1542,7 @@ async function runScreenLifecycleJourney(renderer) {
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = Array.from(editor?.children ?? []).find((item) => item.getAttribute('data-block-id') === ${JSON.stringify(place.blockId)}); const text = block?.firstChild; const selection = window.getSelection(); if (!(text instanceof Text) || text.length < 3 || !selection || !(editor instanceof HTMLElement)) return false; editor.focus({ preventScroll: true }); selection.setBaseAndExtent(text, 1, text, 3); if (selection.toString().length !== 2) return false; selection.collapse(text, ${place.grapheme}); return selection.isCollapsed; })()`, 'screen-lifecycle-selection-usable');
   at('screen-lifecycle-one-edit');
   const beforeEdit = await renderer.observeIpc();
+  await renderer.evaluate(DIRECT_EDIT);
   await renderer.send('Input.insertText', { text: '续' });
   await waitForChecks(renderer, `(() => { const block = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((item) => item.getAttribute('data-block-id') === ${JSON.stringify(place.blockId)}); const save = document.querySelector('[data-editor-persistence]'); return { oneEntry: ${JOURNAL_SEQUENCE_PROBE} === ${journalBefore + 1}, exactEdit: block?.textContent === ${JSON.stringify(place.before.slice(0, place.grapheme) + '续' + place.before.slice(place.grapheme))}, saved: save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed'), closeRiskClear: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'screen-lifecycle-one-durable-edit', 120_000);
   const afterEdit = await renderer.observeIpc();
@@ -1753,7 +1749,7 @@ async function typeAtWindowEnd(renderer, text, location) {
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-    const inserted = document.execCommand('insertText', false, ${JSON.stringify(text)});
+    const inserted = ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(text)});
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     return inserted;
   })()`);
@@ -1939,13 +1935,14 @@ async function runProtectionJourney(renderer) {
   // A composition that crosses the soft limit is taken into the reserve and never cut short (DUR-008).
   const composition = protectionText(100, 4_000);
   await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.lastElementChild; editor?.focus({ preventScroll: true }); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return true; })()`);
+  await renderer.evaluate(DIRECT_EDIT);
   await renderer.send('Input.imeSetComposition', { text: composition, selectionStart: composition.length, selectionEnd: composition.length });
   await protectionChecks(renderer, `({ composing: p.composing === 'true', notReadOnly: p.readOnly === 'none', writable: p.writable })`, 'protection-ime-composing', 15_000);
   await renderer.send('Input.insertText', { text: composition });
   at('protection-read-only');
   await protectionChecks(renderer, `({ ended: p.composing === 'false', kept: p.atRisk === ${filled + 100}, readOnly: p.readOnly === 'capacity' && p.document === 'read-only', headline: p.headline === ${JSON.stringify(PROTECTION_READ_ONLY_HEADLINE)}, refused: !p.writable, withinCapacity: p.atRisk <= p.capacity, noEntry: p.journal === ${durable + 3} })`, 'protection-read-only', 30_000);
   // The read-only text takes nothing more, and its options still offer 重试写入 and 复制受影响内容 (DUR-009).
-  await renderer.evaluate(`(async () => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus({ preventScroll: true }); document.execCommand('insertText', false, ${JSON.stringify(protectionText(5, 9_000))}); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.querySelector('#editing-protection [data-protection-action="options"]')?.click(); return true; })()`);
+  await renderer.evaluate(`(async () => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus({ preventScroll: true }); ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(protectionText(5, 9_000))}); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); document.querySelector('#editing-protection [data-protection-action="options"]')?.click(); return true; })()`);
   await waitForChecks(renderer, `(() => { const p = ${PROTECTION_PROBE}; const options = document.querySelector('#editing-protection-options'); return { unchanged: p.atRisk === ${filled + 100}, optionsOpen: options instanceof HTMLElement && !options.hidden, retryOffered: options?.querySelector('[data-protection-action="retry"]') instanceof HTMLButtonElement, copyOffered: options?.querySelector('[data-protection-action="copy"]') instanceof HTMLButtonElement, readOnlyReason: options?.querySelector('.editing-protection-read-only')?.hidden === false }; })()`, 'protection-read-only-options', 15_000);
   at('protection-read-only-recovery');
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-fault-off-again');

@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { captureJournalEdit, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, captureJournalEdit, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -1256,7 +1256,7 @@ async function createDurableJournalEdit(renderer) {
   requireJourney(before !== null, 'reimport-dirty-scope');
   await assertRenderer(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.querySelector('[data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, '，重新导入前本地编辑'); return block.textContent?.endsWith('，重新导入前本地编辑'); })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.querySelector('[data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText', false, '，重新导入前本地编辑'); return block.textContent?.endsWith('，重新导入前本地编辑'); })()`,
     'reimport-dirty-edit',
   );
   await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'reimport-dirty-save-ready');
@@ -1841,7 +1841,7 @@ async function runJourney(
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
-      document.execCommand('insertText', false, suffix);
+      ${DIRECT_EDIT} && document.execCommand('insertText', false, suffix);
       const dirty = await dirtyReady;
       const liveBlock = Array.from(editor.children).find((item) => item.getAttribute('data-block-id') === blockId);
       if (!dirty || !(liveBlock instanceof HTMLElement) || liveBlock.textContent !== before + suffix) return false;
