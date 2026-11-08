@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisScopeOffer, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -458,7 +459,8 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     buttons.append(confirm, action(BACKGROUND_CANCEL, 'quiet', 'enroll-cancel', cancel));
     const section = el('section', 'background-analysis-disclosure');
     section.setAttribute('aria-labelledby', title.id);
-    section.append(title, what, scopes, ceilingLabel, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, buttons);
+    // What enrollment does not grant is the technical layer's alone (Issue #1413 cluster 4).
+    section.append(title, what, scopes, ceilingLabel, ...(technicalLayerVisible ? [el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted] : []), fieldset, buttons);
     refresh();
     return [section];
   };

@@ -292,7 +292,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const heading = el('h3', undefined, PACKAGE_HEADING);
     heading.id = uid('heading');
     view.setAttribute('aria-labelledby', heading.id);
-    view.append(heading, el('p', 'field-note package-statement', next.statement));
+    view.append(heading);
+    // What a package is and is not is the technical layer's alone (Issue #1413 cluster 4).
+    if (technicalLayerVisible) view.append(el('p', 'field-note package-statement', next.statement));
     // A document's row is the earlier 交付 ledger's reading: once documents are ticked, or outside the technical layer, 随书稿件 says it.
     const conditions = choices === null && technicalLayerVisible ? next.conditions : next.conditions.filter((condition) => condition.key !== 'document');
     view.append(renderConditions(conditions), renderDocumentChoices(next), renderPreview(next), renderPrepare(next));
@@ -565,7 +567,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     }
     panel.append(routes);
     const shown = current.result ?? current.prepared;
-    if (current.review !== null) panel.append(el('p', 'export-local-line', current.route === 'archive'
+    if (current.review !== null && technicalLayerVisible) panel.append(el('p', 'export-local-line', current.route === 'archive'
       ? '压缩包汇集全部内容，不发稿、交付、更改记录或发送文件。' : current.review.statement));
     panel.append(renderExportOptions(current));
     if (current.review !== null) {

@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import {
   SERIES_KNOWLEDGE_CLASSES,
   SERIES_KNOWLEDGE_CLASS_LABELS,
@@ -632,7 +633,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (edit !== null) box.append(draftForm(edit, 'edit'));
       const uses = el('fieldset', 'knowledge-reuse');
       const reuseHeading = el('legend', undefined, KNOWLEDGE_REUSE_LEGEND);
-      reuseHeading.append(' · ', el('span', 'knowledge-promote-note', KNOWLEDGE_PROMOTE_NOTE));
+      if (technicalLayerVisible) reuseHeading.append(' · ', el('span', 'knowledge-promote-note', KNOWLEDGE_PROMOTE_NOTE));
       uses.append(reuseHeading);
       for (const entry of review.reuseScopes) {
         const choice = el('label', 'knowledge-reuse-choice');

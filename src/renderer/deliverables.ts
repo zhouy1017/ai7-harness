@@ -694,8 +694,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const basis = field('basis', PUBLICATION_BASIS_LABEL, PUBLICATION_BASIS_HINT, state.basis, (text) => { state.basis = text; });
 
     // The fixed sentence stands beside the exact action and is on screen whenever the form is (PUB-004).
+    // The fixed sentence is the technical layer's alone (Issue #1413 cluster 4); 设为发稿版本 itself says what it records.
     const statement = el('p', 'publication-statement', next.publication.statement);
     statement.id = uid('statement');
+    statement.hidden = !technicalLayerVisible;
     const problem = el('p', 'publication-problem');
     problem.setAttribute('role', 'alert');
     const reason = el('span', 'publication-confirm-reason');

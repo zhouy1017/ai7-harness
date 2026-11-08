@@ -164,6 +164,9 @@ import {
   REVIEW_WORKSPACE_UNAVAILABLE,
   reviewAuthorizedLine,
   reviewBatchAppliedLine,
+  reviewBatchUndoneLine,
+  REVIEW_BATCH_UNDO_FAILED,
+  REVIEW_IGNORE_DEFAULT_REASON,
   reviewBatchCappedLine,
   reviewBatchExcludedLine,
   reviewBatchItemLine,
@@ -498,7 +501,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     filters: { ...NO_FILTERS },
     pages: 1,
   };
-  const ui: { ignore: IgnoreForm | null; convert: ConvertForm | null; batch: BatchStrip | null; capabilityFindingId: string | null } = {
+  /** Whether 切换历史记录 / 查看覆盖矩阵 is open; kept across redraws (Issue #1413 cluster 6). */
+  let historyOpen = false;
+  const ui: { ignore: IgnoreForm | null; convert: ConvertForm | null; batch: BatchStrip | null; capabilityFindingId: string | null;
+    applied?: { categoryId: string; markIds: string[]; blockIds: string[]; skipped: number } | null; } = {
     ignore: null,
     convert: null,
     batch: null,
@@ -802,6 +808,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   // ---- the card ---------------------------------------------------------------------------------------
 
   /** Paint the whole card, keep the control that had focus focused, and focus what an action just opened. */
+  /** Whether the opened Run has findings on show, so they lead the page (Issue #1413 cluster 6). */
+  function runHasResults(run: ReviewRunProjection): boolean {
+    return run.state !== 'prepared' && run.findings.length > 0;
+  }
+
   function renderCard(next: ReviewWorkspaceProjection): void {
     paintCard(next);
     if (pendingFocus !== null && !working) applyPendingFocus();
@@ -836,7 +847,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     node.setAttribute('aria-busy', run?.state === 'running' ? 'true' : 'false');
     const heading = el('div', 'review-workspace-heading');
     heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
-    if (run !== null) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
+    if (run !== null && !runHasResults(run)) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     const hasReviews = next.runs.length > 0 || next.coverage.some((row) => row.lastRunOrdinal !== null);
     if (!hasReviews) {
       node.classList.add('surface-empty');
@@ -845,15 +856,29 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } else node.append(heading);
     const newReviewReasonId = uid('new-review-reason');
     const actions = renderNewReview(next, newReviewReasonId);
-    if (hasReviews) heading.append(actions);
-    else node.append(actions);
+    if (!hasReviews) node.append(actions);
+    else if (run === null || !runHasResults(run)) heading.append(actions);
     if (hasReviews) {
       const changed = next.coverage.filter((row) => row.state === 'needs-review').length;
       if (changed > 0) node.append(el('p', 'attention-note review-coverage-warning', `稿件有改动，${changed} 类审阅需要复审。`));
+      const history: HTMLElement[] = [];
       if (next.coverage.some((row) => row.lastRunOrdinal !== null) || next.runs.some((summary) => ['running', 'settled', 'partial', 'failed'].includes(summary.state))) {
-        node.append(renderCoverage(next, newReviewReasonId));
+        history.push(renderCoverage(next, newReviewReasonId));
       }
-      node.append(renderRuns(next));
+      history.push(renderRuns(next));
+      if (run !== null && runHasResults(run)) {
+        // With results on show the findings lead (Issue #1413 cluster 6): one compact line names the Run and how many
+        // categories it reviewed; the coverage and the earlier Runs stay one keyboard-reachable disclosure away.
+        const bar = el('div', 'review-summary-bar');
+        const status = el('span', 'review-summary-status');
+        status.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]), ` ${reviewRunHeading(run.label)} · 已审 ${run.categories.length} 类`);
+        const fold = el('details', 'review-history-fold');
+        fold.open = historyOpen;
+        fold.addEventListener('toggle', () => { historyOpen = fold.open; });
+        fold.append(el('summary', undefined, '切换历史记录 / 查看覆盖矩阵'), ...history);
+        bar.append(status, fold, actions);
+        node.append(bar);
+      } else node.append(...history);
     }
     if (run !== null) node.append(renderRun(next, run));
     swapCard(node);
@@ -1028,6 +1053,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     heading.append(meta);
     section.append(heading);
+    const leading = runHasResults(run);
+    if (leading) section.append(renderResults(next, run));
     if (run.localCheck !== undefined) {
       const local = el('section', 'review-local-check');
       local.dataset['localCheck'] = run.localCheck.state;
@@ -1084,7 +1111,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (run.state === 'scope-changed') section.append(renderScopeStop(run));
       if (run.historicalMarker !== null) section.append(historicalMarker(run.historicalMarker, run));
       if (run.influence.length > 0) section.append(renderInfluence(run));
-      section.append(renderResults(next, run), renderReport(run));
+      if (!leading) section.append(renderResults(next, run));
+      section.append(renderReport(run));
     }
     section.append(options.technicalDetails(
       'review-facts',
@@ -1269,7 +1297,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   // ---- results ----------------------------------------------------------------------------------------
 
   function renderResults(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
-    const section = el('section', 'review-results');
+    const section = el('section', 'review-results review-findings-first');
     const headingId = uid('results');
     const heading = el('h5', undefined, REVIEW_RESULTS_HEADING);
     heading.id = headingId;
@@ -1533,6 +1561,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const hasLens = category.categoryId === 'factual-review' && fact.lens !== null && (fact.results.length > 0 || filteredLens);
     if (hasLens) group.append(renderFactLens(run));
     if (ui.batch?.categoryId === category.categoryId) group.append(renderBatchStrip(run, ui.batch));
+    else if (ui.applied?.categoryId === category.categoryId) group.append(renderAppliedBatch(run, ui.applied));
     const lensFindings = new Set(fact.results.map((result) => result.reviewFindingId));
     for (const finding of findings) {
       // A partial run can retain findings for which no evidence result was produced. Keep their actions available.
@@ -1560,27 +1589,31 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const location = el('span', 'review-finding-location', reviewFindingLocation(finding));
     location.id = locationId;
     heading.append(location);
-    article.append(heading, el('blockquote', 'review-finding-quote', reviewQuote(finding.quote)));
-    if (finding.replacement !== null) article.append(el('p', 'review-finding-replacement', reviewReplacementLine(finding.replacement)));
-    article.append(el('p', 'review-finding-note', finding.note));
+    // A compact two-column card (Issue #1413 cluster 6): the words, the suggestion, why and where it stands on the left; the
+    // one-line actions on the right.
+    article.classList.add('is-split');
+    const main = el('div', 'review-finding-main');
+    main.append(heading, el('blockquote', 'review-finding-quote', reviewQuote(finding.quote)));
+    if (finding.replacement !== null) main.append(el('p', 'review-finding-replacement', reviewReplacementLine(finding.replacement)));
+    main.append(el('p', 'review-finding-note', finding.note));
     const referencedRules = findingReferencedRules(finding);
-    if (referencedRules !== null) article.append(referencedRules);
-    if (finding.clauseRefs.length === 0) article.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
-    for (const clause of finding.clauseRefs) article.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
+    if (referencedRules !== null) main.append(referencedRules);
+    if (finding.clauseRefs.length === 0) main.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
+    for (const clause of finding.clauseRefs) main.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
     // Extraction's original non-verdict remains historical; this card's verified result owns the current three states.
     const stateLine = hasVerification && finding.stateLine === '未外部复核' ? null : finding.stateLine;
     const lines = [stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
       .filter((line, index, all): line is string => line !== null && all.indexOf(line) === index);
-    for (const line of lines) article.append(el('p', 'review-finding-state', line));
+    for (const line of lines) main.append(el('p', 'review-finding-state', line));
     const retained = research.get(finding.findingId);
     const attached = category.categoryId === 'factual-review' ? evidence.get(finding.findingId) ?? [] : [];
     const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
-    if (showEvidence && attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
-    if (showEvidence) for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
-    if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
-    if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
-    if (finding.historicalMarker !== null) article.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
-    article.append(renderFindingActions(run, finding));
+    if (showEvidence && attached.length > 0) main.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
+    if (showEvidence) for (const line of sources ?? []) main.append(el('p', 'review-finding-source', line));
+    if (finding.status !== 'pending') main.append(el('p', 'review-finding-status-detail', finding.statusDetail));
+    if (finding.ignoreReason !== null) main.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
+    if (finding.historicalMarker !== null) main.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
+    article.append(main, renderFindingActions(run, finding));
     const reasonAsk = reasonAsks.get(finding.findingId);
     if (reasonAsk !== undefined && reasonAsk.dataset['learningAskState'] !== 'dismissed') article.append(reasonAsk);
     if (ui.capabilityFindingId === finding.findingId) article.append(capabilityNote());
@@ -1619,6 +1652,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       // 忽略并说明 is 批注's (editor-surfaces §4); a finding with nothing left on the manuscript to decide
       // on — its words changed before it could be marked — can be closed the same way.
       if (finding.output === 'annotation' || finding.markId === null) {
+        // 忽略 is one click with the routine reason (Issue #1410 item 6); 忽略并备注… opens the note for one of the editor's own.
+        add(actionButton('ignore-now', 'quiet', () => void ignoreNow(run, finding)));
         const ignore = actionButton('ignore', 'quiet', () => openIgnore(finding));
         ignore.setAttribute('aria-expanded', ui.ignore?.findingId === finding.findingId ? 'true' : 'false');
         add(ignore);
@@ -1641,7 +1676,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const reason = el('textarea');
     reason.rows = 3;
     reason.value = form.reason;
-    reason.required = true;
+    reason.placeholder = REVIEW_IGNORE_DEFAULT_REASON;
     reason.dataset['reviewField'] = 'ignore-reason';
     const problem = el('p', 'review-problem');
     problem.setAttribute('role', 'alert');
@@ -1722,6 +1757,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const offer = el('button', 'secondary', '在专用工作区审阅'); offer.type = 'button'; offer.dataset['proposalWorkspaceOffer'] = 'true';
       offer.addEventListener('click', () => options.openProposalWorkspace?.(input)); host.append(offer);
     }).catch(() => {});
+  }
+
+  /** The batch just applied: how many were written and left out, and 撤销本批应用. */
+  function renderAppliedBatch(run: ReviewRunProjection, applied: NonNullable<typeof ui.applied>): HTMLElement {
+    const node = el('section', 'review-batch-strip review-batch-applied');
+    node.dataset['reviewCategory'] = applied.categoryId;
+    node.dataset['reviewBatchState'] = 'applied';
+    node.setAttribute('role', 'status');
+    node.append(el('p', 'review-batch-scope', `${reviewBatchAppliedLine(applied.markIds.length, false)}${applied.skipped > 0 ? reviewBatchExcludedLine(applied.skipped) : ''}`));
+    const row = el('div', 'button-row');
+    const undo = actionButton('batch-undo', 'secondary', () => void undoBatch(run));
+    const close = actionButton('batch-cancel', 'quiet', () => { ui.applied = null; if (projection !== null) renderCard(projection); });
+    if (working) { undo.disabled = true; close.disabled = true; }
+    row.append(undo, close);
+    node.append(row);
+    return node;
   }
 
   function renderBatchStrip(run: ReviewRunProjection, strip: BatchStrip): HTMLElement {
@@ -2098,8 +2149,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     applyPendingFocus();
   }
 
+  async function ignoreNow(run: ReviewRunProjection, finding: ReviewFindingProjection): Promise<void> {
+    await act(REVIEW_STATUS_LINES.ignoring, REVIEW_STATUS_LINES.ignoreFailed, async () => {
+      const updated = await api.recordReviewFindingDisposition({ reviewRunId: run.reviewRunId, findingId: finding.findingId, disposition: 'ignored', reason: REVIEW_IGNORE_DEFAULT_REASON });
+      offerReasonAsk(finding.findingId, updated.run?.findings.find((entry) => entry.findingId === finding.findingId)?.learningDecisionId);
+      ui.ignore = null;
+      options.setStatus(REVIEW_STATUS_LINES.ignored, 'success');
+    });
+  }
+
   async function confirmIgnore(run: ReviewRunProjection, finding: ReviewFindingProjection, form: IgnoreForm, field: HTMLTextAreaElement, problemLine: HTMLElement): Promise<void> {
-    form.reason = field.value;
+    form.reason = field.value.trim().length === 0 ? REVIEW_IGNORE_DEFAULT_REASON : field.value;
     const problem = reviewIgnoreReasonProblem(form.reason);
     if (problem !== null) {
       form.problem = problem;
@@ -2166,6 +2226,34 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       options.setStatus(listed.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(listed.length));
       pendingFocus = { findingId: null, field: 'batch' };
     });
+    // 接受并应用全部 applies in the same step (Issue #1410 item 5): what was left out is counted in the result, and
+    // 撤销本批应用 takes the batch back.
+    const strip = ui.batch;
+    if (strip !== null && strip.categoryId === category.categoryId && strip.items.length > 0 && !strip.refused) await confirmBatch(run, strip);
+  }
+
+  /** 撤销本批应用: each applied 修改建议 of the batch reversed, newest first; the first that cannot be stops the rest and says so. */
+  async function undoBatch(run: ReviewRunProjection): Promise<void> {
+    const last = ui.applied;
+    if (last === null || last === undefined) return;
+    await act(REVIEW_STATUS_LINES.applying, REVIEW_BATCH_UNDO_FAILED, async () => {
+      let undone = 0;
+      for (let index = last.markIds.length - 1; index >= 0; index -= 1) {
+        const markId = last.markIds[index]!;
+        const target = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, windowStartBlockId: last.blockIds[index]! };
+        const reversed = await applyOnce(run.manuscript,
+          (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...target, markId, clientEffectId }),
+          (input) => api.getManuscriptApplyOutcome(input));
+        if (!reversed.acknowledged && reversed.outcome?.state !== 'committed') {
+          ui.applied = null;
+          options.setStatus(reviewBatchUndoneLine(undone, last.markIds.length), 'error');
+          return;
+        }
+        undone += 1;
+      }
+      ui.applied = null;
+      options.setStatus(reviewBatchUndoneLine(undone, last.markIds.length), 'success');
+    });
   }
 
   async function confirmBatch(run: ReviewRunProjection, strip: BatchStrip): Promise<void> {
@@ -2181,7 +2269,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       );
       if (applied.acknowledged || applied.outcome?.state === 'committed') {
         ui.batch = null;
-        options.setStatus(reviewBatchAppliedLine(strip.items.length, !applied.acknowledged), 'success');
+        ui.applied = { categoryId: strip.categoryId, markIds: strip.items.map((item) => item.markId), blockIds: strip.items.map((item) => item.blockId), skipped: strip.excluded };
+        options.setStatus(`${reviewBatchAppliedLine(strip.items.length, !applied.acknowledged)}${strip.excluded > 0 ? reviewBatchExcludedLine(strip.excluded) : ''}`, 'success');
         // The Apply is finished. Read its decisions in bounded pages; optional asks never hold the batch or its next action.
         void (async () => {
           const remaining = new Set(strip.items.map((item) => item.markId));
@@ -2485,7 +2574,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     numerals.value = state.localOptions.numerals;
     numerals.addEventListener('change', () => {
       const value = numerals.value as typeof state.localOptions.numerals;
-      state.localOptions = { ...state.localOptions, numerals: value, numeralRules: value === 'off' ? [] : ['N01', 'N02'] }; updateSheet();
+      // Choosing a basis is the choice of it and of N01、N02 (Issue #1410 item 16): no box to tick besides.
+      state.localOptions = { ...state.localOptions, numerals: value, numeralRules: value === 'off' ? [] : ['N01', 'N02'], numeralsConfirmed: value !== 'off' }; updateSheet();
     });
     numeralLabel.append(el('span', undefined, '数字依据'), numerals);
     const publicationLabel = el('label', 'review-field');
@@ -2494,10 +2584,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     publication.value = state.localOptions.publication;
     publication.addEventListener('change', () => { state.localOptions = { ...state.localOptions, publication: publication.value as typeof state.localOptions.publication }; updateSheet(); });
     publicationLabel.append(el('span', undefined, '出版物适用范围'), publication);
-    const confirmationLabel = el('label', 'review-field');
-    const confirmation = el('input'); confirmation.type = 'checkbox'; confirmation.dataset['localCheckConfirmation'] = ''; confirmation.checked = state.localOptions.numeralsConfirmed;
-    confirmation.addEventListener('change', () => { state.localOptions = { ...state.localOptions, numeralsConfirmed: confirmation.checked }; updateSheet(); });
-    confirmationLabel.append(confirmation, el('span', undefined, '我明确选择本次数字依据及 N01、N02；编辑约定不表示国标适用'));
+    const confirmationLabel = el('p', 'field-note', '选择数字依据即按 N01、N02 检查；编辑约定不表示国标适用。');
+    confirmationLabel.dataset['localCheckNumeralsNote'] = '';
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
       el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点和无附加条件的异形词可生成机械修正，其余为批注；排除代码、网址和邮件等。'));
     const tables = state.localOptions.tables!;
@@ -2645,9 +2733,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     networkNotice.setAttribute('role', 'status');
     const networkSettings = actionButton('open-search-settings', 'quiet', () => { sheet.close(); options.openSearchSettings?.(); });
     const consequences = el('dl', 'review-consequences');
-    const consequenceValues = REVIEW_CONSEQUENCE_TERMS.map((term) => {
+    const consequenceValues = REVIEW_CONSEQUENCE_TERMS.map((term, index) => {
       const value = el('dd');
-      consequences.append(el('dt', undefined, term), value);
+      // 不会做 is the technical layer's alone (Issue #1413 cluster 4); the value is kept off the page in ordinary mode.
+      if (index !== 2 || technicalLayerVisible) consequences.append(el('dt', undefined, term), value);
       return value;
     });
     const [readValue, sendValue, notDoValue, costValue] = consequenceValues as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
@@ -2710,8 +2799,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       const local = state.categories.has('local-text-check');
       localOptions.hidden = !local;
-      confirmation.disabled = state.localOptions.numerals === 'off';
-      confirmation.checked = state.localOptions.numeralsConfirmed;
+      confirmationLabel.hidden = state.localOptions.numerals === 'off';
       for (const [kind, input] of scopeInputs) input.disabled = !scopeAvailability(workspace, state, kind).available || preparing || (filled !== null && kind !== filled.scopeSlot);
 
       const notes = reviewChangedScopeNotes(workspace.coverage, state.categories);

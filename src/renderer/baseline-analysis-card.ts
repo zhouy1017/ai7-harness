@@ -1307,12 +1307,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       records.append(more);
     }
 
-    // §10: 不会做 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
-    // unabridged — are one step away in 查看技术详情.
-    const notDo = element('ul', 'analysis-list analysis-not-do');
-    for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));
-    const nonEffects = element('dd', 'technical-identity analysis-named-non-effects', projection.namedNonEffects.join('；'));
-    card.append(element('h4', undefined, '不会做'), notDo, technicalDetails('analysis-facts', element('dt', undefined, '技术性的不会做'), nonEffects));
+    // §10: 不会做 — the editor's words and the engineer's statements — is the technical layer's alone (Issue #1413 cluster 4):
+    // ordinary mode carries no list of what the analysis does not do.
+    if (technicalLayerVisible) {
+      const notDo = element('ul', 'analysis-list analysis-not-do');
+      for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));
+      const nonEffects = element('dd', 'technical-identity analysis-named-non-effects', projection.namedNonEffects.join('；'));
+      card.append(element('h4', undefined, '不会做'), notDo, technicalDetails('analysis-facts', element('dt', undefined, '技术性的不会做'), nonEffects));
+    }
     host.replaceChildren(card);
     // The drawer beside ②A states where this Task stands; it reads the plan again when that changes.
     const previousState = host.dataset['analysisRenderedState'];

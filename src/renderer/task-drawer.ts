@@ -1130,7 +1130,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ]), ...(technicalLayerVisible ? budgetBlock(next) : [])),
       planSection(5, facts([
         [TASK_PLAN_RESULT_TERMS[0], listOf(next.outcomes, 'task-plan-list')],
-        [TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')],
+        // 不会做 is the technical layer's alone (Issue #1413 cluster 4).
+        ...(technicalLayerVisible ? [[TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')] as const] : []),
       ])),
       boundaryBlock(next),
       defaultRuleBlock(next),
