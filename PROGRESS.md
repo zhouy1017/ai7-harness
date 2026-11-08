@@ -26,7 +26,7 @@ Wave 23 remains integrated at `dev@41036654` through [PR #1302](https://github.c
 | 2 | #1403–#1407 | [PR #1418](https://github.com/zhouy1017/ai7-harness/pull/1418) | `aaae0d16` | guest ladder + all 15; hosted [42456782510](https://github.com/zhouy1017/ai7-harness/actions/runs/42456782510) |
 | 3 | #1409, #1411, #1412 | [PR #1421](https://github.com/zhouy1017/ai7-harness/pull/1421) | `b1024da9` | guest ladder + all 15; hosted [42475959475](https://github.com/zhouy1017/ai7-harness/actions/runs/42475959475) |
 | 4 | #1410, #1413 | [PR #1422](https://github.com/zhouy1017/ai7-harness/pull/1422) (incorporates [PR #1423](https://github.com/zhouy1017/ai7-harness/pull/1423)) | `1aaf79ba` | tested head `4f48a95e`: guest ladder, 4529 unit / 2142 service, all 15 Journeys + J-02 debug; hosted [42502552047](https://github.com/zhouy1017/ai7-harness/actions/runs/42502552047) |
-| 5 | #1414 | Batch 5 docs PR (draft) | — | `pnpm run docs:check`, `git diff --check`; documentation only |
+| 5 | #1414 | [PR #1424](https://github.com/zhouy1017/ai7-harness/pull/1424) (draft) | — | `pnpm run docs:check`, `git diff --check`; documentation only |
 
 Batch heads are not the wave candidate: the closure head records its own ladder and Gate. Only the J-02 debug screenshot was visually inspected at Batch 4; other surfaces are evidenced by Journey assertions.
 

@@ -14,7 +14,7 @@ The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [m
 | 2 | #1403–#1405 derivative documents on 稿件, rename, ordinary-mode removal of phases/delivery/maintenance forms; #1406–#1407 report-first evaluation and edit/regenerate (protocol 199) | `aaae0d16` (PR #1418) |
 | 3 | #1409 navigation/find/replace; #1411 阅读与修订 and editor revisions; #1412 scoped AI edits and locks (schema 111, protocol 200) | `b1024da9` (PR #1421) |
 | 4 | #1410 one-step workflows; #1413 workbench UX | `1aaf79ba` (PR #1422, incorporating PR #1423) |
-| 5 | #1414 ADR/UI/E2E documentation alignment ([ADR 0096 §4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#4-finish-removing-editor-facing-ceremony-owner-1400--1414)) | draft PR to `codex/integration-1400` |
+| 5 | #1414 ADR/UI/E2E documentation alignment ([ADR 0096 §4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#4-finish-removing-editor-facing-ceremony-owner-1400--1414)) | draft PR #1424 to `codex/integration-1400` |
 
 Remaining delivery order:
 
