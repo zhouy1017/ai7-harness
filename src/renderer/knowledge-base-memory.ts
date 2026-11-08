@@ -240,6 +240,8 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     const titleLabel = el('label', '候选记忆内容'); titleLabel.append(title);
     const scope = el('select', '');
     for (const [value, label] of [['house', '本社'], ['book', '所选来源的图书']]) { const option = el('option', label!); option.value = value!; scope.append(option); }
+    // The narrowest scope is chosen to begin with (Issue #1410 item 28): the Books of the chosen sources.
+    scope.value = 'book';
     const scopeLabel = el('label', '适用范围'); scopeLabel.append(scope);
     const confidence = el('input', ''); confidence.type = 'number'; confidence.min = '0'; confidence.max = '100'; confidence.value = '50'; confidence.required = true;
     const confidenceLabel = el('label', '编辑信心（0–100）'); confidenceLabel.append(confidence);

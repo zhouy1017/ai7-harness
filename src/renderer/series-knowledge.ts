@@ -165,7 +165,8 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const toolbar = el('div', 'button-row');
     const open = action(KNOWLEDGE_PROPOSE_OPEN, 'secondary', 'propose-open', () => {
       if (busy) return;
-      propose = { target: null, subject: '', knowledgeClass: '', content: '' };
+      // A new item of the first class is chosen to begin with (Issue #1410 item 30); both stay changeable.
+      propose = { target: 'new', subject: '', knowledgeClass: SERIES_KNOWLEDGE_CLASSES[0], content: '' };
       proposeRefusal = null;
       paint('input[name="knowledge-target"]');
     });
@@ -689,7 +690,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     paint(candidateId === null ? null : `[data-candidate-id="${candidateId}"] [data-knowledge-action="review"]`);
   };
 
-  /** 纳入审阅…: the review read now; any disposition or use chosen before starts again unchosen. */
+  /** 纳入审阅…: the review read now; a disposition chosen before starts again, and the first offered use is chosen. */
   const openReview = async (candidateId: string): Promise<void> => {
     if (busy) return;
     busy = true;
@@ -702,6 +703,8 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     setStatus(KNOWLEDGE_STATUS.reviewing, 'busy');
     try {
       review = await api.inspectSeriesKnowledgeReview({ seriesId: options.seriesId, candidateId });
+      // The first use the review offers is chosen to begin with (Issue #1410 item 30).
+      reuse = review.reuseScopes[0]?.scope ?? null;
       busy = false;
       paint('.knowledge-review-heading');
       setStatus(KNOWLEDGE_REVIEW_HEADING);
