@@ -3076,7 +3076,13 @@ async function main() {
     await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-menu');
     await waitFor(renderer, `window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-lock-item');
     await assertRenderer(renderer, `(() => { window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-lock');
-    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true' && window.__j07Scoped.block(window.__j07Scoped.state.next).querySelector('[data-ai-lock-block]') !== null`, 'scoped-next-locked');
+    try {
+      await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true' && window.__j07Scoped.block(window.__j07Scoped.state.next).querySelector('[data-ai-lock-block]') !== null`, 'scoped-next-locked');
+    } catch (error) {
+      // Content-free codes only: where the lock stopped, never a word of the page.
+      const failed = await renderer.evaluate(`(async () => { const next=window.__j07Scoped.block(window.__j07Scoped.state.next); const status=document.querySelector('#persistence-status')?.textContent ?? ''; const toast=document.querySelector('[data-toast]')?.textContent ?? ''; const shell=document.querySelector('.editor-shell'); let direct='unread'; try { const locks=await window.ai7.inspectAiEditLocks({ manuscriptId: (await window.ai7.listPriorWork()).find((entry)=>entry.bookId===shell?.dataset.bookId)?.manuscriptId, branchId: (await window.ai7.listPriorWork()).find((entry)=>entry.bookId===shell?.dataset.bookId)?.branchId }); direct='locks-'+locks.blockIds.length+'-has-next-'+locks.blockIds.includes(window.__j07Scoped.state.next); } catch { direct='locks-read-failed'; } return ['next-'+(next===null?'gone':'present'), 'attr-'+(next?.dataset.aiLocked ?? 'none'), 'badges-'+(next?.querySelectorAll('[data-ai-lock-block]').length ?? 0), 'status-'+(status.includes('锁定没有保存')?'lock-failed':status.includes('锁定状态已经变化')?'stale':status.includes('已有新的写入')?'binding':status.length>0?'other':'empty'), 'toast-'+(toast.startsWith('已锁定')?'locked':toast.length>0?'other':'none'), 'menu-'+(document.querySelector('.editorial-mark-menu-layer [data-mark-menu]')?'open':'closed'), 'kind-'+(shell?.dataset.manuscriptKind ?? 'primary'), direct]; })()`).catch(() => ['probe-failed']);
+      throw journeyCheckFailure('J-07', 'scoped-next-locked', { failed, cause: error });
+    }
     await assertRenderer(renderer, `window.__j07Scoped.snapshot()`, 'scoped-snapshot');
     await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-menu');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false`, 'scoped-edit-item');
