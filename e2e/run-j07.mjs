@@ -70,6 +70,56 @@ const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里选下面�
 // fixture's (`tests/support/writing-task.ts`, the same words): the fixture answers only them.
 const WRITING_LIBRARY_FILE = '青铜器保护笔记.txt';
 const WRITING_LIBRARY_TITLE = '青铜器保护笔记';
+// 就选中部分让 AI 修改… and 🔒 (Issue #1412): the sentence the authored scoped-edit fixture answers, located in its paragraph, and the
+// editor's own way to it — a selection and a right click; texts are compared by booleans only.
+const SCOPED_EDIT_FIXTURE = 'sample1-scoped-edit-authored';
+const SCOPED_EDIT_INSTRUCTION = '把这句改得更简洁，保留原意。';
+const SCOPED_EDIT_REPLACEMENT = '当然，并非每个男人都被众人视为有福之人。';
+const SCOPED_SENTENCE_START = '当然，也不是所有男人';
+const SCOPED_SENTENCE_END = '都是众人眼里的有福之人。';
+const SCOPED_HELPERS = `(() => {
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
+  const texts = (root) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode); return nodes; };
+  const point = (root, offset) => { let left = offset; for (const node of texts(root)) { if (left <= node.data.length) return [node, left]; left -= node.data.length; } return null; };
+  const all = () => Object.fromEntries(Array.from(editor()?.children ?? []).filter((node) => node.dataset.blockId).map((node) => [node.dataset.blockId, node.textContent]));
+  window.__j07Scoped = {
+    state: null, before: null, block,
+    locate: () => {
+      const blocks = Array.from(editor()?.children ?? []).filter((node) => node.dataset.blockId);
+      const index = blocks.findIndex((node) => (node.textContent ?? '').includes(${JSON.stringify(SCOPED_SENTENCE_START)}) && (node.textContent ?? '').includes(${JSON.stringify(SCOPED_SENTENCE_END)}));
+      const next = blocks.slice(index + 1).find((node) => (node.textContent ?? '').length >= 4);
+      if (index < 0 || next === undefined) return false;
+      const text = blocks[index].textContent;
+      const from = text.indexOf(${JSON.stringify(SCOPED_SENTENCE_START)});
+      window.__j07Scoped.state = { target: blocks[index].dataset.blockId, next: next.dataset.blockId, from, to: text.indexOf(${JSON.stringify(SCOPED_SENTENCE_END)}, from) + ${SCOPED_SENTENCE_END.length} };
+      return true;
+    },
+    firstText: () => Array.from(editor()?.querySelectorAll(':scope > p[data-block-id]') ?? []).find((node) => (node.textContent ?? '').length >= 8)?.dataset.blockId ?? null,
+    menuOn: (id, from, to) => {
+      const root = block(id); if (!root) return false;
+      editor().focus();
+      const start = point(root, from); const end = point(root, to); if (!start || !end) return false;
+      const range = document.createRange(); range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]);
+      const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      const rect = range.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + 2, clientY: rect.top + 2 };
+      const target = start[0].parentElement;
+      target.dispatchEvent(new MouseEvent('mousedown', init)); target.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 })); target.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    snapshot: () => { window.__j07Scoped.before = all(); return Object.keys(window.__j07Scoped.before).length > 2; },
+    onlySentenceChanged: (replacement) => {
+      const before = window.__j07Scoped.before; const after = all(); const { target, from, to } = window.__j07Scoped.state;
+      return Object.keys(before).length === Object.keys(after).length && Object.entries(before).every(([id, text]) =>
+        id === target ? after[id] === text.slice(0, from) + replacement + text.slice(to) : after[id] === text);
+    },
+    unchanged: () => { const before = window.__j07Scoped.before; const after = all(); return Object.entries(before).every(([id, text]) => after[id] === text) && block(window.__j07Scoped.state.target)?.querySelector('.editorial-mark-applied-badge') === null; },
+  };
+  return true;
+})()`;
+
 const WRITING_LIBRARY_TEXT = '这份笔记整理自一次博物馆讲座：青铜器出土后最怕潮湿与盐分，修复人员先要清除锈蚀，再逐件建立档案。\n\n讲座还提到，研究者常把器物铭文与传世文献对读，一个字的释读往往要花上数年。\n';
 const WRITING_LIBRARY_CHARACTERS = 85;
 const WRITING_LIBRARY_REQUEST = Object.freeze({ typeId: 'review-article', audience: '关注历史题材小说的读者', channel: '读书网站书评栏目' });
@@ -3004,6 +3054,55 @@ async function main() {
     await waitFor(renderer, `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`, 'multi-package-included');
     const deliveriesAfter = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).reduce((total, doc)=>total+doc.deliveries.length, 0))`);
     requireJourney(deliveriesAfter === 0, 'multi-package-no-delivery', deliveriesAfter);
+
+    at('scoped-ai-edit');
+    // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the
+    // authored fixture: its paragraph's neighbour is locked first; the answer also rewrites an id it was never given and the
+    // whole text, and only the selected sentence changes. Its applied card carries ✎ 已改 and is undone in one click.
+    await close();
+    renderer = await launch({ adapter: SCOPED_EDIT_FIXTURE });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]')`, 'scoped-product-ready');
+    await assertRenderer(renderer, PAGE_HELPERS, 'scoped-page-helpers');
+    await assertRenderer(renderer, SCOPED_HELPERS, 'scoped-helpers');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'scoped-book-open');
+    // The Book opens where it was left — a derivative document, last time — so its manuscript is chosen in 稿件's switcher.
+    await waitFor(renderer, `(() => { const shell=document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}]'); if(shell?.dataset.manuscriptKind==='derivative'){ document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="primary"]')?.click(); return false; } return shell?.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'scoped-book-ready', 120_000);
+    // The sentence is found as an editor finds it: 查找, Enter.
+    await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')!=='true') nav.click(); Array.from(document.querySelectorAll('.navigation-modes button')).find((button)=>button.textContent==='查找')?.click(); const input=document.querySelector('#manuscript-search'); input.value=${JSON.stringify(SCOPED_SENTENCE_START)}; input.dispatchEvent(new Event('input',{bubbles:true})); input.focus(); return document.activeElement===input; })()`, 'scoped-find');
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.querySelector('.search-match-position')?.textContent.startsWith('1 /') && window.__j07Scoped.locate()`, 'scoped-sentence-found', 60_000);
+    await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')==='true') nav.click(); return window.__j07Scoped.locate(); })()`, 'scoped-navigation-closed');
+    // 🔒 the next paragraph from the selection menu: it is drawn locked, and the request below does not change because of it.
+    await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-menu');
+    await waitFor(renderer, `window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-lock-item');
+    await assertRenderer(renderer, `(() => { window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-lock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true' && window.__j07Scoped.block(window.__j07Scoped.state.next).querySelector('[data-ai-lock-block]') !== null`, 'scoped-next-locked');
+    await assertRenderer(renderer, `window.__j07Scoped.snapshot()`, 'scoped-snapshot');
+    await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-menu');
+    await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false`, 'scoped-edit-item');
+    await assertRenderer(renderer, `(() => { window.__j07Scoped.item('scoped-ai-edit').click(); return true; })()`, 'scoped-edit-choose');
+    await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true`, 'scoped-edit-composer');
+    await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value=${JSON.stringify(SCOPED_EDIT_INSTRUCTION)}; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.includes('已局部更新所选的 1 个段落')`, 'scoped-edit-applied', 120_000);
+    await waitFor(renderer, `window.__j07Scoped.onlySentenceChanged(${JSON.stringify(SCOPED_EDIT_REPLACEMENT)})`, 'scoped-edit-only-the-sentence', 30_000);
+    await assertRenderer(renderer, `(() => { const block=window.__j07Scoped.block(window.__j07Scoped.state.target); const badge=block?.querySelector('.editorial-mark-applied-badge[data-mark-source="ai7"]'); const mark=block?.querySelector('.editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="ai7"]'); if(!badge||!mark)return false; window.__j07Scoped.mark=badge.dataset.appliedMarkId; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true'; })()`, 'scoped-edit-badge');
+    await waitFor(renderer, `(() => { const card=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"]'); return card?.className.includes('editorial-mark-card-active') && card.querySelector('[data-mark-source]')?.textContent.includes('AI 局部修改') && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'scoped-edit-card-forward');
+    await assertRenderer(renderer, `(() => { document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'scoped-edit-undo');
+    await waitFor(renderer, `window.__j07Scoped.unchanged()`, 'scoped-edit-undone', 30_000);
+    await assertRenderer(renderer, `(() => { const badge=window.__j07Scoped.block(window.__j07Scoped.state.next)?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'scoped-unlock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked===undefined`, 'scoped-unlocked', 30_000);
+
+    at('scoped-ai-edit-derivative');
+    // On a derivative document the same entries stand (Issue #1412): 就选中部分让 AI 修改… is offered, and its paragraph is locked
+    // and unlocked from the menu and the 🔒 badge.
+    await assertRenderer(renderer, `(() => { const item=Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]')).find((entry)=>entry.textContent.includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})); if(!(item instanceof HTMLElement))return false; item.click(); return true; })()`, 'scoped-derivative-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] [data-testid="manuscript-editor"] > p[data-block-id]') !== null && window.__j07Scoped.firstText() !== null`, 'scoped-derivative-ready', 120_000);
+    await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-menu');
+    await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false && window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-derivative-entries');
+    await assertRenderer(renderer, `(() => { window.__j07Scoped.derivative=window.__j07Scoped.firstText(); window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-derivative-lock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.derivative)?.dataset.aiLocked==='true'`, 'scoped-derivative-locked', 30_000);
+    await assertRenderer(renderer, `(() => { const badge=window.__j07Scoped.block(window.__j07Scoped.derivative)?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'scoped-derivative-unlock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.derivative)?.dataset.aiLocked===undefined`, 'scoped-derivative-unlocked', 30_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

@@ -1186,6 +1186,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-07': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
+    'scoped-ai-edit',
+    'scoped-ai-edit-derivative',
     'controller-loopback-sentinel',
     'controller-imports',
     'import-and-open',
