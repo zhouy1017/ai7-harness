@@ -65,6 +65,8 @@ export const SHELL_LABELS = Object.freeze({
   pinnedHeading: '置顶',
   recentHeading: '最近打开',
   noBooks: '打开过的图书会列在这里。',
+  moreBooks: (count: number) => `更多图书（${count}）`,
+  moreBooksHint: (shortcut: string | null) => `其余置顶与最近打开的图书${shortcut === null ? '' : `；也可按 ${shortcut} 快速切换`}`,
   currentBook: '当前图书',
   application: 'AI7 编辑工作台',
   collapse: '收起侧栏',

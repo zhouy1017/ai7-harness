@@ -1656,7 +1656,7 @@ async function runJourney(
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
-      `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限') && document.querySelector('[data-screen="review"] h3')?.textContent.endsWith('（不同作品）'); })()`,
+      `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && (document.documentElement.dataset.technicalLayerVisible === 'true') === summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限') && document.querySelector('[data-screen="review"] h3')?.textContent.endsWith('（不同作品）'); })()`,
       'review-binds-identity-finding-and-distinct-work',
     );
   }
@@ -1682,7 +1682,7 @@ async function runJourney(
     if (hasIdentityFinding) {
       await assertRenderer(
         renderer,
-        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限'); })()`,
+        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && (document.documentElement.dataset.technicalLayerVisible === 'true') === summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限'); })()`,
         'restored-review-retains-identity-findings',
       );
     }
@@ -1739,7 +1739,7 @@ async function runJourney(
       'import-completion',
     ),
   );
-  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='打开稿件' && !document.querySelector('.book-overview .success-note') && document.querySelectorAll('.import-steps [data-import-step]').length===4`, 'overview-anchor-first');
+  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='继续编辑稿件' && !document.querySelector('.book-overview .success-note') && document.querySelectorAll('.import-steps [data-import-step]').length===4`, 'overview-anchor-first');
   if (holdCompletionPaint) {
     await duringCompletion(
       'held-before-paint',

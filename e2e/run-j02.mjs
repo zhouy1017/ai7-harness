@@ -878,7 +878,7 @@ async function waitForImportCommitted(renderer, dataRoot) {
   const acknowledged = await watchImportStep(
     renderer,
     dataRoot,
-    `(() => { if (document.querySelector('#screen')?.dataset.screen !== 'imported') return 'refused'; const open = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '打开稿件'); return document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && open instanceof HTMLButtonElement && !open.disabled ? 'done' : 'waiting'; })()`,
+    `(() => { if (document.querySelector('#screen')?.dataset.screen !== 'imported') return 'refused'; const open = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '继续编辑稿件'); return document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && open instanceof HTMLButtonElement && !open.disabled ? 'done' : 'waiting'; })()`,
   );
   if (acknowledged.outcome === 'done') return;
   if (acknowledged.outcome === 'refused') requireJourney(false, 'completion-acknowledged-before-open-refused');

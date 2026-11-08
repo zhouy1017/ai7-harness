@@ -333,7 +333,35 @@ export function mountGlobalAgent(options: {
   audit.type = 'button';
   audit.addEventListener('click', options.openAudit);
   audit.className = 'btn ' + ('quiet');
-  root.append(state, conversation, questionForm, items, scopeList, form, directives, history, audit);
+  // Issue #1413 cluster 7: the dialogue and the composer are the page. 引用范围, 记忆与治理 and 全局指令 are compact pills
+  // above the composer that open as popovers; the dialogue history is a short list beside the conversation.
+  const pills = el('div'); pills.className = 'global-agent-pills';
+  pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', '提问设置');
+  const pill = (label: string, key: string, ...content: HTMLElement[]): HTMLDetailsElement => {
+    const details = el('details'); details.className = 'global-agent-pill'; details.dataset['globalAgentPill'] = key;
+    const summary = el('summary', label);
+    const pop = el('div'); pop.className = 'global-agent-pop'; pop.append(...content);
+    details.append(summary, pop);
+    details.addEventListener('toggle', () => {
+      if (!details.open) return;
+      for (const other of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill')) if (other !== details) other.open = false;
+    });
+    details.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !details.open) return;
+      event.preventDefault(); event.stopPropagation(); details.open = false; summary.focus();
+    });
+    return details;
+  };
+  pills.append(pill('引用范围', 'scope', items, scopeList), pill('记忆与治理', 'governance', form), pill('全局指令', 'directives', directives));
+  root.addEventListener('pointerdown', (event) => {
+    if (!(event.target instanceof Node) || pills.contains(event.target)) return;
+    for (const details of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill[open]')) details.open = false;
+  });
+  const main = el('div'); main.className = 'global-agent-main';
+  main.append(state, conversation, pills, questionForm);
+  const side = el('aside'); side.className = 'global-agent-side';
+  side.append(history, audit);
+  root.append(main, side);
   let current: GlobalAgentProjection | null = null;
   let busy = false;
   const selected = new Map<string, GlobalMemoryItem>();

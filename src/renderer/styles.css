@@ -150,7 +150,15 @@ body { padding-left: var(--sidebar-width); }
 /* 待我处理's entry keeps its own label and number (global-attention.ts) and takes the row's shape here. */
 .app-sidebar .global-attention-entry { min-height: 30px; padding: .15rem .5rem; border-radius: 8px; border-color: transparent; background: transparent; }
 .app-sidebar .global-attention-entry .global-attention-badge { margin-left: auto; }
-.sidebar-group-label { margin: 0 0 .25rem .5rem; color: var(--text-subdued); font-size: .74rem; font-weight: 800; letter-spacing: .08em; }
+.sidebar-group-label { margin: 0 0 .1rem .5rem; color: var(--text-subdued); font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
+/* Issue #1413 cluster 5: the current Book leads, set off by its title; at most three other Books show, the rest fold. */
+.sidebar-book:not([hidden]) { order: -1; padding: .35rem 0 .45rem; border-top: 0; border-bottom: 1px solid var(--boundary); }
+.sidebar-book .sidebar-current-book { color: var(--text); font-size: .9rem; letter-spacing: 0; }
+.sidebar-more-books > summary { list-style: none; color: var(--text-subdued); font-size: .82rem; font-weight: 600; }
+.sidebar-more-books > summary::-webkit-details-marker { display: none; }
+.sidebar-more-books > summary::before { content: '▸'; flex: 0 0 18px; text-align: center; }
+.sidebar-more-books[open] > summary::before { content: '▾'; }
+:root[data-sidebar="icons"] .sidebar-more-books { display: none; }
 .sidebar-books, .sidebar-book { display: grid; flex: 0 0 auto; gap: .2rem; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-books > div { max-height: clamp(80px, calc(100dvh - 720px), 260px); overflow: auto; scrollbar-width: thin; }
 .sidebar-book[hidden] { display: none; }
@@ -167,7 +175,7 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-book-menu:not(:popover-open) { display: none; }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
-.sidebar-group + .sidebar-group { margin-top: .15rem; }
+.sidebar-group + .sidebar-group { margin-top: .1rem; }
 .sidebar-foot { display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 /* Icons only: the names leave the row's box but not the accessibility tree. */
 /* A thin scrollbar and a narrow inset keep the icon column inside the rail when the Book's groups make it scroll. */
@@ -237,8 +245,23 @@ body { padding-left: var(--sidebar-width); }
 .recent-work { grid-column: 1 / -1; border-top: 1px solid var(--boundary); padding-top: 1.25rem; }
 .recent-work h3 { margin: 0; }
 .recent-work-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: .8rem; margin-top: .8rem; }
-.recent-work-item, .book-summary-item { padding: .8rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); }
-.recent-work-item .secondary, .book-summary-item .secondary { width: 100%; text-align: left; }
+/* Issue #1413 cluster 1: a Book is a structured card — the serif title and its state pill, its facts in small grey words,
+   the action word on the right — and the whole card answers the click, its border lighting on hover. */
+.recent-work-item, .book-summary-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .3rem .8rem; padding: .75rem .9rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); transition: border-color var(--motion-fast, 120ms) ease, box-shadow var(--motion-fast, 120ms) ease; }
+.recent-work-item:hover, .book-summary-item:hover, .recent-work-item:focus-within, .book-summary-item:focus-within { border-color: var(--selection-boundary); box-shadow: 0 2px 10px var(--shadow); }
+.book-card-open { grid-column: 1; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .55rem; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.book-card-open::before { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.book-card-open:focus-visible { outline: none; }
+.book-card-open:focus-visible::before { outline: 3px solid var(--focus); outline-offset: 2px; }
+.book-card-open:disabled { cursor: progress; }
+.book-card-title { min-width: 0; font-family: var(--font-serif); font-size: 1.08rem; font-weight: 700; overflow-wrap: anywhere; }
+.book-card-state { font-size: .76rem; }
+.book-card-action { grid-column: 2; grid-row: 1; padding: .2rem .7rem; border: 1px solid var(--boundary-strong); border-radius: 8px; color: var(--action-text); font-size: .84rem; font-weight: 700; white-space: nowrap; }
+.recent-work-item:hover .book-card-action, .book-summary-item:hover .book-card-action { border-color: var(--action-primary); background: var(--action-primary); color: var(--action-primary-text); }
+.recent-work-item > :not(.book-card-open):not(.book-card-action), .book-summary-item > :not(.book-card-open):not(.book-card-action) { grid-column: 1 / -1; margin: 0; }
+.recent-work-item .field-note, .book-summary-item .field-note { color: var(--text-subdued); font-size: .84rem; }
+/* The technical details stay reachable above the card's click area. */
+.recent-work-item details, .book-summary-item details, .recent-work-item .attention-note { position: relative; z-index: 1; }
 .model-role-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .model-role-card { min-width: 0; padding: 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
 .model-role-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
@@ -371,13 +394,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-coverage-section > p, .review-runs-section > p, .review-results > p, .review-report > p { margin: .45rem 0 0; }
 /* B4: state cards share the A4 pills; coverage appears only after a review has run. */
 .review-coverage { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: .65rem; margin: .6rem 0 0; padding: 0; list-style: none; }
-.review-coverage-card { min-width: 0; padding: .8rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
+.review-coverage-card { min-width: 0; padding: .7rem .8rem; border: 0; border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
 .review-coverage-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .6rem; }
 .review-coverage-title h5 { margin: 0; font-size: .92rem; }
 .review-coverage-counts, .review-coverage-hint { margin: .45rem 0 0; font-size: .84rem; color: var(--text-subdued); }
 .review-coverage .secondary { min-height: 28px; padding: .15rem .6rem; font-size: .86rem; }
 .review-runs { display: grid; gap: .5rem; margin: .55rem 0 0; padding-left: 1.4rem; }
-.review-runs > li { padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); }
+.review-runs > li { padding: .5rem .7rem; border: 1px solid transparent; border-radius: 9px; background: var(--surface); }
 .review-runs > li[aria-current="true"] { border-color: var(--action-text); box-shadow: inset 3px 0 0 var(--selection-boundary); }
 .review-runs > li > span { display: block; }
 .review-run-line { font-weight: 800; }
@@ -389,7 +412,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-run-authorized { display: block; }
 .review-run h4:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .review-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .6rem 0 0; }
-.review-plan, .review-group { margin-top: .8rem; padding: .8rem .9rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); }
+.review-plan, .review-group { margin-top: .8rem; padding: .8rem .9rem; border: 0; border-radius: 10px; background: var(--surface); }
 .review-category-basis { margin: .35rem 0 0; color: var(--text-subdued); font-size: .9rem; }
 .review-authorize-note { margin: .9rem 0 0; font-weight: 800; }
 .review-continue .attention-note { margin-bottom: 0; }
@@ -2736,6 +2759,27 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .book-overview :is(.book-deliverables-summary, .overview-line, .book-review-summary, .book-evaluation-summary, .book-analysis-summary) { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem; padding: .65rem 0; border-bottom: 1px solid var(--boundary); }
 .book-overview :is(.book-deliverables-summary, .overview-line, .book-review-summary, .book-evaluation-summary, .book-analysis-summary) :is(h3, p) { margin: 0; }
 .book-overview :is(.overview-line, .book-deliverables-summary) p { flex: 1; }
+/* 工作概览 as a dashboard (Issue #1413 cluster 4): the manuscript hero, the four work tiles two by two, then people, Series
+   and the folded history. Inner blocks are told apart by background, not by another border. */
+.book-overview .overview-hero { padding: 1.1rem 1.25rem; border: 1px solid var(--boundary-strong); background: var(--surface); box-shadow: 0 2px 12px var(--shadow); }
+.book-overview .overview-hero h3 { font-family: var(--font-serif); font-size: 1.15rem; }
+.book-overview .overview-hero dl dt { color: var(--text-subdued); font-size: .82rem; }
+.book-overview .overview-hero dl dd { font-weight: 700; }
+.book-overview .overview-hero .button-row { margin-left: auto; }
+.book-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin-top: 1rem; }
+.book-overview .book-overview-grid > .book-overview-tile { display: grid; grid-template-rows: auto 1fr auto; align-content: start; justify-items: start; gap: .4rem; min-width: 0; margin: 0; padding: .85rem 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
+.book-overview .book-overview-grid > .book-overview-tile h3 { font-size: 1rem; }
+.book-overview .book-overview-grid > .book-overview-tile p { color: var(--text-subdued); font-size: .88rem; overflow-wrap: anywhere; }
+.book-overview .book-overview-grid > .book-overview-tile :is(.secondary, .primary) { min-height: 28px; padding: .15rem .7rem; font-size: .86rem; }
+.book-overview-secondary { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .6rem 1.5rem; margin-top: 1rem; padding: .7rem 1rem; border-radius: 12px; background: var(--surface-subdued); }
+.book-overview-secondary > * { flex: 1 1 16rem; min-width: 0; margin: 0; }
+.book-overview-secondary :is(h3, h4) { margin: 0 0 .25rem; font-size: .9rem; }
+.book-overview-secondary .source-card, .book-overview-secondary .review-section { margin: 0; padding: 0; border: 0; background: transparent; }
+.book-overview .book-overview-secondary .overview-line { padding: 0; border: 0; }
+.book-overview-history { margin-top: 1rem; border-radius: 12px; }
+.book-overview-history > summary { padding: .5rem .2rem; color: var(--text-subdued); font-weight: 700; cursor: pointer; }
+.book-overview-history > .record-navigation { margin-top: .3rem; }
+@media (max-width: 760px) { .book-overview-grid { grid-template-columns: minmax(0, 1fr); } }
 .book-people-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; }
 .book-people-line .button-row { display: inline-flex; margin: 0 0 0 .5rem; }
 .knowledge-category-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; margin: 1rem 0 1.5rem; }
@@ -2841,3 +2885,28 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .settings-layout [data-learning-settings] > label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, 40%); align-items: center; min-height: 40px; font-weight: 600; }
 .ui-select-error { display: block; color: var(--status-blocked); font-size: .85rem; margin-top: .25rem; }
 .ui-select-error[hidden] { display: none !important; }
+
+/* Issue #1413 cluster 7: a block inside a bordered card is told apart by its own background, not a second grey frame. */
+:is(.source-card, .review-section, .review-workspace-card, .native-artifact-card, .task-authorization-card, .baseline-analysis-card)
+  :is(.source-card, .review-section) { border-color: transparent; background: var(--surface); }
+
+/* Issue #1413 cluster 6 (review workspace DOM by lane 4A): one summary bar above the findings, the history and coverage folded
+   into it, and each finding as text on the left with its actions on the right. */
+.review-summary-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; margin-top: .6rem; padding: .45rem .7rem; border-radius: 10px; background: var(--surface); }
+.review-summary-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; min-width: 0; font-size: .88rem; }
+.review-summary-bar > :is(.primary, .secondary) { margin-left: auto; min-height: 28px; padding: .15rem .7rem; font-size: .86rem; }
+.review-history-fold { flex: 1 1 100%; order: 3; }
+.review-history-fold > summary { display: inline-flex; min-height: 28px; align-items: center; color: var(--action-text); font-size: .86rem; font-weight: 700; cursor: pointer; }
+.review-history-fold[open] > summary { margin-bottom: .4rem; }
+.review-history-fold > :is(.review-coverage-section, .review-runs-section) { margin-top: .5rem; padding-top: .5rem; }
+.review-findings-first { margin-top: .8rem; }
+.review-findings-first > .review-filters:first-child { margin-top: 0; }
+.review-finding.is-split { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .4rem 1rem; }
+.review-finding.is-split > .review-finding-heading { grid-column: 1 / -1; }
+.review-finding.is-split > .review-finding-main { grid-column: 1; min-width: 0; }
+.review-finding.is-split > .review-finding-actions { grid-column: 2; margin-top: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .35rem; }
+.review-finding.is-split > :not(.review-finding-heading):not(.review-finding-main):not(.review-finding-actions) { grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  .review-finding.is-split { grid-template-columns: minmax(0, 1fr); }
+  .review-finding.is-split > .review-finding-actions { grid-column: 1; flex-wrap: wrap; }
+}

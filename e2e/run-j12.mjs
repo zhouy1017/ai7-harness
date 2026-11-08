@@ -1699,7 +1699,7 @@ async function main() {
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
       return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
-        anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
+        anchorSection.querySelector('.button-row button')?.textContent==='继续编辑稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
         readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');

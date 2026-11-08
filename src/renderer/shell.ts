@@ -1,4 +1,5 @@
 import { icon as svgIcon, navigationIcon } from './components/icon-sprite.js';
+import { shortcutHint } from './commands.js';
 import {
   MAX_RECENT_BOOKS,
   MAX_SHELL_BOOK_TITLE_CHARACTERS,
@@ -297,6 +298,9 @@ function navLink(label: string, icon: string, activate: () => void): HTMLAnchorE
   return link;
 }
 
+/** Books shown in the sidebar before 更多图书 (Issue #1413 cluster 5). */
+const SIDEBAR_SHOWN_BOOKS = 3;
+
 export function mountShell(options: MountShellOptions): ShellSurface {
   const { sidebar, preferences } = options;
   options.toggle.replaceChildren(svgIcon('i-menu'));
@@ -392,12 +396,14 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   bookMenu.setAttribute('aria-label', '图书操作');
   let bookMenuOpen = false;
   bookMenu.addEventListener('toggle', (event) => { bookMenuOpen = (event as ToggleEvent).newState === 'open'; });
-  sidebar.replaceChildren(destinations, books, bookGroup, foot, bookMenu);
+  // With a Book open its own groups lead the sidebar (Issue #1413 cluster 5); without one the group is hidden.
+  sidebar.replaceChildren(bookGroup, destinations, books, foot, bookMenu);
 
   const allLinks = (): ReadonlyArray<HTMLElement> => [
     ...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin'),
   ];
 
+  let moreBooksOpen = false;
   const paintBooks = (values: PreferenceValues): void => {
     if (bookMenuOpen) {
       bookMenu.hidePopover();
@@ -463,7 +469,22 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       block.append(label, items);
       return block;
     };
-    const blocks = [list(SHELL_LABELS.pinnedHeading, rows.pinned, 'pinned'), list(SHELL_LABELS.recentHeading, rows.recent, 'recent')].filter((node): node is HTMLElement => node !== null);
+    // At most three Books show; the rest wait under 更多图书 in the same order (Issue #1413 cluster 5).
+    const shownPinned = rows.pinned.slice(0, SIDEBAR_SHOWN_BOOKS);
+    const shownRecent = rows.recent.slice(0, Math.max(0, SIDEBAR_SHOWN_BOOKS - shownPinned.length));
+    const blocks: HTMLElement[] = [list(SHELL_LABELS.pinnedHeading, shownPinned, 'pinned'), list(SHELL_LABELS.recentHeading, shownRecent, 'recent')].filter((node): node is HTMLElement => node !== null);
+    const restPinned = rows.pinned.slice(shownPinned.length);
+    const restRecent = rows.recent.slice(shownRecent.length);
+    if (restPinned.length + restRecent.length > 0) {
+      const more = el('details', 'sidebar-more-books');
+      more.open = moreBooksOpen;
+      more.addEventListener('toggle', () => { moreBooksOpen = more.open; });
+      const summary = el('summary', 'sidebar-link sidebar-more-books-summary');
+      summary.append(el('span', 'nav-label', SHELL_LABELS.moreBooks(restPinned.length + restRecent.length)));
+      summary.title = SHELL_LABELS.moreBooksHint(shortcutHint('book.switch'));
+      more.append(summary, ...[list(SHELL_LABELS.pinnedHeading, restPinned, 'pinned'), list(SHELL_LABELS.recentHeading, restRecent, 'recent')].filter((node): node is HTMLElement => node !== null));
+      blocks.push(more);
+    }
     if (blocks.length === 0) blocks.push(el('p', 'sidebar-empty field-note', SHELL_LABELS.noBooks));
     bookRows.replaceChildren(...blocks);
     applyMode();

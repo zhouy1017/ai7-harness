@@ -992,6 +992,24 @@ function bookIdentityDisclosure(book: { bookId: string; stableIdentity: string }
 }
 
 /**
+ * A Book card's way in (Issue #1413 cluster 1): the title in the serif face and its state as a pill, the whole card answering
+ * the click. The button's words stay 「书名 · 状态」 for its name; the card's facts and its action word sit beside it.
+ */
+function bookCardOpen(titleWords: string, stateWords: string, run: () => Promise<void>): HTMLButtonElement {
+  const open = button('', 'secondary', run);
+  open.className = 'book-card-open';
+  open.append(element('strong', 'book-card-title', titleWords), element('span', 'visually-hidden', ' · '), element('span', 'state-term book-card-state', stateWords));
+  return open;
+}
+
+/** The card's action word: a visible cue on the right; the card's button is the one control. */
+function bookCardAction(words: string): HTMLElement {
+  const cue = element('span', 'book-card-action', words);
+  cue.setAttribute('aria-hidden', 'true');
+  return cue;
+}
+
+/**
  * A Decision Layer row that states an instant (V2-UX-LAYER-004, V2-UX-COPY-011): absolute local date and
  * time, with the exact ISO instant riding inside the same `<dd>` on its own line. This is the shape for a
  * surface with no disclosure of its own — where there is one, the exact instant is a disclosed row
@@ -1597,13 +1615,14 @@ function identityFindingDisclosure(
     element('p', 'section-label', reviewTarget ? '导入身份提示与本次关系' : '发现已有导入身份提示'),
     element('h3', undefined, reviewTarget ? '复核身份提示记录与不同作品后果' : '已有导入与当前文件的身份提示'),
     ...(reviewTarget ? [element('p', undefined, `本次选择：${reviewTarget}`)] : []),
-    element(
+    // What the hint does not authorize is the technical layer's to say (Issue #1413 cluster 4).
+    ...(technicalLayerVisible ? [element(
       'p',
       'field-note',
       reviewTarget
         ? '身份提示不授予目标、关系、去重、覆盖或重新导入权限；现有记录保持不变，本次提交将创建另一图书的完整新记录。'
         : '身份提示仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
-    ),
+    )] : []),
   );
   for (const finding of findings) {
     const item = element('section', 'review-section');
@@ -2574,7 +2593,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       detail.append(acceptedDisclosure);
     }
   }
-  if (record.kind === 'source-import-record') {
+  if (record.kind === 'source-import-record' && technicalLayerVisible) {
     detail.append(listSection('不会做', record.namedNonEffects));
   }
   if (record.kind === 'revision') {
@@ -2609,14 +2628,11 @@ async function renderBookWorkbenchChooser(
     content.classList.add('book-workbench-chooser');
     content.dataset['currentBookId'] = currentOverview.book.bookId;
     const heading = element('h2', undefined, '在另一本图书工作台打开');
-    content.append(
-      heading,
-      element('p', 'lede', '选择会创建或显示目标图书已有的工作台；当前图书工作台保持打开。'),
-    );
+    content.append(heading);
     const list = element('div', 'recent-work-list');
     for (const summary of books) {
       if (summary.bookId === currentOverview.book.bookId) continue;
-      const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
+      const open = bookCardOpen(summary.title, summary.manuscriptStateLabel, async () => {
         open.disabled = true;
         setStatus('正在打开图书…', 'busy');
         try {
@@ -2628,7 +2644,7 @@ async function renderBookWorkbenchChooser(
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
-      row.append(open, bookIdentityDisclosure(summary));
+      row.append(open, bookCardAction('打开图书'), bookIdentityDisclosure(summary));
       list.append(row);
     }
     if (list.childElementCount === 0) {
@@ -3075,7 +3091,9 @@ function renderBookOverview(
     }).catch(() => undefined);
   }
   if (anchor !== null) {
-    const anchorSection = element('section', 'source-card manuscript-anchor');
+    // The hero card (Issue #1413 cluster 4): the manuscript's revision, where the editor was and its save state, with
+    // 继续编辑稿件 as the page's one primary action.
+    const anchorSection = element('section', 'source-card manuscript-anchor overview-hero');
     anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
     const anchorValues = element('dl');
     anchorValues.append(
@@ -3285,16 +3303,17 @@ function renderBookOverview(
       },
     );
   };
+  // The four work areas side by side (Issue #1413 cluster 4): 审阅 · 评估 · 分析 · 交付物, each its state, its count and its way in.
+  const secondary = element('div', 'book-overview-secondary');
   if (overview.manuscriptState.state === 'populated') {
-    content.append(deliverablesHost);
+    const grid = element('div', 'book-overview-grid');
+    for (const host of [reviewHost, evaluationHost, analysisHost, deliverablesHost]) host.classList.add('book-overview-tile');
+    grid.append(reviewHost, evaluationHost, analysisHost, deliverablesHost);
+    content.append(grid);
     const sources = element('section', 'overview-line book-sources-summary');
     sources.append(element('h3', undefined, '来源与证据'),
-      element('p', undefined, '导入文件与审查时留存的证据。'),
-      button('查看来源与证据', 'secondary', () => renderBookSources(overview.book.bookId, overview.book.title)));
-    const recent = element('section', 'overview-recent');
-    recent.append(element('h3', undefined, '最近发生'));
-    recent.append(reviewHost, evaluationHost, analysisHost);
-    content.append(sources, recent);
+      button('查看来源与证据', 'quiet', () => renderBookSources(overview.book.bookId, overview.book.title)));
+    secondary.append(sources);
     if (technicalLayerVisible) content.append(taskHost);
   }
 
@@ -3361,7 +3380,7 @@ function renderBookOverview(
       completionActionButtons.push(importFirst);
     }
   } else if (overview.primaryAction.kind === 'open-manuscript') {
-    const primaryActionButton = button('打开稿件', 'primary', async () => {
+    const primaryActionButton = button('继续编辑稿件', 'primary', async () => {
       setStatus('正在打开稿件…', 'busy');
       try {
         await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: overview.book.bookId, bookTitle: overview.book.title }, recoveryReturn);
@@ -3416,13 +3435,19 @@ function renderBookOverview(
     historyNavigation.append(next);
   }
   records.append(historyNavigation);
-  content.append(records, peopleSlot, seriesSlot, agentEntry);
+  // 导入与历史记录 folds away below the work (Issue #1413 cluster 4); a Book with no manuscript yet, an import just finished
+  // and 历史与恢复 open it.
+  const history = element('details', 'book-overview-history');
+  history.open = overview.manuscriptState.state !== 'populated' || sourceCompletion !== undefined;
+  history.append(element('summary', undefined, technicalWords('精确记录', '导入与历史记录')), records);
+  secondary.prepend(peopleSlot, seriesSlot, agentEntry);
+  content.append(secondary, history);
   if (technicalLayerVisible) content.append(identity);
   if (sourceCompletion) {
     const receiptActions = element('div', 'button-row');
     for (const action of Array.from(actions.children)) receiptActions.append(action);
     records.prepend(receiptActions);
-    const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '打开稿件');
+    const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '继续编辑稿件');
     if (open) actions.append(open);
   }
   (content.querySelector('.manuscript-anchor') ?? content).append(actions);
@@ -4077,6 +4102,8 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
         if (section === 'history') {
           shell.markSection('history');
           const records = screen.querySelector<HTMLElement>('.record-navigation');
+          const folded = records?.closest('details');
+          if (folded) folded.open = true;
           const heading = records?.querySelector<HTMLElement>('h3');
           if (heading) {
             heading.tabIndex = -1;
@@ -4435,7 +4462,7 @@ function renderLanding(
     }
     const list = element('div', 'recent-work-list');
     for (const summary of books.items) {
-      const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
+      const open = bookCardOpen(summary.title, summary.manuscriptStateLabel, async () => {
         open.disabled = true;
         setStatus('正在打开图书…', 'busy');
         try {
@@ -4447,11 +4474,11 @@ function renderLanding(
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
-      row.append(open);
+      row.append(open, bookCardAction('打开图书'));
       // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
       const peopleLine = bookCardPeopleLine(summary.people);
       const relatedLine = bookCardRelatedLine(summary.people);
-      const facts = element('p', 'book-people-line');
+      const facts = element('p', 'book-people-line field-note');
       if (peopleLine !== null) facts.append(peopleLine);
       if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
       if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
@@ -4489,9 +4516,9 @@ function renderLanding(
     recent.append(element('h3', undefined, '最近稿件'));
     const list = element('div', 'recent-work-list');
     for (const item of priorWork) {
-      const title = item.recoveryAttention ? `${item.bookTitle} · 恢复待确认状态` : `${item.bookTitle} · 当前稿件 ${item.revisionLabel}`;
+      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件 ${item.revisionLabel}`;
       const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
-      const open = button(`${title} · ${context}`, 'secondary', async () => {
+      const open = bookCardOpen(item.bookTitle, state, async () => {
         open.disabled = true;
         setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
         try {
@@ -4512,6 +4539,8 @@ function renderLanding(
       const row = element('article', 'recent-work-item');
       row.append(
         open,
+        bookCardAction(item.recoveryAttention ? '返回恢复比较' : '继续编辑'),
+        element('p', 'field-note book-card-facts', context),
         ...(item.recoveryAttention ? [element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。')] : []),
       );
       list.append(row);
