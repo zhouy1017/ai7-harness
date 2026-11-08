@@ -55,6 +55,16 @@ export { FastRoleError };
  */
 export type FastRoleKindId = typeof EDITORIAL_POLISH_KIND | typeof CONFLICT_REGENERATE_KIND | typeof MATERIAL_TRANSLATION_KIND | typeof CONNECTION_TEST_KIND;
 
+/**
+ * Another frozen contract on a kind's own route (Issue #1412): 就选中部分让 AI 修改 sends the editor's selected words under the
+ * route and outbound category 润色这段 is admitted for, with its own system prompt and contract digest.
+ */
+export interface FastRoleContractVariant {
+  readonly label: string;
+  readonly systemPrompt: string;
+  readonly promptContractDigest: string;
+}
+
 export interface FastRoleKindDefinition {
   readonly kindId: FastRoleKindId;
   /** The action as the editor names it, which every reason says. */
@@ -278,7 +288,7 @@ export class FastRoleExecutionOwner {
    * Send the one message of a kind and read its answer. `step` names the request inside the development validation; the
    * caller has checked the route with `requireReady` and built `message` from verified words only.
    */
-  async ask(kindId: FastRoleKindId, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null): Promise<FastRoleAnswer> {
+  async ask(kindId: FastRoleKindId, message: string, step: string, readMemory?: () => EditorialMemorySnapshot | null, contract?: FastRoleContractVariant): Promise<FastRoleAnswer> {
     this.requireReady(kindId);
     if (kindId === CONNECTION_TEST_KIND && message !== CONNECTION_TEST_POLICY.message) throw new FastRoleError('MODEL_CONNECTION_TEST_INVALID', '连接测试只接受固定的公开合成消息。');
     this.#inFlight = true;
@@ -289,7 +299,8 @@ export class FastRoleExecutionOwner {
       if (this.#deps.live !== null) producer = this.#deps.producer ?? this.#deps.requestGovernor.registerProducer({
         key: `fast-role:${randomUUID()}`, kind: kindId === CONNECTION_TEST_KIND ? 'connection-test' : 'fast-role', lane: 'foreground',
       });
-      return await this.#run(FAST_ROLE_KINDS[kindId], message, step, producer, cancellation.signal, readMemory);
+      const kind = FAST_ROLE_KINDS[kindId];
+      return await this.#run(contract === undefined ? kind : { ...kind, ...contract }, message, step, producer, cancellation.signal, readMemory);
     } finally {
       if (producer !== null && this.#deps.producer === undefined) this.#deps.requestGovernor.unregisterProducer(producer);
       this.#requestAbort = null;

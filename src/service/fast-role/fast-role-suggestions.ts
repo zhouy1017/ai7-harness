@@ -41,6 +41,8 @@ import {
   type EditorialPolishWithheld,
 } from './polish-contract.js';
 import { EDITORIAL_POLISH_SPAN_ATOMIC_REASON, placeSpanSuggestions, type PolishPlacement } from './polish-span.js';
+import { finishScopedEdit, prepareScopedEdit, scopedEditProjection, type ScopedEditStore } from './scoped-edit.js';
+import type { ScopedAiEditProjection, StartScopedAiEditInput } from '../../shared/protocol/scoped-edit.js';
 
 /**
  * 润色这段 and 基于当前稿件重新生成建议 as the service runs them (Issue #842): the words are read from the working state as the
@@ -51,7 +53,9 @@ import { EDITORIAL_POLISH_SPAN_ATOMIC_REASON, placeSpanSuggestions, type PolishP
  * on its own.
  */
 export type FastRoleStore = Pick<EditorialStore,
-  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory'>>;
+  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory'>> &
+  // 就选中部分让 AI 修改 (Issue #1412) reads the working state and applies through the store; a store without them refuses it.
+  Partial<Pick<EditorialStore, 'getManuscriptWindow' | 'scopedEditWorkingBlocks' | 'applyChangeSuggestion'>>;
 
 /** The label every 润色这段 mark carries as its source, beside the polish task it came from. */
 export const EDITORIAL_POLISH_MARK_SOURCE_LABEL = '润色这段';
@@ -351,7 +355,8 @@ async function finishRegeneration(owner: FastRoleExecutionOwner, store: FastRole
 
 type RequestEntry =
   | { readonly kind: 'editorial-polish'; projection: EditorialPolishProjection }
-  | { readonly kind: 'conflict-regenerate'; projection: ProposalConflictRegenerationProjection };
+  | { readonly kind: 'conflict-regenerate'; projection: ProposalConflictRegenerationProjection }
+  | { readonly kind: 'scoped-edit'; projection: ScopedAiEditProjection };
 
 /**
  * The fast-role requests of this service's lifetime, by request id: each starts checked, runs its one request beside the
@@ -391,11 +396,34 @@ export class FastRoleRequests {
     return entry.projection;
   }
 
+  /** 就选中部分让 AI 修改 (Issue #1412): checked and frozen at once — a refusal is thrown before anything is sent — then requested beside the loop. */
+  scopedEdit(bookId: string, input: StartScopedAiEditInput): ScopedAiEditProjection {
+    const store = this.#store;
+    require(store.getManuscriptWindow !== undefined && store.scopedEditWorkingBlocks !== undefined && store.applyChangeSuggestion !== undefined,
+      'FAST_ROLE_ROUTE_UNAVAILABLE', '这次运行不能进行 AI 局部修改。');
+    const scopedStore = store as ScopedEditStore;
+    const prepared = prepareScopedEdit(this.#owner, scopedStore, bookId, input);
+    const entry: RequestEntry = { kind: 'scoped-edit', projection: scopedEditProjection(prepared, 'requesting', '正在让 AI 修改所选部分…') };
+    this.#start(prepared.requestId, entry, async () => {
+      entry.projection = await finishScopedEdit(this.#owner, scopedStore, prepared);
+    }, (message) => { entry.projection = scopedEditProjection(prepared, 'failed', message); });
+    return entry.projection;
+  }
+
+  /** A scoped AI edit of the Book, as it stands. */
+  inspectScopedEdit(bookId: string, requestId: string): ScopedAiEditProjection {
+    require(typeof requestId === 'string' && UUID_PATTERN.test(requestId), 'FAST_ROLE_REQUEST_INVALID', '请求标识无效。');
+    const entry = this.#entries.get(requestId);
+    require(entry !== undefined && entry.kind === 'scoped-edit' && entry.projection.bookId === bookId, 'FAST_ROLE_REQUEST_NOT_FOUND',
+      '这次请求已不在本次运行的记录中；已应用的修改仍在稿件里。');
+    return entry.projection;
+  }
+
   /** One request of the Book, as it stands. */
   inspect(bookId: string, requestId: string): FastInteractionRequestProjection {
     require(typeof requestId === 'string' && UUID_PATTERN.test(requestId), 'FAST_ROLE_REQUEST_INVALID', '请求标识无效。');
     const entry = this.#entries.get(requestId);
-    require(entry !== undefined && entry.projection.bookId === bookId, 'FAST_ROLE_REQUEST_NOT_FOUND', '这次请求已不在本次运行的记录中；生成的修改建议和解决草稿仍在稿件里。');
+    require(entry !== undefined && entry.kind !== 'scoped-edit' && entry.projection.bookId === bookId, 'FAST_ROLE_REQUEST_NOT_FOUND', '这次请求已不在本次运行的记录中；生成的修改建议和解决草稿仍在稿件里。');
     return entry.kind === 'editorial-polish' ? { kind: entry.kind, polish: entry.projection } : { kind: entry.kind, regeneration: entry.projection };
   }
 
@@ -418,7 +446,7 @@ export class FastRoleRequests {
 
   /** Forget the oldest settled requests beyond the remembered few. */
   #forget(): void {
-    const settled = [...this.#entries].filter(([, entry]) => entry.kind === 'editorial-polish' ? entry.projection.state !== 'requesting' : entry.projection.outcome !== 'requesting');
+    const settled = [...this.#entries].filter(([, entry]) => entry.kind === 'conflict-regenerate' ? entry.projection.outcome !== 'requesting' : entry.projection.state !== 'requesting');
     for (const [requestId] of settled.slice(0, Math.max(0, settled.length - REMEMBERED_REQUESTS))) this.#entries.delete(requestId);
   }
 }
