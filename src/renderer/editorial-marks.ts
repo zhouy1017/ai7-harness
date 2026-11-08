@@ -533,6 +533,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
   let activeComment: string | undefined;
+  /** The card an applied revision's badge brought forward (Issue #1411), and whether it is still to be scrolled to. */
+  let revealed: { readonly markId: string; readonly pending: boolean } | undefined;
   let commentsReading = 0;
   let commentCardReads = 0;
   let commentsIdentity = '';
@@ -715,6 +717,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }
     }
     const placed = stackEditorialComments(items);
+    // ✎ 已改 (Issue #1411): the card an applied revision's badge asked for carries the active frame, and is brought into view and
+    // focused the first time it is laid out ready.
+    for (const [id, entry] of commentNodes) {
+      const classes = entry.node.className.split(' ').filter((name) => name !== '' && name !== 'editorial-mark-card-active');
+      entry.node.className = [...classes, ...(id === revealed?.markId ? ['editorial-mark-card-active'] : [])].join(' ');
+    }
+    const forward = revealed?.pending === true ? placed.find((item) => item.mark.markId === revealed!.markId && item.node.dataset['revalidating'] !== 'true') : undefined;
+    if (forward !== undefined && revealed !== undefined) {
+      revealed = { markId: revealed.markId, pending: false };
+      forward.node.scrollIntoView?.({ block: 'nearest' });
+      forward.node.focus({ preventScroll: true });
+    }
     for (const [index, item] of placed.entries()) {
       item.node.style.top = `${item.top}px`;
       item.node.dataset['active'] = String(item.mark.markId === activeComment);
@@ -1264,24 +1278,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   async function revealRevision(markId: string): Promise<void> {
     if (destroyed) return;
     if (options.revealComments?.() !== true) { await openCard(markId); return; }
+    // The pane lays the card out once it is read; the layout brings it forward then (see `layoutComments`), however long that takes.
+    revealed = { markId, pending: true };
+    activateComment(markId);
     refreshComments();
-    // Its card is read and laid out in the pane within a few frames; a slow machine is given five seconds before it floats instead.
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline && !destroyed) {
-      const entry = commentNodes.get(markId);
-      if (entry !== undefined && !entry.node.hidden && entry.node.dataset['revalidating'] !== 'true') {
-        for (const other of commentNodes.values()) {
-          const classes = other.node.className.split(' ').filter((name) => name !== '' && name !== 'editorial-mark-card-active');
-          other.node.className = [...classes, ...(other.node === entry.node ? ['editorial-mark-card-active'] : [])].join(' ');
-        }
-        activateComment(markId);
-        entry.node.scrollIntoView?.({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
-        entry.node.focus({ preventScroll: true });
-        return;
-      }
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
-    await openCard(markId);
   }
 
   const update = (
