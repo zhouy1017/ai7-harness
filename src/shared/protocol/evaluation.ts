@@ -500,7 +500,16 @@ export interface EvaluationContent {
   readonly verdict: string | null;
   /** Chosen by the editor, never preselected (EVAL-007). */
   readonly conclusion: EvaluationConclusion | null;
+  /**
+   * 🔒 锁定（AI 不修改）(Issue #1412): the scored items (by `itemId`) and the parts — `verdict`, `strengths`, `weaknesses` — that
+   * 按我的修改重新生成 leaves exactly as this version holds them. Absent when nothing is locked, so an entry saved before locks
+   * existed reads, and digests, exactly as it did.
+   */
+  readonly aiLocked?: ReadonlyArray<string>;
 }
+
+/** The parts of an evaluation version besides its items that can be locked against regeneration (Issue #1412). */
+export const EVALUATION_AI_LOCK_PARTS = ['verdict', 'strengths', 'weaknesses'] as const;
 
 /** The reasons the editor picked for departing from AI7's score, none preselected; `own` with the editor's words in `note`. */
 export type EvaluationAdjustmentReasonId = 'too-high' | 'too-low' | 'insufficient-basis' | 'missed-aspect' | 'own';

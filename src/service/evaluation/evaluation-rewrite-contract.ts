@@ -84,6 +84,22 @@ export interface EvaluationRewriteContractInput {
   readonly conclusions: ReadonlyArray<string>;
   /** Contract `/2`'s whole-report context (Issue #1407); absent from a `/1` Task's frozen input. */
   readonly report?: EvaluationRewriteReportInput;
+  /**
+   * 🔒 锁定 (Issue #1412): the scored items (by `itemId`) and the parts — `verdict`, `strengths`, `weaknesses` — the editor locked,
+   * which the regenerated report leaves exactly as the version holds them. Absent when nothing is locked, so every contract
+   * frozen before locks existed, and every one without a lock, keeps its digest.
+   */
+  readonly locked?: ReadonlyArray<string>;
+}
+
+/** Whether a part of the version is locked against regeneration (Issue #1412). */
+export function evaluationRewriteLocked(input: Pick<EvaluationRewriteContractInput, 'locked'>, key: string): boolean {
+  return input.locked?.includes(key) ?? false;
+}
+
+/** The scored items a regeneration may write a 评语 for: scored, and not locked. */
+export function evaluationRewriteWritableItems(input: Pick<EvaluationRewriteContractInput, 'items' | 'locked'>): EvaluationRewriteItemInput[] {
+  return evaluationRewriteScoredItems(input).filter((item) => !evaluationRewriteLocked(input, item.itemId));
 }
 
 /** AI7's original report and the editor's other report fields, in their words: what a `/2` regeneration reads besides the items. */
@@ -222,7 +238,25 @@ function frozenInput(input: EvaluationRewriteContractInput): EvaluationRewriteCo
     verdict: input.verdict,
     conclusions: [...input.conclusions],
     ...(input.report === undefined ? {} : { report: frozenReport(input.report, lines) }),
+    ...(input.locked === undefined || input.locked.length === 0 ? {} : { locked: frozenLocks(input.locked, items) }),
   };
+}
+
+const LOCKABLE_PARTS = ['verdict', 'strengths', 'weaknesses'] as const;
+
+function frozenLocks(locked: ReadonlyArray<string>, items: ReadonlyArray<EvaluationRewriteItemInput>): string[] {
+  requireAnalysis(Array.isArray(locked) && locked.every((key) => typeof key === 'string' &&
+    ((LOCKABLE_PARTS as ReadonlyArray<string>).includes(key) || items.some((item) => item.itemId === key))) && new Set(locked).size === locked.length,
+  'EVALUATION_REWRITE_INPUT_INVALID', '评估报告重新生成所依据的锁定项无效。');
+  return [...items.map((item) => item.itemId), ...LOCKABLE_PARTS].filter((key) => locked.includes(key));
+}
+
+/** Contract `/2`'s locked parts, in the editor's words, and what the answer writes for them: nothing. */
+function lockedLines(input: EvaluationRewriteContractInput): string[] {
+  if (input.locked === undefined) return [];
+  const names = input.locked.map((key) => key === 'verdict' ? '总评' : key === 'strengths' ? '主要优点' : key === 'weaknesses' ? '主要问题'
+    : `${key}（${input.items.find((item) => item.itemId === key)?.label ?? key}）的评语`);
+  return [`以下内容已被编辑锁定，原样保留：${names.join('、')}。不要重写它们；锁定的评分项不出现在 items 中，锁定的总评、主要优点或主要问题输出 null。`];
 }
 
 function frozenReport(report: EvaluationRewriteReportInput, lines: (list: ReadonlyArray<string>) => string[]): EvaluationRewriteReportInput {
@@ -334,9 +368,10 @@ function synthesisInstructionOf(input: EvaluationRewriteContractInput): string {
       '不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件。',
       '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
       'schema（固定为 "ai7.evaluation-rewrite.synthesis-result/2"）、items、verdict、strengths、weaknesses。',
-      `items 为数组，下列每个编辑已打分的评分项恰好一项：${scored.map((item) => item.itemId).join('、')}；每项精确包含 itemId 与 comment（新版评语，一段话，不超过 300 字素）。`,
+      `items 为数组，下列每个编辑已打分的评分项恰好一项：${(input.locked === undefined ? scored : evaluationRewriteWritableItems(input)).map((item) => item.itemId).join('、')}；每项精确包含 itemId 与 comment（新版评语，一段话，不超过 300 字素）。`,
       'verdict 是新版总评，一段话，不超过 600 字素，概括全书、与各项评语一致，并写出下一步修改建议。',
       `strengths 与 weaknesses 是新版的主要优点与主要问题，各为字符串数组，各 1 至 ${MAX_REWRITTEN_LINES} 条，每条一句、不超过 ${MAX_REWRITTEN_LINE_GRAPHEMES} 字素。每段话都只占一行。`,
+      ...lockedLines(input),
     ].join('\n');
   }
   return [
@@ -430,7 +465,7 @@ export function parseEvaluationRewriteUnitResult(text: string, expected: { unitO
  * Admit the synthesis: one 评语 for every item the editor scored, none for another, and the 总评 — and no other key, so no
  * number can come back with them. The items are returned in the version's order whatever order the model wrote them in.
  */
-export function parseEvaluationRewriteSynthesis(text: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions' | 'report'>): EvaluationRewriteSynthesisParse {
+export function parseEvaluationRewriteSynthesis(text: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions' | 'report' | 'locked'>): EvaluationRewriteSynthesisParse {
   const whole = input.report !== undefined;
   const schema = whole ? EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2 : EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
   const value = extractModelJson(text, { partial: true });
@@ -440,7 +475,8 @@ export function parseEvaluationRewriteSynthesis(text: string, input: Pick<Evalua
   const mark = (section: string, index: number, reason: string): void => { salvaged.push({ section, index, reason }); };
   try { JSON.parse(text); } catch { mark('envelope', -1, 'json-extracted-or-partial'); }
   if (value.schema !== schema) mark('schema', -1, 'request-envelope');
-  const scored = evaluationRewriteScoredItems(input);
+  // A locked item or part is never read from the answer (Issue #1412): it stays the version's own, whatever was written for it.
+  const scored = evaluationRewriteWritableItems(input);
   const fullMarks = scoreDenominators(input.items);
   const clean = (raw: unknown, itemId: string | null, index: number, maximum: number): string | null => {
     const section = itemId === null ? 'verdict' : 'items';
@@ -457,12 +493,13 @@ export function parseEvaluationRewriteSynthesis(text: string, input: Pick<Evalua
   };
   const byId = new Map<string, { itemId: string; comment: string }>();
   for (const [index, candidate] of (Array.isArray(value.items) ? value.items : []).entries()) {
+    if (isRecord(candidate) && typeof candidate.itemId === 'string' && evaluationRewriteLocked(input, candidate.itemId)) { mark('items', index, 'item-locked'); continue; }
     if (!isRecord(candidate) || typeof candidate.itemId !== 'string' || !scored.some((item) => item.itemId === candidate.itemId) || byId.has(candidate.itemId)) { mark('items', index, 'item-unknown-or-duplicate'); continue; }
     const comment = clean(candidate.comment, candidate.itemId, index, MAX_REWRITTEN_COMMENT_GRAPHEMES);
     if (comment !== null) byId.set(candidate.itemId, { itemId: candidate.itemId, comment });
   }
   for (const [index, item] of scored.entries()) if (!byId.has(item.itemId)) { mark('items', index, 'item-missing'); withheld.push({ itemId: item.itemId, reason: '未写出可采用的评语。' }); }
-  const verdict = clean(value.verdict, null, -1, MAX_REWRITTEN_VERDICT_GRAPHEMES);
+  const verdict = evaluationRewriteLocked(input, 'verdict') ? null : clean(value.verdict, null, -1, MAX_REWRITTEN_VERDICT_GRAPHEMES);
   const items = scored.flatMap((item) => { const written = byId.get(item.itemId); return written === undefined ? [] : [written]; });
   // Contract `/2`'s lines: each kept only without a score or a conclusion in it; none kept leaves the editor's own list.
   const lines = (raw: unknown, section: 'strengths' | 'weaknesses', label: string): string[] | null => {
@@ -479,8 +516,8 @@ export function parseEvaluationRewriteSynthesis(text: string, input: Pick<Evalua
     }
     return kept.length > 0 ? kept : null;
   };
-  const strengths = whole ? lines(value.strengths, 'strengths', '主要优点') : null;
-  const weaknesses = whole ? lines(value.weaknesses, 'weaknesses', '主要问题') : null;
+  const strengths = whole && !evaluationRewriteLocked(input, 'strengths') ? lines(value.strengths, 'strengths', '主要优点') : null;
+  const weaknesses = whole && !evaluationRewriteLocked(input, 'weaknesses') ? lines(value.weaknesses, 'weaknesses', '主要问题') : null;
   if (!items.length && verdict === null && strengths === null && weaknesses === null) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
   return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { schema, items, verdict, withheld, ...(whole ? { strengths, weaknesses } : {}), ...(salvaged.length ? { salvaged } : {}) } };
 }

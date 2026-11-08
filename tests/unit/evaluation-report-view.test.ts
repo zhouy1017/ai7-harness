@@ -83,3 +83,28 @@ it('lets a report that settles after a version begun alone lead the page (Issue 
   await vi.waitFor(() => expect(root.dataset['evaluationView']).toBe('report'));
   expect(root.querySelector('[data-evaluation-action="edit-report"]')).not.toBeNull();
 });
+
+it('locks one dimension and the 总评 with one click each, saving the version at once (Issue #1412)', async () => {
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  const editing = { ...page, records: [record, blank], recordCount: 2, record, start: { allowed: false, reason: '尚未定稿' } };
+  const saved: unknown[] = [];
+  const saveEvaluation = vi.fn(async (input: { content: { aiLocked?: string[] } }) => {
+    saved.push(input.content.aiLocked);
+    return { ...editing, record: { ...record, entries: record.entries + 1, content: { ...record.content, ...(input.content.aiLocked === undefined ? {} : { aiLocked: input.content.aiLocked }) } } };
+  });
+  const surface = mountEvaluation({ root: root as unknown as HTMLElement, api: { inspectEvaluation: async () => page, startEvaluation: async () => editing, saveEvaluation }, bookId: 'book',
+    technicalDetails: details, setStatus: vi.fn(), errorMessage: () => '' } as unknown as MountEvaluationOptions);
+  await surface.load();
+  root.querySelector('[data-evaluation-action="edit-report"]')!.click();
+  await vi.waitFor(() => expect(root.dataset['evaluationView']).toBe('record'));
+  const first = profile.items[0]!.itemId;
+  // Every item and 总评 / 主要优点 / 主要问题 offer the lock; 距离可出版 is no AI-written part and offers none.
+  expect(root.querySelectorAll('.evaluation-item [data-evaluation-ai-lock]')).toHaveLength(profile.items.length);
+  expect(root.querySelectorAll('.evaluation-lists [data-evaluation-ai-lock]').map((toggle) => toggle.dataset['evaluationAiLock'])).toEqual(['strengths', 'weaknesses', 'verdict']);
+  root.querySelector(`[data-evaluation-ai-lock="${first}"]`)!.click();
+  await vi.waitFor(() => expect(saved).toEqual([[first]]));
+  await vi.waitFor(() => expect(root.querySelector(`[data-evaluation-ai-lock="${first}"]`)!.getAttribute('aria-pressed')).toBe('true'));
+  expect(root.querySelector(`[data-evaluation-ai-lock="${first}"]`)!.textContent).toBe('🔒 已锁定');
+  root.querySelector('[data-evaluation-ai-lock="verdict"]')!.click();
+  await vi.waitFor(() => expect(saved).toEqual([[first], [first, 'verdict']]));
+});

@@ -136,6 +136,8 @@ export interface EvaluationRewriteWords {
   readonly weaknesses?: ReadonlyArray<string> | null;
 }
 /** Why a regeneration waits on the report as AI7 wrote it (Issue #1407): it follows the editor's saved changes. */
+/** Why a regeneration has nothing to write (Issue #1412): everything it could write is locked. */
+export const EVALUATION_REWRITE_ALL_LOCKED = '报告的各项评语、总评、优点和问题都已锁定：没有可以重新生成的内容；先解锁要重新生成的部分。';
 export const EVALUATION_REWRITE_NEEDS_EDIT = '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。';
 const corrupt = (): EvaluationRewriteError => new EvaluationRewriteError('EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_rewrite_tasks'";
@@ -185,6 +187,11 @@ export function evaluationRewriteRefusal(version: Pick<RewritableEvaluation, 'st
   }) || !sameLines(version.content.strengths, initial.strengths) || !sameLines(version.content.weaknesses, initial.weaknesses) || version.content.verdict !== null;
   if (!edited) return EVALUATION_REWRITE_NEEDS_EDIT;
   if (version.content.items.every((item) => item.score === null)) return '至少要给一项打分并保存，才有评语可以重写。';
+  // 🔒 锁定 (Issue #1412): with every scored item and every part locked, nothing is left to regenerate.
+  const locked = new Set(version.content.aiLocked ?? []);
+  if (version.content.items.every((item) => item.score === null || locked.has(item.itemId)) && ['verdict', 'strengths', 'weaknesses'].every((part) => locked.has(part))) {
+    return EVALUATION_REWRITE_ALL_LOCKED;
+  }
   return null;
 }
 
@@ -237,6 +244,8 @@ export function evaluationRewriteContractInput(version: RewritableEvaluation): E
       conclusion: version.content.conclusion === null ? null
         : version.profile.conclusions.find((entry) => entry.conclusion === version.content.conclusion)?.label ?? null,
     },
+    // 🔒 锁定 (Issue #1412): what the editor locked stays theirs; only present when something is.
+    ...(version.content.aiLocked === undefined || version.content.aiLocked.length === 0 ? {} : { locked: [...version.content.aiLocked] }),
   };
 }
 
@@ -247,17 +256,19 @@ const RISK_LEVEL_WORDS = { low: '低', medium: '中', high: '高' } as const;
  * touched — every score, `不评`, adjustment, risk, line and the conclusion exactly as the entry holds them.
  */
 export function contentWithRewrite(content: EvaluationContent, words: EvaluationRewriteWords): EvaluationContent {
+  // 🔒 锁定 (Issue #1412): a locked item or part is never taken from the rewrite, whatever it holds — the version's own stays.
+  const locked = new Set(content.aiLocked ?? []);
   return {
     ...content,
     items: content.items.map((item) => {
       const rewritten = words.items.find((entry) => entry.itemId === item.itemId);
-      return rewritten === undefined || item.score === null ? item : { ...item, comment: rewritten.comment };
+      return rewritten === undefined || item.score === null || locked.has(item.itemId) ? item : { ...item, comment: rewritten.comment };
     }),
     // A 总评 set aside (it stated a score or a conclusion) leaves the version's own.
-    verdict: words.verdict ?? content.verdict,
+    verdict: locked.has('verdict') ? content.verdict : words.verdict ?? content.verdict,
     // A whole-report regeneration's strengths and problems (Issue #1407); one not offered leaves the version's own.
-    strengths: words.strengths ?? content.strengths,
-    weaknesses: words.weaknesses ?? content.weaknesses,
+    strengths: locked.has('strengths') ? content.strengths : words.strengths ?? content.strengths,
+    weaknesses: locked.has('weaknesses') ? content.weaknesses : words.weaknesses ?? content.weaknesses,
   };
 }
 

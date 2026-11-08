@@ -2238,6 +2238,29 @@ async function main() {
       accepted.rewrite.decided === '上次重写已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
     const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
     requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);
+    at('evaluation-ai-lock');
+    // 🔒 锁定本项 / 锁定本节 (Issue #1412), still in ordinary mode: one click locks a dimension's 评语 and another the 总评 against
+    // the next 按我的修改重新生成, each saved at once as an entry of 第 15 版 that changes no word and no score; unlocking leaves
+    // the version's words exactly as they were. The guard that keeps locked words through a regeneration is the service's.
+    const lockToggle = (key) => `[data-screen="book-evaluation"] .evaluation-record [data-evaluation-ai-lock="${key}"]`;
+    const lockState = (key) => `document.querySelector(${JSON.stringify(lockToggle(key))})?.getAttribute('aria-pressed')`;
+    await waitFor(renderer, `${lockState('literary-quality')} === 'false' && ${lockState('verdict')} === 'false' && document.querySelector(${JSON.stringify(lockToggle('readiness'))}) === null`,
+      'evaluation-ai-lock-offered');
+    await clickSelector(renderer, lockToggle('literary-quality'), 'evaluation-ai-lock-item');
+    await readEvaluation(renderer, (page) => page.record?.entries === '4', 'evaluation-ai-lock-item-saved');
+    await waitFor(renderer, `${lockState('literary-quality')} === 'true' && document.querySelector(${JSON.stringify(lockToggle('literary-quality'))}).textContent === '🔒 已锁定'`, 'evaluation-ai-lock-item-pressed');
+    await clickSelector(renderer, lockToggle('verdict'), 'evaluation-ai-lock-verdict');
+    await readEvaluation(renderer, (page) => page.record?.entries === '5', 'evaluation-ai-lock-verdict-saved');
+    const lockedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.content.aiLocked ?? null, page.record.content.items.map((entry) => entry.score), page.record.content.verdict]))`);
+    requireJourney(lockedService === JSON.stringify([['literary-quality', 'verdict'], [16.5, 15, 13, 14, 10], REWRITTEN_VERDICT]), 'evaluation-ai-lock-service', lockedService);
+    for (const [key, entries] of [['literary-quality', '6'], ['verdict', '7']]) {
+      await clickSelector(renderer, lockToggle(key), `evaluation-ai-unlock-${key}`);
+      await readEvaluation(renderer, (page) => page.record?.entries === entries, `evaluation-ai-unlock-${key}-saved`);
+    }
+    const unlocked = await readEvaluation(renderer, (page) => page.record?.entries === '7', 'evaluation-ai-unlocked');
+    const unlockedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([Object.hasOwn(page.record.content, 'aiLocked'), page.record.content.verdict]))`);
+    requireJourney(unlockedService === JSON.stringify([false, REWRITTEN_VERDICT]) && JSON.stringify(unlocked.record.comments) === JSON.stringify(REWRITTEN_COMMENTS),
+      'evaluation-ai-unlocked-words', [unlockedService, unlocked.record.comments]);
     await evaluationMode(true, 'evaluation-rewrite-developer');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------

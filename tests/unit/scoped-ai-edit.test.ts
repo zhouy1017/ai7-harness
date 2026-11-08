@@ -55,7 +55,8 @@ const projection = (state: ScopedAiEditProjection['state'], markIds: string[] = 
 
 it('reads a cross-paragraph selection as its exact pins and knows when all of it is locked', () => {
   expect(selectionPins(span)).toEqual(span.span);
-  expect(selectionPins({ ...span, span: undefined })).toEqual([{ blockId: 'blk_a', blockDigest: 'd1', fromGrapheme: 2, toGrapheme: 9 }]);
+  const { span: _pins, ...single } = span;
+  expect(selectionPins(single)).toEqual([{ blockId: 'blk_a', blockDigest: 'd1', fromGrapheme: 2, toGrapheme: 9 }]);
   expect(selectionLocked(window0, span)).toBe(false);
   expect(selectionLocked({ aiLockedBlockIds: ['blk_a', 'blk_b'] }, span)).toBe(true);
 });
