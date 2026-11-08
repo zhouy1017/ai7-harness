@@ -3118,7 +3118,12 @@ async function main() {
       throw journeyCheckFailure('J-07', 'scoped-edit-card-forward', { failed, cause: error });
     }
     await assertRenderer(renderer, `(() => { document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'scoped-edit-undo');
-    await waitFor(renderer, `window.__j07Scoped.unchanged()`, 'scoped-edit-undone', 30_000);
+    try {
+      await waitFor(renderer, `window.__j07Scoped.unchanged()`, 'scoped-edit-undone', 30_000);
+    } catch (error) {
+      const failed = await renderer.evaluate(`(() => { const before=window.__j07Scoped.before; const after=Object.fromEntries(Array.from(document.querySelector('[data-testid="manuscript-editor"]')?.children ?? []).filter((node)=>node.dataset.blockId).map((node)=>[node.dataset.blockId,node.textContent])); const target=window.__j07Scoped.state.target; const shared=Object.keys(before).filter((id)=>id in after); const status=document.querySelector('#persistence-status')?.textContent ?? ''; const toast=document.querySelector('[data-toast]')?.textContent ?? ''; return ['target-'+(target in after?'present':'gone'), 'target-text-'+(after[target]===before[target]?'restored':'changed'), 'shared-'+shared.length+'-of-'+Object.keys(before).length, 'others-'+(shared.filter((id)=>id!==target).every((id)=>after[id]===before[id])?'same':'differ'), 'badge-'+(window.__j07Scoped.block(target)?.querySelector('.editorial-mark-applied-badge')?'present':'none'), 'status-'+(status.length>0?'set':'empty'), 'toast-'+(toast.startsWith('已撤销')?'undone':toast.length>0?'other':'none')]; })()`).catch(() => ['probe-failed']);
+      throw journeyCheckFailure('J-07', 'scoped-edit-undone', { failed, cause: error });
+    }
     await assertRenderer(renderer, `(() => { const badge=window.__j07Scoped.block(window.__j07Scoped.state.next)?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'scoped-unlock');
     await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked===undefined`, 'scoped-unlocked', 30_000);
 
