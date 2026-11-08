@@ -18,7 +18,7 @@ export const EXCLUSIONS_NOTE = '本书系检索排除记录后立即生效，后
 export const EXCLUSIONS_EMPTY = '这个书系没有在生效的检索排除。';
 export const EXCLUSIONS_ADD_OPEN = '添加检索排除…';
 export const EXCLUSIONS_CHANGE_OPEN = '修改检索排除…';
-export const EXCLUSIONS_END_OPEN = '停止此排除…';
+export const EXCLUSIONS_END_OPEN = '停止此排除';
 export const EXCLUSIONS_KIND_LEGEND = '排除什么';
 export const EXCLUSIONS_TARGET_LEGEND = '选择要排除的对象';
 export const EXCLUSIONS_REASON_LABEL = '排除理由 · 可选';
@@ -31,8 +31,9 @@ export const EXCLUSIONS_TARGETS_NONE: Readonly<Record<SeriesExclusionTargetKind,
   'source-version': '这个书系的成员图书还没有来源文件。',
 };
 export const EXCLUSIONS_ALREADY = '已排除';
-export const EXCLUSIONS_PREVIEW_ACTION = '查看影响';
-export const EXCLUSIONS_REFRESH = '重新查看影响';
+export const EXCLUSIONS_ADD_ACTION = '添加检索排除';
+export const EXCLUSIONS_CHANGE_ACTION = '保存修改';
+export const EXCLUSIONS_REFRESH = '再试一次';
 export const EXCLUSIONS_CANCEL = '取消';
 export const EXCLUSIONS_PREVIEW_HEADING = '书系检索排除影响预览';
 export const EXCLUSIONS_HISTORY_HEADING = '检索排除记录';

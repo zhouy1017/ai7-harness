@@ -307,7 +307,10 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     } else {
       const view = action(LEARNING_OPEN, 'quiet', 'open', () => {
         if (busy) return;
-        open = { bookId: book.bookId, materialKey: material.materialKey, draft: { choice: null, note: '' } };
+        // An undecided material opens on its recommendation (Issue #1410 item 31): the Book's own, or excluded for a Word change
+        // pair. One already decided opens with nothing chosen anew.
+        const recommended = material.kind === 'word-tracked-edit' ? 'excluded' : 'book';
+        open = { bookId: book.bookId, materialKey: material.materialKey, draft: { choice: material.decision == null ? recommended : null, note: '' } };
         refusal = null;
         paint(`${materialSelector(material.materialKey)} .learning-card h4`);
       });

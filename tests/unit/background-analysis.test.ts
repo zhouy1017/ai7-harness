@@ -52,6 +52,7 @@ import { parseBackgroundQuietMs } from '../../src/shared/protocol.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../../src/shared/protocol.js';
 import {
   BACKGROUND_ENROLL_OPEN,
+  BACKGROUND_REVOKE_CONFIRM,
   BACKGROUND_PAUSE,
   BACKGROUND_RESUME,
   backgroundCeilingLine,
@@ -62,7 +63,6 @@ import {
   backgroundChangeKey,
   backgroundLookLine,
   backgroundNotStartedLine,
-  BACKGROUND_REVOKE_OPEN,
   backgroundEnrollmentLine,
   backgroundHistoryLine,
   backgroundNextLine,
@@ -287,7 +287,7 @@ describe('the 后台处理登记 frames', () => {
 describe('the 后台分析 block words', () => {
   const instant = (value: string): string => `〈${value}〉`;
   it('reads the state, the Runs started and the history in the editor\'s words', () => {
-    expect([BACKGROUND_ENROLL_OPEN, BACKGROUND_REVOKE_OPEN]).toEqual(['登记后台处理…', '撤销登记…']);
+    expect([BACKGROUND_ENROLL_OPEN, BACKGROUND_REVOKE_CONFIRM]).toEqual(['登记后台处理…', '撤销登记']);
     expect(backgroundNextLine({ kind: 'wait', reason: BACKGROUND_PLACE_BUSY })).toBe(`现在：${BACKGROUND_PLACE_BUSY}`);
     expect(backgroundNextLine({ kind: 'start', reason: BACKGROUND_START_SYNC })).toBe(`马上：${BACKGROUND_START_SYNC}`);
     const enrollment = {

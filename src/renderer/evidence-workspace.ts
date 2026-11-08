@@ -652,8 +652,11 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       const next = await api.prepareCorrectionProposal({ bookId, resultId });
       if (destroyed) return;
       draft = next;
-      correction = { choice: null, text: '', rationale: '', ranges: new Set(next.ranges.filter((range) => range.primary && range.current).map((range) => range.rangeId)), problem: null };
-      options.setStatus('更正提案已准备：方案都没有预选，请选择一个方案或自行编辑。');
+      // The first variant is chosen to begin with (Issue #1410 item 18); the editor picks another or writes their own.
+      const first = next.variants[0];
+      correction = { choice: first === undefined ? 'own-edit' : first.variantId, text: first?.text ?? '', rationale: first?.rationale ?? '',
+        ranges: new Set(next.ranges.filter((range) => range.primary && range.current).map((range) => range.rangeId)), problem: null };
+      options.setStatus('更正提案已准备：已选第一个方案，可改选或自行编辑。');
     } catch (error) {
       options.setStatus(options.errorMessage(error, CORRECTION_PREPARE_FAILED), 'error');
     } finally {

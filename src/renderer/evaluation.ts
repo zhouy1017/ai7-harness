@@ -1,7 +1,7 @@
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, menuPanel, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
-import { startPreparedTask } from './one-action-start.js';
+import { oneActionStart, startPreparedTask } from './one-action-start.js';
 import type {
   EvaluationAdjustment,
   EvaluationAdjustmentReasonId,
@@ -430,10 +430,13 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         create.disabled = busy;
         row.append(create);
       } else if (own && task.state === 'prepared' && !reportBlocked) {
-        const open = action(READERS_REPORT_ACTIONS.openPlan, 'primary', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
+        // A plan prepared but not started (Issue #1410 item 11): 起草 starts it; the plan stays one disclosure away.
+        const start = action(READERS_REPORT_ACTIONS.prepare, 'primary', 'prepare-readers-report', () => void prepareReport(entry.template));
+        start.dataset['readersReportAction'] = 'prepare';
+        const open = action(READERS_REPORT_ACTIONS.openPlan, 'quiet', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-plan';
-        open.disabled = busy;
-        row.append(open);
+        start.disabled = open.disabled = busy;
+        row.append(start, open);
       } else if (entry.prepare.allowed) {
         const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => void prepareReport(entry.template));
         prepare.dataset['readersReportAction'] = 'prepare';
@@ -455,9 +458,33 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     return section;
   };
 
-  /** 起草: the Task's plan prepared as one cooperative job, then opened in the Task Drawer, whose bar starts it. */
+  /**
+   * Start a prepared plan at once (Issue #1410 items 11, 12) — or, when its route waits for a decision (a model connection, the
+   * network, a moved boundary), open it in the Task Drawer, which says why.
+   */
+  const startOrOpen = async (kind: 'readers-report' | 'evaluation-rewrite', ref: string, open: (ref: string) => void): Promise<boolean> => {
+    if (api.inspectTaskPlan !== undefined && oneActionStart(await api.inspectTaskPlan({ kind, ref })).kind === 'preview') { open(ref); return false; }
+    await startPreparedTask(api, kind, ref);
+    return true;
+  };
+
+  /** Read the page again after a Task started, keeping the version the editor is in. */
+  const reread = async (): Promise<void> => {
+    if (workspace !== null) workspace = { ...await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore: workspace.recordsBefore }), record: workspace.record };
+  };
+
+  /** 起草: the Task's plan prepared as one cooperative job and started at once; 查看计划 opens it in the Task Drawer instead. */
   const prepareReport = async (template: ReadersReportTemplate): Promise<void> => {
     if (busy || workspace === null) return;
+    const held = workspace.readersReport.task;
+    if (held !== null && held.template === template && held.state === 'prepared' && workspace.materialReferences?.blocked.readersReport !== true) {
+      busy = true;
+      refusal = null;
+      try { if (await startOrOpen('readers-report', held.taskIntentId, options.openReadersReportPlan)) { setStatus(READERS_REPORT_STATUS.started, 'success'); await reread(); } }
+      catch (error) { refusal = errorMessage(error, READERS_REPORT_STATUS.failed); setStatus(refusal, 'error'); }
+      finally { busy = false; paint(null, true); }
+      return;
+    }
     busy = true;
     refusal = null;
     setStatus(READERS_REPORT_STATUS.preparing, 'busy');
@@ -478,9 +505,13 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       workspace = { ...result, record: workspace.record };
       setStatus(READERS_REPORT_STATUS.prepared, 'success');
-      paint(null, true);
       const ref = result.readersReport.task?.taskIntentId ?? null;
-      if (ref !== null) options.openReadersReportPlan(ref);
+      if (ref !== null) {
+        busy = true;
+        try { if (await startOrOpen('readers-report', ref, options.openReadersReportPlan)) { setStatus(READERS_REPORT_STATUS.started, 'success'); await reread(); } }
+        finally { busy = false; }
+      }
+      paint(null, true);
     } catch (error) {
       busy = false;
       refusal = errorMessage(error, READERS_REPORT_STATUS.failed);
@@ -833,15 +864,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   /**
    * 按我的修改重新生成 (Issue #429, S81b2; Issue #1407): the Task's plan prepared as one cooperative job over the version's saved
    * entry and started at once — `preview` opens it in the Task Drawer instead. A regeneration reads only what is saved, so
-   * unsaved edits are refused until the editor saves them.
+   * unsaved edits are saved first (Issue #1410 item 12); a refused save keeps the form and starts nothing.
    */
-  const prepareRewrite = async (record: EvaluationRecordProjection, preview = false): Promise<void> => {
+  const prepareRewrite = async (shown: EvaluationRecordProjection, preview = false): Promise<void> => {
     if (busy || workspace === null) return;
+    let record = shown;
     if (unsaved()) {
-      refusal = EVALUATION_REWRITE_STATUS.unsaved;
-      setStatus(refusal, 'error');
-      paint('.evaluation-rewrite h3', true);
-      return;
+      if (!await save(record, false)) return;
+      if (workspace === null) return;
+      record = workspace.record?.recordId === shown.recordId ? workspace.record : shown;
     }
     const prepared = workspace.rewrite.task;
     if (prepared !== null && prepared.recordId === record.recordId && prepared.state === 'prepared') {
@@ -1586,10 +1617,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
   };
 
-  const save = async (record: EvaluationRecordProjection, finalize: boolean): Promise<void> => {
-    if (busy) return;
+  /** Save the form as a new entry of the version (or finalize it); answers whether the save was recorded. */
+  const save = async (record: EvaluationRecordProjection, finalize: boolean): Promise<boolean> => {
+    if (busy) return false;
     const node = root.querySelector<HTMLElement>(`.evaluation-record[data-record-id="${record.recordId}"]`);
-    if (node === null) return;
+    if (node === null) return false;
     const content = collect(node, record);
     busy = true;
     refusal = null;
@@ -1605,6 +1637,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       leaving = null;
       setStatus(finalize ? evaluationFinalized(record.ordinal) : EVALUATION_STATUS.saved, 'success');
       paint(finalize ? '.evaluation-record h3' : '[data-evaluation-action="save"]');
+      return true;
     } catch (error) {
       // The form keeps what the editor wrote, so a refused save can be corrected where it stands.
       busy = false;
@@ -1615,6 +1648,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       note.setAttribute('role', 'alert');
       root.querySelector('.evaluation-refusal')?.remove();
       node.before(note);
+      return false;
     }
   };
 

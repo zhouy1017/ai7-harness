@@ -7,7 +7,7 @@ import { mountWindowedList } from './windowed-list.js';
 import { applyOnce } from './manuscript-apply.js';
 import { mountPositionRail } from './position-rail.js';
 import { DECISION_REASON_CHIPS } from './editorial-mark-labels.js';
-import { proposalIdentityRows, proposalPreparationLine } from './technical-layer-labels.js';
+import { proposalIdentityRows } from './technical-layer-labels.js';
 
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
 const exclusionLabels = { conflict: '未解决冲突', 'unclassified-stale': '旧基准尚未分类', unloaded: '未加载', 'other-version': '其他版本', 'atomic-group': '原子组需单独处理', applied: '已经应用' } as const;
@@ -54,8 +54,6 @@ export function mountProposalWorkspace(options: {
   let active: ProposalNavigatorItem | null = null;
   let position: ProposalReviewReturnPosition = { blockId: null, activeMarkId: null, comparison: 'inline', review: 'all', chapterBlockId: null, changeType: null, expanded: false };
   let destroyed = false; let generation = 0; let working = false; let autoAdvance = false;
-  let batch: ProposalDraftBatchProjection | null = null;
-  let prepared: string[] | null = null;
   let preparedDecision: string | null = null;
   let draftUndo: Array<{ ids: string[]; disposition: ProposalDraftDisposition | null; group: string | null }> | null = null;
   const selected = new Set<string>();
@@ -91,11 +89,11 @@ export function mountProposalWorkspace(options: {
     (position.chapterBlockId === null || item.chapterBlockId === position.chapterBlockId) && (position.changeType === null || item.changeType === position.changeType) &&
     (position.review === 'all' || (position.review === 'unreviewed' ? item.draft === null && item.disposition === null : position.review === 'reviewed' ? item.draft !== null || item.disposition !== null : position.review === 'stale' ? item.stale : item.conflict))); }
   function refreshList(): void { const items = filtered(); list.setItems(items, Math.max(0, items.findIndex((item) => item.markId === position.activeMarkId))); }
-  async function refresh(): Promise<void> { workspace = await readProposalWorkspace(api, input); if (destroyed) return; prepared = null; batch = null; refreshList(); renderControls(); if (active) { active = workspace.items.find((item) => item.markId === active!.markId) ?? null; if (active) await loadComparison(active); } }
+  async function refresh(): Promise<void> { workspace = await readProposalWorkspace(api, input); if (destroyed) return; refreshList(); renderControls(); if (active) { active = workspace.items.find((item) => item.markId === active!.markId) ?? null; if (active) await loadComparison(active); } }
   function selectFilter<T extends string>(label: string, values: ReadonlyArray<readonly [T, string]>, value: T, change: (value: T) => void): HTMLDivElement {
     const field = el('div', label);
     const choices = filterChoices({ label, choices: values, value, change: (next) => {
-      change(next as T); prepared = null; batch = null; refreshList(); renderControls();
+      change(next as T); refreshList(); renderControls();
       void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error'));
     } });
     choices.dataset['proposalFilter'] = label;
@@ -178,7 +176,7 @@ export function mountProposalWorkspace(options: {
     node.append(el('h4', labels[receipt.state]), el('p', receipt.reason), button('在稿件中查看', 'receipt-manuscript', () => void options.returnToManuscript(position.blockId, position.activeMarkId)),
       button('返回提案', 'receipt-proposal', () => { controls.replaceChildren(); renderControls(); }));
     node.append(el('p', `${options.bookTitle} · 你 · ${receipt.approvedAt ?? '尚无批准记录'} · ${receipt.application?.changeCount ?? 0} 处写入`), technical(proposalIdentityRows({ 分支: receipt.branchId })));
-    if (receipt.safeRetry && receipt.state === 'not-applied') node.append(button('重新准备应用（需重新批准）', 'safe-reprepare', renderControls));
+    if (receipt.safeRetry && receipt.state === 'not-applied') node.append(button('重新应用', 'safe-reprepare', () => void act(applyAccepted)));
     // EREC-005: no retry while 结果待确认; the editor's re-check reads the authoritative records and dispatches nothing.
     if (receipt.state === 'unresolved') node.append(button('重新核对应用结果', 'receipt-recheck', () => void act(async () => {
       const next = await api.inspectApplyReceipt({ ...binding, clientEffectId: receipt.clientEffectId, recovery: 'recheck' });
@@ -193,53 +191,65 @@ export function mountProposalWorkspace(options: {
     })));
     for (const [scope, label] of [['selection', '已选修改'], ['chapter', '当前章节'], ['change-type', '当前修改类型'], ['filter', '当前筛选']] as const) {
       for (const disposition of ['accepted', 'rejected', 'deferred'] as const) {
-        controls.append(button(`${dispositions[disposition]} · ${label}`, `batch-${scope}-${disposition}`, () => void act(async () => {
-          batch = await previewBatch({ ...input, scope, markIds: [...selected], chapterBlockId: position.chapterBlockId, changeType: position.changeType, review: position.review, disposition, confirmDigest: null });
-          renderBatch(scope, disposition);
-        })));
+        controls.append(button(`${dispositions[disposition]} · ${label}`, `batch-${scope}-${disposition}`, () => void act(() => saveBatch(scope, disposition))));
       }
     }
-    controls.append(button('采纳全部无冲突项', 'accept-conflict-free', () => void act(async () => {
-      batch = await previewBatch({ ...input, scope: 'filter', markIds: [], chapterBlockId: position.chapterBlockId, changeType: position.changeType, review: position.review, disposition: 'accepted', confirmDigest: null }); renderBatch('filter', 'accepted');
-    })));
+    controls.append(button('采纳全部无冲突项', 'accept-conflict-free', () => void act(() => saveBatch('filter', 'accepted', []))));
     const summary = el('details'); summary.append(el('summary', `提案决定范围 · ${workspace.items.filter((item) => item.draft !== null).length} 项草稿 · ${workspace.items.filter((item) => item.draft === null || item.draft === 'deferred' || item.conflict).length} 项未解决`));
     const rows = el('ul'); for (const item of workspace.items) rows.append(el('li', `第 ${item.position} 段 · ${item.draft === null ? '未决定' : dispositions[item.draft]}${item.conflict ? ' · 冲突' : ''}`)); summary.append(rows);
-    controls.append(summary, button('记录提案决定', 'record', () => void act(async () => { workspace = await api.recordProposalDecision({ ...input, expectedScopeDigest: workspace!.scopeDigest, clientDecisionId: crypto.randomUUID() }); await refresh(); message.textContent = '提案决定已记录；稿件未发生变化。'; })),
-      button('准备应用', 'prepare', () => void act(async () => { workspace = await readProposalWorkspace(api, input); preparedDecision = workspace.decision?.decisionId ?? null;
-        prepared = workspace.decision?.items.filter((entry) => entry.disposition === 'accepted' && workspace!.items.some((item) => item.markId === entry.markId && item.decisionId === entry.decisionId && item.disposition === 'accepted' && !item.conflict && item.loaded && item.appliedRevisionId === null)).map((entry) => entry.markId) ?? []; renderPreparation(); })));
+    controls.append(summary, button('应用已采纳修改', 'apply-accepted', () => void act(applyAccepted)));
   }
-  function renderBatch(scope: 'selection' | 'chapter' | 'change-type' | 'filter', disposition: ProposalDraftDisposition): void {
-    if (!batch) return; const frozen = batch; controls.replaceChildren(el('h3', '批量草稿范围（已冻结）'), el('p', `${frozen.included.length} 项纳入 · ${frozen.excluded.length} 项排除 · 仅保存草稿，稿件未发生变化。`));
-    const included = el('ul'); for (const markId of frozen.included) { const item = workspace!.items.find((entry) => entry.markId === markId)!; included.append(el('li', `纳入：${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme}`)); }
-    const excluded = el('ul'); for (const item of frozen.excluded) { const found = workspace!.items.find((entry) => entry.markId === item.markId); excluded.append(el('li', `排除：${found ? `${found.chapter} · 第 ${found.position} 段 ${found.fromGrapheme}–${found.toGrapheme}` : '不在本次范围的修改项'} · ${exclusionLabels[item.reason]}`)); }
-    controls.append(included, excluded, button('确认保存批量草稿', 'batch-confirm', () => void act(async () => {
+  /**
+   * A batch button saves its drafts at once (Issue #1410 item 8): the scope is frozen and confirmed in the same step, what was
+   * left out is said with its reason, and 撤销上次草稿处理 takes the batch back.
+   */
+  async function saveBatch(scope: 'selection' | 'chapter' | 'change-type' | 'filter', disposition: ProposalDraftDisposition, markIds: string[] = [...selected]): Promise<void> {
+    const request = { ...input, scope, markIds, chapterBlockId: position.chapterBlockId, changeType: position.changeType, review: position.review, disposition };
+    const frozen = await previewBatch({ ...request, confirmDigest: null });
+    if (frozen.included.length > 0) {
       const undo = frozen.included.map((id) => { const item = frozen.workspace.items.find((entry) => entry.markId === id)!; return { ids: [id], disposition: item.draft, group: null }; });
-      await api.batchProposalDecisionDraft({ ...input, scope, markIds: [...selected], chapterBlockId: position.chapterBlockId, changeType: position.changeType, review: position.review, disposition, confirmDigest: frozen.scopeDigest }); draftUndo = undo; await refresh();
-    })), button('返回处理', 'batch-cancel', renderControls));
+      await api.batchProposalDecisionDraft({ ...request, confirmDigest: frozen.scopeDigest });
+      draftUndo = undo; await refresh();
+    }
+    renderBatchOutcome(frozen);
   }
-  function renderPreparation(): void {
-    if (!workspace || prepared === null) return;
-    controls.replaceChildren(el('h3', '准备应用'), el('p', proposalPreparationLine(options.bookTitle, preparedDecision !== null, prepared.length, workspace.journalSequence + 1)), el('p', '尚未批准应用，稿件未发生变化'),
-      technical(proposalIdentityRows({ 分支: workspace.branchId, 当前修订: workspace.revisionId, 提案决定: preparedDecision })));
-    const rows = el('ul'); for (const markId of prepared) { const item = workspace.items.find((entry) => entry.markId === markId)!; const row = el('li', `${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme}`);
-      row.append(button('从本次应用移除', 'remove', () => { const group = item.atomicGroupId; prepared = prepared!.filter((id) => group === null ? id !== markId : workspace!.items.find((entry) => entry.markId === id)?.atomicGroupId !== group); renderPreparation(); })); rows.append(row); }
-    const excluded = el('ul'); for (const item of workspace.items.filter((entry) => !prepared!.includes(entry.markId))) excluded.append(el('li', `排除：${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme} · ${item.appliedRevisionId !== null ? '已应用' : item.conflict ? '冲突待解决' : item.disposition === 'accepted' ? '本次移除或决定已更新（已采纳 · 尚未应用）' : '未被当前决定采纳'}`));
-    controls.append(rows, el('p', `排除 ${workspace.items.length - prepared.length} 项；移除项保持已采纳 · 尚未应用。`), excluded);
-    // One Effect carries at most the existing batch bound; the strip says so instead of sending what would be refused.
-    if (prepared.length > MAX_BATCH_APPLY_SUGGESTIONS) controls.append(el('p', `一次应用最多 ${MAX_BATCH_APPLY_SUGGESTIONS} 项；请移除部分修改后再确认应用。`));
-    const confirm = button('确认应用', 'confirm', () => void act(async () => {
-      const fresh = await readProposalWorkspace(api, input);
-      if (fresh.scopeDigest !== workspace!.scopeDigest || fresh.decision?.decisionId !== preparedDecision) { await refresh(); message.textContent = '决定或稿件已变，请重新准备应用。'; return; }
-      const first = workspace!.items.find((item) => item.markId === prepared![0])!;
-      let effectIdentity = '';
-      const result = await applyOnce(input, (clientEffectId) => { effectIdentity = clientEffectId; return api.applyChangeSuggestionBatch({ manuscriptId: input.manuscriptId, branchId: input.branchId, windowStartBlockId: first.blockId, markIds: prepared!, clientEffectId }); },
-        (target) => api.getManuscriptApplyOutcome(target), undefined, async (clientEffectId, state) => {
-          const status = el('p', state === 'confirming' ? '正在确认应用结果' : '结果待确认'); status.dataset['applyReceiptState'] = state; controls.replaceChildren(status);
-          const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId, recovery: state }); if (!destroyed) controls.replaceChildren(receiptCard(receipt));
-        });
-      if (result.acknowledged) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: result.result.application.effectId, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); }
-      else if (result.outcome !== null) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: effectIdentity, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = result.outcome.state === 'committed' ? '已应用，结果从记录确认。' : '未应用，请重新准备。'; }
-    })); confirm.disabled = prepared.length === 0 || prepared.length > MAX_BATCH_APPLY_SUGGESTIONS || preparedDecision === null; controls.append(confirm, button('取消准备', 'cancel-prepare', renderControls));
+  function renderBatchOutcome(frozen: ProposalDraftBatchProjection): void {
+    const outcome = el('section', undefined, 'proposal-batch-outcome'); outcome.setAttribute('role', 'status');
+    const left = frozen.excluded.length > 0 ? `，${frozen.excluded.length} 项未纳入` : '';
+    outcome.append(el('p', frozen.included.length > 0 ? `已保存 ${frozen.included.length} 项草稿${left}；稿件未发生变化。` : `没有可处理的修改${left}。`));
+    if (frozen.excluded.length > 0) {
+      const excluded = el('ul'); for (const item of frozen.excluded) { const found = workspace!.items.find((entry) => entry.markId === item.markId); excluded.append(el('li', `未纳入：${found ? `${found.chapter} · 第 ${found.position} 段 ${found.fromGrapheme}–${found.toGrapheme}` : '不在本次范围的修改项'} · ${exclusionLabels[item.reason]}`)); }
+      outcome.append(excluded);
+    }
+    controls.prepend(outcome);
+  }
+  /**
+   * 应用已采纳修改 (Issue #1410 item 8): the drafts are recorded as the decision, the accepted changes that can be applied are
+   * gathered, and they are applied in one step; with nothing accepted the manuscript stays as it was and the line says so.
+   */
+  async function applyAccepted(): Promise<void> {
+    if (!workspace) return;
+    if (workspace.items.some((item) => item.draft !== null)) {
+      workspace = await api.recordProposalDecision({ ...input, expectedScopeDigest: workspace.scopeDigest, clientDecisionId: crypto.randomUUID() });
+      await refresh();
+    }
+    workspace = await readProposalWorkspace(api, input); preparedDecision = workspace.decision?.decisionId ?? null;
+    const ready = workspace.decision?.items.filter((entry) => entry.disposition === 'accepted' && workspace!.items.some((item) => item.markId === entry.markId && item.decisionId === entry.decisionId && item.disposition === 'accepted' && !item.conflict && item.loaded && item.appliedRevisionId === null)).map((entry) => entry.markId) ?? [];
+    renderControls();
+    if (preparedDecision === null || ready.length === 0) { message.textContent = '提案决定已记录；没有可应用的已采纳修改，稿件未发生变化。'; return; }
+    // One Effect carries at most the existing batch bound; the line says so instead of sending what would be refused.
+    if (ready.length > MAX_BATCH_APPLY_SUGGESTIONS) { message.textContent = `一次应用最多 ${MAX_BATCH_APPLY_SUGGESTIONS} 项；请按章节或筛选分开应用。`; return; }
+    const fresh = await readProposalWorkspace(api, input);
+    if (fresh.scopeDigest !== workspace.scopeDigest || fresh.decision?.decisionId !== preparedDecision) { await refresh(); message.textContent = '决定或稿件已变，请再试一次。'; return; }
+    const first = workspace.items.find((item) => item.markId === ready[0])!;
+    let effectIdentity = '';
+    const result = await applyOnce(input, (clientEffectId) => { effectIdentity = clientEffectId; return api.applyChangeSuggestionBatch({ manuscriptId: input.manuscriptId, branchId: input.branchId, windowStartBlockId: first.blockId, markIds: ready, clientEffectId }); },
+      (target) => api.getManuscriptApplyOutcome(target), undefined, async (clientEffectId, state) => {
+        const status = el('p', state === 'confirming' ? '正在确认应用结果' : '结果待确认'); status.dataset['applyReceiptState'] = state; controls.replaceChildren(status);
+        const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId, recovery: state }); if (!destroyed) controls.replaceChildren(receiptCard(receipt));
+      });
+    if (result.acknowledged) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: result.result.application.effectId, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = `已应用 ${ready.length} 项已采纳修改。`; }
+    else if (result.outcome !== null) { const receipt = await api.inspectApplyReceipt({ ...binding, clientEffectId: effectIdentity, recovery: 'settled' }); await refresh(); controls.prepend(receiptCard(receipt)); message.textContent = result.outcome.state === 'committed' ? '已应用，结果从记录确认。' : '未应用，请再试一次。'; }
   }
   return { start() { void act(async () => { workspace = await readProposalWorkspace(api, input); position = workspace.returnPosition ?? position; renderToolbar(); refreshList(); renderControls(); rail.refresh();
       const first = filtered().find((item) => item.markId === position.activeMarkId) ?? filtered()[0]; if (first) list.activate(filtered().indexOf(first), false); }); },

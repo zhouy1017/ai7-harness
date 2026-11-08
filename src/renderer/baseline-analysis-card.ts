@@ -1009,7 +1009,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Run never starts behind a plan the editor has not seen and no rule has spoken for.
       const quickStart = action.quickStart ?? null;
       const quickRule = quickStart !== null && quickStart.available ? quickStart.rule : null;
-      const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', 'primary', async () => {
+      const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', mode === 'sync-current' ? 'primary' : 'secondary', async () => {
         if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
         await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false }, {
           start: quick,
@@ -1022,24 +1022,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (quickStart?.rule) quick.dataset['ruleVersionId'] = quickStart.rule.ruleVersionId;
       // Only a quick start on offer joins the actions a preparation holds and gives back.
       actionButtons.push(quick);
-      const choice = element('div', 'analysis-update-choice');
-      choice.id = `analysis-update-choice-${mode}`;
-      choice.hidden = true;
-      const choiceActions = element('div', 'button-row analysis-actions');
-      choiceActions.append(quick, start);
-      choice.append(choiceActions);
-      const chooser = button(action.label, mode === 'sync-current' ? 'primary' : 'secondary', () => {
-        choice.hidden = !choice.hidden;
-        chooser.setAttribute('aria-expanded', choice.hidden ? 'false' : 'true');
-      });
-      chooser.dataset['analysisAction'] = `choose-${mode}`;
-      chooser.setAttribute('aria-expanded', 'false');
-      chooser.setAttribute('aria-controls', choice.id);
-      chooser.disabled = !action.available;
-      actionButtons.push(chooser);
+      // The mode's start and 查看计划 stand on the card at once (Issue #1410 item 15): no button only unfolds them.
       const actions = element('div', 'button-row analysis-actions');
-      actions.append(chooser);
-      block.append(actions, choice);
+      actions.append(quick, start);
+      block.append(actions);
       section.append(block);
     }
     section.append(cancel);
@@ -1320,12 +1306,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       records.append(more);
     }
 
-    // §10: 不会做 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
-    // unabridged — are one step away in 查看技术详情.
-    const notDo = element('ul', 'analysis-list analysis-not-do');
-    for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));
-    const nonEffects = element('dd', 'technical-identity analysis-named-non-effects', projection.namedNonEffects.join('；'));
-    card.append(element('h4', undefined, '不会做'), notDo, technicalDetails('analysis-facts', element('dt', undefined, '技术性的不会做'), nonEffects));
+    // §10: 不会做 — the editor's words and the engineer's statements — is the technical layer's alone (Issue #1413 cluster 4):
+    // ordinary mode carries no list of what the analysis does not do.
+    if (technicalLayerVisible) {
+      const notDo = element('ul', 'analysis-list analysis-not-do');
+      for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));
+      const nonEffects = element('dd', 'technical-identity analysis-named-non-effects', projection.namedNonEffects.join('；'));
+      card.append(element('h4', undefined, '不会做'), notDo, technicalDetails('analysis-facts', element('dt', undefined, '技术性的不会做'), nonEffects));
+    }
     host.replaceChildren(card);
     // The drawer beside ②A states where this Task stands; it reads the plan again when that changes.
     const previousState = host.dataset['analysisRenderedState'];

@@ -872,13 +872,14 @@ async function acknowledgedEdit(renderer, text, name) {
 
 async function openDesignateForm(renderer, name) {
   await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="designate"]', `${name}-open`);
-  await waitFor(renderer, `window.__j07.form() !== null && window.__j07.radios().length > 0 && window.__j07.radios().every((radio) => !radio.checked)`, `${name}-form`, 10_000);
+  await waitFor(renderer, `window.__j07.form() !== null && window.__j07.radios().length > 0 && window.__j07.radios()[0]?.checked === true`, `${name}-form`, 10_000);
 }
 async function chooseDesignation(renderer, milestoneId, name) {
   await assertRenderer(renderer, `(() => { const radio = window.__j07.radios().find((item) => item.value === ${JSON.stringify(milestoneId)}); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, name);
 }
 /** Confirm only with the fixed sentence on screen beside the action (V2-UX-PUB-004). */
 async function confirmWithStatement(renderer, completion, name) {
+  // The fixed sentence shows on the technical layer this Journey runs with (Issue #1413 cluster 4 hides it in ordinary mode).
   await assertRenderer(renderer, `(() => { const statement = window.__j07.form()?.querySelector('.publication-statement'); const confirm = window.__j07.action('confirm'); if (!(statement instanceof HTMLElement) || statement.textContent !== ${JSON.stringify(STATEMENT)} || !statement.checkVisibility() || statement.getBoundingClientRect().height === 0) return false; if (!(confirm instanceof HTMLButtonElement) || confirm.disabled) return false; confirm.click(); return true; })()`, `${name}-confirm`);
   await waitFor(renderer, `window.__j07.status() === ${JSON.stringify(completion)} && window.__j07.tone() === 'success' && window.__j07.form() === null`, `${name}-completion`, 60_000);
 }
@@ -1100,11 +1101,11 @@ async function main() {
       await waitFor(native, `document.querySelector('[data-import-relationship="first-manuscript"]')`, `${name}-relationship`);
       await clickImportControl(native, '[data-import-relationship="first-manuscript"]', true, `${name}-first-manuscript`);
       await waitFor(native, `document.querySelector('[data-word-import-controls="ready"]')`, `${name}-controls-before-prepare`);
-      await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
+      await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')===null && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
       if (mode === 'accepted-baseline') {
+        // Choosing 直接并入正文 · 定稿基线 is its confirmation (Issue #1410 item 32A): its note shows and the import is ready.
         await clickImportControl(native, '[data-word-import-mode="accepted-baseline"]', true, `${name}-accepted-mode`);
-        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='查看导入详情')?.disabled===true`, `${name}-separate-confirmation-required`);
-        await clickImportControl(native, '[data-word-accepted-baseline-confirmation]', true, `${name}-confirm-accepted`);
+        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-note]')?.hidden===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='查看导入详情')?.disabled===false`, `${name}-choice-is-the-confirmation`);
       }
       await clickImportControl(native, '[data-word-learn-from-edits]', false, `${name}-learning-opt-out`);
       await assertRenderer(native, `document.querySelector('[data-word-learn-from-edits]')?.checked===false`, `${name}-learning-choice-visible`);
@@ -1286,8 +1287,8 @@ async function main() {
     await openManuscript(renderer, 'before-milestone');
 
     at('milestone-needs-a-purpose');
-    // 标签 / 用途 / 说明 · 可选: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
-    // purpose with its reason beside it (V2-UX-MILE-003); 自行输入 asks for the editor's own words.
+    // 标签 / 用途 / 说明 · 可选: 阶段留档 is chosen to begin with and an empty label saves under a dated default
+    // (Issue #1410 item 21), so 保存里程碑版本 is ready at once; 自行输入 asks for the editor's own words.
     await openMilestoneForm(renderer, 'first');
     await assertRenderer(renderer, `(() => {
       const section = document.querySelector('details.milestone-section');
@@ -1298,11 +1299,11 @@ async function main() {
         section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。' &&
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
-        radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
-        save instanceof HTMLButtonElement && save.disabled;
-    })()`, 'milestone-form-starts-unselected');
+        radios.filter((radio) => radio.checked).map((radio) => radio.value).join() === 'stage-archive' && custom instanceof HTMLInputElement && custom.hidden &&
+        (document.querySelector('#milestone-label')?.placeholder ?? '').startsWith('阶段留档 · ') &&
+        save instanceof HTMLButtonElement && !save.disabled;
+    })()`, 'milestone-form-starts-with-defaults');
     await fill(renderer, '#milestone-label', FIRST.label, 'first-label');
-    await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? ''); return save?.disabled === true && (reason?.textContent ?? '').includes('选择用途'); })()`, 'milestone-save-waits-for-a-purpose');
     await choosePurpose(renderer, 'custom', 'first-purpose-custom');
     await assertRenderer(renderer, `(() => { const custom = document.querySelector('#milestone-purpose-custom'); const save = window.__j07.milestoneSave(); return custom instanceof HTMLInputElement && !custom.hidden && save?.disabled === true; })()`, 'milestone-custom-asks-for-words');
     await choosePurpose(renderer, FIRST.purpose, 'first-purpose');
@@ -1312,7 +1313,7 @@ async function main() {
     await fill(renderer, '#milestone-note', FIRST.note, 'first-note');
     // Nothing changed since the import, so the milestone designates r1 as it stands.
     await saveMilestone(renderer, FIRST, 'r1', 'first');
-    await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('details.milestone-section input[name="milestone-purpose"]')); return document.querySelector('#milestone-label')?.value === '' && document.querySelector('#milestone-note')?.value === '' && radios.every((radio) => !radio.checked) && window.__j07.milestoneSave()?.disabled === true; })()`, 'milestone-form-starts-again-unselected');
+    await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('details.milestone-section input[name="milestone-purpose"]')); return document.querySelector('#milestone-label')?.value === '' && document.querySelector('#milestone-note')?.value === '' && radios.filter((radio) => radio.checked).map((radio) => radio.value).join() === 'stage-archive' && window.__j07.milestoneSave()?.disabled === false; })()`, 'milestone-form-starts-again-with-defaults');
 
     at('milestone-changed-since');
     // One acknowledged edit: the manuscript is newer than 一审稿 (V2-UX-MILE-007).
@@ -1362,8 +1363,8 @@ async function main() {
     at('designate-form');
     await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="designate"]', 'designate-open');
     await waitFor(renderer, `window.__j07.form() !== null && document.activeElement === window.__j07.radios()[0]`, 'designate-form-open', 10_000);
-    // Every milestone as a choice and none chosen; what will be recorded; the two fields; the fixed sentence
-    // beside the action, on screen from the start; and the confirm unavailable with its reason in words.
+    // Every milestone as a choice, the newest chosen; what will be recorded; the two fields with routine words; and the
+    // confirm ready (Issue #1410 item 22).
     await assertRenderer(renderer, `(() => {
       const form = window.__j07.form();
       const radios = window.__j07.radios();
@@ -1374,16 +1375,17 @@ async function main() {
       const basis = window.__j07.field('basis');
       const terms = Array.from(form.querySelectorAll('dl.publication-designate-summary > dt')).map((term) => term.textContent);
       const reason = form.querySelector('.publication-confirm-reason');
-      return JSON.stringify(radios.map((radio) => radio.value)) === ${JSON.stringify(JSON.stringify([second, first]))} && radios.every((radio) => !radio.checked) &&
+      // Issue #1410 item 22: the newest milestone is chosen, with 全书定稿 / 编辑审定通过 written in, so 设为发稿版本 is ready.
+      return JSON.stringify(radios.map((radio) => radio.value)) === ${JSON.stringify(JSON.stringify([second, first]))} && radios[0].checked && !radios[1].checked &&
         form.querySelector('fieldset > legend')?.textContent === '选择里程碑版本' &&
         statement?.textContent === ${JSON.stringify(STATEMENT)} && statement.checkVisibility() && statement.getBoundingClientRect().height > 0 &&
         JSON.stringify(terms) === '["图书","稿件","里程碑版本","与当前稿件","操作人","时间"]' &&
-        scope instanceof HTMLInputElement && scope.required && scope.closest('label')?.querySelector('.publication-field-label')?.textContent === '发稿范围' &&
-        basis instanceof HTMLTextAreaElement && basis.required && basis.closest('label')?.querySelector('.publication-field-label')?.textContent === '依据' &&
-        confirm instanceof HTMLButtonElement && confirm.disabled && confirm.getAttribute('aria-label') === '设为发稿版本' &&
+        scope instanceof HTMLInputElement && scope.value === '全书定稿' && scope.closest('label')?.querySelector('.publication-field-label')?.textContent === '发稿范围' &&
+        basis instanceof HTMLTextAreaElement && basis.value === '编辑审定通过' && basis.closest('label')?.querySelector('.publication-field-label')?.textContent === '依据' &&
+        confirm instanceof HTMLButtonElement && !confirm.disabled && confirm.getAttribute('aria-label') === '设为发稿版本' &&
         cancel instanceof HTMLButtonElement && !cancel.disabled && cancel.textContent === '取消' &&
-        reason instanceof HTMLElement && !reason.hidden && (reason.textContent ?? '').startsWith('还需要选择一个里程碑版本');
-    })()`, 'designate-form-states-everything-and-preselects-nothing');
+        reason instanceof HTMLElement && reason.hidden;
+    })()`, 'designate-form-preselects-the-newest-with-defaults');
     await chooseDesignation(renderer, second, 'designate-choose-second');
     await assertRenderer(renderer, `(() => { const values = window.__j07.summary(); return values[0] === ${JSON.stringify(EXCERPT.title)} && values[1].startsWith('主稿件 · 当前修订版 r2') && values[2].startsWith(${JSON.stringify(`「${SECOND.label}」 · r2 · `)}) && values[3] === '与当前稿件一致' && values[4] === '本机编辑' && values[5] === '确认时记录'; })()`, 'designate-summary-names-the-exact-version');
     // 发稿范围 counts characters as the service does: 81 CJK characters are too many, while 80 characters
@@ -1743,14 +1745,14 @@ async function main() {
     })()`, 'documents-five-cards-none-made');
 
     at('document-create');
-    // 从来源材料创建… offers the Book's source material, none preselected; 创建文档 waits for a choice, then the 新闻稿 opens
+    // 从来源材料创建… offers the Book's source material, the first chosen (Issue #1410 item 23); 创建文档, then the 新闻稿 opens
     // on the manuscript's own surface — named by its type and 版本 1, with the 工作流程 column beside it and nothing of the
     // manuscript's own: no 审阅, no 分析, no milestone, no 发稿.
     // Since Issue #1403 the 新闻稿 is made on 稿件: 新建 / 导入衍生稿件 → 稿件题目 → 新闻稿 → 从来源材料创建.
     await openManuscript(renderer, 'document-create');
     await openDerivativePanel(renderer, { title: '新闻稿', typeId: 'news-release', mode: 'source' }, 'document-create');
     await waitFor(renderer, `document.activeElement === document.querySelector('.derivative-create-form input[name="derivative-source"]')`, 'document-create-form');
-    await assertRenderer(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const radios = Array.from(form.querySelectorAll('input[name="derivative-source"]')); return radios.length === 1 && !radios[0].checked && form.querySelector('.derivative-sources legend')?.textContent === '来源材料' && (form.querySelector('.derivative-sources label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && form.querySelector('[data-document-field="title"]')?.value === '新闻稿'; })()`, 'document-create-nothing-preselected');
+    await assertRenderer(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const radios = Array.from(form.querySelectorAll('input[name="derivative-source"]')); return radios.length === 1 && radios[0].checked && form.querySelector('.derivative-sources legend')?.textContent === '来源材料' && (form.querySelector('.derivative-sources label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && form.querySelector('[data-document-field="title"]')?.value === '新闻稿'; })()`, 'document-create-first-source');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('.derivative-create-form input[name="derivative-source"]'); radio.click(); return radio.checked && document.querySelector('[data-document-action="create-derivative"]')?.disabled === false; })()`, 'document-create-choose');
     await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'document-create-confirm');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="news-release"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'document-opened', 120_000);
@@ -2160,9 +2162,9 @@ async function main() {
     await assertRenderer(renderer, `JSON.stringify(window.__j07.packageVersions().map((item) => item.dataset.packageVersion + ':' + item.dataset.packageCurrent)) === '["2:true","1:false"]'`, 'package-v2-above-v1');
 
     at('package-export');
-    // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes and binds nothing until a
-    // folder is chosen; 选择位置… answers the folder dialog with the run's own empty folder and prepares every file there,
-    // writing none; 按上述方式导出 writes them one by one, each with its receipt. The folder then holds exactly the four
+    // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes, every one ticked to begin
+    // with; 选择位置… answers the folder dialog with the run's own empty folder, and the place chosen is the approval
+    // (Issue #1410 item 1): the files are written one by one at once, each with its receipt. The folder then holds exactly the four
     // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, the 定稿 评估记录 (Issue #429) and the 交付包清单
     // in the package's own words — v2's history says so, and 交付物's export records and the package itself stay as they were.
     const packageFiles = [
@@ -2181,16 +2183,15 @@ async function main() {
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.status() === '要导出的文件已列出'`, 'package-export-reviewed', 60_000);
     await assertRenderer(renderer, `(() => {
       const panel = window.__j07.packageExport();
-      const approve = panel.querySelector('[data-package-action="export-approve"]');
-      const reason = document.getElementById(approve?.getAttribute('aria-describedby') ?? '');
+      const boxes = Array.from(panel.querySelectorAll('input[data-package-member]'));
       return panel.closest('li')?.dataset.packageVersion === '2' && panel.querySelector('h5')?.textContent === '导出 · 图书交付包 v2' &&
         panel.querySelector('.export-local-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_STATEMENT)} &&
         JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('', '')))} &&
-        approve instanceof HTMLButtonElement && approve.disabled && reason?.textContent === '先选择位置。' &&
+        panel.querySelector('[data-package-action="export-approve"]') === null &&
         panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
-        document.activeElement === panel.querySelector('h5') && panel.querySelector('[data-package-action="export-choose"]')?.disabled === true &&
-        Array.from(panel.querySelectorAll('input[data-package-member]')).every((box) => !box.checked) && !/%|百分/.test(panel.textContent ?? '');
-    })()`, 'package-export-lists-the-files');
+        document.activeElement === panel.querySelector('h5') && panel.querySelector('[data-package-action="export-choose"]')?.disabled === false &&
+        boxes.length === ${packageFiles.length} && boxes.every((box) => box.checked) && !/%|百分/.test(panel.textContent ?? '');
+    })()`, 'package-export-lists-the-files-all-ticked');
     // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
     // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
     // version shows, and its restoration line.
@@ -2222,25 +2223,14 @@ async function main() {
     await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
     await toggleAnnotations('package-export-annotations-on');
     await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
-    const selectPackageMember = (key) => assertRenderer(renderer, `(() => {
+    // Unticking leaves a file behind: the first batch is every file but the 新闻稿.
+    const unselectPackageMember = (key) => assertRenderer(renderer, `(() => {
       const box = window.__j07.packageExport()?.querySelector('input[data-package-member=' + CSS.escape(${JSON.stringify(key)}) + ']');
-      if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || box.disabled || box.checked) return false;
+      if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || box.disabled || !box.checked) return false;
       box.focus(); box.click(); return true;
-    })()`, 'package-export-select-member');
-    for (const [key] of firstMembers) await selectPackageMember(key);
+    })()`, 'package-export-unselect-member');
+    await unselectPackageMember('document:news-release');
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
-    await assertRenderer(renderer, `(() => {
-      const panel = window.__j07.packageExport();
-      const approve = panel.querySelector('[data-package-action="export-approve"]');
-      return panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(`导出到：${packageFolder}`)} &&
-        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('prepared', '已准备', firstMembers)))} &&
-        approve instanceof HTMLButtonElement && !approve.disabled && document.activeElement === approve &&
-        panel.querySelector('[data-package-action="export-choose"]')?.textContent === '重新选择位置…' &&
-        (window.__j07.packageVersions()[0].querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 暂无导出记录');
-    })()`, 'package-export-bound-to-the-folder');
-    requireJourney((await readdir(packageFolder)).length === 0, 'package-export-prepared-writes-nothing');
-    await clickSelector(renderer, packageAction('export-approve'), 'package-export-approve');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 3 个文件'`, 'package-export-written', 60_000);
     await assertRenderer(renderer, `(() => {
       const panel = window.__j07.packageExport();
@@ -2267,12 +2257,10 @@ async function main() {
     await reopenDeliverables(renderer, 'package-export-second-batch');
     await openRemainingPackageExport(renderer);
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
-    await selectPackageMember('document:news-release');
+    for (const [key] of firstMembers) await unselectPackageMember(key);
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-remaining-choose');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-export-remaining-prepared', 60_000);
-    await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-prepared-member');
-    await clickSelector(renderer, packageAction('export-approve'), 'package-export-remaining-approve');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 1 个文件'`, 'package-export-remaining-written', 60_000);
+    await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-written-member');
     await assertRenderer(renderer, `window.__j07.packageVersions()[0].querySelectorAll('ol.package-export-list > li').length === 2`, 'package-export-two-subset-receipts');
     // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
     // for byte, as the package and its Delivery Records answer them.
@@ -2325,10 +2313,8 @@ async function main() {
     // 导出为压缩包 is a radio of the export card, not a button.
     await assertRenderer(renderer, `(() => { const radio = window.__j07.packageExport()?.querySelector('input[type="radio"][name="package-export-route"][value="archive"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled || radio.checked) return false; radio.click(); return radio.checked; })()`, 'package-archive-route');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.packageExport()?.querySelector('input[value=archive]')?.checked === true`, 'package-archive-reviewed', 60_000);
+    requireJourney(!existsSync(packageArchive), 'package-archive-nothing-before-the-place');
     await clickSelector(renderer, packageAction('export-choose'), 'package-archive-choose');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-archive-prepared', 60_000);
-    requireJourney(!existsSync(packageArchive), 'package-archive-prepared-writes-nothing');
-    await clickSelector(renderer, packageAction('export-approve'), 'package-archive-approve');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 压缩包 · 3 个文件'`, 'package-archive-written', 60_000);
     const archiveBytes = await readFile(packageArchive);
     const archiveMembers = unzipSync(archiveBytes);
@@ -2865,14 +2851,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-plan-default-rule="offered"] [data-task-drawer-control="default-rule"]')?.disabled === false`, 'writing-rule-offered');
     const writingRulesBefore = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => page.rules.filter((rule) => rule.taskKind === 'writing').length)`);
     requireJourney(writingRulesBefore === 0, 'writing-rule-none', writingRulesBefore);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-open');
-    const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer .task-plan-default-rule-confirm'); if (!(confirm instanceof HTMLElement) || confirm.hidden) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
+    // What the rule binds is one closed disclosure beside the action, and the one click sets it (Issue #1410 item 19).
+    const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer details.task-plan-default-rule-detail'); if (!(confirm instanceof HTMLElement) || confirm.open) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
     const confirmRead = typeof writingConfirm === 'string' ? JSON.parse(writingConfirm) : null;
     requireJourney(confirmRead !== null && confirmRead[0] === WRITING_RULE_LEAD &&
       confirmRead[1].map(([label]) => label).join('|') === '模型服务|工序|预算上限|发送内容类别|会得到|适用于' &&
       confirmRead[1][1][1].startsWith('写作任务 · ') && confirmRead[1][2][1] === '未设置任务预算上限' &&
       confirmRead[1][5][1] === '新建文档「宣传文章」', 'writing-rule-confirm', writingConfirm);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule-confirm"]', 'writing-rule-set');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-set');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-default-rule-current')?.textContent === ${JSON.stringify(`这本书的默认执行规则：${WRITING_RULE_NAME}（使用中，由这份计划设定）`)}`, 'writing-rule-set-shown');
     const writingRules = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => JSON.stringify(page.rules.filter((rule) => rule.taskKind === 'writing').map((rule) => [rule.name, rule.pattern, rule.state, rule.bookTitle])))`);
     requireJourney(writingRules === JSON.stringify([[WRITING_RULE_NAME, WRITING_RULE_PATTERN, 'active', WRITING_TITLE]]), 'writing-rule-record', writingRules);
@@ -2930,14 +2916,10 @@ async function main() {
     await click(renderer, '资料库', 'writing-library-tab');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .library-materials')?.dataset.library === 'ready' && document.querySelectorAll('article.library-material').length === 0`, 'writing-library-empty');
     await clickSelector(renderer, '[data-library-action="add"]', 'writing-library-add');
-    await waitFor(renderer, `document.querySelector('.library-preview [data-library-field="title"]') !== null`, 'writing-library-preview');
-    await fill(renderer, '.library-preview [data-library-field="title"]', WRITING_LIBRARY_TITLE, 'writing-library-title');
+    // The file chosen in the dialog goes straight in under its own name as a 文档 (Issue #1410 item 29): no preview to confirm.
+    await waitFor(renderer, `document.querySelectorAll('article.library-material').length === 1 && document.querySelector('.library-preview') === null && (document.querySelector('article.library-material h3')?.textContent ?? '').includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})`, 'writing-library-added');
     // 资料库's choices are radio buttons: each is chosen as the editor chooses it, and must then read as chosen.
     const chooseLibrary = (selector, name) => assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(selector)}); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, name);
-    await chooseLibrary('.library-preview [data-library-choice="document"]', 'writing-library-kind');
-    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'writing-library-confirm-enabled');
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'writing-library-confirm');
-    await waitFor(renderer, `document.querySelectorAll('article.library-material').length === 1 && document.querySelector('.library-preview') === null`, 'writing-library-added');
     const libraryMaterialId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then((page) => page.materials.length === 1 ? page.materials[0].materialId : null)`);
     requireJourney(typeof libraryMaterialId === 'string' && UUID_PATTERN.test(libraryMaterialId), 'writing-library-identity', libraryMaterialId);
     await clickSelector(renderer, '[data-library-action="attribute"]', 'writing-library-attribute');

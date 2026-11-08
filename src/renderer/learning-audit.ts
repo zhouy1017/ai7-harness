@@ -459,13 +459,15 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       const preview = await api.previewLearningRemediation({ bookId: entries[0]!.bookId, items });
       if (!root.isConnected) return;
       batch = { kind: 'preview', preview, items };
-      setStatus(LEARNING_REMEDIATION_HEADING);
     } catch (error) {
-      if (root.isConnected) setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error');
-    } finally {
       busy = false;
-      if (root.isConnected) paint(batch === null ? '[data-learning-audit-action="batch-stop"]' : '.learning-remediation-preview h4');
+      if (root.isConnected) { setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error'); paint('[data-learning-audit-action="batch-stop"]'); }
+      return;
     }
+    // 停止今后使用 is one step (Issue #1410 item 31): what it would stop is recorded at once against exactly the preview read,
+    // and the outcome names what was left out.
+    busy = false;
+    await confirmBatch();
   };
 
   const confirmBatch = async (): Promise<void> => {
@@ -615,13 +617,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       const preview = await api.previewLearningRemediation({ bookId: open.bookId, items });
       if (!root.isConnected) return;
       open.panel = { kind: 'preview', preview, items };
-      setStatus(LEARNING_REMEDIATION_HEADING);
     } catch (error) {
-      if (root.isConnected) setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error');
-    } finally {
       busy = false;
-      if (root.isConnected) paint(open.panel === null ? '[data-learning-audit-action="stop"]' : '.learning-remediation-preview h4');
+      if (root.isConnected) { setStatus(errorMessage(error, LEARNING_AUDIT_STATUS.previewFailed), 'error'); paint('[data-learning-audit-action="stop"]'); }
+      return;
     }
+    // One step (Issue #1410 item 31), as the batch's.
+    busy = false;
+    await confirmOne();
   };
 
   const confirmOne = async (): Promise<void> => {
@@ -834,7 +837,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (read.standing === 'excluded') {
       const again = action(LEARNING_LINEAGE_REINCLUDE, 'secondary', 'reinclude', () => {
         if (busy || open.panel !== null) return;
-        open.panel = { kind: 'reinclude', choice: null };
+        // The Book's own is chosen to begin with (Issue #1410 item 31).
+        open.panel = { kind: 'reinclude', choice: 'book' };
         open.refusal = null;
         paint('.learning-reinclude input');
       });

@@ -406,17 +406,20 @@ describe('configuration selection memory (#1374)', () => {
     expect(view.root.querySelector('[data-review-action="start"]')!.disabled).toBe(true);
     expect(cost()).toBe('选好类别后显示'); view.scope('whole'); expect(view.box('style-and-format').checked).toBe(true);
   });
-  it('suspends model categories during local checking and remembers numeral confirmation through off/on', async () => {
+  it('suspends model categories during local checking and takes a chosen numeral basis as its confirmation (Issue #1410 item 16)', async () => {
     const view = await selectionSheet(); view.change(view.box('local-text-check'), true);
     expect(view.box('typos-and-usage').disabled).toBe(true); expect(view.box('typos-and-usage').checked).toBe(false);
+    expect(view.root.querySelector('[data-local-check-confirmation]')).toBeNull();
     view.change(view.root.querySelector('[data-local-check-numerals]')!, 'editor-convention');
-    view.change(view.root.querySelector('[data-local-check-confirmation]')!, true);
+    expect(view.root.querySelector('[data-local-check-numerals-note]')!.hidden).toBe(false);
+    expect(view.root.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
     view.change(view.root.querySelector('[data-local-check-numerals]')!, 'off');
-    expect(view.root.querySelector('[data-local-check-confirmation]')!.disabled).toBe(true);
+    expect(view.root.querySelector('[data-local-check-numerals-note]')!.hidden).toBe(true);
     view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['local-text-check'], localCheck: expect.objectContaining({ numeralsConfirmed: false }) }));
     view.change(view.root.querySelector('[data-local-check-numerals]')!, 'editor-convention');
-    expect(view.root.querySelector('[data-local-check-confirmation]')!.checked).toBe(true);
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ numeralsConfirmed: true, numeralRules: ['N01', 'N02'] }) }));
     view.change(view.box('local-text-check'), false);
     expect(view.box('typos-and-usage').checked).toBe(true); expect(view.box('style-and-format').checked).toBe(true);
   });

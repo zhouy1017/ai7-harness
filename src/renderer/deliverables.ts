@@ -28,6 +28,8 @@ import {
   PUBLICATION_ACTION_LABELS,
   PUBLICATION_ACTOR,
   PUBLICATION_BASIS_HINT,
+  PUBLICATION_BASIS_DEFAULT,
+  PUBLICATION_SCOPE_DEFAULT,
   PUBLICATION_BASIS_LABEL,
   PUBLICATION_CURRENT_MARK,
   PUBLICATION_FORM_HEADING,
@@ -674,7 +676,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         input.rows = 3;
       }
       input.value = value;
-      input.required = true;
       input.disabled = working;
       input.dataset['publicationField'] = name;
       input.placeholder = hint;
@@ -693,8 +694,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const basis = field('basis', PUBLICATION_BASIS_LABEL, PUBLICATION_BASIS_HINT, state.basis, (text) => { state.basis = text; });
 
     // The fixed sentence stands beside the exact action and is on screen whenever the form is (PUB-004).
+    // The fixed sentence is the technical layer's alone (Issue #1413 cluster 4); 设为发稿版本 itself says what it records.
     const statement = el('p', 'publication-statement', next.publication.statement);
     statement.id = uid('statement');
+    statement.hidden = !technicalLayerVisible;
     const problem = el('p', 'publication-problem');
     problem.setAttribute('role', 'alert');
     const reason = el('span', 'publication-confirm-reason');
@@ -734,7 +737,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       }
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;
-      const why = publicationDesignateReason(publicationDesignateBlockers({ milestoneChosen: chosen !== null, scope: state.scope, basis: state.basis }));
+      const why = publicationDesignateReason(publicationDesignateBlockers({ milestoneChosen: chosen !== null, ...designationWords(state) }));
       reason.textContent = why ?? '';
       reason.hidden = why === null;
       reasonLabel.hidden = why === null;
@@ -754,10 +757,22 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     return node;
   }
 
+  /**
+   * The form opens on the newest milestone with the routine scope and basis (Issue #1410 item 22): each stays editable, and a
+   * field the editor clears is recorded with its default.
+   */
   function openForm(): void {
     if (destroyed || working || projection === null || !projection.publication.designate.available) return;
-    form ??= { milestoneId: null, scope: '', basis: '', problem: null };
+    form ??= { milestoneId: projection.publication.milestones[0]?.milestoneId ?? null, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
     render('form');
+  }
+
+  /** What 设为发稿版本 records for the form as it stands: an empty field is its default. */
+  function designationWords(state: DesignateForm): { scope: string; basis: string } {
+    return {
+      scope: state.scope.trim().length === 0 ? PUBLICATION_SCOPE_DEFAULT : state.scope,
+      basis: state.basis.trim().length === 0 ? PUBLICATION_BASIS_DEFAULT : state.basis,
+    };
   }
 
   function closeForm(): void {
@@ -775,7 +790,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     if (destroyed || working || projection === null || form !== state) return;
     const milestoneId = state.milestoneId;
     const chosen = milestoneId !== null && projection.publication.milestones.some((milestone) => milestone.milestoneId === milestoneId);
-    if (milestoneId === null || publicationDesignateBlockers({ milestoneChosen: chosen, scope: state.scope, basis: state.basis }).length > 0) return;
+    const words = designationWords(state);
+    if (milestoneId === null || publicationDesignateBlockers({ milestoneChosen: chosen, ...words }).length > 0) return;
     working = true;
     // Any read still in flight is older than the answer this action will carry.
     generation += 1;
@@ -785,7 +801,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     options.setStatus(DELIVERABLES_STATUS_LINES.designating, 'busy');
     try {
-      const result = await api.designatePublicationVersion({ milestoneId, scope: state.scope, basis: state.basis });
+      const result = await api.designatePublicationVersion({ milestoneId, ...words });
       if (destroyed) return;
       if (result.bookId !== bookId || result.deliverables.bookId !== bookId) throw new Error(DELIVERABLES_STATUS_LINES.designateFailed);
       working = false;

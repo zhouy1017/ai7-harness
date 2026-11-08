@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection, BackgroundAnalysisScopeOffer, BackgroundAnalysisStartingPoint, RendererApi } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -17,6 +18,7 @@ import {
   backgroundCeilingOf,
   backgroundSharePreview,
   backgroundSkippedLine,
+  BACKGROUND_CEILING_DEFAULT,
   BACKGROUND_CONFIRM,
   BACKGROUND_DISCLOSURE_HEADING,
   BACKGROUND_ENROLLED_STATUS,
@@ -28,8 +30,6 @@ import {
   BACKGROUND_NOT_GRANTED_LABEL,
   BACKGROUND_REVOKED_STATUS,
   BACKGROUND_REVOKE_CONFIRM,
-  BACKGROUND_REVOKE_HEADING,
-  BACKGROUND_REVOKE_OPEN,
   BACKGROUND_SCOPE_LABEL,
   BACKGROUND_STARTED_HEADING,
   BACKGROUND_STARTING_POINT_LEGEND,
@@ -279,15 +279,9 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     }
     if ((projection.state === 'active' || projection.state === 'paused' || projection.state === 'suspended') && projection.enrollment !== null && projection.revoke.canRevoke) {
       const enrollmentId = projection.enrollment.enrollmentId;
-      const open = action(BACKGROUND_REVOKE_OPEN, 'secondary', 'revoke-open', () => {
-        engaged = true;
-        open.setAttribute('aria-expanded', 'true');
-        form.replaceChildren(...revokeForm(projection, enrollmentId, () => close(open)));
-        form.hidden = false;
-        form.querySelector<HTMLElement>('h4')?.focus();
-      });
-      open.setAttribute('aria-expanded', 'false');
-      actions.append(open);
+      // 撤销登记 revokes in one step (Issue #1410 item 24): what stops and what is kept is said with the result.
+      const revoke = action(BACKGROUND_REVOKE_CONFIRM, 'secondary', 'revoke', () => void submitRevoke(revoke, projection, enrollmentId));
+      actions.append(revoke);
     }
     if (projection.state !== 'active' && projection.state !== 'paused') {
       const open = action(BACKGROUND_ENROLL_OPEN, 'secondary', 'enroll-open', () => {
@@ -395,7 +389,9 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     for (const entry of offer.notGranted) notGranted.append(el('li', undefined, entry));
     const fieldset = el('fieldset', 'background-analysis-starting-points');
     fieldset.append(el('legend', undefined, BACKGROUND_STARTING_POINT_LEGEND));
-    let chosen: BackgroundAnalysisStartingPoint | null = null;
+    // The first starting point and a routine ceiling are filled in to begin with (Issue #1410 item 24); both stay editable.
+    let chosen: BackgroundAnalysisStartingPoint | null = offer.startingPoints[0]?.value ?? null;
+    ceilingInput.value = BACKGROUND_CEILING_DEFAULT;
     const hint = el('span', 'background-analysis-choose', BACKGROUND_CHOOSE_FIRST);
     hint.id = 'background-analysis-choose';
     const confirm = action(BACKGROUND_CONFIRM, 'primary', 'enroll-confirm', () => void submit());
@@ -431,6 +427,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       radio.name = 'background-analysis-starting-point';
       radio.value = point.value;
       radio.dataset['startingPoint'] = point.value;
+      radio.checked = point.value === chosen;
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         chosen = point.value;
@@ -452,7 +449,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
         options.setStatus(BACKGROUND_ENROLLED_STATUS, 'success');
         if (!root.isConnected) return;
         draw(projectionAfter);
-        root.querySelector<HTMLButtonElement>('[data-background-action="revoke-open"]')?.focus();
+        root.querySelector<HTMLButtonElement>('[data-background-action="revoke"]')?.focus();
       } catch (error) {
         confirm.disabled = false;
         options.setStatus(options.errorMessage(error, '无法登记后台处理。'), 'error');
@@ -462,38 +459,27 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     buttons.append(confirm, action(BACKGROUND_CANCEL, 'quiet', 'enroll-cancel', cancel));
     const section = el('section', 'background-analysis-disclosure');
     section.setAttribute('aria-labelledby', title.id);
-    section.append(title, what, scopes, ceilingLabel, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, buttons);
+    // What enrollment does not grant is the technical layer's alone (Issue #1413 cluster 4).
+    section.append(title, what, scopes, ceilingLabel, ...(technicalLayerVisible ? [el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted] : []), fieldset, buttons);
+    refresh();
     return [section];
   };
 
-  const revokeForm = (projection: BackgroundAnalysisEnrollmentProjection, enrollmentId: string, cancel: () => void): HTMLElement[] => {
-    const title = el('h4', undefined, BACKGROUND_REVOKE_HEADING);
-    title.tabIndex = -1;
-    title.id = 'background-analysis-revoke-heading';
-    const consequences = el('ul', 'analysis-list background-analysis-revoke-consequences');
-    for (const entry of projection.revoke.consequences) consequences.append(el('li', undefined, entry));
-    const confirm = action(BACKGROUND_REVOKE_CONFIRM, 'primary', 'revoke-confirm', () => void submit());
-    const submit = async (): Promise<void> => {
-      confirm.disabled = true;
-      options.setStatus('正在撤销后台处理登记…', 'busy');
-      try {
-        const projectionAfter = await api.revokeBackgroundAnalysisEnrollment({ enrollmentId });
-        engaged = false;
-        options.setStatus(BACKGROUND_REVOKED_STATUS, 'success');
-        if (!root.isConnected) return;
-        draw(projectionAfter);
-        root.querySelector<HTMLButtonElement>('[data-background-action="enroll-open"]')?.focus();
-      } catch (error) {
-        confirm.disabled = false;
-        options.setStatus(options.errorMessage(error, '无法撤销后台处理登记。'), 'error');
-      }
-    };
-    const buttons = el('div', 'button-row');
-    buttons.append(confirm, action(BACKGROUND_CANCEL, 'quiet', 'revoke-cancel', cancel));
-    const section = el('section', 'background-analysis-revoke');
-    section.setAttribute('aria-labelledby', title.id);
-    section.append(title, consequences, buttons);
-    return [section];
+  const submitRevoke = async (button: HTMLButtonElement, projection: BackgroundAnalysisEnrollmentProjection, enrollmentId: string): Promise<void> => {
+    button.disabled = true;
+    options.setStatus('正在撤销后台处理登记…', 'busy');
+    try {
+      const projectionAfter = await api.revokeBackgroundAnalysisEnrollment({ enrollmentId });
+      engaged = false;
+      const kept = projection.revoke.consequences.join('；');
+      options.setStatus(kept.length === 0 ? BACKGROUND_REVOKED_STATUS : `${BACKGROUND_REVOKED_STATUS.replace(/。$/u, '')}：${kept}`, 'success');
+      if (!root.isConnected) return;
+      draw(projectionAfter);
+      root.querySelector<HTMLButtonElement>('[data-background-action="enroll-open"]')?.focus();
+    } catch (error) {
+      button.disabled = false;
+      options.setStatus(options.errorMessage(error, '无法撤销后台处理登记。'), 'error');
+    }
   };
 
   void load();

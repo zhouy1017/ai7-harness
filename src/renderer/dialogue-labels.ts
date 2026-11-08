@@ -71,6 +71,7 @@ export const DIALOGUE_ACTIONS = {
   continue: '继续回答',
   regenerate: '重新回答',
   convert: '转为修改建议',
+  'convert-edit': '编辑后转为修改建议…',
 } as const;
 
 /** Each attempt, numbered, as the first answer, a 继续回答 or a 重新回答 (DIALOG-014). */

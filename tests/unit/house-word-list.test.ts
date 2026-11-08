@@ -112,9 +112,9 @@ describe('standalone House panel through its two-operation interface', () => {
     const type = (name: string, value: string) => { const field = miniDocument.body.querySelector(`[data-house-field="${name}"]`)!; field.value = value; field.dispatchEvent({ type: 'input' }); };
     try {
       await panel.load(); expect(root.textContent).toContain('尚未保存'); expect(api.saveHouseWordList).not.toHaveBeenCalled();
-      await click('edit'); type('paste', '合成甲\n合成乙'); await click('preview-paste');
-      expect(root.textContent).toContain('尚未加入草稿或保存'); expect(owner.inspect().current).toBeNull();
-      await click('accept-paste'); await click('save');
+      await click('edit'); type('paste', '合成甲\n合成乙'); await click('accept-paste');
+      expect(owner.inspect().current).toBeNull();
+      await click('save');
       const first = owner.inspect(); expect(first.selected?.ordinal).toBe(1); expect(first.selected?.source.kind).toBe('editor-paste');
       expect(first.entries.map((row) => row.literal)).toEqual(['合成甲', '合成乙']);
       await click('edit'); type('literal', '草稿保留');

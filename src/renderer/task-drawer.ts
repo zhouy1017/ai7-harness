@@ -93,8 +93,6 @@ import {
   TASK_PLAN_BOUNDARY_COLUMNS,
   TASK_PLAN_CEILING_NOTE,
   TASK_PLAN_DEFAULT_RULE,
-  TASK_PLAN_DEFAULT_RULE_CANCEL,
-  TASK_PLAN_DEFAULT_RULE_CONFIRM,
   TASK_PLAN_DEFAULT_RULE_FAILED,
   TASK_PLAN_DEFAULT_RULE_HEADING,
   taskPlanDefaultRuleLead,
@@ -427,8 +425,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let diffShown = false;
   /** Focus belongs on the bar once the action that had it is gone: the start just replaced by the Run's state. */
   let focusBar = false;
-  /** Whether `设为快速开始默认…`'s confirmation is open; kept across the reads of the same plan version. */
-  let ruleConfirmShown = false;
   /** Whether 取消任务's Cancellation Impact Summary is open; kept across the reads while the Run can still be cancelled. */
   let cancelConfirmShown = false;
   // 查看未确认的部分 (Issue #51, S16c): whether the list of unconfirmed ranges is open beside the bar.
@@ -764,7 +760,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       diffShown = false;
       unconfirmedRecordShown = false;
       refusal = null;
-      ruleConfirmShown = false;
     }
     // The summary stays open only while there is still a Run 取消任务 can name.
     if (next.runControl === null || next.runControl.cancel.reason !== null) cancelConfirmShown = false;
@@ -1135,7 +1130,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ]), ...(technicalLayerVisible ? budgetBlock(next) : [])),
       planSection(5, facts([
         [TASK_PLAN_RESULT_TERMS[0], listOf(next.outcomes, 'task-plan-list')],
-        [TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')],
+        // 不会做 is the technical layer's alone (Issue #1413 cluster 4).
+        ...(technicalLayerVisible ? [[TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')] as const] : []),
       ])),
       boundaryBlock(next),
       defaultRuleBlock(next),
@@ -1194,9 +1190,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /**
-   * `设为快速开始默认…` (AUTH-009, TASK-019; Issue #421): on a plan a rule may come from it opens a confirmation that
-   * lists exactly what the rule binds, and only its `设为默认` sets the rule; on any other plan it is shown, disabled,
-   * with the reason. The Book's rule for the plan's pattern is named beside it, in force or turned off.
+   * `设为快速开始默认` (AUTH-009, TASK-019; Issue #421, #1410 item 19): on a plan a rule may come from it sets the rule in one
+   * click, what the rule binds one disclosure away; on any other plan it is shown, disabled, with the reason. The Book's rule for the plan's pattern is named beside it, in force or turned off.
    */
   function defaultRuleBlock(next: TaskPlanProjection): HTMLElement {
     const rule = next.defaultRule;
@@ -1213,42 +1208,20 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       section.append(row);
       return section;
     }
+    // One click sets the rule (Issue #1410 item 10/19): what it binds stays one disclosure away, never a second confirmation.
     const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
-    const confirm = el('div', 'task-plan-default-rule-confirm');
-    confirm.id = uid('default-rule-confirm');
-    confirm.hidden = !ruleConfirmShown;
-    confirm.setAttribute('role', 'group');
-    confirm.setAttribute('aria-label', TASK_PLAN_DEFAULT_RULE_HEADING);
-    open.setAttribute('aria-controls', confirm.id);
-    open.setAttribute('aria-expanded', ruleConfirmShown ? 'true' : 'false');
     const binds = el('dl', 'task-plan-facts task-plan-default-rule-binds');
     for (const row of rule.binds) {
       const value = el('dd', undefined, row.value);
       value.dataset['defaultRuleBind'] = row.label;
       binds.append(el('dt', undefined, row.label), value);
     }
-    const yes = control(TASK_PLAN_DEFAULT_RULE_CONFIRM, 'primary', 'default-rule-confirm');
-    const no = control(TASK_PLAN_DEFAULT_RULE_CANCEL, 'quiet', 'default-rule-cancel');
-    const actions = el('div', 'button-row');
-    actions.append(yes, no);
-    confirm.append(el('h4', undefined, TASK_PLAN_DEFAULT_RULE_HEADING), el('p', undefined, taskPlanDefaultRuleLead(next.kind)), binds, actions);
-    const show = (shown: boolean): void => {
-      ruleConfirmShown = shown;
-      confirm.hidden = !shown;
-      open.setAttribute('aria-expanded', shown ? 'true' : 'false');
-    };
-    open.addEventListener('click', () => {
-      show(!ruleConfirmShown);
-      if (ruleConfirmShown) yes.focus();
-    });
-    no.addEventListener('click', () => {
-      show(false);
-      open.focus();
-    });
-    yes.addEventListener('click', () => void setDefaultRule());
-    if (working) for (const button of [open, yes, no]) button.disabled = true;
+    const detail = el('details', 'task-plan-default-rule-detail');
+    detail.append(el('summary', undefined, TASK_PLAN_DEFAULT_RULE_HEADING), el('p', 'field-note', taskPlanDefaultRuleLead(next.kind)), binds);
+    open.addEventListener('click', () => void setDefaultRule());
+    if (working) open.disabled = true;
     row.append(open);
-    section.append(row, confirm);
+    section.append(row, detail);
     return section;
   }
 
@@ -1262,7 +1235,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在设为快速开始默认…', 'busy');
     try {
       const rule = await api.setDefaultExecutionRule({ taskIntentId: current.ref, planEnvelopeDigest });
-      ruleConfirmShown = false;
       options.setStatus(taskPlanDefaultRuleSet(rule.name), 'success');
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -2806,7 +2778,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       refusal = null;
       pendingNote = note ?? null;
       diffShown = false;
-      ruleConfirmShown = false;
       cancelConfirmShown = false;
       clearPoll();
       root.hidden = false;

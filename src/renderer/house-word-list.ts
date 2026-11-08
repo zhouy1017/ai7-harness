@@ -109,19 +109,24 @@ export function mountHouseWordList(options: {
         button('添加词条', 'add', () => { draft?.push({ entryId: null, literal: '', note: '', enabled: true }); draftOffset = Math.floor(((draft?.length ?? 1) - 1) / HOUSE_PAGE_SIZE) * HOUSE_PAGE_SIZE; paint(); }, draft.length >= MAX_HOUSE_ENTRIES));
       const pasteLabel = el('label', '粘贴词条（一行一条，空行忽略）'); const paste = el('textarea'); paste.value = pastedText; paste.disabled = busy; paste.dataset['houseField'] = 'paste';
       paste.addEventListener('input', () => { pastedText = paste.value; preview = null; }); pasteLabel.append(paste);
-      panel.append(pasteLabel, button('预览粘贴', 'preview-paste', () => { preview = previewHousePaste(pastedText); paint(); }));
-      if (preview !== null) {
-        const result = el('div'); result.dataset['housePastePreview'] = 'true';
-        result.append(el('p', `预览${preview.entries.length}条；尚未加入草稿或保存。`));
+      // The pasted lines are parsed and joined to the draft in one step (Issue #1410 item 26); 加入并保存 also saves the version.
+      // A line that cannot be kept stops the whole paste with its reason, and nothing is joined.
+      const acceptPaste = (): boolean => {
+        if (draft === null) return false;
+        preview = previewHousePaste(pastedText);
+        if (preview.errors.length > 0 || preview.entries.length === 0) { paint(); return false; }
+        try {
+          const combined = [...draft, ...preview.entries]; validateSaveHouseWordListInput({ expectedCurrent, sourceKind: 'editor-paste', entries: combined });
+          draft = combined; sourceKind = 'editor-paste'; preview = null; pastedText = ''; paint(); return true;
+        } catch (error) { setStatus(error instanceof HouseWordListError ? error.message : '粘贴未完成。', 'error'); return false; }
+      };
+      panel.append(pasteLabel, button('加入草稿', 'accept-paste', () => { acceptPaste(); }),
+        button('加入并保存词表版本', 'paste-save', () => { if (acceptPaste()) void save(); }));
+      if (preview !== null && (preview.errors.length > 0 || preview.entries.length === 0)) {
+        const result = el('div'); result.dataset['housePastePreview'] = 'true'; result.setAttribute('role', 'alert');
+        result.append(el('p', preview.errors.length > 0 ? '粘贴的词条没有加入草稿：' : '没有可加入的词条。'));
         for (const error of preview.errors) result.append(el('p', error.message));
-        const literals = el('ul'); for (const entry of preview.entries.slice(0, HOUSE_PAGE_SIZE)) literals.append(el('li', entry.literal)); result.append(literals);
-        result.append(button('加入草稿', 'accept-paste', () => {
-          if (draft === null || preview === null || preview.errors.length > 0) return;
-          try {
-            const combined = [...draft, ...preview.entries]; validateSaveHouseWordListInput({ expectedCurrent, sourceKind: 'editor-paste', entries: combined });
-            draft = combined; sourceKind = 'editor-paste'; preview = null; pastedText = ''; paint();
-          } catch (error) { setStatus(error instanceof HouseWordListError ? error.message : '粘贴未完成。', 'error'); }
-        }, preview.errors.length > 0 || preview.entries.length === 0)); panel.append(result);
+        panel.append(result);
       }
       panel.append(button('保存词表版本', 'save', () => void save()), button('放弃草稿并重新载入', 'discard', () => void run(async () => {
         await inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }); draft = null; preview = null;
