@@ -1728,7 +1728,11 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .search-result[data-active-match="true"] { border-color: var(--action-primary); box-shadow: 0 0 0 1px var(--action-primary); }
 .navigation-modes { margin-top: .5rem; }
 .manuscript-navigator > input[type="search"] { width: 100%; box-sizing: border-box; }
-.navigation-legend { display: flex; flex-wrap: wrap; gap: .5rem; padding-top: .75rem; font-size: .72rem; }
+.navigation-legend { display: flex; flex: none; flex-wrap: wrap; gap: .5rem; padding-top: .75rem; font-size: .72rem; }
+/* Issue #1413 cluster 2: in a short window the search section scrolls inside its own box, so its paging links never run
+   under the legend and footer below it. */
+.manuscript-navigator .search-section { overflow-y: auto; overscroll-behavior: contain; }
+.manuscript-navigator .navigation-footer { flex: none; }
 .navigation-legend span::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: .3rem; border-radius: 50%; background: var(--mark-note); }
 .navigation-legend [data-legend-kind="change-suggestion"]::before { background: var(--mark-suggestion); }
 .navigation-legend [data-legend-kind="annotation"]::before { background: var(--mark-annotation); }
