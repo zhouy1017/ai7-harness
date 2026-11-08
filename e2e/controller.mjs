@@ -102,6 +102,13 @@ export async function releaseHeldBaselineAfterPause(renderer, scope, waitFor, re
   await release();
 }
 // The loaded window's position, rather than a pointer's preview while its jump is still in flight.
+/**
+ * 自由直接编辑 (Issue #1411): a manuscript or document opens in 阅读与修订模式, where keys, paste and drop never reach the text.
+ * A step that types into the text on purpose switches explicitly first; true once the editor takes direct input.
+ */
+export const DIRECT_EDIT = `(() => { const toggle = document.querySelector('[data-editor-input-mode-toggle]'); if (!(toggle instanceof HTMLElement)) return false; if (toggle.dataset.inputMode !== 'direct-edit') toggle.click(); return toggle.dataset.inputMode === 'direct-edit' && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.inputMode === 'direct-edit'; })()`;
+/** 阅读与修订模式, the mode every manuscript and document opens in (Issue #1411). */
+export const READING_REVISION = `(() => document.querySelector('[data-editor-input-mode-toggle]')?.dataset.inputMode === 'reading-revision' && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.inputMode === 'reading-revision')()`;
 export const MANUSCRIPT_RAIL_POSITION = `Number(document.querySelector('#manuscript-position')?.dataset.windowPosition)`;
 export function manuscriptRailJump(proportionExpression) {
   return `(() => { const rail = document.querySelector('#manuscript-position[role="slider"]'); if (!(rail instanceof HTMLElement)) return false; rail.setAttribute('aria-valuenow', String(Math.round((${proportionExpression}) * 1_000_000))); rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;

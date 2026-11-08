@@ -4,6 +4,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkKind } from '../shared/protocol.js';
 import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
+import { AI_LOCK_BADGE_UNLOCK, AI_LOCK_TOOLTIP } from './scoped-ai-edit.js';
 
 // The marks drawn over the manuscript window (Issue #1178, F-10 outcome 3): one DecorationSet kept in the plugin's state and
 // changed only where something changed — a caret move draws nothing again, a card opened or closed redraws the paragraphs of
@@ -45,6 +46,8 @@ export interface MarkDecorationSource {
   active(): ActiveMark | undefined;
   /** A supporting card's linked range; independent of the full card's proposed-text preview. */
   linked?(): string | undefined;
+  /** 🔒 锁定 (Issue #1412): the window's blocks the AI may not change, drawn with their badge. */
+  locked?(): ReadonlyArray<string> | undefined;
   /** The durable text as it was last read: when it is read again, every mark is drawn again. */
   generation(): unknown;
 }
@@ -73,9 +76,28 @@ export function blockMarkDecorations(
   baselineText: string | undefined,
   activeMark: ActiveMark | undefined,
   linkedMarkId?: string,
+  aiLocked = false,
 ): Decoration[] {
   const blockId = String(node.attrs['blockId']);
   const decorations: Decoration[] = [];
+  if (aiLocked) {
+    // 🔒 (Issue #1412): the block keeps its words whatever an AI edit returns; its badge unlocks it.
+    decorations.push(Decoration.node(offset, offset + node.nodeSize, { 'data-ai-locked': 'true', title: AI_LOCK_TOOLTIP }, { blockId }));
+    decorations.push(Decoration.widget(offset + 1, () => {
+      const badge = window.document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'ai-lock-badge';
+      badge.contentEditable = 'false';
+      badge.tabIndex = -1;
+      badge.textContent = '🔒';
+      badge.title = `${AI_LOCK_TOOLTIP}（${AI_LOCK_BADGE_UNLOCK}）`;
+      badge.setAttribute('aria-label', `${AI_LOCK_TOOLTIP}；${AI_LOCK_BADGE_UNLOCK}`);
+      badge.dataset['aiLockAction'] = 'unlock';
+      badge.dataset['aiLockBlock'] = blockId;
+      badge.addEventListener('mousedown', (event) => { if (event.button === 0) event.preventDefault(); });
+      return badge;
+    }, { side: -1, ignoreSelection: true, key: `ai-lock:${blockId}`, blockId }));
+  }
   const parts = graphemes(node.textContent);
   const local = baselineText !== undefined && baselineText !== node.textContent ? deriveSpanEdit(graphemes(baselineText), parts) : null;
   const position = (grapheme: number): number =>
@@ -205,17 +227,18 @@ function marksByBlock(marks: ReadonlyArray<EditorialMarkAnchorProjection>): Map<
   return byBlock;
 }
 
-/** Every mark of the window drawn over `doc`. */
+/** Every mark of the window drawn over `doc`, with its AI-locked blocks. */
 export function buildMarkDecorations(doc: ProseMirrorNode, source: MarkDecorationSource): DecorationSet {
   const marks = source.marks();
-  if (marks.length === 0) return DecorationSet.empty;
+  const locked = new Set(source.locked?.() ?? []);
+  if (marks.length === 0 && locked.size === 0) return DecorationSet.empty;
   const byBlock = marksByBlock(marks);
   const active = source.active();
   const decorations: Decoration[] = [];
   doc.forEach((node, offset) => {
     const blockId = String(node.attrs['blockId']);
     const blockMarks = byBlock.get(blockId);
-    if (blockMarks) decorations.push(...blockMarkDecorations(node, offset, blockMarks, source.baselineText(blockId), active, source.linked?.()));
+    if (blockMarks || locked.has(blockId)) decorations.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId)));
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -285,6 +308,7 @@ export function redrawBlocks(set: DecorationSet, doc: ProseMirrorNode, blocks: R
   const present = new Set<string>();
   doc.forEach((node) => present.add(String(node.attrs['blockId'])));
   const byBlock = marksByBlock(source.marks());
+  const locked = new Set(source.locked?.() ?? []);
   const active = source.active();
   const stale: Decoration[] = [];
   const fresh: Decoration[] = [];
@@ -294,7 +318,7 @@ export function redrawBlocks(set: DecorationSet, doc: ProseMirrorNode, blocks: R
     stale.push(...set.find(offset, offset + node.nodeSize, (spec: { blockId?: string }) =>
       spec.blockId === blockId || (spec.blockId !== undefined && !present.has(spec.blockId))));
     const blockMarks = byBlock.get(blockId);
-    if (blockMarks) fresh.push(...blockMarkDecorations(node, offset, blockMarks, source.baselineText(blockId), active, source.linked?.()));
+    if (blockMarks || locked.has(blockId)) fresh.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId)));
   });
   return set.remove(stale).add(doc, fresh);
 }

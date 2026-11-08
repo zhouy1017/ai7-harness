@@ -27,6 +27,7 @@ import {
   replacementRefusal, searchContextParts, searchHitsTitle, searchQueryRefusal,
 } from './manuscript-search-labels.js';
 import { replacementRevisionRationale } from '../shared/editor-revision-words.js';
+import { AI_LOCK_SECTION_LABEL, AI_UNLOCK_SECTION_LABEL, setAiLocks, type ScopedAiEditHost } from './scoped-ai-edit.js';
 import { DEFAULT_EDITOR_INPUT_MODE, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
 import { shortcutHint } from './commands.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
@@ -450,10 +451,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     editor.setInputMode(mode);
     paintInputMode(editor.inputMode());
     setStatus(INPUT_MODE_CHANGED[editor.inputMode()], 'success');
-    editor.focus();
   };
   paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
-  toolbarActions.append(inputModeToggle, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  // 让 AI 修改… (Issue #1412): the unlocked parts of this section or of the whole text, on the manuscript and on a document.
+  const scopedAiEditEntry = button('让 AI 修改…', 'secondary', () => editorialMarks?.composeScopedAiEdit());
+  scopedAiEditEntry.dataset['scopedAiEditEntry'] = 'true';
+  toolbarActions.append(inputModeToggle, scopedAiEditEntry, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
   // 本书稿件 (Issue #1403): the manuscript and every derivative document of the Book, and 新建 / 导入衍生稿件, above the editor.
   let switcher: ManuscriptSwitcher | undefined;
@@ -1024,6 +1027,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   saveMenu?.element.addEventListener('toggle', () => { if ((saveMenu.element as HTMLDetailsElement).open) refreshMilestonePersistence(true); });
   let outlineEntries: ReadonlyArray<OutlineProjection['entries'][number]> | undefined;
+  /** Headings whose sections are locked against AI edits (Issue #1412). */
+  let lockedSections = new Set<string>();
+  // 就选中部分让 AI 修改… and 🔒 (Issue #1412): what the scoped edit's composer and lock calls stand on.
+  const scopedAiEditHost: ScopedAiEditHost = {
+    api,
+    flush: async () => { await editor?.flush(); },
+    current: () => editor?.currentWindow() ?? currentWindow,
+    refresh: () => reloadWindow(),
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  };
   let outlineTruncated = false;
   let outlineRead = 0;
   /** Where Enter in the outline filter stands among the chapters it leaves; -1 before the first Enter. */
@@ -1098,7 +1112,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
     nextWindow.disabled = authoritativeMutationBusy() || currentWindow.nextCursor === null;
     updateScrollChrome();
-    paintNavigationFooter();
+    if (!navigator.hidden && navigationMode === 'outline') paintOutline();
+    else paintNavigationFooter();
   };
 
   const syncAuthoritativeMutationControls = (): void => {
@@ -1572,6 +1587,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const query = outlineFilter.value.trim().toLocaleLowerCase();
     const current = currentChapterId();
     const rows: HTMLButtonElement[] = [];
+    const rowNodes: HTMLElement[] = [];
     for (const entry of outlineEntries) {
       if (query && !entry.text.toLocaleLowerCase().includes(query)) continue;
       const chapter = railProjection?.chapters.find((candidate) => candidate.blockId === entry.blockId);
@@ -1579,6 +1595,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       const percent = Number.isFinite(entry.proportion) ? `${Math.round(entry.proportion * 100)}%` : '';
       const open = button('', 'quiet', () => void navigate({ kind: 'block', blockId: entry.blockId }));
       open.className = `${open.className} outline-entry`;
+      const sectionLocked = lockedSections.has(entry.blockId);
       open.dataset['outlineBlock'] = entry.blockId;
       open.append(element('span', 'outline-title', entry.text));
       // A chapter's marks are one light count, and only where there are some.
@@ -1587,14 +1604,25 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       open.setAttribute('title', entry.text);
       open.setAttribute('aria-label', `${entry.text}${marks > 0 ? ` · ${marks} 处标记` : ''}${percent === '' ? '' : ` · ${percent}`}`);
       open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
-      open.setAttribute('role', 'listitem');
       if (entry.blockId === current) {
         open.setAttribute('aria-current', 'location');
         open.className = `${open.className} is-current-chapter`;
       }
+      if (sectionLocked) open.dataset['aiLocked'] = 'true';
+      // 🔒 锁定本节 (Issue #1412): beside the heading, never inside its jump.
+      const lock = button(sectionLocked ? AI_UNLOCK_SECTION_LABEL : AI_LOCK_SECTION_LABEL, 'quiet', () =>
+        void setAiLocks(scopedAiEditHost, [{ kind: 'section', headingBlockId: entry.blockId }], !sectionLocked));
+      lock.className = `${lock.className} outline-lock`;
+      lock.dataset['aiLockSection'] = entry.blockId;
+      lock.setAttribute('aria-pressed', String(sectionLocked));
+      lock.setAttribute('aria-label', `${sectionLocked ? AI_UNLOCK_SECTION_LABEL : AI_LOCK_SECTION_LABEL}：${entry.text}`);
+      const row = element('div', 'outline-row');
+      row.setAttribute('role', 'listitem');
+      row.append(open, lock);
       rows.push(open);
+      rowNodes.push(row);
     }
-    outlineList.replaceChildren(...rows);
+    outlineList.replaceChildren(...rowNodes);
     outlineEmpty.hidden = rows.length > 0;
     outlineEmpty.textContent = outlineEntries.length === 0 ? OUTLINE_EMPTY_LINE : outlineNoMatchLine(outlineFilter.value.trim());
     if (outlineCursor >= rows.length) outlineCursor = -1;
@@ -1618,6 +1646,53 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     navigationFooter.textContent = outlineEntries === undefined ? '按章节或标记回到原文。'
       : `${outlineTruncated ? '已显示' : '共'} ${outlineEntries.length.toLocaleString('zh-CN')} 个章节标题 · 当前位置 ${Math.round(currentWindow.position.proportion * 100)}%`;
   }
+  /** The sections locked against AI edits (Issue #1412), read with the outline; a read that fails leaves the last one. */
+  async function readSectionLocks(): Promise<void> {
+    try {
+      const binding = editor?.currentWindow() ?? currentWindow;
+      const locks = await api.inspectAiEditLocks({ manuscriptId: binding.manuscriptId, branchId: binding.branchId });
+      lockedSections = new Set(locks.sectionHeadingBlockIds);
+    } catch { /* the outline still shows; its lock buttons say what was last read */ }
+  }
+  /** The heading whose section holds `blockId`: the nearest outline heading at or above it in the window, else before the window. */
+  function sectionOf(blockId: string): string | null {
+    if (outlineEntries === undefined || outlineEntries.length === 0) return null;
+    const headings = new Set(outlineEntries.map((entry) => entry.blockId));
+    const blocks = currentWindow.blocks;
+    for (let at = blocks.findIndex((block) => block.blockId === blockId); at >= 0; at -= 1) {
+      if (headings.has(blocks[at]!.blockId)) return blocks[at]!.blockId;
+    }
+    let found: string | null = null;
+    for (const entry of outlineEntries) {
+      if (entry.proportion > currentWindow.position.proportion + 1e-9) break;
+      found = entry.blockId;
+    }
+    return found;
+  }
+  /**
+   * The window read again after a lock change or an applied scoped edit (Issue #1412): its text, its marks and its locks, with
+   * the place kept; the outline's section locks follow.
+   */
+  async function reloadWindow(): Promise<void> {
+    if (!editor || destroyed || !(await settleLocalEdit()) || !editor) return;
+    const binding = editor.currentWindow();
+    const first = binding.blocks[0];
+    if (first === undefined) return;
+    const continuity = editor.captureContinuity();
+    const next = await api.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'window-start', blockId: first.blockId } });
+    if (!editor || destroyed) return;
+    windowLoadCause = 'authoritative';
+    let loaded: boolean;
+    try { loaded = editor.loadWindow(next, continuity); } finally { windowLoadCause = 'unnamed'; }
+    if (!loaded) return;
+    currentWindow = next;
+    updateWindowChrome();
+    editorialMarks?.refreshComments();
+    updateCommentsBadge();
+    manuscriptRail?.refresh();
+    await invalidateSearchIfStale('稿件已由 AI 局部修改；先前搜索结果和返回位置已失效。');
+    await loadOutline();
+  }
   /** The whole outline, read page after page (Issue #1409): the filter and the current chapter see every heading of the Book. */
   async function loadOutline(propagateFailure = false): Promise<void> {
     const request = ++outlineRead;
@@ -1635,6 +1710,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       outlineEntries = entries;
       outlineTruncated = cursor !== null;
       paintOutline();
+      // The section locks follow without holding the outline back.
+      void readSectionLocks().then(() => { if (!destroyed && request === outlineRead) paintOutline(); });
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取稿件结构。'), 'error');
       if (propagateFailure) throw error;
@@ -2588,6 +2665,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     setStatus,
     errorMessage: rendererErrorMessage,
     inputMode: () => editor?.inputMode() ?? DEFAULT_EDITOR_INPUT_MODE,
+    scopedAiEdit: { host: scopedAiEditHost, sectionOf },
     // ✎ 已改 (Issue #1411): the 批注栏 opens on the revision's card, unless 专注模式 keeps it closed.
     revealComments: () => {
       if (focusMode.active) return false;

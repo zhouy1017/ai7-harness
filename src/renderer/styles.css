@@ -1665,7 +1665,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .navigator-section .button-row button { padding-inline: .55rem; }
 .outline-list { display: grid; grid-auto-rows: min-content; align-content: start; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
 .outline-list .btn { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; max-width: 100%; min-height: 36px; padding: .35rem .25rem .35rem calc(.25rem + var(--outline-depth, 0) * .8rem); text-align: left; line-height: 1.5; }
-.outline-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.outline-title { text-overflow: ellipsis; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .outline-marks { grid-column: 1; justify-self: start; padding: 0 .4rem; border-radius: 999px; color: var(--text-subdued); background: var(--surface); font-size: .7rem; }
 .outline-percent { grid-column: 2; grid-row: 1 / 3; font-variant-numeric: tabular-nums; color: var(--text-subdued); font-size: .75rem; }
 /* 大纲 / 查找 / 替换 (Issue #1409): the modes on top, then one mode's own field and its list at the panel's full height. */
@@ -1674,6 +1674,18 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .manuscript-navigator .outline-section, .manuscript-navigator .search-section { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .manuscript-navigator .navigator-section[hidden] { display: none; }
 .navigator-heading { font-size: .9rem; }
+.outline-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; }
+.outline-row .outline-lock { min-height: 28px; padding: 0 .35rem; color: var(--text-subdued); font-size: .72rem; opacity: 0; }
+.outline-row:hover .outline-lock, .outline-row:focus-within .outline-lock, .outline-row .outline-lock[aria-pressed="true"] { opacity: 1; }
+.outline-list .outline-entry[data-ai-locked="true"] .outline-title::before { content: '🔒 '; }
+/* 🔒 锁定 (Issue #1412): a locked paragraph's calm protecting edge and its badge. */
+.ProseMirror [data-block-id][data-ai-locked="true"] { border-left: 3px solid var(--boundary-strong); background: var(--surface-subdued); padding-left: 8px; }
+.ai-lock-badge { border: 0; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; color: var(--text-subdued); }
+.ai-lock-badge:focus-visible { outline: 2px solid var(--focus); }
+.scoped-ai-edit-composer { display: grid; gap: 8px; padding: 12px; max-width: 440px; background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; box-shadow: var(--shadow); }
+.scoped-ai-edit-quote { margin: 0; padding-left: 8px; border-left: 2px solid var(--boundary); color: var(--text-subdued); white-space: pre-wrap; }
+.scoped-ai-edit-scope { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 12px; }
+.scoped-ai-edit-field { display: grid; gap: 4px; }
 .outline-list .outline-entry.is-current-chapter { box-shadow: inset 3px 0 0 var(--action-primary); background: var(--surface); font-weight: 700; }
 .outline-list .outline-entry[data-filter-cursor="true"] { outline: 1px solid var(--focus); outline-offset: -1px; }
 .outline-empty { margin: 0; }

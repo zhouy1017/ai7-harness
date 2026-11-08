@@ -377,7 +377,7 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['模式：阅读与修订（防误触）', '撤销', '重做', '重试权威刷新']);
+      .toEqual(['模式：阅读与修订（防误触）', '让 AI 修改…', '撤销', '重做', '重试权威刷新']);
     app.showing?.destroy();
   });
 
@@ -425,7 +425,7 @@ describe('the Manuscript screen lifecycle', () => {
         marks: [], marksTruncated: false, uncovered: null });
       await vi.advanceTimersByTimeAsync(0);
       // A chapter's marks are one light count where it has some (Issue #1409); none is drawn for a chapter without.
-      const rows = app.screen.querySelectorAll('.outline-list button');
+      const rows = app.screen.querySelectorAll('.outline-list .outline-entry');
       expect(rows[0]!.querySelector('.outline-marks')?.textContent).toBe('1 处标记');
       expect(rows[1]!.querySelector('.outline-marks')).toBeNull();
       expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('共 2 个章节标题');

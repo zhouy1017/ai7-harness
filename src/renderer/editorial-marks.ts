@@ -67,6 +67,10 @@ import {
 import { applyOnce } from './manuscript-apply.js';
 import { READING_REVISION_CLIPBOARD_REASON, type EditorInputMode } from './editor-input-mode.js';
 import {
+  AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_MENU_LABEL, openScopedAiEditComposer, selectionLockTargets, selectionLocked,
+  setAiLocks, type ScopedAiEditHost,
+} from './scoped-ai-edit.js';
+import {
   EDITOR_REVISION_RATIONALE, QUICK_REVISE_APPLIED, QUICK_REVISE_FIELD, QUICK_REVISE_FIELD_HINT, QUICK_REVISE_HINT, QUICK_REVISE_LABEL,
   QUICK_REVISE_NOTE, QUICK_REVISE_RATIONALE, QUICK_REVISE_SPAN_HINT, QUICK_REVISE_SUBMIT, QUICK_REVISE_TITLE, QUICK_REVISE_UNCHANGED,
   REVERSE_REVISION_DONE, REVERSE_REVISION_LABEL, spanRevisionSegments, type RevisionSegment,
@@ -140,6 +144,8 @@ export interface EditorialMarksSurface {
   recordAndApplyEditorRevision(range: Omit<RevisionSegment, 'proposedText'>, proposedText: string, rationale?: string | null): Promise<string | null>;
   /** An applied revision's card brought forward in the 批注栏 (Issue #1411): opened, scrolled to and highlighted. */
   revealRevision(markId: string): Promise<void>;
+  /** 让 AI 修改… with nothing selected (Issue #1412): the unlocked parts of the section the caret is in, or of the whole text. */
+  composeScopedAiEdit(): void;
   /**
    * Whether the pane's position is this surface's doing: a composer or a Mark Card is open — bringing
    * one into view may rest the pane at its edge — or one just closed and the pane, shorter by the
@@ -235,6 +241,11 @@ interface MountOptions {
   inputMode?(): EditorInputMode;
   /** Open the 批注栏 for a card it should show; `false` where it cannot show now (专注模式), and the card floats instead. */
   revealComments?(): boolean;
+  /**
+   * 就选中部分让 AI 修改… and 🔒 锁定 (Issue #1412), on the Book's manuscript and on a derivative document alike: the request, the
+   * lock calls and the reload after them are the scoped edit's own; `sectionOf` names the heading whose section holds a block.
+   */
+  scopedAiEdit?: { readonly host: ScopedAiEditHost; sectionOf(blockId: string): string | null };
 }
 
 /** Window-only memory. A new projection/version fences every outstanding read, including failed reads. */
@@ -2127,8 +2138,48 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
       })),
       polishItem(selectionReason),
+      ...scopedAiEditItems(selectionReason),
     ],
   });
+
+  /** 就选中部分让 AI 修改… and the selection's 🔒 (Issue #1412): offered wherever the surface passes the scoped edit. */
+  const scopedAiEditItems = (selectionReason: string | undefined): MenuItem[] => {
+    const scoped = options.scopedAiEdit;
+    if (scoped === undefined) return [];
+    const range = editor.selectedRange();
+    const words = range.kind === 'range' || range.kind === 'span' ? range : null;
+    const reading = words === null ? null : selectionInputOf(words);
+    const locked = reading !== null && selectionLocked(editor.currentWindow(), reading);
+    return [
+      { action: 'scoped-ai-edit', label: SCOPED_AI_EDIT_MENU_LABEL, ...(selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeScopedOnSelection() }) },
+      { action: locked ? 'ai-unlock-selection' : 'ai-lock-selection', label: locked ? AI_UNLOCK_SELECTION_LABEL : AI_LOCK_SELECTION_LABEL,
+        ...(selectionReason !== undefined || reading === null ? { disabledReason: selectionReason ?? '先选中文字' }
+          : { run: () => void setAiLocks(scoped.host, selectionLockTargets(reading), !locked) }) },
+    ];
+  };
+  /** The scoped edit's composer below a paragraph, closed once its request settles. */
+  const openScopedComposer = (blockId: string, selection: DialogueSelectionInput | null, quote?: string): void => {
+    const scoped = options.scopedAiEdit;
+    if (scoped === undefined) return;
+    close();
+    const holder = el('section', 'editorial-mark-composer scoped-ai-edit-holder');
+    holder.dataset['markComposer'] = 'scoped-ai-edit';
+    placeBelowBlock(holder, blockId);
+    layer.append(holder);
+    floating = holder;
+    floatingBlockId = blockId;
+    openScopedAiEditComposer(scoped.host, {
+      selection, ...(quote === undefined ? {} : { quote }), sectionHeadingBlockId: scoped.sectionOf(blockId), mount: holder,
+      onSettled: () => { if (floating === holder) closeFloating(); },
+    });
+    holder.scrollIntoView?.({ block: 'nearest' });
+  };
+  const composeScopedOnSelection = async (): Promise<void> => {
+    if (refuseWhileBusy()) return;
+    const reading = await spanNow();
+    if (reading === null) return;
+    openScopedComposer(reading.span.blockId, reading.span, reading.span.selectedText);
+  };
 
   /**
    * 润色这段 (Issue #842; the Owner's decision 18 of 2026-10-13): the selected words go to the model at once with their paragraph's
@@ -2646,6 +2697,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     // ✎ 已改 (Issue #1411): the badge, or the applied words themselves, bring the revision's card forward in the 批注栏.
     const badge = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-applied-mark-id]') : null;
     if (badge !== null) { event.preventDefault(); void revealRevision(badge.dataset['appliedMarkId']!); return; }
+    // 🔒 (Issue #1412): the badge beside a locked block unlocks it.
+    const lock = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-ai-lock-block]') : null;
+    if (lock !== null && options.scopedAiEdit !== undefined) {
+      event.preventDefault();
+      void setAiLocks(options.scopedAiEdit.host, [{ kind: 'block', blockId: lock.dataset['aiLockBlock']! }], false);
+      return;
+    }
     if (editor.selectedRange().kind !== 'none') return;
     const mark = markAt(event.target, false);
     if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied') { void revealRevision(mark.markId); return; }
@@ -2729,6 +2787,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     },
     recordAndApplyEditorRevision,
     revealRevision,
+    composeScopedAiEdit: () => {
+      const blockId = editor.captureContinuity().head.blockId;
+      if (blockId !== undefined) openScopedComposer(blockId, null);
+    },
     ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;

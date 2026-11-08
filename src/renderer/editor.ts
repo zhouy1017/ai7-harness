@@ -602,6 +602,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     baselineText: (blockId) => baselines.get(blockId)?.text,
     active: () => activeMark,
     linked: () => linkedMark,
+    locked: () => windowProjection.aiLockedBlockIds,
     generation: () => baselines,
   });
   const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
