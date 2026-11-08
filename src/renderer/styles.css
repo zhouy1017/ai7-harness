@@ -394,7 +394,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-coverage-section > p, .review-runs-section > p, .review-results > p, .review-report > p { margin: .45rem 0 0; }
 /* B4: state cards share the A4 pills; coverage appears only after a review has run. */
 .review-coverage { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: .65rem; margin: .6rem 0 0; padding: 0; list-style: none; }
-.review-coverage-card { min-width: 0; padding: .7rem .8rem; border: 0; border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
+.review-coverage-card { min-width: 0; padding: .7rem .8rem; border: 1px solid transparent; border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
 .review-coverage-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .6rem; }
 .review-coverage-title h5 { margin: 0; font-size: .92rem; }
 .review-coverage-counts, .review-coverage-hint { margin: .45rem 0 0; font-size: .84rem; color: var(--text-subdued); }
@@ -412,7 +412,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-run-authorized { display: block; }
 .review-run h4:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .review-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .6rem 0 0; }
-.review-plan, .review-group { margin-top: .8rem; padding: .8rem .9rem; border: 0; border-radius: 10px; background: var(--surface); }
+.review-plan, .review-group { margin-top: .8rem; padding: .8rem .9rem; border: 1px solid transparent; border-radius: 10px; background: var(--surface); }
 .review-category-basis { margin: .35rem 0 0; color: var(--text-subdued); font-size: .9rem; }
 .review-authorize-note { margin: .9rem 0 0; font-weight: 800; }
 .review-continue .attention-note { margin-bottom: 0; }
@@ -2774,8 +2774,9 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .book-overview-secondary { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .6rem 1.5rem; margin-top: 1rem; padding: .7rem 1rem; border-radius: 12px; background: var(--surface-subdued); }
 .book-overview-secondary > * { flex: 1 1 16rem; min-width: 0; margin: 0; }
 .book-overview-secondary :is(h3, h4) { margin: 0 0 .25rem; font-size: .9rem; }
-.book-overview-secondary .source-card, .book-overview-secondary .review-section { margin: 0; padding: 0; border: 0; background: transparent; }
-.book-overview .book-overview-secondary .overview-line { padding: 0; border: 0; }
+/* A transparent border, not none, so forced colours still draw each block's edge. */
+.book-overview-secondary .source-card, .book-overview-secondary .review-section { margin: 0; padding: .3rem .4rem; border-color: transparent; background: transparent; }
+.book-overview .book-overview-secondary .overview-line { padding: 0; border-color: transparent; }
 .book-overview-history { margin-top: 1rem; border-radius: 12px; }
 .book-overview-history > summary { padding: .5rem .2rem; color: var(--text-subdued); font-weight: 700; cursor: pointer; }
 .book-overview-history > .record-navigation { margin-top: .3rem; }

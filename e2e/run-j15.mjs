@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -251,7 +251,8 @@ async function readKnowledge(renderer, predicate, name) {
 // 知识库 › 资料库 (Issue #427, plan slice S79c): the admitted Public SampleBook `sample1`, collected by the editor as a reference
 // book, handed to 放入资料… through the picker control of the relaunched window.
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
-const LIBRARY_TITLE = '样书一';
+// Issue #1410 item 29: a file goes into 资料库 under its own suggested title, as 资料 when no kind is suggested.
+const LIBRARY_TITLE = 'sample1';
 const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 /** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
 const READ_LIBRARY = `(() => {
@@ -737,20 +738,9 @@ async function main() {
     const sample1Digest = createHash('sha256').update(sample1).digest('hex');
     const libraryObjects = resolve(dataRoot, 'library-objects');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-add');
-    const libraryPreview = await readLibrary(renderer, (page) => page.preview !== null, 'library-preview');
-    requireJourney(libraryPreview.preview.heading === '放入资料库：sample1.docx' &&
-      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原文件保持不变` && libraryPreview.preview.title === 'sample1' &&
-      JSON.stringify(libraryPreview.preview.kinds) === JSON.stringify([['book', false], ['paper', false], ['document', false], ['web', false]]) &&
-      libraryPreview.preview.confirmDisabled === true, 'library-preview-words', libraryPreview.preview);
-    await waitFor(renderer, `document.activeElement === document.querySelector('.library-preview h3')`, 'library-preview-focused', 10_000);
-    requireJourney(await lstat(libraryObjects).then(() => false, () => true), 'library-preview-keeps-nothing');
-    await fill(renderer, '.library-preview [data-library-field="title"]', LIBRARY_TITLE, 'library-title');
-    await clickSelector(renderer, '.library-preview [data-library-choice="book"]', 'library-kind-book');
-    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'library-confirm-enabled', 10_000);
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-confirm');
     const libraryAdded = await readLibrary(renderer, (page) => page.preview === null && page.cards.length === 1, 'library-added');
     const [libraryCard] = libraryAdded.cards;
-    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '图书' && libraryCard.attribution === 'house' && libraryCard.eligibility === 'house' && libraryCard.reference === 'available' && libraryCard.decisions === '2', 'library-added-card', libraryCard);
+    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '资料' && libraryCard.attribution === 'house' && libraryCard.eligibility === 'house' && libraryCard.reference === 'available' && libraryCard.decisions === '2', 'library-added-card', libraryCard);
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」；已允许任务参考。`)}`, 'library-added-status', 10_000);
     // The original is kept byte for byte under its digest in the Agent Data Root, and the service reads it as the page does.
     const libraryKept = await readFile(resolve(libraryObjects, 'sha256', sample1Digest.slice(0, 2), `${sample1Digest}.docx`));
@@ -813,7 +803,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
     const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('.global-attention-object-name')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
-    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 图书「${LIBRARY_TITLE}」` &&
+    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 资料「${LIBRARY_TITLE}」` &&
       indexListed.next === '查看索引', 'library-index-attention-words', indexListed);
     await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
     await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
@@ -894,10 +884,6 @@ async function main() {
       await click(renderer, '资料库', 'library-page-tab');
       await readLibrary(renderer, (page) => page.state === 'ready', 'library-page-loaded');
       await clickSelector(renderer, '[data-library-action="add"]', 'library-page-add');
-      await readLibrary(renderer, (page) => page.preview !== null, 'library-page-preview');
-      await fill(renderer, '[data-library-field="title"]', `分页资料${index}`, 'library-page-title');
-      await clickSelector(renderer, '[data-library-choice="document"]', 'library-page-kind');
-      await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-page-confirm');
       await readLibrary(renderer, (page) => page.preview === null && page.cards.length === Math.min(index + 2, 20), 'library-page-arrival');
     }
     for (let repeat = 0; repeat < 2; repeat += 1) {
@@ -934,10 +920,6 @@ async function main() {
     await click(renderer, '资料库', 'library-epub-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-epub-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-epub-add');
-    await readLibrary(renderer, (page) => page.preview?.heading === '放入资料库：library-reference-book.epub', 'library-epub-preview');
-    await fill(renderer, '[data-library-field="title"]', '合成电子书', 'library-epub-title');
-    await clickSelector(renderer, '[data-library-choice="book"]', 'library-epub-kind');
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-epub-confirm');
     const epubIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成电子书' && page.cards[0].index === 'complete', 'library-epub-indexed');
     const epubLayers = new Map(epubIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(epubLayers.get('metadata')?.[1] === '中文 · 3 段 · 1 个标题 · 文件自带标题「合成电子书」' &&
@@ -966,10 +948,6 @@ async function main() {
     await click(renderer, '资料库', 'library-pdf-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-pdf-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-pdf-add');
-    await readLibrary(renderer, (page) => page.preview?.heading === '放入资料库：library-reference.pdf', 'library-pdf-preview');
-    await fill(renderer, '[data-library-field="title"]', '合成 PDF', 'library-pdf-title');
-    await clickSelector(renderer, '[data-library-choice="document"]', 'library-pdf-kind');
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-pdf-confirm');
     const pdfIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成 PDF' && page.cards[0].index === 'complete', 'library-pdf-indexed');
     const pdfLayers = new Map(pdfIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(pdfLayers.get('metadata')?.[1] === '中文 · 3 段 · 0 个标题 · 文件自带标题「合成 PDF」' && pdfLayers.get('text')?.[0] === 'complete' &&

@@ -21,7 +21,7 @@
 .global-agent-pill[open] > summary { border-color: var(--selection-boundary); background: var(--selection); color: var(--selection-text); }
 .global-agent-pop { position: absolute; z-index: 20; left: 0; top: calc(100% + .35rem); display: grid; gap: .8rem; width: min(40rem, 100%); max-height: min(60vh, 34rem); overflow: auto; padding: .9rem 1rem; border: 1px solid var(--boundary); border-radius: .75rem; background: var(--surface); box-shadow: 0 12px 32px var(--shadow); }
 /* Inside a popover the sections are told apart by spacing and a soft background, never another box. */
-.global-agent-pop > :is(.global-agent-sources, .global-agent-scope, .global-agent-governance, .global-agent-directives) { padding: .6rem .7rem; border: 0; border-radius: .5rem; background: var(--surface-subdued); }
+.global-agent-pop > :is(.global-agent-sources, .global-agent-scope, .global-agent-governance, .global-agent-directives) { padding: .6rem .7rem; border: 1px solid transparent; border-radius: .5rem; background: var(--surface-subdued); }
 .global-agent [hidden] { display: none !important; }
 .global-agent h2, .global-agent h3, .global-agent h4, .global-agent p { margin: 0; }
 .global-agent-heading, .global-agent-conversation, .global-agent-previous-turns,

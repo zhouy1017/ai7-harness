@@ -2215,8 +2215,11 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'database-export-open-settings-hub');
     await click(primary, '数据与存储', 'database-export-open');
     await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
+    // Issue #1410 item 2: the destination chosen in the save dialog is written at once; there is no 按上述方式导出 step. The
+    // Books the export holds are this library's, read from the service before the write.
+    const booksShown = await primary.evaluate(`window.ai7.listBooks({ after: null }).then((page) => page.nextCursor === null ? page.items.length : null)`);
+    requireJourney(Number.isSafeInteger(booksShown) && booksShown >= 1, 'database-export-books-known', booksShown);
     await click(primary, '导出数据库…', 'database-export-choose');
-    // Issue #1410 item 2: the destination chosen in the save dialog is written at once; there is no 按上述方式导出 step.
     await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
     // The outcome line is drawn with the outcome; 导出记录 and its count follow one read later, and only then are the export's
     // controls released and focus moved to 导出数据库…. On a slow runner the one-shot check landed between the two (#656), and a
