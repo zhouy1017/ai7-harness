@@ -104,15 +104,6 @@ export function prepareScopedEdit(owner: FastRoleExecutionOwner, store: ScopedEd
   require(window.bookId === bookId, 'AI_EDIT_SCOPE_INVALID', '这份稿件不属于这本书。');
   require(window.revisionId === input.baseRevisionId && window.journalSequence === input.expectedJournalSequence,
     'MARK_BINDING_CHANGED', '稿件已有新的写入，请重新选择要修改的范围。');
-  // The revision the words are read in decides whether they may be sent; only these three fields are read.
-  const source = { manuscriptId: input.manuscriptId, branchId: input.branchId, baseRevisionId: window.revisionId } as DialogueSelectionInput;
-  try {
-    owner.requireReady(EDITORIAL_POLISH_KIND, store.dialogueSourceDigest(bookId, source));
-  } catch (error) {
-    // The route is 润色这段's; the refusal names the action the editor asked for.
-    if (error instanceof FastRoleError) throw new FastRoleError(error.code, error.message.replaceAll('润色这段', SCOPED_EDIT_LABEL).replace('另一项润色或重新生成', '另一项 AI 修改'));
-    throw error;
-  }
   const scope = input.scope;
   const lines: ScopedEditSegment[][] = [];
   const targets: FrozenTarget[] = [];
@@ -181,6 +172,16 @@ export function prepareScopedEdit(owner: FastRoleExecutionOwner, store: ScopedEd
     }
     if (after !== undefined && after.kind !== 'note') lines.push(context(head(after.text, CONTEXT_GRAPHEMES)));
     require(targets.length > 0, 'AI_EDIT_SCOPE_LOCKED', '这个范围里没有未锁定的段落可以修改。');
+  }
+  // The route is asked only once the scope holds something to change (Issue #1412): words that are all locked are refused for
+  // that, with or without a model. The revision the words are read in decides whether they may be sent; only these three fields are read.
+  const source = { manuscriptId: input.manuscriptId, branchId: input.branchId, baseRevisionId: window.revisionId } as DialogueSelectionInput;
+  try {
+    owner.requireReady(EDITORIAL_POLISH_KIND, store.dialogueSourceDigest(bookId, source));
+  } catch (error) {
+    // The route is 润色这段's; the refusal names the action the editor asked for.
+    if (error instanceof FastRoleError) throw new FastRoleError(error.code, error.message.replaceAll('润色这段', SCOPED_EDIT_LABEL).replace('另一项润色或重新生成', '另一项 AI 修改'));
+    throw error;
   }
   require(locksDigest === input.expectedLocksDigest, 'AI_EDIT_LOCKS_STALE', '锁定状态已经变化；请看当前的锁定再试。');
   require(targets.length <= MAX_SCOPED_AI_EDIT_TARGETS, 'AI_EDIT_SCOPE_TOO_LARGE',
