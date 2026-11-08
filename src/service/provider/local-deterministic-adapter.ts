@@ -36,6 +36,7 @@ import {
   editorialPolishRequestDigest,
   parseEditorialPolishMessageHeader,
 } from '../fast-role/polish-contract.js';
+import { SCOPED_EDIT_PROMPT_CONTRACT_DIGEST, parseScopedEditMessageHeader, scopedEditRequestDigest } from '../fast-role/scoped-edit-contract.js';
 import {
   CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
   conflictRegenerateRequestDigest,
@@ -477,6 +478,11 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const polish = text === null ? null : parseEditorialPolishMessageHeader(text);
     if (polish !== null) {
       yield* this.#fastRole(editorialPolishRequestDigest(EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, polish.selectionDigest, polish.contextDigest), '润色', failure);
+      return;
+    }
+    const scoped = text === null ? null : parseScopedEditMessageHeader(text);
+    if (scoped !== null) {
+      yield* this.#fastRole(scopedEditRequestDigest(SCOPED_EDIT_PROMPT_CONTRACT_DIGEST, scoped.instructionDigest, scoped.scopeDigest), '局部修改', failure);
       return;
     }
     const regeneration = text === null ? null : parseConflictRegenerateMessageHeader(text);

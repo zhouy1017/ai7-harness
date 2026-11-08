@@ -89,7 +89,7 @@ export function requestTimeoutMs(operation: ServiceOperation): number | null {
   if (operation === 'ready') return STARTUP_READY_TIMEOUT_MS;
   const long =
     operation === 'stageSelectedManuscript' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
-    operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
+    operation === 'commitManuscriptReimport' || operation === 'commitReplacement' || operation === 'commitReplacementRevisions' ||
     operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
     operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
     operation === 'authorizeBaselineAnalysis' ||

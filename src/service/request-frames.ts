@@ -3,6 +3,7 @@ import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
+import { MAX_AI_EDIT_LOCK_TARGETS, MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS } from '../shared/protocol/scoped-edit.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { validCurationBudget } from './learning/curation.js';
@@ -2677,6 +2678,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'commitReplacementRevisions': {
+      const input = requireInput(value.input, ['previewId', 'windowStartBlockId'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId) ||
+          !isBoundedString(input.windowStartBlockId, 28) || !MARK_BLOCK_PATTERN.test(input.windowStartBlockId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'dismissReplacementPreview':
     case 'startReplacementCommit':
     case 'commitReplacement': {
@@ -2869,9 +2878,46 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || input.selection === null || !validSelection(input.selection)) throw new ProtocolError(tentativeId);
       break;
     }
-    case 'inspectFastInteractionRequest': {
+    case 'inspectFastInteractionRequest':
+    case 'inspectScopedAiEdit': {
       const input = requireInput(value.input, ['bookId', 'requestId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.requestId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 🔒 锁定 and 就选中部分让 AI 修改 (Issue #1412): a manuscript branch, its lock targets and the exact frozen scope.
+    case 'inspectAiEditLocks': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId'], tentativeId);
+      if (!validUuid(input.manuscriptId) || !validUuid(input.branchId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'setAiEditLocks': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'targets', 'locked', 'expectedLocksDigest'], tentativeId);
+      if (!validUuid(input.manuscriptId) || !validUuid(input.branchId) || typeof input.locked !== 'boolean' ||
+          !isBoundedString(input.expectedLocksDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedLocksDigest) ||
+          !Array.isArray(input.targets) || input.targets.length < 1 || input.targets.length > MAX_AI_EDIT_LOCK_TARGETS ||
+          !input.targets.every((target) => isRecord(target) && (
+            (hasExactKeys(target, ['kind', 'blockId']) && target.kind === 'block' && isBoundedString(target.blockId, 28) && MARK_BLOCK_PATTERN.test(target.blockId)) ||
+            (hasExactKeys(target, ['kind', 'headingBlockId']) && target.kind === 'section' && isBoundedString(target.headingBlockId, 28) && MARK_BLOCK_PATTERN.test(target.headingBlockId))))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'startScopedAiEdit': {
+      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], tentativeId);
+      const scope = input.scope;
+      const validScope = isRecord(scope) && (
+        (hasExactKeys(scope, ['mode', 'span']) && scope.mode === 'selected-only' && Array.isArray(scope.span) && scope.span.length >= 1 &&
+          scope.span.length <= MAX_SELECTION_SPAN_BLOCKS && scope.span.every((pin) => isRecord(pin) && hasExactKeys(pin, ['blockId', 'blockDigest', 'fromGrapheme', 'toGrapheme']) &&
+            isBoundedString(pin.blockId, 28) && MARK_BLOCK_PATTERN.test(pin.blockId) && isBoundedString(pin.blockDigest, 64) && HEX_DIGEST_PATTERN.test(pin.blockDigest) &&
+            isSafeInteger(pin.fromGrapheme, 0) && isSafeInteger(pin.toGrapheme, 0))) ||
+        (hasExactKeys(scope, ['mode', 'range']) && scope.mode === 'unlocked-only' && isRecord(scope.range) && (
+          (hasExactKeys(scope.range, ['kind']) && scope.range.kind === 'document') ||
+          (hasExactKeys(scope.range, ['kind', 'headingBlockId']) && scope.range.kind === 'section' && isBoundedString(scope.range.headingBlockId, 28) && MARK_BLOCK_PATTERN.test(scope.range.headingBlockId)))));
+      if (!validUuid(input.bookId) || !validUuid(input.manuscriptId) || !validUuid(input.branchId) || !validUuid(input.baseRevisionId) ||
+          !isSafeInteger(input.expectedJournalSequence, 0) || !isBoundedString(input.expectedLocksDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedLocksDigest) ||
+          !isBoundedString(input.instruction, MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS * 2) || !validScope) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'regenerateProposalConflictUnit': {

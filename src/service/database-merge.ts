@@ -280,6 +280,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // document — the Book's own.
   writing_tasks: 'owned',
   writing_drafts: 'owned',
+  // 🔒 锁定（AI 不修改）(Issue #1412): the locks of the Book's manuscripts travel with them.
+  ai_edit_lock_events: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
