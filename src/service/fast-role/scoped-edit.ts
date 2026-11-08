@@ -4,6 +4,7 @@ import type { ScopedEditWorkingBlock } from '../ai-edit-locks.js';
 import type { ProducedEditorialMarkInput } from '../editorial-marks.js';
 import type { EditorialStore } from '../store.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
+import type { DialogueSelectionInput } from '../../shared/protocol.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../../shared/selection-span.js';
 import {
   MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS,
@@ -75,7 +76,7 @@ export interface PreparedScopedEdit {
   readonly totalBlocks: number;
   readonly targets: ReadonlyArray<FrozenTarget>;
   readonly message: ScopedEditMessageInput;
-  /** The first block of the window the Apply commands are issued from. */
+  /** The block the Apply commands name their window by: the first target, which the guard has just found standing. */
   readonly windowStartBlockId: string;
 }
 
@@ -103,7 +104,15 @@ export function prepareScopedEdit(owner: FastRoleExecutionOwner, store: ScopedEd
   require(window.bookId === bookId, 'AI_EDIT_SCOPE_INVALID', '这份稿件不属于这本书。');
   require(window.revisionId === input.baseRevisionId && window.journalSequence === input.expectedJournalSequence,
     'MARK_BINDING_CHANGED', '稿件已有新的写入，请重新选择要修改的范围。');
-  owner.requireReady(EDITORIAL_POLISH_KIND, store.dialogueSourceDigest(bookId, { manuscriptId: input.manuscriptId, branchId: input.branchId, baseRevisionId: window.revisionId } as never));
+  // The revision the words are read in decides whether they may be sent; only these three fields are read.
+  const source = { manuscriptId: input.manuscriptId, branchId: input.branchId, baseRevisionId: window.revisionId } as DialogueSelectionInput;
+  try {
+    owner.requireReady(EDITORIAL_POLISH_KIND, store.dialogueSourceDigest(bookId, source));
+  } catch (error) {
+    // The route is 润色这段's; the refusal names the action the editor asked for.
+    if (error instanceof FastRoleError) throw new FastRoleError(error.code, error.message.replaceAll('润色这段', SCOPED_EDIT_LABEL).replace('另一项润色或重新生成', '另一项 AI 修改'));
+    throw error;
+  }
   const scope = input.scope;
   const lines: ScopedEditSegment[][] = [];
   const targets: FrozenTarget[] = [];
@@ -181,7 +190,7 @@ export function prepareScopedEdit(owner: FastRoleExecutionOwner, store: ScopedEd
   for (const line of lines) for (const segment of line) requireSendable(segment.text);
   return {
     bookId, requestId: randomUUID(), manuscriptId: input.manuscriptId, branchId: input.branchId, locksDigest, totalBlocks: window.position.totalBlocks,
-    targets, message: { instruction, lines: lines.filter((line) => line.length > 0) }, windowStartBlockId: window.blocks[0]?.blockId ?? targets[0]!.blockId,
+    targets, message: { instruction, lines: lines.filter((line) => line.length > 0) }, windowStartBlockId: targets[0]!.blockId,
   };
 }
 

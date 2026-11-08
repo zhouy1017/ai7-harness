@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -19,7 +21,9 @@ import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection, ScopedAiEditProjection, StartScopedAiEditInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
-import { inMemoryFixture, typeInto, unitResult } from '../support/fast-role.js';
+import { inMemoryFixture, polishSelectionOf, typeInto, unitResult } from '../support/fast-role.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { SCOPED_EDIT_AUTHORED_ANSWER, SCOPED_EDIT_AUTHORED_REPLACEMENT, SCOPED_EDIT_FIXTURE_IDENTITY, scopedEditJourneyInput, scopedEditJourneyRequest } from '../support/scoped-edit.js';
 
 // Service-integration suite (L2) for 就选中部分让 AI 修改 and 🔒 锁定 (Issue #1412): the real store, the real scoped-edit
 // service path and the deterministic route under development-ci, answered by one-entry fixtures held in memory, over exact
@@ -212,8 +216,8 @@ describe('就选中部分让 AI 修改: the scoped splice guard', () => {
   }, 300_000);
 });
 
-describe('🔒 锁定 on a derivative document: unlocked-only rounds', () => {
-  async function derivative(): Promise<Target> {
+/** A derivative document of the Book whose blocks are a copy of `sample1`, made through the real import and creation path. */
+async function derivativeCopy(): Promise<Target> {
     const staged = await store.stageSelectedManuscript(randomUUID(), join(roots.codeRoot, 'SampleBooks', 'sample1.docx'));
     const source = db.prepare('SELECT source_version_id FROM manuscript_revisions WHERE revision_id = ?').get(book.revisionId)!;
     const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion,
@@ -223,10 +227,12 @@ describe('🔒 锁定 on a derivative document: unlocked-only rounds', () => {
     await store.acknowledgeImportCompletion(commitId);
     const document = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId: committed.sourceVersionId })).document!;
     return { manuscriptId: document.documentId, branchId: document.branchId };
-  }
+}
+
+describe('🔒 锁定 on a derivative document: unlocked-only rounds', () => {
 
   it('changes every unlocked block of a section over several rounds, keeps locked blocks and sections byte for byte, and refuses a scope too large', async () => {
-    const target = await derivative();
+    const target = await derivativeCopy();
     // The editor makes two paragraphs chapter headings: the section is everything between them.
     const styled = store.getManuscriptWindow(target.manuscriptId, target.branchId, null).blocks.filter((block) => block.kind === 'paragraph' && block.text.length > 0);
     for (const block of [styled[2]!, styled[8]!]) {
@@ -294,4 +300,50 @@ describe('🔒 锁定 on a derivative document: unlocked-only rounds', () => {
     const window = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
     expect(aiLocksOfWindow(db, target.branchId, window.blocks[0]!.position)).toEqual({ aiLockedBlockIds: [blocks[0].blockId], aiLocksDigest: locksDigest(target) });
   });
+});
+
+// The authored fixture `sample1-scoped-edit-authored` (Issue #1412): its one request digest is derived here from the real store
+// exactly as the service derives it. Regenerate after the contract or the Journey's words change with
+//   AI7_REGENERATE_SCOPED_EDIT_FIXTURE=1 pnpm exec vitest run tests/service/scoped-ai-edit.test.ts -t "authored fixture"
+// and review the diff like any other change.
+describe('the authored fixture sample1-scoped-edit-authored', () => {
+  const FIXTURES = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
+
+  it.runIf(process.env['AI7_REGENERATE_SCOPED_EDIT_FIXTURE'] === '1')('generates the authored fixture', async () => {
+    const { requestDigest } = scopedEditJourneyRequest(store, book.bookId, scopedEditJourneyInput(store, book, locksDigest(primary())));
+    const fixture = {
+      schema: 'ai7.model-fixture/1',
+      identity: SCOPED_EDIT_FIXTURE_IDENTITY,
+      description: 'Authored 就选中部分让 AI 修改 answer (Issue #1412) for the one 润色这段 sentence of exact sample1 selected inside its paragraph, keyed under unit ordinal 0 by the ai7.scoped-edit/1 request digest of that selection, its paragraph edges and its neighbours\' edges: the sentence rewritten, plus a target id never given and a whole-document rewrite, which the splice drops.',
+      basedOn: null,
+      provenance: 'authored',
+      provider: 'ai7-local-deterministic',
+      model: 'ai7-deterministic-fixture',
+      entries: [{ unitOrdinal: 0, requestDigest, response: { kind: 'unit-result', text: SCOPED_EDIT_AUTHORED_ANSWER, usage: { inputTokens: 480, outputTokens: 70 } } }],
+    };
+    await writeFile(resolve(FIXTURES, `${SCOPED_EDIT_FIXTURE_IDENTITY}.json`), `${JSON.stringify(fixture, null, 2)}\n`);
+  });
+
+  it('answers the Journey request on the manuscript and on a derivative copy of it alike, changing only the sentence', async () => {
+    const fixture = await loadModelFixture(FIXTURES, SCOPED_EDIT_FIXTURE_IDENTITY);
+    expect(fixture.provenance).toBe('authored');
+    const requests = new FastRoleRequests(new FastRoleExecutionOwner({ requestGovernor, fixture, live: null }), store, () => new Date('2026-11-08T00:00:00.000Z'));
+    const derivativeTarget = await derivativeCopy();
+    for (const target of [primary(), derivativeTarget]) {
+      const on = { ...book, ...target };
+      const selection = polishSelectionOf(store, on);
+      const before = allBlocks(target);
+      const original = before.get(selection.blockId)!.text;
+      // The paragraph after the sentence's is locked first: locks never enter the request, so the same answer still applies.
+      const next = [...before.entries()].find(([, block]) => block.position === before.get(selection.blockId)!.position + 1)![0];
+      store.setAiEditLocks({ ...target, targets: [{ kind: 'block', blockId: next }], locked: true, expectedLocksDigest: locksDigest(target) });
+      const input = scopedEditJourneyInput(store, on, locksDigest(target));
+      const result = await settled(requests, requests.scopedEdit(book.bookId, input));
+      expect(result).toMatchObject({ state: 'applied', changedBlockIds: [selection.blockId], droppedCount: 1 });
+      const after = allBlocks(target);
+      const parts = graphemesOf(original);
+      expect(after.get(selection.blockId)!.text).toBe(`${parts.slice(0, selection.fromGrapheme).join('')}${SCOPED_EDIT_AUTHORED_REPLACEMENT}${parts.slice(selection.toGrapheme).join('')}`);
+      for (const [blockId, block] of before) if (blockId !== selection.blockId) expect(after.get(blockId)).toEqual(block);
+    }
+  }, 300_000);
 });
