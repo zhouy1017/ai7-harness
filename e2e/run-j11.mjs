@@ -3620,11 +3620,18 @@ async function main() {
       JSON.stringify(wordAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-preserves-c0-memory-owners-and-counts');
     // Only that actual exclusion offers the existing explicit re-inclusion; it appends one decision and survives a reopen.
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'word-audit-reinclude-open');
+    // The choices open on the Book's own (Issue #1410 item 31), its consequence said; opening them records nothing.
     const wordReincluding = await readAudit(renderer, (page) => page.reinclude !== null, 'word-audit-reinclude-card');
-    requireJourney(JSON.stringify(wordReincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) &&
-      wordReincluding.reinclude.record === false, 'word-audit-reinclude-explicit-choices', wordReincluding.reinclude);
+    requireJourney(JSON.stringify(wordReincluding.reinclude.choices) === JSON.stringify([['book', true], ['house', false]]) &&
+      wordReincluding.reinclude.record === true && (wordReincluding.reinclude.consequence ?? '').startsWith('仅纳入当前图书：'),
+    'word-audit-reinclude-explicit-choices', wordReincluding.reinclude);
+    const wordBeforeRecord = await renderer.evaluate(`window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}}).then((read)=>[read.standing, read.decisions.length])`);
+    requireJourney(JSON.stringify(wordBeforeRecord) === JSON.stringify(['excluded', 1]), 'word-audit-reinclude-records-nothing-yet', wordBeforeRecord);
+    // The editor widens it to the house; that choice, not the default, is what 记录 records.
     await tick(renderer, '.learning-reinclude input[value="house"]', 'word-audit-reinclude-house');
-    await readAudit(renderer, (page) => page.reinclude?.record === true, 'word-audit-reinclude-chosen');
+    const wordHouseChosen = await readAudit(renderer, (page) => JSON.stringify(page.reinclude?.choices) === JSON.stringify([['book', false], ['house', true]]), 'word-audit-reinclude-chosen');
+    requireJourney(wordHouseChosen.reinclude.record === true && wordHouseChosen.reinclude.consequence === '纳入出版社经验：全社以后的图书都可能从它学习。',
+      'word-audit-reinclude-house-words', wordHouseChosen.reinclude);
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'word-audit-reinclude-record');
     await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
     const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
