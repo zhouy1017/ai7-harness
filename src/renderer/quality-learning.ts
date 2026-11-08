@@ -307,7 +307,8 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     } else {
       const view = action(LEARNING_OPEN, 'quiet', 'open', () => {
         if (busy) return;
-        open = { bookId: book.bookId, materialKey: material.materialKey, draft: { choice: null, note: '' } };
+        // The recommendation is chosen to begin with (Issue #1410 item 31): the Book's own, or excluded for a Word change pair.
+        open = { bookId: book.bookId, materialKey: material.materialKey, draft: { choice: material.kind === 'word-tracked-edit' ? 'excluded' : 'book', note: '' } };
         refusal = null;
         paint(`${materialSelector(material.materialKey)} .learning-card h4`);
       });
