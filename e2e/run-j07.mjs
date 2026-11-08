@@ -1605,12 +1605,13 @@ async function main() {
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
 
     at('j14-designate-keyboard');
-    // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice, an arrow chooses, Tab
+    // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice — the newest milestone, already chosen with
+    // the routine scope and basis (Issue #1410 item 22) — an arrow chooses the other, Tab
     // reaches 发稿范围, 依据, the confirm and 取消 with visible focus, and Enter on 取消 closes it with focus back
     // on the opener and nothing recorded.
     await assertRenderer(renderer, `(() => { const open = window.__j07.action('designate'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'keyboard-opener-focused');
     await pressEnter(renderer);
-    await waitFor(renderer, `(() => { const radios = window.__j07.radios(); return window.__j07.form() !== null && radios.length === 2 && document.activeElement === radios[0] && radios.every((radio) => !radio.checked); })()`, 'keyboard-form-opens-on-its-first-choice', 10_000);
+    await waitFor(renderer, `(() => { const radios = window.__j07.radios(); return window.__j07.form() !== null && radios.length === 2 && document.activeElement === radios[0] && radios[0].checked && !radios[1].checked && window.__j07.field('scope')?.value === '全书定稿' && window.__j07.field('basis')?.value === '编辑审定通过'; })()`, 'keyboard-form-opens-on-its-first-choice', 10_000);
     await press(renderer, 'ArrowDown');
     await waitFor(renderer, `(() => { const radios = window.__j07.radios(); return document.activeElement === radios[1] && radios[1].checked && !radios[0].checked; })()`, 'keyboard-arrow-chooses', 10_000);
     await press(renderer, 'Tab');
