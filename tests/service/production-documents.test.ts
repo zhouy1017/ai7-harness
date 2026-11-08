@@ -1,5 +1,6 @@
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { mountDeliverables } from '../../src/renderer/deliverables.js';
+import { mountManuscriptSwitcher } from '../../src/renderer/manuscript-switcher.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
@@ -104,10 +105,11 @@ async function withBook(run: (store: EditorialStore, book: Book) => Promise<void
   await withStore(async (store) => run(store, await importBook(store, await compose('交付记录组稿', [1, 2, 3, 4, 5, 6]))));
 }
 
-function documentSurface(store: EditorialStore, book: Book, pickerPath?: string) {
+/** 交付物's technical layer (Issue #1405): the documents' records stay there for audit. */
+function documentSurface(store: EditorialStore, book: Book) {
   const uninstall = installMiniDom();
   vi.stubGlobal('window', { ai7: { getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }) } });
-  setTechnicalLayerVisible(false);
+  setTechnicalLayerVisible(true);
   const root = document.createElement('main'); document.body.append(root);
   const opened = vi.fn(async (_document: ProductionDocumentProjection) => {});
   const status = vi.fn();
@@ -115,6 +117,24 @@ function documentSurface(store: EditorialStore, book: Book, pickerPath?: string)
     inspectDeliverables: async () => store.inspectDeliverables(book.bookId),
     inspectProductionDocuments: async () => store.inspectProductionDocuments(book.bookId),
     inspectBookDeliveryPackage: async () => store.inspectBookDeliveryPackage(book.bookId),
+  };
+  const surface = mountDeliverables({ root, bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountDeliverables>[0]['api'],
+    setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败', openDocument: opened, openReview: () => {},
+    openManuscript: () => {},
+    technicalDetails: (_className, ...rows) => { const section = document.createElement('div'); section.append(...rows); return section; } });
+  return { root, api, surface, opened, status, close: () => { surface.destroy(); root.remove(); setTechnicalLayerVisible(false); vi.unstubAllGlobals(); uninstall(); } };
+}
+
+/** 本书稿件 on 稿件 (Issue #1403): 新建 / 导入衍生稿件 in place, its 稿件题目 first. */
+function switcherSurface(store: EditorialStore, book: Book, pickerPath?: string) {
+  const uninstall = installMiniDom();
+  vi.stubGlobal('window', { ai7: { getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }) } });
+  setTechnicalLayerVisible(false);
+  const root = document.createElement('main'); document.body.append(root);
+  const opened = vi.fn(async (_document: ProductionDocumentProjection) => {});
+  const status = vi.fn();
+  const api: Partial<Parameters<typeof mountManuscriptSwitcher>[0]['api']> = {
+    inspectProductionDocuments: async () => store.inspectProductionDocuments(book.bookId),
     inspectWritingTask: async () => store.inspectWritingTask(book.bookId),
     selectAndStageManuscript: async () => pickerPath === undefined ? { status: 'cancelled' }
       : { status: 'staged', staged: await store.stageSelectedManuscript(randomUUID(), pickerPath) },
@@ -125,11 +145,21 @@ function documentSurface(store: EditorialStore, book: Book, pickerPath?: string)
     abandonImportDraft: vi.fn(async (input) => store.abandonImportDraft(input.draftId, input.expectedDraftVersion)),
     createProductionDocument: async (input) => store.createProductionDocument({ ...input, bookId: book.bookId }),
   };
-  const surface = mountDeliverables({ root, bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountDeliverables>[0]['api'],
-    setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败', openDocument: opened, openReview: () => {},
-    awaitServiceJob: async (job) => job, openWritingPlan: () => {},
-    technicalDetails: (_className, ...rows) => { const section = document.createElement('div'); section.append(...rows); return section; } });
-  return { root, api, surface, opened, status, close: () => { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); } };
+  const surface = mountManuscriptSwitcher({ bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountManuscriptSwitcher>[0]['api'],
+    currentDocumentId: null, setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败',
+    awaitServiceJob: async (job) => job, openPrimary: async () => {}, openDocument: opened, openWritingPlan: () => {} });
+  root.append(surface.element);
+  /** 新建 / 导入衍生稿件 → 导入文件 → 创建并打开, the 稿件题目 left as offered. */
+  const importFile = async (): Promise<void> => {
+    await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>('[data-manuscript-switch="new"]')!.disabled).toBe(false));
+    root.querySelector<HTMLButtonElement>('[data-manuscript-switch="new"]')!.click();
+    // 稿件题目 is the first field of the form, before the type and the way of making it (Issue #1404).
+    expect(root.querySelector('.derivative-create-form [data-document-field]')?.getAttribute('data-document-field')).toBe('title');
+    const mode = [...root.querySelectorAll<HTMLInputElement>('.derivative-modes input')].find((radio) => radio.value === 'import')!;
+    mode.checked = true; (mode as unknown as { dispatchEvent(event: { type: string }): void }).dispatchEvent({ type: 'change' });
+    root.querySelector<HTMLButtonElement>('[data-document-action="create-derivative"]')!.click();
+  };
+  return { root, api, surface, opened, status, importFile, close: () => { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); } };
 }
 
 async function withDocument(run: (fixture: DocumentFixture) => Promise<void>): Promise<void> {
@@ -329,11 +359,12 @@ describe('Production Documents', () => {
       const before = store.listPriorWork();
       const acknowledge = vi.spyOn(store, 'acknowledgeImportCompletion');
       const abandon = vi.spyOn(store, 'abandonImportDraft');
-      const view = documentSurface(store, book, await compose('同页材料', [21, 22]));
+      const view = switcherSurface(store, book, await compose('同页材料', [21, 22]));
       try {
-        view.surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
-        view.root.querySelector<HTMLButtonElement>('.production-document-card[data-document-type-id="news-release"] [data-document-action="import"]')!.click();
+        await view.importFile();
         await vi.waitFor(() => expect(view.opened).toHaveBeenCalledTimes(1));
+        // An imported file is named after itself when the editor wrote no title of their own (Issue #1404).
+        expect(view.opened.mock.calls[0]![0].title).toBe('同页材料');
         expect(acknowledge).toHaveBeenCalledTimes(1);
         expect(abandon).not.toHaveBeenCalled();
         expect((await store.getImportStartup()).state).toBe('none');
@@ -348,10 +379,9 @@ describe('Production Documents', () => {
       const path = join(roots.inputRoot, 'refused.bin'); await writeFile(path, Uint8Array.of(0));
       const acknowledge = vi.spyOn(store, 'acknowledgeImportCompletion');
       const abandon = vi.spyOn(store, 'abandonImportDraft');
-      const view = documentSurface(store, book, path);
+      const view = switcherSurface(store, book, path);
       try {
-        view.surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
-        view.root.querySelector<HTMLButtonElement>('.production-document-card[data-document-type-id="news-release"] [data-document-action="import"]')!.click();
+        await view.importFile();
         await vi.waitFor(() => expect(view.status).toHaveBeenCalledWith('请选择 DOCX、Markdown 或 TXT 文件。', 'error'));
         expect(abandon).toHaveBeenCalledTimes(1);
         expect(view.api.abandonImportDraft).toHaveBeenCalledWith(expect.objectContaining({ preserveBookRoute: true }));
@@ -374,8 +404,9 @@ describe('Production Documents', () => {
         root.querySelector<HTMLButtonElement>(`.package-condition-list li[data-document-id="${second.documentId}"] [data-package-route="document"]`)!.click();
         expect(document.activeElement?.closest<HTMLElement>('.production-document-row')?.dataset['documentId']).toBe(second.documentId);
         expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('deliver');
+        // New documents are made on 稿件 (Issue #1403): the technical card of a type without one keeps 本书不做.
         root.querySelector<HTMLButtonElement>('.package-condition-list li[data-type-id="promotion-article"] [data-package-route="document"]')!.click();
-        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('blank');
+        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('notForThisBook');
       } finally { view.close(); }
     });
   });

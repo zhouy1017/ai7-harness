@@ -84,6 +84,8 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 107, class: 'additive' }, // #1290: immutable evidence summary successors after continuation.
   { revision: 108, class: 'additive' }, // #1312: persisted search source override, off by default.
   { revision: 109, class: 'additive' }, // #1378: remove per-type uniqueness without changing historical rows.
+  { revision: 110, class: 'additive' }, // #1401: permit first factual range tasks without rewriting prior records.
+  { revision: 111, class: 'additive' }, // #1412: the append-only 🔒 AI edit lock ledger; a store without locks reads as before.
 ];
 
 /**

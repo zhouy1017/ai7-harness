@@ -741,18 +741,48 @@ export interface BookDeliveryPackageProjection {
   versionsTruncated: boolean;
   /** The content differs from the newest version's, so preparing again makes the next version (BUNDLE-004). */
   changedSinceLatest: boolean;
+  /** Every derivative document the package can hold, in the house's order (Issue #1405). */
+  documents: ReadonlyArray<BookDeliveryPackageDocumentOptionProjection>;
 }
 
-/** The read of 图书交付包: the route's Book, supplied by the main process. */
+/** The most derivative documents one package selection names (Issue #1405). */
+export const MAX_BOOK_DELIVERY_PACKAGE_DOCUMENT_CHOICES = 200;
+
+/**
+ * One derivative document the editor ticked for the package, at one of its saved versions (Issue #1405): no Delivery Record
+ * and no workflow phase is asked for. A document of the route's Book only, at a version it saved.
+ */
+export interface BookDeliveryPackageDocumentChoice {
+  documentId: string;
+  revisionId: string;
+}
+
+/** One derivative document the package can hold, with its saved versions newest first and the one chosen now, if any. */
+export interface BookDeliveryPackageDocumentOptionProjection {
+  documentId: string;
+  typeId: string;
+  typeLabel: string;
+  title: string;
+  versions: ReadonlyArray<{ revisionId: string; label: string; savedAt: string }>;
+  /** The version the content holds now: the ticked one, or — with no selection given — the latest delivered one; `null` when left out. */
+  selectedRevisionId: string | null;
+}
+
+/**
+ * The read of 图书交付包: the route's Book, supplied by the main process, and — since Issue #1405 — the derivative documents
+ * the editor ticked. Without `documents` the package reads as it always did: each type's latest delivered version.
+ */
 export interface InspectBookDeliveryPackageInput {
   bookId: string;
+  documents?: ReadonlyArray<BookDeliveryPackageDocumentChoice>;
 }
 
-/** `准备图书交付包`: the content the editor saw, by its digest, and the purpose they wrote. */
+/** `准备图书交付包`: the content the editor saw, by its digest, the purpose they wrote and the documents they ticked. */
 export interface PrepareBookDeliveryPackageInput {
   bookId: string;
   purpose: string;
   expectedContentDigest: string;
+  documents?: ReadonlyArray<BookDeliveryPackageDocumentChoice>;
 }
 
 /** What `准备图书交付包` came to: a new version, or the newest one unchanged, and the package as it stands. */

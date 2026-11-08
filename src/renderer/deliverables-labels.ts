@@ -26,7 +26,8 @@ import {
 export const DELIVERABLES_SECTION_LABEL = '工作 · 交付物';
 /** The editor toolbar's entry in IA-006's 工作 group, after 审阅, and the heading of 工作概览's one line. */
 export const DELIVERABLES_ENTRY_LABEL = '交付物';
-export const DELIVERABLES_LEDE = '从稿件的里程碑版本中明确选定一版，写明发稿范围和依据，设为发稿版本；之后稿件再有修改，这里会提示。';
+/** Issue #1410 item 22: the newest milestone is chosen and 发稿范围 / 依据 are written in, so the editor only changes what differs. */
+export const DELIVERABLES_LEDE = '默认选中最新的里程碑版本，发稿范围和依据已按常规填好，可按需改写后设为发稿版本；之后稿件再有修改，这里会提示。';
 /** The one block S65 reaches: the manuscript's 发稿 (editor-surfaces §9's first row). */
 export const DELIVERABLES_PUBLICATION_HEADING = '发稿 · 稿件';
 export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
@@ -57,6 +58,9 @@ export const PUBLICATION_SCOPE_LABEL = '发稿范围';
 export const PUBLICATION_BASIS_LABEL = '依据';
 export const PUBLICATION_SCOPE_HINT = '这一版可用于哪里，例如纸质版首印、电子版首发。';
 export const PUBLICATION_BASIS_HINT = '为什么是这一版，例如三审意见或社里的决定。';
+/** The routine scope and basis a designation records unless the editor writes others (Issue #1410 item 22). */
+export const PUBLICATION_SCOPE_DEFAULT = '全书定稿';
+export const PUBLICATION_BASIS_DEFAULT = '编辑审定通过';
 /**
  * What the compact surface states before commitment (PUB-004): the exact Book and Deliverable, the
  * milestone and its version, its relation to the current manuscript, the actor and the time. The scope

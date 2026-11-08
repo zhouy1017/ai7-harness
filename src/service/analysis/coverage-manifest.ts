@@ -1,4 +1,4 @@
-import type { CoverageManifestProjection, CoverageManifestUnitProjection } from '../../shared/protocol.js';
+import type { BaselineAnalysisSelectedRange, CoverageManifestProjection, CoverageManifestUnitProjection } from '../../shared/protocol.js';
 import { BLOCK_ID_PATTERN, DIGEST_PATTERN, UUID_PATTERN, canonicalJson, requireAnalysis, sha256Hex } from './canonical.js';
 
 /**
@@ -36,6 +36,10 @@ export interface CoverageManifestInput {
   readonly revisionLabel: string;
   readonly revisionDigest: string;
   readonly blocks: ReadonlyArray<ManifestBlockInput>;
+  /** Factual range tasks split boundary units and keep all model context inside the selected range. */
+  readonly exactRange?: BaselineAnalysisSelectedRange;
+  /** Preserve earlier range cuts so unchanged out-of-range results remain reusable. */
+  readonly priorRangeBoundaries?: ReadonlyArray<number>;
 }
 
 interface Section {
@@ -119,12 +123,29 @@ export function deriveCoverageManifest(input: CoverageManifestInput): CoverageMa
   );
   requireBlocks(input.blocks);
   const sections = sectionsOf(input.blocks);
+  const range = input.exactRange;
+  const priorBoundaries = new Set(input.priorRangeBoundaries ?? []);
+  const boundaries = new Set(priorBoundaries);
+  if (range !== undefined) { boundaries.add(range.startPosition); boundaries.add(range.endPosition + 1); }
+  const region = (position: number): number => range === undefined ? 0 : position < range.startPosition ? -1 : position > range.endPosition ? 1 : 0;
   const units: CoverageManifestUnitProjection[] = [];
   for (const section of sections) {
-    const groups = splitSection(section);
+    const originalGroups = splitSection(section);
+    const originalStarts = new Set(originalGroups.map(group => group[0]!.position));
+    const groups = originalGroups.flatMap((blocks) => {
+      const parts: ManifestBlockInput[][] = [];
+      for (const block of blocks) {
+        if (parts.length === 0 || boundaries.has(block.position)) parts.push([]);
+        parts.at(-1)!.push(block);
+      }
+      return parts;
+    });
     groups.forEach((group, index) => {
       const previous = index === 0 ? [] : groups[index - 1]!;
-      const overlap = previous.slice(Math.max(0, previous.length - UNIT_OVERLAP_BLOCKS));
+      const overlap = previous.slice(Math.max(0, previous.length - UNIT_OVERLAP_BLOCKS))
+        .filter((block) => !priorBoundaries.has(group[0]!.position) && originalStarts.has(group[0]!.position) &&
+          (region(group[0]!.position) !== 0 || region(block.position) === 0));
+      const heading = section.heading !== null && region(section.heading.position) === region(group[0]!.position) ? section.heading : null;
       const ordinal = units.length + 1;
       const blockIds = group.map((block) => block.blockId);
       const blockDigests = group.map((block) => block.digest);
@@ -136,9 +157,9 @@ export function deriveCoverageManifest(input: CoverageManifestInput): CoverageMa
         sectionOrdinal: section.ordinal,
         subUnitIndex: index + 1,
         subUnitCount: groups.length,
-        headingBlockId: section.heading?.blockId ?? null,
-        headingText: section.heading?.text ?? null,
-        headingLevel: section.heading?.level ?? null,
+        headingBlockId: heading?.blockId ?? null,
+        headingText: heading?.text ?? null,
+        headingLevel: heading?.level ?? null,
         startPosition,
         endPosition,
         blockIds,
@@ -159,7 +180,8 @@ export function deriveCoverageManifest(input: CoverageManifestInput): CoverageMa
       revisionLabel: input.revisionLabel,
       revisionDigest: input.revisionDigest,
     },
-    parameters: { unitBudgetGraphemes: UNIT_BUDGET_GRAPHEMES, overlapBlocks: UNIT_OVERLAP_BLOCKS },
+    parameters: { unitBudgetGraphemes: UNIT_BUDGET_GRAPHEMES, overlapBlocks: UNIT_OVERLAP_BLOCKS,
+      ...(range === undefined ? {} : { rangeContext: 'exact' as const }) },
     totalBlocks: input.blocks.length,
     totalGraphemes: input.blocks.reduce((total, block) => total + block.graphemes, 0),
     sectionCount: sections.length,

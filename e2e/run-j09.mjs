@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_ICONS_ONLY, SIDEBAR_LIBRARY_READY, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-09 (Issue #424, plan slice S78): 待我处理 — a cross-Book attention view (editor-surfaces §8.1, V2-UX-ATTN-001
@@ -496,8 +496,8 @@ async function startFirstBaseline(renderer, readiness, name, from = 'available')
 async function prepareRange(renderer, unitOrdinal, name) {
   await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true'; })()`, `${name}-history-tab`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-${unitOrdinal}'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; if(!radio.checked)radio.click(); return radio.checked; })()`, `${name}-range`);
-  await assertRenderer(renderer, `(() => { const chooser=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] [data-analysis-action="choose-reanalyze-range"]'); if(!(chooser instanceof HTMLButtonElement)||chooser.disabled)return false; if(chooser.getAttribute('aria-expanded')!=='true')chooser.click(); return chooser.getAttribute('aria-expanded')==='true'; })()`, `${name}-choose`);
-  await assertRenderer(renderer, `(() => { const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]'); const choice=block?.querySelector('.analysis-update-choice'); const plan=choice?.querySelector('[data-analysis-action="reanalyze-range"]'); if(!(choice instanceof HTMLElement)||choice.hidden||!(plan instanceof HTMLButtonElement)||plan.disabled||plan.textContent!=='查看计划')return false; plan.click(); return true; })()`, `${name}-plan-first`);
+  // 查看计划 stands on the mode's block at once (Issue #1410 item 15): no button only unfolds it.
+  await assertRenderer(renderer, `(() => { const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]'); const plan=block?.querySelector('.analysis-actions [data-analysis-action="reanalyze-range"]'); if(!(plan instanceof HTMLButtonElement)||plan.disabled||plan.textContent!=='查看计划')return false; plan.click(); return true; })()`, `${name}-plan-first`);
 }
 
 /** 书库 from wherever the window is: the header's 待我处理, then its 返回图书列表. */
@@ -537,7 +537,7 @@ async function editAndSave(renderer, suffix, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, `${name}-editor-ready`);
   const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
   requireJourney(before !== null, `${name}-scope`);
-  await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, `${name}-inserted`);
+  await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, `${name}-inserted`);
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, `${name}-dirty`);
   await click(renderer, '保存', `${name}-save`);
   await waitFor(renderer, journalEditPersisted(before, suffix), `${name}-durable`, 120_000);
@@ -1471,12 +1471,13 @@ async function main() {
     await clickSelector(renderer, '[data-background-action="enroll-open"]', 'background-open');
     await waitFor(renderer, `document.activeElement===document.querySelector('.background-analysis-disclosure h4')`, 'background-disclosure-focused', 10_000);
     const disclosure = await renderer.evaluate(`(() => { const root=document.querySelector('.background-analysis-disclosure'); const terms=Array.from(root.querySelectorAll('dt')); return { rows: terms.map((term)=>term.textContent), scope: root.querySelector('dd')?.textContent ?? null, budget: terms.find((term)=>term.textContent==='预算上限')?.nextElementSibling?.textContent ?? null, notGranted: root.querySelectorAll('.background-analysis-not-granted li').length, radios: Array.from(root.querySelectorAll('input[data-starting-point]')).map((radio)=>[radio.dataset.startingPoint, radio.checked]), scopes: Array.from(root.querySelectorAll('input[data-scope-kind]')).map((radio)=>[radio.dataset.scopeKind, radio.checked]), scopesShown: root.querySelector('.background-analysis-scopes')?.hidden===false, ceiling: root.querySelector('input[data-background-ceiling]')?.value ?? null, confirm: root.querySelector('[data-background-action="enroll-confirm"]')?.disabled ?? null }; })()`);
-    // Synchronized delta (Issue #864): the house's three Books make two scopes, the Book chosen; the ceiling is empty and required.
+    // Synchronized delta (Issue #864): the house's three Books make two scopes, the Book chosen; the first starting point and a
+    // routine ceiling are filled in, so 登记 is ready at once (Issue #1410 item 24).
     requireJourney(JSON.stringify(disclosure.rows) === JSON.stringify(['范围', '分析', '何时开始', '模型服务', '工序', '预算上限', '发送内容类别', '会得到']) &&
       disclosure.scope === `《${SECOND.title}》这一本书` && disclosure.budget === BACKGROUND_CEILING_REQUIRED && disclosure.notGranted === 4 &&
-      JSON.stringify(disclosure.radios) === JSON.stringify([['prospective', false], ['backfill', false]]) &&
+      JSON.stringify(disclosure.radios) === JSON.stringify([['prospective', true], ['backfill', false]]) &&
       JSON.stringify(disclosure.scopes) === JSON.stringify([['book', true], ['all-books', false]]) && disclosure.scopesShown === true &&
-      disclosure.ceiling === '' && disclosure.confirm === true,
+      disclosure.ceiling === '100000' && disclosure.confirm === false,
     'background-disclosure-read', disclosure);
 
     at('j14-background-keyboard');
@@ -1490,13 +1491,13 @@ async function main() {
     // `只分析登记之后的改动`: the Enrollment is recorded, and over 乙's current analysis it has nothing to do.
     await clickSelector(renderer, '[data-background-action="enroll-open"]', 'background-reopen');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.background-analysis-disclosure input[data-starting-point="prospective"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'background-choose-prospective');
-    // A starting point alone is not enough (Issue #864): `登记` waits for the ceiling, and says so.
+    // A cleared ceiling holds `登记` with its reason (Issue #864); the editor's own ceiling replaces the routine one.
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.background-analysis-disclosure input[data-background-ceiling]'); if(!(input instanceof HTMLInputElement))return false; input.focus(); input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return document.activeElement===input; })()`, 'background-ceiling-focus');
     await assertRenderer(renderer, `document.querySelector('[data-background-action="enroll-confirm"]')?.disabled===true && document.querySelector('.background-analysis-choose')?.hidden===false && document.querySelector('.background-analysis-choose')?.textContent===${JSON.stringify(BACKGROUND_CEILING_FIRST)}`, 'background-ceiling-required');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('.background-analysis-disclosure input[data-background-ceiling]'); if(!(input instanceof HTMLInputElement))return false; input.focus(); return document.activeElement===input; })()`, 'background-ceiling-focus');
     await renderer.send('Input.insertText', { text: String(BACKGROUND_CEILING_TOKENS) });
     await waitFor(renderer, `document.querySelector('[data-background-action="enroll-confirm"]')?.disabled===false && document.querySelector('.background-analysis-share')?.textContent===${JSON.stringify(`每次后台分析最多用 ${BACKGROUND_CEILING_TOKENS} tokens，达到就停下。`)}`, 'background-confirm-enabled', 10_000);
     await clickSelector(renderer, '[data-background-action="enroll-confirm"]', 'background-confirm');
-    await waitFor(renderer, `(${READ_BACKGROUND})?.state==='active' && document.activeElement===document.querySelector('[data-background-action="revoke-open"]')`, 'background-active', 30_000);
+    await waitFor(renderer, `(${READ_BACKGROUND})?.state==='active' && document.activeElement===document.querySelector('[data-background-action="revoke"]')`, 'background-active', 30_000);
     const enrolled = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
     const activeBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(enrolled?.state === 'active' && enrolled.enrollment?.ordinal === 1 && enrolled.enrollment.startingPoint === 'prospective' &&
@@ -1504,7 +1505,7 @@ async function main() {
       enrolled.enrollment.ceilingTokens === BACKGROUND_CEILING_TOKENS && enrolled.enrollment.shareTokens === BACKGROUND_CEILING_TOKENS && enrolled.enrollment.scope?.kind === 'book' &&
       activeBlock.pill === '已登记' && (activeBlock.enrollment ?? '').startsWith('后台处理登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 ') &&
       activeBlock.ceiling === `范围：《${SECOND.title}》这一本书 · 预算上限 ${BACKGROUND_CEILING_TOKENS} tokens` &&
-      activeBlock.nextLine === BACKGROUND_CURRENT_LINE && JSON.stringify(activeBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
+      activeBlock.nextLine === BACKGROUND_CURRENT_LINE && JSON.stringify(activeBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
     'background-enrolled-record', { enrolled: enrolled?.state, next: enrolled?.next, block: activeBlock });
     const beforeBackground = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(beforeBackground?.bookId === bookB && beforeBackground.resultSetRevision?.ordinal === 2, 'background-before-record');
@@ -1512,13 +1513,13 @@ async function main() {
     at('j14-background-focus-kept');
     // The block reads again while the Enrollment is in force, and each new answer — here the dispatcher's next look, patched in
     // place — leaves the keyboard focus on `撤销登记…` and the open disclosures as the editor left them (#713 review, P2-6, P3-4).
-    await assertRenderer(renderer, `(() => { const binds=document.querySelector('details.background-analysis-binds'); const history=document.querySelector('details.background-analysis-history'); if(!(binds instanceof HTMLDetailsElement)||!(history instanceof HTMLDetailsElement))return false; binds.open=true; history.open=true; const revoke=document.querySelector('[data-background-action="revoke-open"]'); if(!(revoke instanceof HTMLButtonElement))return false; revoke.focus(); return document.activeElement===revoke; })()`, 'background-focus-set');
+    await assertRenderer(renderer, `(() => { const binds=document.querySelector('details.background-analysis-binds'); const history=document.querySelector('details.background-analysis-history'); if(!(binds instanceof HTMLDetailsElement)||!(history instanceof HTMLDetailsElement))return false; binds.open=true; history.open=true; const revoke=document.querySelector('[data-background-action="revoke"]'); if(!(revoke instanceof HTMLButtonElement))return false; revoke.focus(); return document.activeElement===revoke; })()`, 'background-focus-set');
     const lookedBefore = await renderer.evaluate(`document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null`);
     for (const round of [1, 2]) {
       await waitFor(renderer, `(() => { const at=document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return at !== null && at !== ${JSON.stringify(lookedBefore)} && (${round} === 1 || at !== window.__j09LookedAt); })()`, `background-looked-${round}`, 30_000);
       await renderer.evaluate(`(() => { window.__j09LookedAt = document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return true; })()`);
     }
-    await assertRenderer(renderer, `document.activeElement===document.querySelector('[data-background-action="revoke-open"]') && document.activeElement.matches(':focus-visible, :focus') && document.querySelector('details.background-analysis-binds')?.open===true && document.querySelector('details.background-analysis-history')?.open===true`, 'background-focus-kept');
+    await assertRenderer(renderer, `document.activeElement===document.querySelector('[data-background-action="revoke"]') && document.activeElement.matches(':focus-visible, :focus') && document.querySelector('details.background-analysis-binds')?.open===true && document.querySelector('details.background-analysis-history')?.open===true`, 'background-focus-kept');
 
     at('background-change-dispatches');
     // The editor edits 乙's manuscript and keeps the caret in its text. Once the text has stood still, AI7 starts 同步到当前稿件 by
@@ -1566,7 +1567,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='paused' && document.activeElement===document.querySelector('[data-background-action="resume"]')`, 'background-paused', 30_000);
     const pausedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(pausedBlock.pill === '已暂停' && pausedBlock.nextLine === BACKGROUND_PAUSED_LINE && pausedBlock.history.length === 2 && pausedBlock.startedLines.length === 1 &&
-      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '续行', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
+      JSON.stringify(pausedBlock.actions) === JSON.stringify([['resume', '续行', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
     'background-paused-read', pausedBlock);
     const pausedService = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
     requireJourney(pausedService?.state === 'paused' && pausedService.enrollment?.ordinal === 1 && pausedService.hold?.canResume === true &&
@@ -1578,18 +1579,19 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='active' && document.activeElement===document.querySelector('[data-background-action="pause"]')`, 'background-resumed', 30_000);
     const resumedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(resumedBlock.pill === '已登记' && resumedBlock.nextLine === BACKGROUND_CURRENT_LINE && resumedBlock.history.length === 3 &&
-      JSON.stringify(resumedBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
+      JSON.stringify(resumedBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke', '撤销登记', 'enabled']]),
     'background-resumed-read', resumedBlock);
     requireJourney((await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`))?.enrollment?.ordinal === 1, 'background-resumed-record');
 
     at('background-revoke');
     // `撤销登记…` says what revoking keeps, then records it: the block reads 已撤销 with both states in its history.
-    await clickSelector(renderer, '[data-background-action="revoke-open"]', 'background-revoke-open');
-    await waitFor(renderer, `document.activeElement===document.querySelector('.background-analysis-revoke h4')`, 'background-revoke-focused', 10_000);
-    const consequences = await renderer.evaluate(`Array.from(document.querySelectorAll('.background-analysis-revoke-consequences li')).map((item)=>item.textContent)`);
-    requireJourney(Array.isArray(consequences) && consequences.length === 3 && consequences[0] === 'AI7 不再为这本书开始新的后台分析', 'background-revoke-consequences', consequences);
-    await clickSelector(renderer, '[data-background-action="revoke-confirm"]', 'background-revoke-confirm');
+    // 撤销登记 is one click (Issue #1410 item 24); what revoking keeps is said in the status line with the result.
+    await clickSelector(renderer, '[data-background-action="revoke"]', 'background-revoke');
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
+    // The result is announced where every success is (the polite toast; #persistence-status shows only busy and error lines).
+    const revokeAnnounced = await renderer.evaluate(`({ toast: document.querySelector('[data-toast]')?.textContent ?? null, tone: document.querySelector('[data-toast]')?.dataset.tone ?? null, hidden: document.querySelector('[data-toast]')?.hidden ?? null, status: document.querySelector('#persistence-status')?.textContent ?? null })`);
+    requireJourney(revokeAnnounced?.toast === '已撤销后台处理登记：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
+      revokeAnnounced.tone === 'success' && revokeAnnounced.hidden === false, 'background-revoke-consequences', revokeAnnounced);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&
       revokedBlock.startedLines.length === 1 && JSON.stringify(revokedBlock.actions) === JSON.stringify([['enroll-open', '登记后台处理…', 'enabled']]),

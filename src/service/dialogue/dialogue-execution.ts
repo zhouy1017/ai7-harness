@@ -5,6 +5,7 @@ import { RetrievalIndex } from '../retrieval/index.js';
 import { PlatformToolSession, type GlobalAgentScopedToolOwner } from '../provider/platform-tool-session.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
+import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import type { OrdinaryProductionRouteId } from '../../shared/protocol.js';
@@ -69,6 +70,7 @@ import { DIALOGUE_OUTBOUND_CATEGORY, DIALOGUE_TASK_KIND, admittedDialogueRoute, 
  * reaches the transport itself every time, and nothing reads or writes the development cache or ledger.
  */
 export interface DialogueRecords {
+  dialogueEditorialMemory?(dialogueId: string): EditorialMemorySnapshot | null;
   localFixtureRuntime?(): LocalFixtureRuntimeContext | null;
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void;
   openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number): void;
@@ -374,10 +376,14 @@ export class DialogueExecutionOwner {
     const localRule = scoped ?? (admittedLocalRule === null ? null : { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker });
     let retrieval: RetrievalIndex | null = null;
     let scopedTools: GlobalAgentScopedToolOwner | undefined;
-    const promptContractDigest = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST
+    const basePromptContractDigest = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST) : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
-    const systemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
+    const baseSystemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt) : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
+    const memory = live?.route?.providerProcessingVersion === 'v35' || turn.globalRoute?.providerProcessingVersion === 'v35'
+      ? records.dialogueEditorialMemory?.(turn.dialogueId) ?? null : null;
+    const promptContractDigest = editorialMemoryDigest(basePromptContractDigest, memory);
+    const systemPrompt = editorialMemoryPrompt(baseSystemPrompt, memory);
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
@@ -397,7 +403,8 @@ export class DialogueExecutionOwner {
       const route = live === null ? null : turn.globalRoute ?? live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
       const credentialReference = live === null ? '' : turn.globalCredentialReference ?? live.credentialReference;
-      const isCurrent = (): boolean => turn.sourceGuard?.() !== false && (route === null || live === null ||
+      const isCurrent = (): boolean => turn.sourceGuard?.() !== false &&
+        (memory === null || editorialMemoryDigest(basePromptContractDigest, records.dialogueEditorialMemory?.(turn.dialogueId)) === promptContractDigest) && (route === null || live === null ||
         (turn.globalRoute !== undefined ? turn.sourceGuard?.() === true : live.current?.(credentialReference, route) ?? true));
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
@@ -424,6 +431,7 @@ export class DialogueExecutionOwner {
         systemPrompt,
         // The editor's own selected words and question: the local deterministic route, or a remote one whose rule names them.
         outboundDataCategory: global ? 'public-or-synthetic' : DIALOGUE_OUTBOUND_CATEGORY,
+        ...(!global && memory !== null ? { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt']) } : {}),
         ...(global ? { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt',
           ...((turn.message.globalScope?.books.length ?? 0) > 0 ? ['editor-selected-manuscript-excerpt' as const] : [])]) } : {}),
         ...(global && route?.globalAgentDialogue !== undefined ? { globalAgentScope: {
@@ -509,6 +517,7 @@ export class DialogueExecutionOwner {
             tickets: { take: () => { const ticket = pendingTicket; pendingTicket = null; return ticket; } },
             attribution: () => ({}),
             promptContractDigest,
+            ...(memory === null ? {} : { editorialMemory: memory }),
             codes,
             profile: route.profile,
             modelProfile: route.modelProfile,
@@ -578,6 +587,7 @@ export class DialogueExecutionOwner {
             behaviorCompositionSha256: harness.composition.digest,
             promptContractSha256: promptContractDigest,
             providerProcessingVersion: route.providerProcessingVersion,
+            ...(memory === null ? {} : { editorialMemory: memory }),
             policyRuleId: route.ruleId,
             boundAt: new Date().toISOString(),
           });

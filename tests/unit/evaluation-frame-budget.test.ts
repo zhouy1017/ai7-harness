@@ -201,7 +201,7 @@ describe('评估 on a long Book stays within one frame (Issue #689)', () => {
           revisionId: randomUUID(), createdAt: '2026-10-09T00:00:00.000Z', entryOrdinal: 1, current: true,
           reading: { unitsTotal: RANGES, unitsRead: RANGES },
           items: rewriteProposalItems(ITEMS.map((itemId, index) => ({ itemId, comment: words(300, 50 + index) })), rewriteNotes, version.content),
-          verdict: { before: null, after: words(600, 60) }, withheld: [],
+          verdict: { before: null, after: words(600, 60) }, strengths: null, weaknesses: null, withheld: [],
         },
       }),
     });

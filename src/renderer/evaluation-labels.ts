@@ -54,7 +54,7 @@ export function evaluationSkippedRecordsLine(record: Pick<EvaluationRecordProjec
   const skipped = `这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`;
   return record.seededFrom === null ? `${skipped}，从头开始评估。` : `${skipped}，从${technicalWords(`第 ${record.seededFrom} 版`, '版本')}定稿重新评估。`;
 }
-export const EVALUATION_SAVE = '保存评估';
+export const EVALUATION_SAVE = '保存修改';
 export const EVALUATION_FINALIZE = '定稿';
 /** 定稿 waits while every item is 不评 (Issue #638): the service's own words for its refusal. */
 export { EVALUATION_FINALIZE_NEEDS_SCORE } from '../shared/evaluation-scoring.js';
@@ -237,11 +237,34 @@ export function evaluationProfileUse(profile: { records: number; books: number }
 
 // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) --------------------------------------
 
-export const EVALUATION_AI7_HEADING = 'AI7 初评';
-export const EVALUATION_AI7_NONE = 'AI7 还没有为这本书做初评。';
+export const EVALUATION_AI7_HEADING = 'AI7 评估报告';
+export const EVALUATION_AI7_NONE = '还没有评估报告：生成后，AI7 通读全稿，给出逐项评分与评语、原文依据、优缺点、下一步建议和市场分析。';
 export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' };
 export const EVALUATION_AI7_OPEN_TASK = '查看任务';
-export const EVALUATION_START_FROM_INITIAL = '从 AI7 初评开始';
+// ---- 评估报告 as the main way (Issue #1406, #1407) ------------------------------------------------------------------------
+
+export const EVALUATION_GENERATE = '生成评估报告';
+export const EVALUATION_REGENERATE = '重新生成评估报告';
+export const EVALUATION_REPORT_HEADING = '详细评估报告';
+export const EVALUATION_REPORT_EDIT = '修改报告';
+export const EVALUATION_REPORT_NEXT_STEP = '下一步建议';
+export const EVALUATION_SHOW_LATEST_REPORT = '查看最新评估报告';
+export const EVALUATION_MANUAL_START = '自行填写评估';
+export const EVALUATION_REPORT_UNSAVED = '这一版有未保存的修改：先保存或放弃这些修改，再打开最新评估报告。';
+
+/**
+ * Why AI7's latest report cannot become the editor's version now, in the editor's words; `null` when 修改报告 can. A version
+ * still unfinished never stops it (Issue #1406): only a report that no longer reads the text as it stands, one that scored
+ * not every item, or the service's own refusal does.
+ */
+export function evaluationReportEditReason(start: EvaluationWorkspaceProjection['start'],
+  latest: Pick<NonNullable<EvaluationInitialProjection['latest']>, 'revisionId' | 'current' | 'complete'>): string | null {
+  if (!latest.current) return '稿件在这份报告之后改过：重新生成评估报告后，才能在报告上修改。';
+  if (!latest.complete) return '这份报告没有给出全部评分项的分数：请重新生成评估报告。';
+  if (!start.allowed) return start.reason;
+  if (start.fromInitial === null || start.fromInitial.revisionId !== latest.revisionId) return '评估方案在这份报告之后变了：请重新生成评估报告。';
+  return null;
+}
 export const EVALUATION_AI7_SUFFICIENCY: Readonly<Record<InitialEvaluationSufficiency, string>> = { sufficient: '充分', fair: '一般', insufficient: '不足' };
 export const EVALUATION_AI7_SUGGESTED = 'AI7 建议';
 export const EVALUATION_ADJUSTMENT_LEGEND = '调分原因 · 可多选';
@@ -249,10 +272,10 @@ export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdju
 export const EVALUATION_ADJUSTMENT_NOTE = '自行输入的原因';
 export const EVALUATION_AI7_STATUS = {
   preparing: '正在准备 AI7 初评的任务计划…',
-  prepared: 'AI7 初评的任务计划已准备：在任务计划里看过再开始。',
+  prepared: 'AI7 初评的任务计划已准备。',
   cancelled: 'AI7 初评的任务计划准备已取消。',
   failed: '无法准备 AI7 初评。',
-  startingFromInitial: '正在从 AI7 初评开始…',
+  startingFromInitial: '正在打开评估报告供修改…',
 } as const;
 
 /** The Book's 初评 Task in one line: its state as the drawer names it. */
@@ -263,7 +286,7 @@ export function evaluationAi7TaskLine(task: NonNullable<EvaluationInitialProject
 /** The latest 初评 that settled: which one, what it read, its total and band, and whether the manuscript moved since. */
 export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjection, 'bands'>, latest: NonNullable<EvaluationInitialProjection['latest']>): string {
   const total = latest.complete ? evaluationTotalLine(profile, latest.total) : '全书综合没有给出分数';
-  const moved = latest.current ? '' : '（稿件此后改过：重新初评后才能从初评开始）';
+  const moved = latest.current ? '' : '（稿件此后改过：重新生成后才能在报告上修改）';
   return `第 ${latest.ordinal} 次初评 · 读的是修订版${technicalWords(` ${latest.revisionLabel}`)} · ${total}${moved}`;
 }
 
@@ -344,7 +367,7 @@ export const READERS_REPORT_LEDE =
   '根据定稿评估起草审稿意见，修改并保存后可导出，草稿不会自动发送或改变评估。';
 export const READERS_REPORT_ACTIONS = {
   prepare: '起草',
-  openPlan: '查看计划并开始',
+  openPlan: '查看计划',
   openTask: '查看任务',
   createDraft: '打开草稿',
   openDraft: '打开草稿',
@@ -352,7 +375,8 @@ export const READERS_REPORT_ACTIONS = {
 } as const;
 export const READERS_REPORT_STATUS = {
   preparing: '正在准备审稿意见的任务计划…',
-  prepared: '审稿意见的任务计划已准备：在任务计划里看过再开始。',
+  prepared: '审稿意见的任务计划已准备。',
+  started: '已开始起草审稿意见。',
   cancelled: '审稿意见的任务计划准备已取消。',
   failed: '无法准备审稿意见。',
   creating: '正在打开审稿意见草稿…',
@@ -460,23 +484,24 @@ export function evaluationPricingLines(pricing: EvaluationPricingProjection): st
 
 // ---- 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008) ---------------------------------------------------
 
-export const EVALUATION_REWRITE_HEADING = '按我的评分重写评语';
+export const EVALUATION_REWRITE_HEADING = '按我的修改重新生成';
 export const EVALUATION_REWRITE_ACTIONS = {
-  prepare: '按我的评分重写评语',
+  prepare: '按我的修改重新生成',
   openPlan: '查看计划并开始',
   openTask: '查看任务',
-  accept: '采用重写',
+  accept: '采用新版报告',
   discard: '放弃',
 } as const;
 export const EVALUATION_REWRITE_STATUS = {
-  preparing: '正在准备评语重写的任务计划…',
-  prepared: '评语重写的任务计划已准备：在任务计划里看过再开始。',
-  cancelled: '评语重写的任务计划准备已取消。',
-  failed: '无法按你的评分重写评语。',
-  unsaved: '先保存评估，再按你的评分重写评语：重写只读已保存的分数与评语。',
-  unsavedAccept: '这一版有未保存的修改：先保存或放弃这些修改，再采用重写的评语。',
-  accepting: '正在采用重写的评语…',
-  accepted: '已采用重写的评语：各项分数没有改动。',
+  preparing: '正在准备按你的修改重新生成报告…',
+  prepared: '重新生成的任务计划已准备。',
+  started: 'AI7 正在按你的修改重新生成报告。',
+  cancelled: '重新生成的任务计划准备已取消。',
+  failed: '无法按你的修改重新生成报告。',
+  unsaved: '先保存修改，再按你的修改重新生成：重新生成只读已保存的内容。',
+  unsavedAccept: '这一版有未保存的修改：先保存或放弃这些修改，再采用新版报告。',
+  accepting: '正在采用新版报告…',
+  accepted: '已采用新版报告：各项分数与结论没有改动。',
   discarding: '正在放弃重写的评语…',
   discarded: '已放弃这一次重写，评语保持原样。',
   decideFailed: '无法处理重写的评语。',
@@ -485,7 +510,7 @@ export const EVALUATION_REWRITE_VERDICT = '总评';
 export const EVALUATION_REWRITE_BEFORE = '现在';
 export const EVALUATION_REWRITE_AFTER = '重写';
 export const EVALUATION_REWRITE_EMPTY = '（还没有写）';
-export const EVALUATION_REWRITE_STALE = '这一版在重写之后又保存过：重写依据的是之前的分数，不能采用；可以放弃它，再按现在的评分重写。';
+export const EVALUATION_REWRITE_STALE = '这一版在重新生成之后又保存过：新版依据的是之前的修改，不能采用；可以放弃它，再按现在的修改重新生成。';
 
 /** The Book's latest rewrite Task in one line: the version it rewrites, and its state as the drawer names it. */
 export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWorkspaceProjection['task']>): string {
@@ -494,7 +519,8 @@ export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWor
 
 /** The proposal waiting for the editor: which save it was written from. */
 export function evaluationRewriteProposalLine(proposal: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>): string {
-  return `AI7 按你第 ${proposal.entryOrdinal} 次保存的评分重写了评语，等你决定：采用后才记入这一版，分数不变。`;
+  const lines = proposal.strengths !== null || proposal.weaknesses !== null;
+  return `AI7 按你第 ${proposal.entryOrdinal} 次保存的修改重新生成了${lines ? '评估报告（评语、总评、优点与问题）' : '评语与总评'}，等你决定：采用后才记入这一版，分数与结论不变。`;
 }
 
 /**

@@ -8,7 +8,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
-import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -22,7 +22,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // Issue #413 (plan slice S64, E6) extends it with ④ 导出 · DOCX: the input also carries a header, a styled run
 // in a paragraph no stage edits, and one comment and one tracked replacement by the file's author; the editor
 // adds one 备注. 导出… of the current revision saves the unsaved edits as a revision, reviews its fidelity, takes
-// the destination from the Save dialog's launch control, and 按上述方式导出 writes the file, whose receipt 交付物
+// the destination from the Save dialog's launch control, which writes the file at once (Issue #1410); its receipt 交付物
 // lists and a restart keeps. The runner reads the written file itself — the comment and the tracked change by
 // their author, the header byte for byte, the untouched paragraph's bold run, and no 备注. Cancelling after the
 // destination was chosen writes nothing, and the card is reached by keyboard, reflows at 200% and keeps its
@@ -70,6 +70,72 @@ const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里选下面�
 // fixture's (`tests/support/writing-task.ts`, the same words): the fixture answers only them.
 const WRITING_LIBRARY_FILE = '青铜器保护笔记.txt';
 const WRITING_LIBRARY_TITLE = '青铜器保护笔记';
+// 就选中部分让 AI 修改… and 🔒 (Issue #1412): the sentence the authored scoped-edit fixture answers, located in its paragraph, and the
+// editor's own way to it — a selection and a right click; texts are compared by booleans only.
+const SCOPED_EDIT_FIXTURE = 'sample1-scoped-edit-authored';
+const SCOPED_EDIT_INSTRUCTION = '把这句改得更简洁，保留原意。';
+const SCOPED_EDIT_REPLACEMENT = '当然，并非每个男人都被众人视为有福之人。';
+const SCOPED_SENTENCE_START = '当然，也不是所有男人';
+const SCOPED_SENTENCE_END = '都是众人眼里的有福之人。';
+const SCOPED_HELPERS = `(() => {
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
+  const texts = (root) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode); return nodes; };
+  const point = (root, offset) => { let left = offset; for (const node of texts(root)) { if (left <= node.data.length) return [node, left]; left -= node.data.length; } return null; };
+  // A paragraph's own words: an open suggestion's preview (预览 · 未应用) drawn beside them is not part of them.
+  const words = (root) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT }); let text = ''; while (walker.nextNode()) text += walker.currentNode.data; return text; };
+  const all = () => Object.fromEntries(Array.from(editor()?.children ?? []).filter((node) => node.dataset.blockId).map((node) => [node.dataset.blockId, words(node)]));
+  window.__j07Scoped = {
+    state: null, before: null, block,
+    locate: () => {
+      const blocks = Array.from(editor()?.children ?? []).filter((node) => node.dataset.blockId);
+      const index = blocks.findIndex((node) => (node.textContent ?? '').includes(${JSON.stringify(SCOPED_SENTENCE_START)}) && (node.textContent ?? '').includes(${JSON.stringify(SCOPED_SENTENCE_END)}));
+      const next = blocks.slice(index + 1).find((node) => (node.textContent ?? '').length >= 4);
+      if (index < 0 || next === undefined) return false;
+      const text = blocks[index].textContent;
+      const from = text.indexOf(${JSON.stringify(SCOPED_SENTENCE_START)});
+      window.__j07Scoped.state = { target: blocks[index].dataset.blockId, next: next.dataset.blockId, from, to: text.indexOf(${JSON.stringify(SCOPED_SENTENCE_END)}, from) + ${SCOPED_SENTENCE_END.length} };
+      return true;
+    },
+    firstText: () => Array.from(editor()?.querySelectorAll(':scope > p[data-block-id]') ?? []).find((node) => (node.textContent ?? '').length >= 8)?.dataset.blockId ?? null,
+    // The selection a reader makes, settled once the editor has read it: the editor reads the page's selection in its own
+    // selectionchange listener, registered before this one, so the event this waits for has been read by then. A selection
+    // equal to the one already there fires no event, and is already read. Bounded at two seconds.
+    select: async (id, from, to) => {
+      const root = block(id); if (!root) return false;
+      editor().focus();
+      const start = point(root, from); const end = point(root, to); if (!start || !end) return false;
+      const range = document.createRange(); range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]);
+      const read = new Promise((resolve) => { const done = () => resolve(true); document.addEventListener('selectionchange', done, { once: true }); setTimeout(() => { document.removeEventListener('selectionchange', done); resolve(false); }, 2000); });
+      const selection = getSelection(); const same = selection.rangeCount === 1 && selection.getRangeAt(0).compareBoundaryPoints(Range.START_TO_START, range) === 0 && selection.getRangeAt(0).compareBoundaryPoints(Range.END_TO_END, range) === 0;
+      selection.removeAllRanges(); selection.addRange(range);
+      const settled = (await read) || same;
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      const now = getSelection();
+      return settled && now.rangeCount === 1 && root.contains(now.anchorNode) && now.toString().length === to - from;
+    },
+    // The right click comes once the editor has read the selection, a task after it was made, as a reader's would.
+    rightClick: () => {
+      const selection = getSelection(); if (!selection || selection.rangeCount === 0) return false;
+      const range = selection.getRangeAt(0); const rect = range.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + 2, clientY: rect.top + 2 };
+      const target = range.startContainer.parentElement;
+      target.dispatchEvent(new MouseEvent('mousedown', init)); target.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 })); target.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    menuSays: (count) => (document.querySelector('.editorial-mark-menu-layer [data-mark-menu]')?.textContent ?? '').includes('已选 ' + count + ' 字'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    snapshot: () => { window.__j07Scoped.before = all(); return Object.keys(window.__j07Scoped.before).length > 2; },
+    onlySentenceChanged: (replacement) => {
+      const before = window.__j07Scoped.before; const after = all(); const { target, from, to } = window.__j07Scoped.state;
+      return Object.keys(before).length === Object.keys(after).length && Object.entries(before).every(([id, text]) =>
+        id === target ? after[id] === text.slice(0, from) + replacement + text.slice(to) : after[id] === text);
+    },
+    unchanged: () => { const before = window.__j07Scoped.before; const after = all(); return Object.entries(before).every(([id, text]) => after[id] === text) && block(window.__j07Scoped.state.target)?.querySelector('.editorial-mark-applied-badge') === null; },
+  };
+  return true;
+})()`;
+
 const WRITING_LIBRARY_TEXT = '这份笔记整理自一次博物馆讲座：青铜器出土后最怕潮湿与盐分，修复人员先要清除锈蚀，再逐件建立档案。\n\n讲座还提到，研究者常把器物铭文与传世文献对读，一个字的释读往往要花上数年。\n';
 const WRITING_LIBRARY_CHARACTERS = 85;
 const WRITING_LIBRARY_REQUEST = Object.freeze({ typeId: 'review-article', audience: '关注历史题材小说的读者', channel: '读书网站书评栏目' });
@@ -743,6 +809,18 @@ async function openManuscript(renderer, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] > [data-block-id]') && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true'`, `${name}-editor`);
 }
 
+/**
+ * 稿件's 新建 / 导入衍生稿件 (Issue #1403): the panel opens with its 稿件题目 first and focused (Issue #1404); the title is written
+ * before the type, so choosing the type keeps it, and the way of making the document is chosen last.
+ */
+async function openDerivativePanel(renderer, { title, typeId, mode }, name) {
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
+  await clickSelector(renderer, '[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]', `${name}-open`);
+  await waitFor(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const first = form?.querySelector('[data-document-field]'); return first?.dataset.documentField === 'title' && document.activeElement === first; })()`, `${name}-title-first`);
+  if (title !== undefined) await fill(renderer, '.derivative-create-form [data-document-field="title"]', title, `${name}-title`);
+  await assertRenderer(renderer, `(() => { const type = document.querySelector('.derivative-create-form select[data-document-field="type"]'); if (!(type instanceof HTMLSelectElement)) return false; type.value = ${JSON.stringify(typeId)}; type.dispatchEvent(new Event('change', { bubbles: true })); const mode = document.querySelector('.derivative-create-form input[name="derivative-mode"][value=${JSON.stringify(mode)}]'); if (!(mode instanceof HTMLInputElement)) return false; mode.click(); return type.value === ${JSON.stringify(typeId)} && mode.checked; })()`, `${name}-type-and-mode`);
+}
+
 /** The milestone form lives in the 导航 panel, which opens on demand (Issue #409). */
 async function openMilestoneForm(renderer, name) {
   await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); if (!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if (entry.getAttribute('aria-expanded') !== 'true') entry.click(); return entry.getAttribute('aria-expanded') === 'true' && !panel.hidden; })()`, `${name}-navigation`);
@@ -778,7 +856,7 @@ async function acknowledgedEdit(renderer, text, name) {
     const selection = getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-    return document.execCommand('insertText', false, ${JSON.stringify(text)}) && (block.textContent ?? '') === original + ${JSON.stringify(text)};
+    return ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(text)}) && (block.textContent ?? '') === original + ${JSON.stringify(text)};
   })()`);
   requireJourney(typed === true, `${name}-typed`);
   await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
@@ -794,13 +872,14 @@ async function acknowledgedEdit(renderer, text, name) {
 
 async function openDesignateForm(renderer, name) {
   await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="designate"]', `${name}-open`);
-  await waitFor(renderer, `window.__j07.form() !== null && window.__j07.radios().length > 0 && window.__j07.radios().every((radio) => !radio.checked)`, `${name}-form`, 10_000);
+  await waitFor(renderer, `window.__j07.form() !== null && window.__j07.radios().length > 0 && window.__j07.radios()[0]?.checked === true`, `${name}-form`, 10_000);
 }
 async function chooseDesignation(renderer, milestoneId, name) {
   await assertRenderer(renderer, `(() => { const radio = window.__j07.radios().find((item) => item.value === ${JSON.stringify(milestoneId)}); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, name);
 }
 /** Confirm only with the fixed sentence on screen beside the action (V2-UX-PUB-004). */
 async function confirmWithStatement(renderer, completion, name) {
+  // The fixed sentence shows on the technical layer this Journey runs with (Issue #1413 cluster 4 hides it in ordinary mode).
   await assertRenderer(renderer, `(() => { const statement = window.__j07.form()?.querySelector('.publication-statement'); const confirm = window.__j07.action('confirm'); if (!(statement instanceof HTMLElement) || statement.textContent !== ${JSON.stringify(STATEMENT)} || !statement.checkVisibility() || statement.getBoundingClientRect().height === 0) return false; if (!(confirm instanceof HTMLButtonElement) || confirm.disabled) return false; confirm.click(); return true; })()`, `${name}-confirm`);
   await waitFor(renderer, `window.__j07.status() === ${JSON.stringify(completion)} && window.__j07.tone() === 'success' && window.__j07.form() === null`, `${name}-completion`, 60_000);
 }
@@ -1022,11 +1101,11 @@ async function main() {
       await waitFor(native, `document.querySelector('[data-import-relationship="first-manuscript"]')`, `${name}-relationship`);
       await clickImportControl(native, '[data-import-relationship="first-manuscript"]', true, `${name}-first-manuscript`);
       await waitFor(native, `document.querySelector('[data-word-import-controls="ready"]')`, `${name}-controls-before-prepare`);
-      await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
+      await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')===null && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
       if (mode === 'accepted-baseline') {
+        // Choosing 直接并入正文 · 定稿基线 is its confirmation (Issue #1410 item 32A): its note shows and the import is ready.
         await clickImportControl(native, '[data-word-import-mode="accepted-baseline"]', true, `${name}-accepted-mode`);
-        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='查看导入详情')?.disabled===true`, `${name}-separate-confirmation-required`);
-        await clickImportControl(native, '[data-word-accepted-baseline-confirmation]', true, `${name}-confirm-accepted`);
+        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-note]')?.hidden===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='查看导入详情')?.disabled===false`, `${name}-choice-is-the-confirmation`);
       }
       await clickImportControl(native, '[data-word-learn-from-edits]', false, `${name}-learning-opt-out`);
       await assertRenderer(native, `document.querySelector('[data-word-learn-from-edits]')?.checked===false`, `${name}-learning-choice-visible`);
@@ -1186,12 +1265,10 @@ async function main() {
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
-        Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) => {
-          const create = card.querySelector('[data-document-action="create"]');
-          const reason = document.getElementById(create?.getAttribute('aria-describedby') ?? '');
-          return card.dataset.documentState === 'none' && create instanceof HTMLButtonElement && create.disabled &&
-            reason?.textContent === '暂无来源材料：可在这里导入文件，或新建空白文档。';
-        });
+        // New documents are made on 稿件 (Issue #1403): a technical card offers no way of making one, only 本书不做.
+        Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
+          card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
+          card.querySelector('[data-document-action="notForThisBook"]') instanceof HTMLButtonElement);
     })()`, 'designate-unavailable-before-a-milestone');
     // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false'`, 'package-before-milestone');
@@ -1210,8 +1287,8 @@ async function main() {
     await openManuscript(renderer, 'before-milestone');
 
     at('milestone-needs-a-purpose');
-    // 标签 / 用途 / 说明 · 可选: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
-    // purpose with its reason beside it (V2-UX-MILE-003); 自行输入 asks for the editor's own words.
+    // 标签 / 用途 / 说明 · 可选: 阶段留档 is chosen to begin with and an empty label saves under a dated default
+    // (Issue #1410 item 21), so 保存里程碑版本 is ready at once; 自行输入 asks for the editor's own words.
     await openMilestoneForm(renderer, 'first');
     await assertRenderer(renderer, `(() => {
       const section = document.querySelector('details.milestone-section');
@@ -1222,11 +1299,11 @@ async function main() {
         section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。' &&
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
-        radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
-        save instanceof HTMLButtonElement && save.disabled;
-    })()`, 'milestone-form-starts-unselected');
+        radios.filter((radio) => radio.checked).map((radio) => radio.value).join() === 'stage-archive' && custom instanceof HTMLInputElement && custom.hidden &&
+        (document.querySelector('#milestone-label')?.placeholder ?? '').startsWith('阶段留档 · ') &&
+        save instanceof HTMLButtonElement && !save.disabled;
+    })()`, 'milestone-form-starts-with-defaults');
     await fill(renderer, '#milestone-label', FIRST.label, 'first-label');
-    await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? ''); return save?.disabled === true && (reason?.textContent ?? '').includes('选择用途'); })()`, 'milestone-save-waits-for-a-purpose');
     await choosePurpose(renderer, 'custom', 'first-purpose-custom');
     await assertRenderer(renderer, `(() => { const custom = document.querySelector('#milestone-purpose-custom'); const save = window.__j07.milestoneSave(); return custom instanceof HTMLInputElement && !custom.hidden && save?.disabled === true; })()`, 'milestone-custom-asks-for-words');
     await choosePurpose(renderer, FIRST.purpose, 'first-purpose');
@@ -1236,7 +1313,7 @@ async function main() {
     await fill(renderer, '#milestone-note', FIRST.note, 'first-note');
     // Nothing changed since the import, so the milestone designates r1 as it stands.
     await saveMilestone(renderer, FIRST, 'r1', 'first');
-    await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('details.milestone-section input[name="milestone-purpose"]')); return document.querySelector('#milestone-label')?.value === '' && document.querySelector('#milestone-note')?.value === '' && radios.every((radio) => !radio.checked) && window.__j07.milestoneSave()?.disabled === true; })()`, 'milestone-form-starts-again-unselected');
+    await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('details.milestone-section input[name="milestone-purpose"]')); return document.querySelector('#milestone-label')?.value === '' && document.querySelector('#milestone-note')?.value === '' && radios.filter((radio) => radio.checked).map((radio) => radio.value).join() === 'stage-archive' && window.__j07.milestoneSave()?.disabled === false; })()`, 'milestone-form-starts-again-with-defaults');
 
     at('milestone-changed-since');
     // One acknowledged edit: the manuscript is newer than 一审稿 (V2-UX-MILE-007).
@@ -1286,8 +1363,8 @@ async function main() {
     at('designate-form');
     await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="designate"]', 'designate-open');
     await waitFor(renderer, `window.__j07.form() !== null && document.activeElement === window.__j07.radios()[0]`, 'designate-form-open', 10_000);
-    // Every milestone as a choice and none chosen; what will be recorded; the two fields; the fixed sentence
-    // beside the action, on screen from the start; and the confirm unavailable with its reason in words.
+    // Every milestone as a choice, the newest chosen; what will be recorded; the two fields with routine words; and the
+    // confirm ready (Issue #1410 item 22).
     await assertRenderer(renderer, `(() => {
       const form = window.__j07.form();
       const radios = window.__j07.radios();
@@ -1298,16 +1375,17 @@ async function main() {
       const basis = window.__j07.field('basis');
       const terms = Array.from(form.querySelectorAll('dl.publication-designate-summary > dt')).map((term) => term.textContent);
       const reason = form.querySelector('.publication-confirm-reason');
-      return JSON.stringify(radios.map((radio) => radio.value)) === ${JSON.stringify(JSON.stringify([second, first]))} && radios.every((radio) => !radio.checked) &&
+      // Issue #1410 item 22: the newest milestone is chosen, with 全书定稿 / 编辑审定通过 written in, so 设为发稿版本 is ready.
+      return JSON.stringify(radios.map((radio) => radio.value)) === ${JSON.stringify(JSON.stringify([second, first]))} && radios[0].checked && !radios[1].checked &&
         form.querySelector('fieldset > legend')?.textContent === '选择里程碑版本' &&
         statement?.textContent === ${JSON.stringify(STATEMENT)} && statement.checkVisibility() && statement.getBoundingClientRect().height > 0 &&
         JSON.stringify(terms) === '["图书","稿件","里程碑版本","与当前稿件","操作人","时间"]' &&
-        scope instanceof HTMLInputElement && scope.required && scope.closest('label')?.querySelector('.publication-field-label')?.textContent === '发稿范围' &&
-        basis instanceof HTMLTextAreaElement && basis.required && basis.closest('label')?.querySelector('.publication-field-label')?.textContent === '依据' &&
-        confirm instanceof HTMLButtonElement && confirm.disabled && confirm.getAttribute('aria-label') === '设为发稿版本' &&
+        scope instanceof HTMLInputElement && scope.value === '全书定稿' && scope.closest('label')?.querySelector('.publication-field-label')?.textContent === '发稿范围' &&
+        basis instanceof HTMLTextAreaElement && basis.value === '编辑审定通过' && basis.closest('label')?.querySelector('.publication-field-label')?.textContent === '依据' &&
+        confirm instanceof HTMLButtonElement && !confirm.disabled && confirm.getAttribute('aria-label') === '设为发稿版本' &&
         cancel instanceof HTMLButtonElement && !cancel.disabled && cancel.textContent === '取消' &&
-        reason instanceof HTMLElement && !reason.hidden && (reason.textContent ?? '').startsWith('还需要选择一个里程碑版本');
-    })()`, 'designate-form-states-everything-and-preselects-nothing');
+        reason instanceof HTMLElement && reason.hidden;
+    })()`, 'designate-form-preselects-the-newest-with-defaults');
     await chooseDesignation(renderer, second, 'designate-choose-second');
     await assertRenderer(renderer, `(() => { const values = window.__j07.summary(); return values[0] === ${JSON.stringify(EXCERPT.title)} && values[1].startsWith('主稿件 · 当前修订版 r2') && values[2].startsWith(${JSON.stringify(`「${SECOND.label}」 · r2 · `)}) && values[3] === '与当前稿件一致' && values[4] === '本机编辑' && values[5] === '确认时记录'; })()`, 'designate-summary-names-the-exact-version');
     // 发稿范围 counts characters as the service does: 81 CJK characters are too many, while 80 characters
@@ -1527,12 +1605,13 @@ async function main() {
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
 
     at('j14-designate-keyboard');
-    // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice, an arrow chooses, Tab
+    // The form without a pointer: Enter on 设为发稿版本… opens it on its first choice — the newest milestone, already chosen with
+    // the routine scope and basis (Issue #1410 item 22) — an arrow chooses the other, Tab
     // reaches 发稿范围, 依据, the confirm and 取消 with visible focus, and Enter on 取消 closes it with focus back
     // on the opener and nothing recorded.
     await assertRenderer(renderer, `(() => { const open = window.__j07.action('designate'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.focus(); return document.activeElement === open; })()`, 'keyboard-opener-focused');
     await pressEnter(renderer);
-    await waitFor(renderer, `(() => { const radios = window.__j07.radios(); return window.__j07.form() !== null && radios.length === 2 && document.activeElement === radios[0] && radios.every((radio) => !radio.checked); })()`, 'keyboard-form-opens-on-its-first-choice', 10_000);
+    await waitFor(renderer, `(() => { const radios = window.__j07.radios(); return window.__j07.form() !== null && radios.length === 2 && document.activeElement === radios[0] && radios[0].checked && !radios[1].checked && window.__j07.field('scope')?.value === '全书定稿' && window.__j07.field('basis')?.value === '编辑审定通过'; })()`, 'keyboard-form-opens-on-its-first-choice', 10_000);
     await press(renderer, 'ArrowDown');
     await waitFor(renderer, `(() => { const radios = window.__j07.radios(); return document.activeElement === radios[1] && radios[1].checked && !radios[0].checked; })()`, 'keyboard-arrow-chooses', 10_000);
     await press(renderer, 'Tab');
@@ -1659,24 +1738,27 @@ async function main() {
       const cards = Array.from(block.querySelectorAll('li.production-document-card'));
       return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
         JSON.stringify(cards.map((card) => card.dataset.documentTypeId + ':' + card.querySelector('h4')?.textContent + ':' + card.dataset.documentState)) === ${JSON.stringify(JSON.stringify(DOCUMENT_TYPES.map(([typeId, label]) => `${typeId}:${label}:none`)))} &&
+        // New documents are made on 稿件 (Issue #1403): the technical card keeps 本书不做 and no way of making one.
         cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
-          window.__j07.cardAction(card.dataset.documentTypeId, 'create')?.disabled === false &&
+          window.__j07.cardAction(card.dataset.documentTypeId, 'create') === null && window.__j07.cardAction(card.dataset.documentTypeId, 'blank') === null &&
           window.__j07.cardAction(card.dataset.documentTypeId, 'notForThisBook')?.disabled === false) &&
         !/%|百分/.test(block.textContent ?? '');
     })()`, 'documents-five-cards-none-made');
 
     at('document-create');
-    // 从来源材料创建… offers the Book's source material, none preselected; 创建文档 waits for a choice, then the 新闻稿 opens
+    // 从来源材料创建… offers the Book's source material, the first chosen (Issue #1410 item 23); 创建文档, then the 新闻稿 opens
     // on the manuscript's own surface — named by its type and 版本 1, with the 工作流程 column beside it and nothing of the
     // manuscript's own: no 审阅, no 分析, no milestone, no 发稿.
-    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="create"]', 'document-create-open');
-    await waitFor(renderer, `window.__j07.card('news-release')?.querySelector('form.document-create') !== null && document.activeElement === window.__j07.card('news-release').querySelector('input[name="document-source"]')`, 'document-create-form');
-    await assertRenderer(renderer, `(() => { const form = window.__j07.card('news-release').querySelector('form.document-create'); const radios = Array.from(form.querySelectorAll('input[name="document-source"]')); return radios.length === 1 && !radios[0].checked && form.querySelector('legend')?.textContent === '选择来源材料 · 文档从材料创建，材料本身不变' && (form.querySelector('label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === true; })()`, 'document-create-nothing-preselected');
-    await assertRenderer(renderer, `(() => { const radio = window.__j07.card('news-release').querySelector('input[name="document-source"]'); radio.click(); return radio.checked && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === false; })()`, 'document-create-choose');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmCreate"]', 'document-create-confirm');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'document-opened', 120_000);
+    // Since Issue #1403 the 新闻稿 is made on 稿件: 新建 / 导入衍生稿件 → 稿件题目 → 新闻稿 → 从来源材料创建.
+    await openManuscript(renderer, 'document-create');
+    await openDerivativePanel(renderer, { title: '新闻稿', typeId: 'news-release', mode: 'source' }, 'document-create');
+    await waitFor(renderer, `document.activeElement === document.querySelector('.derivative-create-form input[name="derivative-source"]')`, 'document-create-form');
+    await assertRenderer(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const radios = Array.from(form.querySelectorAll('input[name="derivative-source"]')); return radios.length === 1 && radios[0].checked && form.querySelector('.derivative-sources legend')?.textContent === '来源材料' && (form.querySelector('.derivative-sources label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && form.querySelector('[data-document-field="title"]')?.value === '新闻稿'; })()`, 'document-create-first-source');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector('.derivative-create-form input[name="derivative-source"]'); radio.click(); return radio.checked && document.querySelector('[data-document-action="create-derivative"]')?.disabled === false; })()`, 'document-create-choose');
+    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'document-create-confirm');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="news-release"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'document-opened', 120_000);
     const surface = await renderer.evaluate(`(() => {
-      const shell = document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"]');
+      const shell = document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="news-release"]');
       const lens = shell?.querySelector('aside.document-lens');
       const work = Array.from(shell?.querySelectorAll('nav.book-work-group button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent);
       const edge = Array.from(shell?.querySelectorAll('.edge-entries button') ?? []).map((item) => item.dataset.edgeEntry);
@@ -1695,7 +1777,10 @@ async function main() {
         originMarks: lens?.querySelector('.document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)},
         work: work.length === 0 && document.querySelector('#app-sidebar [data-nav-book-section="deliverables"]') !== null,
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
-        edge: JSON.stringify(edge) === '["navigation"]',
+        edge: JSON.stringify(edge) === '["navigation","comments"]',
+        // It is one of the Book's 稿件 (Issue #1403): the switcher marks it current, beside the manuscript.
+        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null]]' &&
+          shell?.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"]')?.textContent === '[新闻稿] 新闻稿',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
         // The surface's own words, not the document's or the Book's: the text in the editor is the draft's, and this
@@ -1720,7 +1805,7 @@ async function main() {
     const beforeDocumentEdit = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
     requireJourney(beforeDocumentEdit !== null, 'document-edit-scope');
     // An edit is written to the document's own journal; 保存为版本 makes it 版本 2, and the column lists both.
-    await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DOCUMENT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-edit');
+    await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(DOCUMENT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-edit');
     await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'document-edit-save-ready');
     await click(renderer, '保存', 'document-edit-save');
     await waitFor(renderer, journalEditPersisted(beforeDocumentEdit, DOCUMENT_EDIT), 'document-edit-durable');
@@ -1740,8 +1825,8 @@ async function main() {
       };
       return true;
     })()`, 'document-version-hold-frame');
-    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'document-save-version');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && window.__j07.status() === '已保存为版本 2'`, 'document-version-saved', 120_000);
+    await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="saveVersion"]', 'document-save-version');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && window.__j07.status() === '已保存为版本 2'`, 'document-version-saved', 120_000);
     await assertRenderer(renderer, `(() => { const versions = Array.from(document.querySelectorAll('aside.document-lens ol.document-version-list > li')).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? '')); return JSON.stringify(versions) === '["2:true","1:"]' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-two-versions');
 
     at('document-workflow');
@@ -1763,7 +1848,7 @@ async function main() {
       throw error;
     }
     at('document-task-target');
-    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="start-task"]', 'document-task-open');
+    await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
     await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
     await clickSelector(renderer, '.task-composer [data-task-composer-action="save-draft"]', 'document-task-save');
@@ -1808,13 +1893,13 @@ async function main() {
     // Its workflow at a glance (WORK-005): the summary, the first 下一项 and a chip per phase in its state.
     // The card reads 下一项需要处理 and the seven phases before 交付状态 (§9 总览页, DELIV-001; Issue #626).
     await assertRenderer(renderer, `(() => { const workflow = window.__j07.card('news-release').querySelector('.document-workflow-card'); const delivery = window.__j07.card('news-release').querySelector('.document-delivery-line'); return workflow !== null && delivery !== null && (workflow.compareDocumentPosition(delivery) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 && workflow?.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理' && workflow.querySelector('.document-workflow-next-line')?.textContent === '下一项需要处理：起草 · 已重新打开' && JSON.stringify(Array.from(workflow.querySelectorAll('li.phase-chip'), (chip) => chip.dataset.phaseId + ':' + chip.dataset.phaseState)) === JSON.stringify(['intake:not-started', 'source-development:skipped', 'drafting:reopened', 'review-verification:not-started', 'finalization:not-started', 'delivery:not-started', 'maintenance:not-started']); })()`, 'document-card-workflow');
-    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && card.querySelector('.document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create')?.disabled === false; })()`, 'document-card-names-the-version');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && card.querySelector('.document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
 
     at('document-not-for-this-book');
     // 本书不做 is one record, and 恢复 another; focus stays with the card's own next action.
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="promotion-article"] [data-document-action="notForThisBook"]', 'document-not-for-this-book');
     await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'not-for-this-book' && document.activeElement === window.__j07.cardAction('promotion-article', 'restore') && window.__j07.status() === '已标为本书不做'`, 'document-not-for-this-book-recorded');
-    await assertRenderer(renderer, `window.__j07.card('promotion-article').querySelector('.document-not-for-this-book')?.textContent === '本书不做' && window.__j07.cardAction('promotion-article', 'create')?.disabled === true`, 'document-not-for-this-book-card');
+    await assertRenderer(renderer, `window.__j07.card('promotion-article').querySelector('.document-not-for-this-book')?.textContent === '本书不做' && window.__j07.cardAction('promotion-article', 'create') === null`, 'document-not-for-this-book-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="promotion-article"] [data-document-action="restore"]', 'document-restore');
     await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'none' && document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook') && window.__j07.status() === '已恢复'`, 'document-restored');
     const documentsRead = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((documents) => documents.types.map((type) => [type.typeId, type.notForThisBook, type.document === null ? null : type.document.versions.map((version) => version.label)]))`);
@@ -1892,7 +1977,7 @@ async function main() {
     // The document's 工作流程 column lists the delivery beside its versions. An edit after it: the card reads
     // 交付后有修改 (DELIV-004) beside 有修改尚未保存为版本.
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'changed-open');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'changed-document', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 2' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'changed-document', 120_000);
     await assertRenderer(renderer, `(() => {
       const lens = document.querySelector('aside.document-lens');
       const records = Array.from(lens?.querySelectorAll('ol.document-lens-deliveries > li') ?? []);
@@ -1906,7 +1991,7 @@ async function main() {
     await waitFor(renderer, `(() => { const row = document.querySelector('aside.document-lens li.document-phase[data-phase-id="delivery"]'); return row?.dataset.phaseState === 'in-progress' && row.dataset.phaseWaiting === 'false' && row.querySelector('.phase-pill')?.textContent === '进行中' && window.__j07.status() === '「交付」已开始'; })()`, 'changed-delivery-started');
     const beforeChangedEdit = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
     requireJourney(beforeChangedEdit !== null, 'changed-edit-scope');
-    await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
+    await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
     await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'changed-edit-save-ready');
     await click(renderer, '保存', 'changed-edit-save');
     await waitFor(renderer, journalEditPersisted(beforeChangedEdit, DELIVERY_EDIT), 'changed-edit-durable');
@@ -1997,7 +2082,8 @@ async function main() {
     at('package-conditions');
     // 图书交付包 (Issue #416, S67a; BUNDLE-001 to 005): the last block of 交付物 says what a package is and is not and
     // lists its conditions — the 发稿版本 set, with 自发稿版本后有修改 beside it; the 新闻稿 delivered; the four other
-    // types absent; these optional items are excluded and preparation waits only for a purpose. A row's route
+    // types absent; these optional items are excluded and do not hold preparation back, and an empty purpose is the routine
+    // 常规交付打包 (Issue #1410 item 1), so 准备图书交付包 is available at once. A row's route
     // takes the editor to where it is met: here, the type's own card.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'true' && window.__j07.condition('document:news-release')?.dataset.conditionMet === 'true'`, 'package-read');
     await assertRenderer(renderer, `(() => {
@@ -2005,6 +2091,7 @@ async function main() {
       const rows = Array.from(bundle.querySelectorAll('ol.package-condition-list > li'))
         .map((row) => row.dataset.conditionId + ':' + row.dataset.conditionMet + ':' + (row.querySelector('.package-condition-detail')?.textContent ?? ''));
       const prepare = bundle.querySelector('[data-package-action="prepare"]');
+      const purpose = bundle.querySelector('[data-package-field="purpose"]');
       return bundle.querySelector('.package-statement')?.textContent === ${JSON.stringify(PACKAGE_STATEMENT)} &&
         JSON.stringify(rows) === ${JSON.stringify(JSON.stringify([
           `publication:true:发稿版本「${FIRST.label}」 · r1`,
@@ -2014,15 +2101,19 @@ async function main() {
         ]))} &&
         window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
         window.__j07.condition('document:news-release').querySelector('[data-package-route]') === null &&
-        prepare instanceof HTMLButtonElement && prepare.disabled && window.__j07.packageReason() === '先写明交付包用途。' &&
+        prepare instanceof HTMLButtonElement && !prepare.disabled && window.__j07.packageReason() === '' &&
+        purpose instanceof HTMLInputElement && purpose.value === '' && purpose.placeholder === '常规交付打包（可改写）' &&
         !/%|百分/.test(bundle.textContent ?? '');
     })()`, 'package-conditions-name-what-is-missing');
-    await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); input.value='未创建附属文档也可打包'; input.dispatchEvent(new Event('input',{bubbles:true})); const enabled=!window.__j07.pkg().querySelector('[data-package-action=prepare]').disabled; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return enabled; })()`, 'package-optional-documents-do-not-block');
+    // A purpose the editor writes still has its limit: past 80 characters 准备 is held with the reason, and clearing the field
+    // gives the routine purpose back; the four documents not yet created never hold it.
+    await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); const prepare=()=>window.__j07.pkg().querySelector('[data-package-action=prepare]'); input.value='长'.repeat(81); input.dispatchEvent(new Event('input',{bubbles:true})); const held=prepare().disabled && window.__j07.packageReason()==='交付包用途过长。'; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return held && !prepare().disabled && window.__j07.packageReason()===''; })()`, 'package-optional-documents-do-not-block');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
-    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'create')`, 'package-route-focuses-the-card');
+    // A type with no document yet: the technical card's own next action is 本书不做 (new documents are made on 稿件, Issue #1403).
+    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
 
     at('package-not-for-this-book');
-    // The four other types 本书不做 on their own cards: every condition holds, 准备 waits only for a purpose, and the
+    // The four other types 本书不做 on their own cards: every condition holds, 准备 is available on the routine purpose, and the
     // preview lists the 发稿版本 and the 新闻稿 at its delivered 版本 3 as included, the four types and the fixed
     // exclusions as left out, and what the package cannot say.
     for (const typeId of OTHER_TYPES) {
@@ -2040,7 +2131,8 @@ async function main() {
         ]))} &&
         bundle.querySelector('ul.package-excluded > li[data-item-kind="readers-report"] .package-item-detail')?.textContent === '本书没有审稿意见' &&
         JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
-        bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '先写明交付包用途。';
+        !bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '' &&
+        bundle.querySelector('[data-package-field="purpose"]')?.value === '';
     })()`, 'package-preview-lists-what-it-holds');
 
     at('package-prepare');
@@ -2077,9 +2169,9 @@ async function main() {
     await assertRenderer(renderer, `JSON.stringify(window.__j07.packageVersions().map((item) => item.dataset.packageVersion + ':' + item.dataset.packageCurrent)) === '["2:true","1:false"]'`, 'package-v2-above-v1');
 
     at('package-export');
-    // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes and binds nothing until a
-    // folder is chosen; 选择位置… answers the folder dialog with the run's own empty folder and prepares every file there,
-    // writing none; 按上述方式导出 writes them one by one, each with its receipt. The folder then holds exactly the four
+    // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes, every one ticked to begin
+    // with; 选择位置… answers the folder dialog with the run's own empty folder, and the place chosen is the approval
+    // (Issue #1410 item 1): the files are written one by one at once, each with its receipt. The folder then holds exactly the four
     // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, the 定稿 评估记录 (Issue #429) and the 交付包清单
     // in the package's own words — v2's history says so, and 交付物's export records and the package itself stay as they were.
     const packageFiles = [
@@ -2098,16 +2190,15 @@ async function main() {
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.status() === '要导出的文件已列出'`, 'package-export-reviewed', 60_000);
     await assertRenderer(renderer, `(() => {
       const panel = window.__j07.packageExport();
-      const approve = panel.querySelector('[data-package-action="export-approve"]');
-      const reason = document.getElementById(approve?.getAttribute('aria-describedby') ?? '');
+      const boxes = Array.from(panel.querySelectorAll('input[data-package-member]'));
       return panel.closest('li')?.dataset.packageVersion === '2' && panel.querySelector('h5')?.textContent === '导出 · 图书交付包 v2' &&
         panel.querySelector('.export-local-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_STATEMENT)} &&
         JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('', '')))} &&
-        approve instanceof HTMLButtonElement && approve.disabled && reason?.textContent === '先选择位置。' &&
+        panel.querySelector('[data-package-action="export-approve"]') === null &&
         panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(PACKAGE_EXPORT_FOLDER_UNCHOSEN)} &&
-        document.activeElement === panel.querySelector('h5') && panel.querySelector('[data-package-action="export-choose"]')?.disabled === true &&
-        Array.from(panel.querySelectorAll('input[data-package-member]')).every((box) => !box.checked) && !/%|百分/.test(panel.textContent ?? '');
-    })()`, 'package-export-lists-the-files');
+        document.activeElement === panel.querySelector('h5') && panel.querySelector('[data-package-action="export-choose"]')?.disabled === false &&
+        boxes.length === ${packageFiles.length} && boxes.every((box) => box.checked) && !/%|百分/.test(panel.textContent ?? '');
+    })()`, 'package-export-lists-the-files-all-ticked');
     // 含批注 and 含修改建议（作为修订） are offered on (EXP-023), and each file carries its own Export Fidelity Review
     // (EXP-007), open by itself when something in it is not written as it was: the classes the service's own review of the
     // version shows, and its restoration line.
@@ -2139,25 +2230,14 @@ async function main() {
     await waitFor(renderer, switchedTo(false), 'package-export-reviewed-without-annotations', 60_000);
     await toggleAnnotations('package-export-annotations-on');
     await waitFor(renderer, switchedTo(true), 'package-export-reviewed-with-annotations', 60_000);
-    const selectPackageMember = (key) => assertRenderer(renderer, `(() => {
+    // Unticking leaves a file behind: the first batch is every file but the 新闻稿.
+    const unselectPackageMember = (key) => assertRenderer(renderer, `(() => {
       const box = window.__j07.packageExport()?.querySelector('input[data-package-member=' + CSS.escape(${JSON.stringify(key)}) + ']');
-      if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || box.disabled || box.checked) return false;
+      if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox' || box.disabled || !box.checked) return false;
       box.focus(); box.click(); return true;
-    })()`, 'package-export-select-member');
-    for (const [key] of firstMembers) await selectPackageMember(key);
+    })()`, 'package-export-unselect-member');
+    await unselectPackageMember('document:news-release');
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-choose');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared' && window.__j07.status() === '已准备好导出文件，等待你确认。'`, 'package-export-prepared', 60_000);
-    await assertRenderer(renderer, `(() => {
-      const panel = window.__j07.packageExport();
-      const approve = panel.querySelector('[data-package-action="export-approve"]');
-      return panel.querySelector('.package-export-folder-line')?.textContent === ${JSON.stringify(`导出到：${packageFolder}`)} &&
-        JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('prepared', '已准备', firstMembers)))} &&
-        approve instanceof HTMLButtonElement && !approve.disabled && document.activeElement === approve &&
-        panel.querySelector('[data-package-action="export-choose"]')?.textContent === '重新选择位置…' &&
-        (window.__j07.packageVersions()[0].querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 暂无导出记录');
-    })()`, 'package-export-bound-to-the-folder');
-    requireJourney((await readdir(packageFolder)).length === 0, 'package-export-prepared-writes-nothing');
-    await clickSelector(renderer, packageAction('export-approve'), 'package-export-approve');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 3 个文件'`, 'package-export-written', 60_000);
     await assertRenderer(renderer, `(() => {
       const panel = window.__j07.packageExport();
@@ -2184,12 +2264,10 @@ async function main() {
     await reopenDeliverables(renderer, 'package-export-second-batch');
     await openRemainingPackageExport(renderer);
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready'`, 'package-export-remaining-reviewed', 60_000);
-    await selectPackageMember('document:news-release');
+    for (const [key] of firstMembers) await unselectPackageMember(key);
     await clickSelector(renderer, packageAction('export-choose'), 'package-export-remaining-choose');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-export-remaining-prepared', 60_000);
-    await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-prepared-member');
-    await clickSelector(renderer, packageAction('export-approve'), 'package-export-remaining-approve');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 1 个文件'`, 'package-export-remaining-written', 60_000);
+    await assertRenderer(renderer, `window.__j07.packageExport().querySelectorAll('ol.package-export-files > li').length === 1`, 'package-export-one-written-member');
     await assertRenderer(renderer, `window.__j07.packageVersions()[0].querySelectorAll('ol.package-export-list > li').length === 2`, 'package-export-two-subset-receipts');
     // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
     // for byte, as the package and its Delivery Records answer them.
@@ -2242,10 +2320,8 @@ async function main() {
     // 导出为压缩包 is a radio of the export card, not a button.
     await assertRenderer(renderer, `(() => { const radio = window.__j07.packageExport()?.querySelector('input[type="radio"][name="package-export-route"][value="archive"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled || radio.checked) return false; radio.click(); return radio.checked; })()`, 'package-archive-route');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'ready' && window.__j07.packageExport()?.querySelector('input[value=archive]')?.checked === true`, 'package-archive-reviewed', 60_000);
+    requireJourney(!existsSync(packageArchive), 'package-archive-nothing-before-the-place');
     await clickSelector(renderer, packageAction('export-choose'), 'package-archive-choose');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'prepared'`, 'package-archive-prepared', 60_000);
-    requireJourney(!existsSync(packageArchive), 'package-archive-prepared-writes-nothing');
-    await clickSelector(renderer, packageAction('export-approve'), 'package-archive-approve');
     await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 压缩包 · 3 个文件'`, 'package-archive-written', 60_000);
     const archiveBytes = await readFile(packageArchive);
     const archiveMembers = unzipSync(archiveBytes);
@@ -2495,9 +2571,9 @@ async function main() {
     requireJourney(typeof documentsBefore === 'string' && documentsAfter === documentsBefore, 'documents-restart-moved-nothing');
     await waitFor(renderer, `window.__j07.card('news-release')?.dataset.documentState === 'document' && window.__j07.card('news-release').dataset.documentDeliveries === '2' && window.__j07.card('news-release').dataset.documentChangedSinceDelivery === 'false' && window.__j07.packageVersions().length === 2 && (window.__j07.packageVersions()[0].querySelector('ol.package-export-list > li .package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 压缩包 · 3 个文件 · ')`, 'documents-restart-card');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="open"]', 'documents-restart-open');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar h2')?.textContent === '新闻稿 · 版本 3' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)})`, 'documents-restart-document');
     // Reopened from 交付物 after the restart, the document still says how its material was read (Issue #547).
-    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens .document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)}`, 'documents-restart-origin-marks');
+    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] aside.document-lens .document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)}`, 'documents-restart-origin-marks');
     await assertNoForbiddenWords(renderer, 'documents-without-forbidden-words');
 
     at('knowledge-exemplars');
@@ -2671,14 +2747,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'writing-book-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-manuscript', 120_000);
-    await openDeliverables(renderer, 'writing-deliverables');
+    // 写作 lives on 稿件 since Issue #1403: the Book opened on its manuscript is where it begins.
 
     at('writing-sheet');
     // 新建文档 · 写作任务 under 交付 · 生产文档: 新建文档… opens the sheet in place — the five house types with none chosen, what AI7
     // will reference (each part the Book does not have says so, the 范例 once a type is chosen), the four consequence rows and
     // 快速开始 waiting, with why, for a writing 默认执行规则 (S84b).
     const READ_WRITING = `(() => {
-      const section = document.querySelector('[data-screen="book-deliverables"] .writing-task');
+      const section = document.querySelector('[data-screen="editor"] .writing-task');
       if (!(section instanceof HTMLElement)) return null;
       const quick = section.querySelector('[data-writing-action="quick"]');
       return {
@@ -2716,36 +2792,39 @@ async function main() {
       error.detail = page;
       throw error;
     };
-    const writingBefore = await readWriting((page) => page.heading === '新建文档 · 写作任务', 'writing-section');
+    const writingBefore = await readWriting((page) => page.heading === 'AI 写作', 'writing-section');
     requireJourney(writingBefore.state === 'none' && writingBefore.task === null && writingBefore.drafted.length === 0 && !writingBefore.open &&
-      JSON.stringify(writingBefore.buttons) === JSON.stringify([['new', '新建文档…', false]]), 'writing-section-words', writingBefore);
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-new');
+      JSON.stringify(writingBefore.buttons) === '[]', 'writing-section-words', writingBefore);
+    // 新建 / 导入衍生稿件 → 稿件题目 → 宣传文章 → AI 写作生成 opens the sheet with the type chosen and the title carried (Issue #1404).
+    await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-new');
+    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-new-continue');
     const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
+    await assertRenderer(renderer, `(() => { const first = document.querySelector('.writing-task-sheet [data-document-field]'); return first?.dataset.documentField === 'title' && first.value === '宣传文章'; })()`, 'writing-sheet-title-first');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
     requireJourney(JSON.stringify(writingSheet.similarMaterials) === JSON.stringify([[1, '相似段落检索', 1_000,
       [['使用当前选中文字', 'button', false], ['检索相似段落', 'button', false]]]]), 'writing-sheet-retrieval-control', writingSheet.similarMaterials);
-    requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, false, false])) &&
+    requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, typeId === WRITING_REQUEST.typeId, false])) &&
       JSON.stringify(writingSheet.references) === JSON.stringify([
-        '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '选好类型后显示',
+        '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '本社暂无其他图书的宣传文章范例，本次不参考范例',
         // 资料库 (Issue #428): nothing this Book's Tasks may list yet.
         WRITING_MATERIALS_NONE,
         `《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`,
       ]) &&
       JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个段落，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
       writingSheet.quick === null, 'writing-sheet-words', writingSheet);
-    // 先看计划 with no type chosen asks for one; choosing 宣传文章 names its 范例 — none in this house.
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-unchosen');
-    await readWriting((page) => page.problem === '请选择一类文档。', 'writing-pick-type');
-    await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'writing-type-choose');
+    // The type the panel chose names its 范例 — none in this house.
+
+
+
     await readWriting((page) => page.references[2] === '本社暂无其他图书的宣传文章范例，本次不参考范例' && page.problem === null &&
       page.quick === null, 'writing-type-chosen');
-    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-audience');
-    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-channel');
+    await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-audience');
+    await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-channel');
 
     at('writing-plan');
     // 先看计划 prepares the Task and opens its plan in the Task Drawer: the type and the editor's words, each reference part, its
     // two steps, and that it copies no 范例; no button of the drawer carries 授权.
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-open');
+    await clickSelector(renderer, '[data-screen="editor"] .writing-task [data-writing-action="plan"]', 'writing-plan-open');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-plan-ready', 120_000);
     const writingPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label), plan.notDo.editorial.includes('不照抄范例：与范例有连续 12 个字以上相同（跨标点、空格或外文词时 16 个字；拉丁字母文字为 8 个词，跨标点、数字或编号时 11 个词）的草稿不予采用')]))`);
@@ -2765,6 +2844,11 @@ async function main() {
     const writingEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'writing-ended');
     requireJourney(writingEnded.state === 'settled', 'writing-settled', writingEnded);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-drawer-settled', 30_000);
+    // AI7's draft waits to be opened: a plan started from the drawer leaves 打开草稿 to the editor.
+    const writingDrafted = await readWriting((page) => page.drafted.length === 1, 'writing-drafted');
+    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成' && writingDrafted.drafted[0][0] === 'promotion-article' &&
+      (writingDrafted.drafted[0][1] ?? '').startsWith('「宣传文章」的草稿已写好（') &&
+      (writingDrafted.drafted[0][1] ?? '').endsWith('）；打开后成为这本书的宣传文章，处于「起草」阶段。'), 'writing-drafted-words', writingDrafted);
 
     at('writing-rule');
     // 设为快速开始默认… (Issue #432, S84b; AUTH-009, TASK-019): the settled plan offers it in 完整, the standard start having set
@@ -2774,14 +2858,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-plan-default-rule="offered"] [data-task-drawer-control="default-rule"]')?.disabled === false`, 'writing-rule-offered');
     const writingRulesBefore = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => page.rules.filter((rule) => rule.taskKind === 'writing').length)`);
     requireJourney(writingRulesBefore === 0, 'writing-rule-none', writingRulesBefore);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-open');
-    const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer .task-plan-default-rule-confirm'); if (!(confirm instanceof HTMLElement) || confirm.hidden) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
+    // What the rule binds is one closed disclosure beside the action, and the one click sets it (Issue #1410 item 19).
+    const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer details.task-plan-default-rule-detail'); if (!(confirm instanceof HTMLElement) || confirm.open) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
     const confirmRead = typeof writingConfirm === 'string' ? JSON.parse(writingConfirm) : null;
     requireJourney(confirmRead !== null && confirmRead[0] === WRITING_RULE_LEAD &&
       confirmRead[1].map(([label]) => label).join('|') === '模型服务|工序|预算上限|发送内容类别|会得到|适用于' &&
       confirmRead[1][1][1].startsWith('写作任务 · ') && confirmRead[1][2][1] === '未设置任务预算上限' &&
       confirmRead[1][5][1] === '新建文档「宣传文章」', 'writing-rule-confirm', writingConfirm);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule-confirm"]', 'writing-rule-set');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-set');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-default-rule-current')?.textContent === ${JSON.stringify(`这本书的默认执行规则：${WRITING_RULE_NAME}（使用中，由这份计划设定）`)}`, 'writing-rule-set-shown');
     const writingRules = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => JSON.stringify(page.rules.filter((rule) => rule.taskKind === 'writing').map((rule) => [rule.name, rule.pattern, rule.state, rule.bookTitle])))`);
     requireJourney(writingRules === JSON.stringify([[WRITING_RULE_NAME, WRITING_RULE_PATTERN, 'active', WRITING_TITLE]]), 'writing-rule-record', writingRules);
@@ -2793,25 +2877,19 @@ async function main() {
 
     at('writing-quick-start');
     // The ordinary primary action prepares and starts without a rule or plan drawer.
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-direct-new');
+    await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-direct-new');
+    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-direct-continue');
     await readWriting((page) => page.open, 'writing-direct-sheet');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
     await fill(renderer, '.writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-direct-channel');
     await clickSelector(renderer, '.writing-task [data-writing-action="start"]', 'writing-direct-start');
-    const directEnded = await readWriting((page) => !page.open && ['settled','failed','interrupted'].includes(page.state), 'writing-direct-ended');
-    requireJourney(directEnded.state === 'settled', 'writing-direct-settled', directEnded);
     await assertRenderer(renderer, `document.body.dataset.taskDrawer !== 'open' && !document.querySelector('.writing-task [data-writing-action="quick"]')`, 'writing-no-plan-wall');
 
     at('writing-draft');
-    // AI7's draft waits to be opened; 打开草稿 makes it the Book's 宣传文章 — its words the draft's, 版本 1 — and its 起草 phase is
-    // started by that command and nothing else.
-    const writingDrafted = await readWriting((page) => page.drafted.length === 1, 'writing-drafted');
-    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成' && writingDrafted.drafted[0][0] === 'promotion-article' &&
-      (writingDrafted.drafted[0][1] ?? '').startsWith('「宣传文章」的草稿已写好（') &&
-      (writingDrafted.drafted[0][1] ?? '').endsWith('）；打开后成为这本书的宣传文章，处于「起草」阶段。'), 'writing-drafted-words', writingDrafted);
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="open-draft"]', 'writing-open-draft');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent === '宣传文章 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'writing-draft-surface', 120_000);
+    // 开始写作 begun on 稿件 opens its draft by itself once written (Issue #1403): the Book's 宣传文章 under the title written first —
+    // its words the draft's, 版本 1 — its 起草 phase started by that opening and nothing else.
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent === '宣传文章 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'writing-draft-surface', 120_000);
     const writingTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
     requireJourney(JSON.stringify(writingTexts) === JSON.stringify(await writingDraftTexts()), 'writing-draft-words', Array.isArray(writingTexts) ? writingTexts.length : null);
     await assertRenderer(renderer, `(() => { const rows = Array.from(document.querySelectorAll('aside.document-lens li.document-phase')); return rows.length === 7 && rows.find((row) => row.dataset.phaseId === 'drafting')?.dataset.phaseState === 'in-progress' && rows.filter((row) => row.dataset.phaseState !== 'not-started').length === 1; })()`, 'writing-draft-drafting');
@@ -2819,14 +2897,15 @@ async function main() {
     at('writing-card');
     // Back on 交付物 the 宣传文章's card names the document as drafted by the writing Task, its 起草 under way; nothing is left to
     // open, and nothing on the page or in the records says it was delivered or sent.
+    // Nothing is left to open on 稿件.
+    const writingAfter = await readWriting((page) => page.state === 'settled', 'writing-after');
+    requireJourney(writingAfter.drafted.length === 0 && !writingAfter.open, 'writing-nothing-to-open', writingAfter);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'writing-back');
     await waitForDeliverables(renderer, 'writing-card');
     await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'document'`, 'writing-card-document');
     await assertRenderer(renderer, `(() => { const card = window.__j07.card('promotion-article'); return card?.querySelector('.document-card-line')?.textContent === '版本 1 · 由写作任务起草 · 范例只参照，不复制' && card.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理'; })()`, 'writing-card-words');
     const writingDocument = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((page) => { const document = page.types.find((type) => type.typeId === 'promotion-article')?.document; return document ? JSON.stringify([document.origin.drafted, document.versions.length, document.workflow.phases.find((phase) => phase.phaseId === 'drafting')?.state, document.workflow.transitions]) : null; })`);
     requireJourney(writingDocument === JSON.stringify([true, 1, 'in-progress', 1]), 'writing-card-service', writingDocument);
-    const writingAfter = await readWriting((page) => page.state === 'settled', 'writing-after');
-    requireJourney(writingAfter.drafted.length === 0 && !writingAfter.open, 'writing-nothing-to-open', writingAfter);
     await assertNoForbiddenWords(renderer, 'writing-without-forbidden-words');
 
     at('writing-library-material');
@@ -2844,14 +2923,10 @@ async function main() {
     await click(renderer, '资料库', 'writing-library-tab');
     await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .library-materials')?.dataset.library === 'ready' && document.querySelectorAll('article.library-material').length === 0`, 'writing-library-empty');
     await clickSelector(renderer, '[data-library-action="add"]', 'writing-library-add');
-    await waitFor(renderer, `document.querySelector('.library-preview [data-library-field="title"]') !== null`, 'writing-library-preview');
-    await fill(renderer, '.library-preview [data-library-field="title"]', WRITING_LIBRARY_TITLE, 'writing-library-title');
+    // The file chosen in the dialog goes straight in under its own name as a 文档 (Issue #1410 item 29): no preview to confirm.
+    await waitFor(renderer, `document.querySelectorAll('article.library-material').length === 1 && document.querySelector('.library-preview') === null && (document.querySelector('article.library-material h3')?.textContent ?? '').includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})`, 'writing-library-added');
     // 资料库's choices are radio buttons: each is chosen as the editor chooses it, and must then read as chosen.
     const chooseLibrary = (selector, name) => assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(selector)}); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, name);
-    await chooseLibrary('.library-preview [data-library-choice="document"]', 'writing-library-kind');
-    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'writing-library-confirm-enabled');
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'writing-library-confirm');
-    await waitFor(renderer, `document.querySelectorAll('article.library-material').length === 1 && document.querySelector('.library-preview') === null`, 'writing-library-added');
     const libraryMaterialId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then((page) => page.materials.length === 1 ? page.materials[0].materialId : null)`);
     requireJourney(typeof libraryMaterialId === 'string' && UUID_PATTERN.test(libraryMaterialId), 'writing-library-identity', libraryMaterialId);
     await clickSelector(renderer, '[data-library-action="attribute"]', 'writing-library-attribute');
@@ -2884,18 +2959,18 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-library-books-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'writing-library-book-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-library-manuscript', 120_000);
-    await openDeliverables(renderer, 'writing-library-deliverables');
-    await readWriting((page) => page.heading === '新建文档 · 写作任务' && page.state === 'settled', 'writing-library-section');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-library-new');
+    await readWriting((page) => page.heading === 'AI 写作' && page.state === 'settled', 'writing-library-section');
+    await openDerivativePanel(renderer, { title: '评论文章', typeId: WRITING_LIBRARY_REQUEST.typeId, mode: 'writing' }, 'writing-library-new');
+    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-library-continue');
     const librarySheet = await readWriting((page) => page.open, 'writing-library-sheet');
-    const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="book-deliverables"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="book-deliverables"] .writing-task input[data-writing-material]').length] : null; })()`);
+    const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="editor"] .writing-task input[data-writing-material]').length] : null; })()`);
     requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料` &&
       JSON.stringify(libraryBox) === JSON.stringify([false, false, `《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料`, 1]), 'writing-library-offered', [librarySheet.references, libraryBox]);
-    await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_LIBRARY_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'writing-library-type');
-    await assertRenderer(renderer, `(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="book-deliverables"] .writing-task input[data-writing-material="${libraryMaterialId}"]`)}); if (!(box instanceof HTMLInputElement) || box.disabled || box.checked) return false; box.click(); return box.checked; })()`, 'writing-library-tick');
-    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');
-    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_LIBRARY_REQUEST.channel, 'writing-library-channel');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-library-plan-open');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="editor"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_LIBRARY_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'writing-library-type');
+    await assertRenderer(renderer, `(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[data-writing-material="${libraryMaterialId}"]`)}); if (!(box instanceof HTMLInputElement) || box.disabled || box.checked) return false; box.click(); return box.checked; })()`, 'writing-library-tick');
+    await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');
+    await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="channel"]', WRITING_LIBRARY_REQUEST.channel, 'writing-library-channel');
+    await clickSelector(renderer, '[data-screen="editor"] .writing-task [data-writing-action="plan"]', 'writing-library-plan-open');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-library-plan-ready', 120_000);
     const libraryPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.scope.send, plan.technical.find((row) => row.key === 'material-references')?.value ?? null,
@@ -2917,8 +2992,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-library-drawer-settled', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'writing-library-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'writing-library-drawer-closed');
-    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="open-draft"]', 'writing-library-open-draft');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="review-article"] .editor-toolbar h2')?.textContent === '评论文章 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'writing-library-draft-surface', 120_000);
+    await clickSelector(renderer, '[data-screen="editor"] .writing-task [data-writing-action="open-draft"]', 'writing-library-open-draft');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="review-article"] .editor-toolbar h2')?.textContent === '评论文章 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'writing-library-draft-surface', 120_000);
     const libraryTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
     requireJourney(JSON.stringify(libraryTexts) === JSON.stringify(await writingDraftTexts(WRITING_LIBRARY_DRAFT_TITLE)), 'writing-library-draft-words', Array.isArray(libraryTexts) ? libraryTexts.length : null);
     // The index the Run read is the one the plan pinned, unchanged.
@@ -2939,31 +3014,123 @@ async function main() {
     await click(renderer, '帮助', 'multi-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'multi-mode-ready');
     await assertRenderer(renderer, `(() => { const box=document.querySelector('.help-developer-mode input'); if(!box||box.disabled)return false; if(box.checked)box.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'multi-mode-off');
-    await openDeliverables(renderer, 'multi-deliverables');
-    await waitFor(renderer, `['blank','writing','import'].every(action=>{const button=window.__j07.cardAction('promotion-article',action);return button instanceof HTMLButtonElement&&!button.disabled;})`, 'multi-ordinary-actions');
-    await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="writing"]', 'multi-writing-entry');
-    await waitFor(renderer, `document.querySelector('.writing-task input[name="writing-type"][value="promotion-article"]')?.checked===true`, 'multi-writing-type');
-    await clickSelector(renderer, '.writing-task [data-writing-action="cancel"]', 'multi-writing-cancel');
+    // Issue #1403: in ordinary mode 稿件 lists the manuscript and every derivative document by type and title, and makes new ones.
+    await openManuscript(renderer, 'multi-manuscript');
+    await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
+    const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
+    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '+ 新建 / 导入衍生稿件', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
-    await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="blank"]', 'multi-blank');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent==='宣传文章 2'`, 'multi-blank-open');
-    await openDeliverables(renderer, 'multi-back');
-    await waitFor(renderer, `window.__j07.card('promotion-article')?.querySelectorAll('.production-document-row').length===2`, 'multi-two-rows');
+    // 空白新建 under the 稿件题目 offered for the type: the Book's title and the type, numbered after the one already made.
+    await openDerivativePanel(renderer, { typeId: 'promotion-article', mode: 'blank' }, 'multi-blank');
+    const offeredTitle = Array.from(`《${WRITING_TITLE}》宣传文章 2`).slice(0, 80).join('');
+    await assertRenderer(renderer, `document.querySelector('.derivative-create-form [data-document-field="title"]')?.value === ${JSON.stringify(offeredTitle)}`, 'multi-blank-title-offered');
+    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'multi-blank');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(offeredTitle)} && document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"][aria-current="page"]')?.textContent===${JSON.stringify(`[宣传文章] ${offeredTitle}`)}`, 'multi-blank-open', 120_000);
+    // Ordinary mode (Issue #1405): the document's column lists its saved versions — no seven phases, nothing of 交付 — and its 批注栏 is there.
+    await assertRenderer(renderer, `(() => { const lens = document.querySelector('aside.document-lens'); return lens !== null && lens.querySelector('li.document-phase, section.document-workflow') === null && !(lens.textContent ?? '').includes('交付') && lens.querySelectorAll('ol.document-version-list > li').length === 1 && document.querySelector('[data-edge-entry="comments"]') !== null; })()`, 'multi-ordinary-lens');
     at('multi-documents-ordinary-rename');
-    await assertRenderer(renderer, `(() => { const row=window.__j07.card('promotion-article').querySelectorAll('.production-document-row')[1]; row.querySelector('[data-document-action="rename"]').click(); return true; })()`, 'multi-rename-open');
-    await fill(renderer, '.production-document-row input[aria-label="文档题目"]', '另一篇宣传文章', 'multi-rename-title');
-    await clickSelector(renderer, '[data-document-action="confirmRename"]', 'multi-rename-save');
-    await waitFor(renderer, `window.__j07.card('promotion-article')?.querySelectorAll('.production-document-row h4')[1]?.textContent==='另一篇宣传文章'`, 'multi-renamed');
+    // 重命名 on the document's own title: Enter saves, the editor stays the same one, its text untouched.
+    await assertRenderer(renderer, `(() => { window.__j07.renameEditor = document.querySelector('[data-testid="manuscript-editor"]'); return window.__j07.renameEditor instanceof HTMLElement; })()`, 'multi-rename-hold-editor');
+    await clickSelector(renderer, '.editor-toolbar [data-document-action="rename"]', 'multi-rename-open');
+    await waitFor(renderer, `document.activeElement === document.querySelector('.editor-toolbar .document-title-input')`, 'multi-rename-input');
+    await fill(renderer, '.editor-toolbar .document-title-input', '另一篇宣传文章', 'multi-rename-title');
+    await assertRenderer(renderer, `(() => { const input = document.querySelector('.editor-toolbar .document-title-input'); input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`, 'multi-rename-enter');
+    await waitFor(renderer, `document.querySelector('.editor-toolbar .document-title-heading')?.textContent==='另一篇宣传文章' && document.querySelector('.editor-toolbar .document-title-input')===null && document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"][aria-current="page"]')?.textContent==='[宣传文章] 另一篇宣传文章' && document.querySelector('[data-testid="manuscript-editor"]')===window.__j07.renameEditor`, 'multi-renamed');
     at('multi-documents-ordinary-import');
-    await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="import"]', 'multi-import');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
-    await openDeliverables(renderer, 'multi-import-back');
-    await waitFor(renderer, `window.__j07.card('promotion-article')?.querySelectorAll('.production-document-row').length===3`, 'multi-three-rows');
+    // 导入文件 with no title written: the document is named after the file.
+    await openDerivativePanel(renderer, { typeId: 'promotion-article', mode: 'import' }, 'multi-import');
+    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'multi-import');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
+    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 4`, 'multi-four-listed');
     at('multi-documents-ordinary-identities');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>{const type=page.types.find(type=>type.typeId==='promotion-article');return type.documents.length===3&&new Set(type.documents.map(doc=>doc.documentId)).size===3&&type.document.documentId===type.documents[0].documentId&&type.documents.every(doc=>doc.versions.length===1);})`, 'multi-independent-identities');
     const primaryAfter = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
     requireJourney(primaryBefore===primaryAfter, 'multi-primary-unchanged');
+    at('multi-documents-ordinary-package');
+    // Ordinary 交付物 (Issue #1405): no document cards, Delivery Records or 维护事项 — a pointer to 稿件 — and 图书交付包 holds a
+    // ticked derivative document at a saved version with no delivery recorded.
+    await openDeliverables(renderer, 'multi-package');
+    await waitFor(renderer, `document.querySelectorAll('.deliverables-package .package-document-choices > li').length === 4`, 'multi-package-choices');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-manuscript"]')?.textContent === '前往稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
+    const renamedId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title==='另一篇宣传文章')?.documentId ?? null)`);
+    requireJourney(UUID_PATTERN.test(renamedId ?? ''), 'multi-package-renamed-id', renamedId);
+    await assertRenderer(renderer, `(() => { const box = document.querySelector('.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]'); if (!(box instanceof HTMLInputElement) || box.checked || box.disabled) return false; box.click(); return true; })()`, 'multi-package-tick');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.deliverables-package ul.package-included > li'), (item) => item.textContent).includes('宣传文章 · 《另一篇宣传文章》 · 版本 1')`, 'multi-package-included');
+    const deliveriesAfter = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).reduce((total, doc)=>total+doc.deliveries.length, 0))`);
+    requireJourney(deliveriesAfter === 0, 'multi-package-no-delivery', deliveriesAfter);
+
+    at('scoped-ai-edit');
+    // 就选中部分让 AI 修改… (Issue #1412) on the writing Book's exact sample1 manuscript, on a launch whose adapter answers from the
+    // authored fixture: its paragraph's neighbour is locked first; the answer also rewrites an id it was never given and the
+    // whole text, and only the selected sentence changes. Its applied card carries ✎ 已改 and is undone in one click.
+    await close();
+    renderer = await launch({ adapter: SCOPED_EDIT_FIXTURE });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]')`, 'scoped-product-ready');
+    await assertRenderer(renderer, PAGE_HELPERS, 'scoped-page-helpers');
+    await assertRenderer(renderer, SCOPED_HELPERS, 'scoped-helpers');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'scoped-book-open');
+    // The Book opens where it was left — a derivative document, last time — so its manuscript is chosen in 稿件's switcher.
+    await waitFor(renderer, `(() => { const shell=document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}]'); if(shell?.dataset.manuscriptKind==='derivative'){ document.querySelector('.manuscript-switcher-bar [data-manuscript-switch="primary"]')?.click(); return false; } return shell?.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'scoped-book-ready', 120_000);
+    // The sentence is found as an editor finds it: 查找, Enter.
+    await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')!=='true') nav.click(); Array.from(document.querySelectorAll('.navigation-modes button')).find((button)=>button.textContent==='查找')?.click(); const input=document.querySelector('#manuscript-search'); input.value=${JSON.stringify(SCOPED_SENTENCE_START)}; input.dispatchEvent(new Event('input',{bubbles:true})); input.focus(); return document.activeElement===input; })()`, 'scoped-find');
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.querySelector('.search-match-position')?.textContent.startsWith('1 /') && window.__j07Scoped.locate()`, 'scoped-sentence-found', 60_000);
+    await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')==='true') nav.click(); return window.__j07Scoped.locate(); })()`, 'scoped-navigation-closed');
+    // 🔒 the next paragraph from the selection menu: it is drawn locked, and the request below does not change because of it.
+    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-select');
+    await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-lock-menu');
+    await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-lock-menu-names-the-selection');
+    await waitFor(renderer, `window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-lock-item');
+    await assertRenderer(renderer, `(() => { window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-lock');
+    try {
+      await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true' && window.__j07Scoped.block(window.__j07Scoped.state.next).querySelector('[data-ai-lock-block]') !== null`, 'scoped-next-locked');
+    } catch (error) {
+      // Content-free codes only: where the lock stopped, never a word of the page.
+      const failed = await renderer.evaluate(`(async () => { const next=window.__j07Scoped.block(window.__j07Scoped.state.next); const status=document.querySelector('#persistence-status')?.textContent ?? ''; const toast=document.querySelector('[data-toast]')?.textContent ?? ''; const shell=document.querySelector('.editor-shell'); let direct='unread'; try { const locks=await window.ai7.inspectAiEditLocks({ manuscriptId: (await window.ai7.listPriorWork()).find((entry)=>entry.bookId===shell?.dataset.bookId)?.manuscriptId, branchId: (await window.ai7.listPriorWork()).find((entry)=>entry.bookId===shell?.dataset.bookId)?.branchId }); direct='locks-'+locks.blockIds.length+'-has-next-'+locks.blockIds.includes(window.__j07Scoped.state.next); } catch { direct='locks-read-failed'; } return ['next-'+(next===null?'gone':'present'), 'attr-'+(next?.dataset.aiLocked ?? 'none'), 'badges-'+(next?.querySelectorAll('[data-ai-lock-block]').length ?? 0), 'status-'+(status.includes('锁定没有保存')?'lock-failed':status.includes('锁定状态已经变化')?'stale':status.includes('已有新的写入')?'binding':status.length>0?'other':'empty'), 'toast-'+(toast.startsWith('已锁定')?'locked':toast.length>0?'other':'none'), 'menu-'+(document.querySelector('.editorial-mark-menu-layer [data-mark-menu]')?'open':'closed'), 'kind-'+(shell?.dataset.manuscriptKind ?? 'primary'), direct]; })()`).catch(() => ['probe-failed']);
+      throw journeyCheckFailure('J-07', 'scoped-next-locked', { failed, cause: error });
+    }
+    await assertRenderer(renderer, `window.__j07Scoped.snapshot()`, 'scoped-snapshot');
+    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-select');
+    await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-edit-menu');
+    await waitFor(renderer, `window.__j07Scoped.menuSays(window.__j07Scoped.state.to - window.__j07Scoped.state.from)`, 'scoped-edit-menu-names-the-selection');
+    await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false`, 'scoped-edit-item');
+    await assertRenderer(renderer, `(() => { window.__j07Scoped.item('scoped-ai-edit').click(); return true; })()`, 'scoped-edit-choose');
+    await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true`, 'scoped-edit-composer');
+    await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value=${JSON.stringify(SCOPED_EDIT_INSTRUCTION)}; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.includes('已局部更新所选的 1 个段落')`, 'scoped-edit-applied', 120_000);
+    await waitFor(renderer, `window.__j07Scoped.onlySentenceChanged(${JSON.stringify(SCOPED_EDIT_REPLACEMENT)})`, 'scoped-edit-only-the-sentence', 30_000);
+    await assertRenderer(renderer, `(() => { const block=window.__j07Scoped.block(window.__j07Scoped.state.target); const badge=block?.querySelector('.editorial-mark-applied-badge[data-mark-source="ai7"]'); const mark=block?.querySelector('.editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="ai7"]'); if(!badge||!mark)return false; window.__j07Scoped.mark=badge.dataset.appliedMarkId; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true'; })()`, 'scoped-edit-badge');
+    try {
+      await waitFor(renderer, `(() => { const card=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"]'); return card?.className.includes('editorial-mark-card-active') && card.querySelector('[data-mark-source]')?.textContent.includes('AI 局部修改') && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'scoped-edit-card-forward');
+    } catch (error) {
+      // Content-free codes only: which part of the card's arrival is missing.
+      const failed = await renderer.evaluate(`(() => { const pane=document.querySelector('#manuscript-comments-pane'); const card=pane?.querySelector('[data-comment-card="'+window.__j07Scoped.mark+'"]'); const source=card?.querySelector('[data-mark-source]')?.textContent ?? ''; const reverse=card?.querySelector('[data-mark-action="reverse-revision"]'); return ['pane-'+(pane?.hidden===false?'open':'closed'), 'cards-'+(pane?.querySelectorAll('[data-comment-card]').length ?? 0), 'card-'+(card?'present':'absent'), 'active-'+String(card?.className.includes('editorial-mark-card-active') ?? false), 'revalidating-'+(card?.dataset.revalidating ?? 'none'), 'source-'+(source.includes('AI 局部修改')?'scoped':source.includes('任务')?'task-other':source.length>0?'other':'empty'), 'reverse-'+(reverse===null||reverse===undefined?'absent':reverse.disabled?'disabled':'enabled'), 'floating-'+(document.querySelector('.editorial-mark-layer [data-mark-card]')?'open':'none')]; })()`).catch(() => ['probe-failed']);
+      throw journeyCheckFailure('J-07', 'scoped-edit-card-forward', { failed, cause: error });
+    }
+    await assertRenderer(renderer, `(() => { document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'scoped-edit-undo');
+    try {
+      await waitFor(renderer, `window.__j07Scoped.unchanged()`, 'scoped-edit-undone', 30_000);
+    } catch (error) {
+      const failed = await renderer.evaluate(`(() => { const before=window.__j07Scoped.before; const after=Object.fromEntries(Array.from(document.querySelector('[data-testid="manuscript-editor"]')?.children ?? []).filter((node)=>node.dataset.blockId).map((node)=>[node.dataset.blockId,node.textContent])); const target=window.__j07Scoped.state.target; const shared=Object.keys(before).filter((id)=>id in after); const status=document.querySelector('#persistence-status')?.textContent ?? ''; const toast=document.querySelector('[data-toast]')?.textContent ?? ''; return ['target-'+(target in after?'present':'gone'), 'target-text-'+(after[target]===before[target]?'restored':'changed'), 'shared-'+shared.length+'-of-'+Object.keys(before).length, 'others-'+(shared.filter((id)=>id!==target).every((id)=>after[id]===before[id])?'same':'differ'), 'badge-'+(window.__j07Scoped.block(target)?.querySelector('.editorial-mark-applied-badge')?'present':'none'), 'status-'+(status.length>0?'set':'empty'), 'toast-'+(toast.startsWith('已撤销')?'undone':toast.length>0?'other':'none')]; })()`).catch(() => ['probe-failed']);
+      throw journeyCheckFailure('J-07', 'scoped-edit-undone', { failed, cause: error });
+    }
+    await assertRenderer(renderer, `(() => { const badge=window.__j07Scoped.block(window.__j07Scoped.state.next)?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'scoped-unlock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked===undefined`, 'scoped-unlocked', 30_000);
+
+    at('scoped-ai-edit-derivative');
+    // On a derivative document the same entries stand (Issue #1412): 就选中部分让 AI 修改… is offered, and its paragraph is locked
+    // and unlocked from the menu and the 🔒 badge.
+    await assertRenderer(renderer, `(() => { const item=Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]')).find((entry)=>entry.textContent.includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})); if(!(item instanceof HTMLElement))return false; item.click(); return true; })()`, 'scoped-derivative-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] [data-testid="manuscript-editor"] > p[data-block-id]') !== null && window.__j07Scoped.firstText() !== null`, 'scoped-derivative-ready', 120_000);
+    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-select');
+    await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-derivative-menu');
+    await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-derivative-menu-names-the-selection');
+    await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false && window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-derivative-entries');
+    await assertRenderer(renderer, `(() => { window.__j07Scoped.derivative=window.__j07Scoped.firstText(); window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-derivative-lock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.derivative)?.dataset.aiLocked==='true'`, 'scoped-derivative-locked', 30_000);
+    await assertRenderer(renderer, `(() => { const badge=window.__j07Scoped.block(window.__j07Scoped.derivative)?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'scoped-derivative-unlock');
+    await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.derivative)?.dataset.aiLocked===undefined`, 'scoped-derivative-unlocked', 30_000);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

@@ -23,10 +23,6 @@ import { reportExportLabel } from '../shared/report-wording.js';
 /** The label of every `data-export-action` the 交付物 destination carries. */
 export const EXPORT_ACTION_LABELS = {
   open: '导出…',
-  choose: '选择保存位置…',
-  chooseAgain: '重新选择保存位置…',
-  approve: '按上述方式导出',
-  cancel: '取消',
   close: '完成',
   reveal: '在文件夹中显示',
 } as const;
@@ -138,7 +134,7 @@ export function exportAbsentLine(fidelity: ReadonlyArray<ExportFidelityRowProjec
 
 /** V2-UX-EXP-008: a degradation is accepted only by the unselected approval, for this one export. */
 export const EXPORT_DEGRADED_NOTE =
-  '标为「降级导出」或「无法导出」的内容会按上面所说的方式处理；选择「按上述方式导出」即表示只对这一次导出接受这些处理。';
+  '标为「降级导出」或「无法导出」的内容会按上面所说的方式处理；选择保存位置即表示只对这一次导出接受这些处理。';
 
 // ---- the destination and the approval ----------------------------------------------------------------
 

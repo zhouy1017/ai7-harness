@@ -538,6 +538,8 @@ export type AnalysisAuthorizationOrigin =
  * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
+  /** Current editor-confirmed rules, frozen by new plans; never a startup scan or a second ledger. */
+  readonly editorialMemory?: (bookId: string, taskKind: string) => import('../learning/editorial-memory.js').EditorialMemorySnapshot | null;
   readonly retainedPolicyFor?: (pin: ResultSetPolicyPin, binding: import('../launch-policy.js').ConfiguredProviderBinding) => LaunchPolicyProjection | null;
   readonly localFixtureRuntime?: () => LocalFixtureRuntimeContext | null;
   /** Verified runtime policy for review admission; never persisted as a new record or IPC member. */

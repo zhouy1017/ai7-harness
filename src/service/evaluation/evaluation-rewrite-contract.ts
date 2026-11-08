@@ -27,6 +27,18 @@ export const EVALUATION_REWRITE_UNIT_RESULT_SCHEMA = 'ai7.evaluation-rewrite.uni
 export const EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA = 'ai7.evaluation-rewrite.synthesis-result/1' as const;
 export const EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA = 'ai7.evaluation-rewrite.prompt-contract/1' as const;
 export const EVALUATION_REWRITE_RESULT_SET_REVISION_SCHEMA = 'ai7.evaluation-rewrite.result-set-revision/1' as const;
+/**
+ * Contract `/2` (Issue #1407, 按我的修改重新生成): the model reads AI7's whole original report — its strengths, problems, next
+ * step, suggested conclusion and market lists — beside the editor's edited report — scores, 评语, lines, 总评, risks, what is
+ * still missing and the conclusion they chose — and writes a new version of the report: every scored item's 评语, the 总评 with
+ * the next step, and the strengths and problems. Scores and the conclusion stay the editor's constraints. A contract input
+ * without `report` is a `/1` Task's, frozen before it existed, and keeps its own prompt and result shape.
+ */
+export const EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2 = 'ai7.evaluation-rewrite.synthesis-result/2' as const;
+export const EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA_V2 = 'ai7.evaluation-rewrite.prompt-contract/2' as const;
+/** The strengths and the problems a regenerated report offers at most, each line at most this long. */
+export const MAX_REWRITTEN_LINES = 5;
+export const MAX_REWRITTEN_LINE_GRAPHEMES = 100;
 /** The shape that carries scope-plan facts and per-unit lineage: every rewrite after the first. */
 export const EVALUATION_REWRITE_SUCCESSOR_REVISION_SCHEMA = 'ai7.evaluation-rewrite.result-set-revision/2' as const;
 
@@ -70,6 +82,41 @@ export interface EvaluationRewriteContractInput {
   readonly verdict: string | null;
   /** The profile's conclusions in its words: a rewritten 评语 or 总评 that names one is not offered. */
   readonly conclusions: ReadonlyArray<string>;
+  /** Contract `/2`'s whole-report context (Issue #1407); absent from a `/1` Task's frozen input. */
+  readonly report?: EvaluationRewriteReportInput;
+  /**
+   * 🔒 锁定 (Issue #1412): the scored items (by `itemId`) and the parts — `verdict`, `strengths`, `weaknesses` — the editor locked,
+   * which the regenerated report leaves exactly as the version holds them. Absent when nothing is locked, so every contract
+   * frozen before locks existed, and every one without a lock, keeps its digest.
+   */
+  readonly locked?: ReadonlyArray<string>;
+}
+
+/** Whether a part of the version is locked against regeneration (Issue #1412). */
+export function evaluationRewriteLocked(input: Pick<EvaluationRewriteContractInput, 'locked'>, key: string): boolean {
+  return input.locked?.includes(key) ?? false;
+}
+
+/** The scored items a regeneration may write a 评语 for: scored, and not locked. */
+export function evaluationRewriteWritableItems(input: Pick<EvaluationRewriteContractInput, 'items' | 'locked'>): EvaluationRewriteItemInput[] {
+  return evaluationRewriteScoredItems(input).filter((item) => !evaluationRewriteLocked(input, item.itemId));
+}
+
+/** AI7's original report and the editor's other report fields, in their words: what a `/2` regeneration reads besides the items. */
+export interface EvaluationRewriteReportInput {
+  readonly ai7: {
+    readonly strengths: ReadonlyArray<string>;
+    readonly weaknesses: ReadonlyArray<string>;
+    readonly nextStep: string | null;
+    /** The conclusion AI7 suggested, in the profile's words. */
+    readonly suggestedConclusion: string | null;
+    readonly market: null | { readonly readers: ReadonlyArray<string>; readonly sellingPoints: ReadonlyArray<string>; readonly channels: ReadonlyArray<string> };
+  };
+  /** Each risk item as the editor left it: its label, level in words (低 / 中 / 高) and statement. */
+  readonly risks: ReadonlyArray<{ readonly label: string; readonly level: string | null; readonly statement: string | null }>;
+  readonly readiness: ReadonlyArray<string>;
+  /** The conclusion the editor chose, in the profile's words; `null` while none is. */
+  readonly conclusion: string | null;
 }
 
 /** One observation exactly as the model listed it. */
@@ -87,13 +134,16 @@ export interface EvaluationRewriteUnitResult extends SalvagedModelResult {
 }
 
 export interface EvaluationRewriteSynthesisResult extends SalvagedModelResult {
-  readonly schema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
+  readonly schema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA | typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2;
   /** Every item the editor scored whose 评语 may be offered, once each, in the profile's order once read. */
   readonly items: ReadonlyArray<{ readonly itemId: string; readonly comment: string }>;
   /** The rewritten 总评, or `null` when it is not offered. */
   readonly verdict: string | null;
-  /** What was written but is not offered, and why: an item's 评语 (`itemId`) or the 总评 (`null`). */
+  /** What was written but is not offered, and why: an item's 评语 (`itemId`), or the 总评 or a line (`null`). */
   readonly withheld: ReadonlyArray<{ readonly itemId: string | null; readonly reason: string }>;
+  /** Contract `/2`: the regenerated strengths and problems, or `null` when none was offered; absent from a `/1` result. */
+  readonly strengths?: ReadonlyArray<string> | null;
+  readonly weaknesses?: ReadonlyArray<string> | null;
 }
 
 /**
@@ -187,6 +237,48 @@ function frozenInput(input: EvaluationRewriteContractInput): EvaluationRewriteCo
     weaknesses: lines(input.weaknesses),
     verdict: input.verdict,
     conclusions: [...input.conclusions],
+    ...(input.report === undefined ? {} : { report: frozenReport(input.report, lines) }),
+    ...(input.locked === undefined || input.locked.length === 0 ? {} : { locked: frozenLocks(input.locked, items) }),
+  };
+}
+
+const LOCKABLE_PARTS = ['verdict', 'strengths', 'weaknesses'] as const;
+
+function frozenLocks(locked: ReadonlyArray<string>, items: ReadonlyArray<EvaluationRewriteItemInput>): string[] {
+  requireAnalysis(Array.isArray(locked) && locked.every((key) => typeof key === 'string' &&
+    ((LOCKABLE_PARTS as ReadonlyArray<string>).includes(key) || items.some((item) => item.itemId === key))) && new Set(locked).size === locked.length,
+  'EVALUATION_REWRITE_INPUT_INVALID', '评估报告重新生成所依据的锁定项无效。');
+  return [...items.map((item) => item.itemId), ...LOCKABLE_PARTS].filter((key) => locked.includes(key));
+}
+
+/** Contract `/2`'s locked parts, in the editor's words, and what the answer writes for them: nothing. */
+function lockedLines(input: EvaluationRewriteContractInput): string[] {
+  if (input.locked === undefined) return [];
+  const names = input.locked.map((key) => key === 'verdict' ? '总评' : key === 'strengths' ? '主要优点' : key === 'weaknesses' ? '主要问题'
+    : `${key}（${input.items.find((item) => item.itemId === key)?.label ?? key}）的评语`);
+  return [`以下内容已被编辑锁定，原样保留：${names.join('、')}。不要重写它们；锁定的评分项不出现在 items 中，锁定的总评、主要优点或主要问题输出 null。`];
+}
+
+function frozenReport(report: EvaluationRewriteReportInput, lines: (list: ReadonlyArray<string>) => string[]): EvaluationRewriteReportInput {
+  const optional = (value: unknown, maximum: number): boolean => value === null || text(value, maximum);
+  const ai7 = report.ai7;
+  requireAnalysis(isRecord(report) && isRecord(ai7) && Array.isArray(ai7.strengths) && Array.isArray(ai7.weaknesses) &&
+    optional(ai7.nextStep, 400) && optional(ai7.suggestedConclusion, 20) &&
+    (ai7.market === null || (isRecord(ai7.market) && Array.isArray(ai7.market.readers) && Array.isArray(ai7.market.sellingPoints) && Array.isArray(ai7.market.channels))) &&
+    Array.isArray(report.risks) && report.risks.every((risk) => isRecord(risk) && text(risk.label, 40) && optional(risk.level, 4) && optional(risk.statement, 4_000)) &&
+    Array.isArray(report.readiness) && optional(report.conclusion, 20),
+  'EVALUATION_REWRITE_INPUT_INVALID', '评估报告重新生成所依据的报告无效。');
+  return {
+    ai7: {
+      strengths: lines(ai7.strengths),
+      weaknesses: lines(ai7.weaknesses),
+      nextStep: ai7.nextStep,
+      suggestedConclusion: ai7.suggestedConclusion,
+      market: ai7.market === null ? null : { readers: lines(ai7.market.readers), sellingPoints: lines(ai7.market.sellingPoints), channels: lines(ai7.market.channels) },
+    },
+    risks: report.risks.map((risk) => ({ label: risk.label, level: risk.level, statement: risk.statement })),
+    readiness: lines(report.readiness),
+    conclusion: report.conclusion,
   };
 }
 
@@ -213,8 +305,45 @@ function versionLines(input: EvaluationRewriteContractInput): string[] {
   return lines;
 }
 
+/** Contract `/2`'s whole-report lines: the editor's other fields, then AI7's original report. */
+function reportLines(report: EvaluationRewriteReportInput): string[] {
+  const lines: string[] = [];
+  for (const risk of report.risks) {
+    lines.push(`- 风险项「${risk.label}」：${risk.level === null ? '未定级' : `${risk.level}风险`}${risk.statement === null ? '' : `；说明：${oneLine(risk.statement)}`}`);
+  }
+  if (report.readiness.length > 0) lines.push(`- 距离可出版还差：${report.readiness.map(oneLine).join('；')}`);
+  lines.push(report.conclusion === null ? '- 编辑选定的结论：（尚未选定）' : `- 编辑选定的结论：${report.conclusion}`);
+  lines.push('以下是 AI7 的原报告（供参照；与编辑的修改不一致处，以编辑为准）：');
+  const ai7 = report.ai7;
+  if (ai7.strengths.length > 0) lines.push(`- 原报告的主要优点：${ai7.strengths.map(oneLine).join('；')}`);
+  if (ai7.weaknesses.length > 0) lines.push(`- 原报告的主要问题：${ai7.weaknesses.map(oneLine).join('；')}`);
+  if (ai7.nextStep !== null) lines.push(`- 原报告的下一步建议：${oneLine(ai7.nextStep)}`);
+  if (ai7.suggestedConclusion !== null) lines.push(`- 原报告建议的结论：${ai7.suggestedConclusion}`);
+  if (ai7.market !== null) {
+    if (ai7.market.readers.length > 0) lines.push(`- 原报告的目标读者：${ai7.market.readers.map(oneLine).join('；')}`);
+    if (ai7.market.sellingPoints.length > 0) lines.push(`- 原报告的差异化卖点：${ai7.market.sellingPoints.map(oneLine).join('；')}`);
+    if (ai7.market.channels.length > 0) lines.push(`- 原报告的渠道与策略：${ai7.market.channels.map(oneLine).join('；')}`);
+  }
+  return lines;
+}
+
 function systemPromptOf(input: EvaluationRewriteContractInput): string {
   const scored = evaluationRewriteScoredItems(input);
+  if (input.report !== undefined) {
+    return [
+      '你是 AI7 的评估报告重新生成组件，按编辑修改后的评估报告重新生成一份新版报告。你只处理用户消息中给出的一个分析单元，逐块阅读，记下能说明编辑所给分数与修改的依据。',
+      '以下是编辑修改后的这一版评估报告（编辑的评分与判断，照录，不得改动）：',
+      ...versionLines(input),
+      ...reportLines(input.report),
+      `只为编辑已打分的评分项记依据：${scored.map((item) => `${item.itemId}（${item.label}）`).join('、')}。`,
+      '本步只记依据，不打分、不改分、不写评语、不下结论、不改写稿件、不调用任何工具、不引用外部资料。',
+      '每条依据精确包含以下键：itemId（上面列出的评分项编号之一）、note（这条依据如何说明编辑所给的分数与修改，不超过 200 字素）、blockOrdinals（它所依据的内容块序号数组，至少 1 个、至多 8 个、不重复）。',
+      '内容块序号从 1 开始，按用户消息中列出的顺序计数：先是重叠上下文的内容块，然后是本单元的内容块。',
+      '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
+      'schema（固定为 "ai7.evaluation-rewrite.unit-result/1"）、unitOrdinal（与用户消息头部的单元序号一致）、observations（数组，至多 30 项）。',
+      '本单元没有可记的依据时输出空数组。不要编造稿件中不存在的内容。',
+    ].join('\n');
+  }
   return [
     '你是 AI7 的评语重写组件，按编辑给出的分数重写一份评估记录的评语。你只处理用户消息中给出的一个分析单元，逐块阅读，记下能说明编辑所给分数的依据。',
     '以下是这一版评估（编辑的评分与判断，照录，不得改动）：',
@@ -231,6 +360,20 @@ function systemPromptOf(input: EvaluationRewriteContractInput): string {
 
 function synthesisInstructionOf(input: EvaluationRewriteContractInput): string {
   const scored = evaluationRewriteScoredItems(input);
+  if (input.report !== undefined) {
+    return [
+      '以下是同一部书稿各已闭合阅读范围按评分项记下的依据。依据系统提示中编辑修改后的评估报告、AI7 的原报告与这些依据，重新生成一份新版评估报告。',
+      '新版报告与编辑的分数和修改一致：编辑比 AI7 打分低的项写清它的不足，打分高的项写清它的长处；编辑改写过的评语、优点、问题、总评与调分原因中的判断要保留并展开；原报告中仍然成立的内容可以保留。',
+      `不改任何分数，也不在评语、总评、优点或问题里写分数；不改编辑选定的结论，也不在其中写出${input.conclusions.map((label) => `「${label}」`).join('、')}这些结论；写了分数或结论的那一段或那一条不会提供给编辑。`,
+      '不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件。',
+      '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
+      'schema（固定为 "ai7.evaluation-rewrite.synthesis-result/2"）、items、verdict、strengths、weaknesses。',
+      `items 为数组，下列每个编辑已打分的评分项恰好一项：${(input.locked === undefined ? scored : evaluationRewriteWritableItems(input)).map((item) => item.itemId).join('、')}；每项精确包含 itemId 与 comment（新版评语，一段话，不超过 300 字素）。`,
+      'verdict 是新版总评，一段话，不超过 600 字素，概括全书、与各项评语一致，并写出下一步修改建议。',
+      `strengths 与 weaknesses 是新版的主要优点与主要问题，各为字符串数组，各 1 至 ${MAX_REWRITTEN_LINES} 条，每条一句、不超过 ${MAX_REWRITTEN_LINE_GRAPHEMES} 字素。每段话都只占一行。`,
+      ...lockedLines(input),
+    ].join('\n');
+  }
   return [
     '以下是同一部书稿各已闭合阅读范围按评分项记下的依据。依据系统提示中这一版评估的评分、调分原因与现有评语，以及这些依据，按编辑的分数重写评语。',
     '评语要与编辑给的分数一致：编辑比 AI7 打分低的项，写清它的不足；打分高的项，写清它的长处；照顾编辑写下的调分原因与现有评语中编辑自己的判断。',
@@ -245,10 +388,10 @@ function synthesisInstructionOf(input: EvaluationRewriteContractInput): string {
 
 /** The frozen prompt contract: model-facing text, fixed formats and the version's words. */
 export interface EvaluationRewritePromptContract {
-  readonly schema: typeof EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA;
+  readonly schema: typeof EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA | typeof EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA_V2;
   readonly contractVersion: typeof EVALUATION_REWRITE_CONTRACT_VERSION;
   readonly unitResultSchema: typeof EVALUATION_REWRITE_UNIT_RESULT_SCHEMA;
-  readonly synthesisResultSchema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
+  readonly synthesisResultSchema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA | typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2;
   readonly input: EvaluationRewriteContractInput;
   readonly systemPrompt: string;
   readonly unitMessageHeader: typeof UNIT_MESSAGE_HEADER;
@@ -264,11 +407,12 @@ export interface EvaluationRewritePromptContract {
 
 export function evaluationRewriteContract(input: EvaluationRewriteContractInput): EvaluationRewritePromptContract {
   const frozen = frozenInput(input);
+  const whole = frozen.report !== undefined;
   return {
-    schema: EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA,
+    schema: whole ? EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA_V2 : EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA,
     contractVersion: EVALUATION_REWRITE_CONTRACT_VERSION,
     unitResultSchema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
-    synthesisResultSchema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
+    synthesisResultSchema: whole ? EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2 : EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
     input: frozen,
     systemPrompt: systemPromptOf(frozen),
     unitMessageHeader: UNIT_MESSAGE_HEADER,
@@ -321,15 +465,18 @@ export function parseEvaluationRewriteUnitResult(text: string, expected: { unitO
  * Admit the synthesis: one 评语 for every item the editor scored, none for another, and the 总评 — and no other key, so no
  * number can come back with them. The items are returned in the version's order whatever order the model wrote them in.
  */
-export function parseEvaluationRewriteSynthesis(text: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions'>): EvaluationRewriteSynthesisParse {
+export function parseEvaluationRewriteSynthesis(text: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions' | 'report' | 'locked'>): EvaluationRewriteSynthesisParse {
+  const whole = input.report !== undefined;
+  const schema = whole ? EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2 : EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
   const value = extractModelJson(text, { partial: true });
   if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
   const salvaged: ModelResultSalvage[] = [];
   const withheld: Array<{ itemId: string | null; reason: string }> = [];
   const mark = (section: string, index: number, reason: string): void => { salvaged.push({ section, index, reason }); };
   try { JSON.parse(text); } catch { mark('envelope', -1, 'json-extracted-or-partial'); }
-  if (value.schema !== EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA) mark('schema', -1, 'request-envelope');
-  const scored = evaluationRewriteScoredItems(input);
+  if (value.schema !== schema) mark('schema', -1, 'request-envelope');
+  // A locked item or part is never read from the answer (Issue #1412): it stays the version's own, whatever was written for it.
+  const scored = evaluationRewriteWritableItems(input);
   const fullMarks = scoreDenominators(input.items);
   const clean = (raw: unknown, itemId: string | null, index: number, maximum: number): string | null => {
     const section = itemId === null ? 'verdict' : 'items';
@@ -346,15 +493,33 @@ export function parseEvaluationRewriteSynthesis(text: string, input: Pick<Evalua
   };
   const byId = new Map<string, { itemId: string; comment: string }>();
   for (const [index, candidate] of (Array.isArray(value.items) ? value.items : []).entries()) {
+    if (isRecord(candidate) && typeof candidate.itemId === 'string' && evaluationRewriteLocked(input, candidate.itemId)) { mark('items', index, 'item-locked'); continue; }
     if (!isRecord(candidate) || typeof candidate.itemId !== 'string' || !scored.some((item) => item.itemId === candidate.itemId) || byId.has(candidate.itemId)) { mark('items', index, 'item-unknown-or-duplicate'); continue; }
     const comment = clean(candidate.comment, candidate.itemId, index, MAX_REWRITTEN_COMMENT_GRAPHEMES);
     if (comment !== null) byId.set(candidate.itemId, { itemId: candidate.itemId, comment });
   }
   for (const [index, item] of scored.entries()) if (!byId.has(item.itemId)) { mark('items', index, 'item-missing'); withheld.push({ itemId: item.itemId, reason: '未写出可采用的评语。' }); }
-  const verdict = clean(value.verdict, null, -1, MAX_REWRITTEN_VERDICT_GRAPHEMES);
+  const verdict = evaluationRewriteLocked(input, 'verdict') ? null : clean(value.verdict, null, -1, MAX_REWRITTEN_VERDICT_GRAPHEMES);
   const items = scored.flatMap((item) => { const written = byId.get(item.itemId); return written === undefined ? [] : [written]; });
-  if (!items.length && verdict === null) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
-  return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, items, verdict, withheld, ...(salvaged.length ? { salvaged } : {}) } };
+  // Contract `/2`'s lines: each kept only without a score or a conclusion in it; none kept leaves the editor's own list.
+  const lines = (raw: unknown, section: 'strengths' | 'weaknesses', label: string): string[] | null => {
+    if (!Array.isArray(raw)) { mark(section, -1, 'lines-missing'); return null; }
+    const kept: string[] = [];
+    for (const [index, entry] of raw.entries()) {
+      if (typeof entry !== 'string' || !entry.isWellFormed() || !entry.trim() || kept.length >= MAX_REWRITTEN_LINES) { mark(section, index, 'line-invalid'); continue; }
+      if (claimsScore(entry, fullMarks) || claimsConclusion(entry, input.conclusions)) {
+        withheld.push({ itemId: null, reason: `${label}中含分数或结论的一条没有采用：分数与结论由你定。` }); mark(section, index, 'claim-withheld'); continue;
+      }
+      const line = normalizeEvaluationLine(entry, MAX_REWRITTEN_LINE_GRAPHEMES);
+      if (line !== entry) mark(section, index, 'text-normalized');
+      if (line) kept.push(line);
+    }
+    return kept.length > 0 ? kept : null;
+  };
+  const strengths = whole && !evaluationRewriteLocked(input, 'strengths') ? lines(value.strengths, 'strengths', '主要优点') : null;
+  const weaknesses = whole && !evaluationRewriteLocked(input, 'weaknesses') ? lines(value.weaknesses, 'weaknesses', '主要问题') : null;
+  if (!items.length && verdict === null && strengths === null && weaknesses === null) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { schema, items, verdict, withheld, ...(whole ? { strengths, weaknesses } : {}), ...(salvaged.length ? { salvaged } : {}) } };
 }
 
 // ---- the unit message ---------------------------------------------------------------------------------------------

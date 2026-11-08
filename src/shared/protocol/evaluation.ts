@@ -322,6 +322,12 @@ export interface EvaluationRewriteWordsProjection {
   verdict: string | null;
   /** What was written but is not offered — a 评语 (`itemId`) or the 总评 (`null`) that stated a score or a conclusion — and why. */
   withheld: ReadonlyArray<{ itemId: string | null; reason: string }>;
+  /**
+   * The regenerated strengths and problems of a whole-report regeneration (contract `/2`, Issue #1407), or `null` when none was
+   * offered; absent from a rewrite under contract `/1`, which wrote 评语 and 总评 only.
+   */
+  strengths?: ReadonlyArray<string> | null;
+  weaknesses?: ReadonlyArray<string> | null;
 }
 
 /** The evaluation rewrite kind's own component of a Result Set Revision. */
@@ -494,7 +500,16 @@ export interface EvaluationContent {
   readonly verdict: string | null;
   /** Chosen by the editor, never preselected (EVAL-007). */
   readonly conclusion: EvaluationConclusion | null;
+  /**
+   * 🔒 锁定（AI 不修改）(Issue #1412): the scored items (by `itemId`) and the parts — `verdict`, `strengths`, `weaknesses` — that
+   * 按我的修改重新生成 leaves exactly as this version holds them. Absent when nothing is locked, so an entry saved before locks
+   * existed reads, and digests, exactly as it did.
+   */
+  readonly aiLocked?: ReadonlyArray<string>;
 }
+
+/** The parts of an evaluation version besides its items that can be locked against regeneration (Issue #1412). */
+export const EVALUATION_AI_LOCK_PARTS = ['verdict', 'strengths', 'weaknesses'] as const;
 
 /** The reasons the editor picked for departing from AI7's score, none preselected; `own` with the editor's words in `note`. */
 export type EvaluationAdjustmentReasonId = 'too-high' | 'too-low' | 'insufficient-basis' | 'missed-aspect' | 'own';
@@ -701,6 +716,11 @@ export interface EvaluationWorkspaceProjection {
         readonly kind: 'first' | 'again';
         readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number };
         readonly skipDamaged: null | { readonly skipped: ReadonlyArray<number>; readonly seedOrdinal: number | null };
+        /**
+         * Set while the latest version is unfinished and only AI7's newer report may begin the next (Issue #1406): why a start of
+         * the editor's own still waits. The unfinished version stays as it is.
+         */
+        readonly blankReason?: string;
       }
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
@@ -819,6 +839,9 @@ export interface EvaluationRewriteWorkspaceProjection {
     }>;
     /** The 总评 offered beside the version's own; `null` when it was set aside. */
     readonly verdict: null | { readonly before: string | null; readonly after: string };
+    /** The regenerated strengths and problems beside the version's own (Issue #1407); `null` when none is offered. */
+    readonly strengths: null | { readonly before: ReadonlyArray<string>; readonly after: ReadonlyArray<string> };
+    readonly weaknesses: null | { readonly before: ReadonlyArray<string>; readonly after: ReadonlyArray<string> };
     /** What AI7 wrote but does not offer — a 评语 or the 总评 that stated a score or a conclusion — each with why. */
     readonly withheld: ReadonlyArray<string>;
   };

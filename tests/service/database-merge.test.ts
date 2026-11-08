@@ -710,7 +710,7 @@ const withPreferences = <T>(run: (preferences: HouseReviewPreferenceLedger, db: 
   try { return run(new HouseReviewPreferenceLedger(db), db); } finally { db.close(); }
 };
 
-function verifyMergedPreferences(excludedId: string, comparisonId: string): string {
+function verifyMergedPreferences(excludedId: string, comparisonId: string): { typos: string; style: string } {
   return withPreferences((preferences) => {
     const scope = 'ordinary-production';
     expect(preferences.history(scope)).toEqual([]);
@@ -722,9 +722,11 @@ function verifyMergedPreferences(excludedId: string, comparisonId: string): stri
     expect(line('style-and-format').sources.map((source) => source.bookId)).toEqual([comparisonId]);
     expect(preferences.use(scope, comparisonId, 'style-and-format')).toMatchObject({
       versionId: version.versionId, lines: [line('style-and-format').text], sourceCount: 1 });
-    expect(preferences.use(scope, comparisonId, 'typos-and-usage')).toBeNull();
+    // #1408: a category review also recalls the house's cross-category style line, never the excluded Book's own typos line.
+    expect(preferences.use(scope, comparisonId, 'typos-and-usage')).toMatchObject({
+      versionId: version.versionId, lines: [line('style-and-format').text], sourceCount: 1 });
     expect(preferences.use(scope, excludedId, 'style-and-format')).toBeNull();
-    return line('typos-and-usage').text;
+    return { typos: line('typos-and-usage').text, style: line('style-and-format').text };
   });
 }
 
@@ -768,7 +770,7 @@ describe('Book learning controls across database merge (#1115)', () => {
     } finally { target.close(); }
 
     const scope = 'ordinary-production';
-    const typosLine = verifyMergedPreferences(excluded.bookId, comparison.bookId);
+    const merged = verifyMergedPreferences(excluded.bookId, comparison.bookId);
     // Restoring the imported Book after its carried history lets the same line be used: the carried exclusion was the refusal.
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
@@ -776,7 +778,7 @@ describe('Book learning controls across database merge (#1115)', () => {
       expect(learning(target).excludedBooks.map((book) => book.bookId)).not.toContain(excluded.bookId);
       target.markCleanShutdown();
     } finally { target.close(); }
-    withPreferences((preferences) => expect(preferences.use(scope, comparison.bookId, 'typos-and-usage')?.lines).toEqual([typosLine]));
+    withPreferences((preferences) => expect(preferences.use(scope, comparison.bookId, 'typos-and-usage')?.lines).toEqual([merged.style, merged.typos]));
   }, 180_000);
 
   it('takes only selected new Books, never switches or already-present Book controls, and retains multi-hop provenance', async () => {
@@ -957,7 +959,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 109, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 111, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);

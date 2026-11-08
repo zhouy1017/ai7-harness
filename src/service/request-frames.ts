@@ -3,6 +3,7 @@ import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
+import { MAX_AI_EDIT_LOCK_TARGETS, MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS } from '../shared/protocol/scoped-edit.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { validCurationBudget } from './learning/curation.js';
@@ -37,6 +38,7 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_DOCUMENT_CHOICES,
   MAX_BOOK_AUTHORS,
   MAX_BOOK_EDITORS,
   MAX_BOOK_PERSON_NAME_CHARACTERS,
@@ -212,7 +214,11 @@ function validEvaluationAdjustment(value: unknown): boolean {
  * store holds them to the profile, the scale and the bounds.
  */
 function validEvaluationContent(value: unknown): boolean {
-  if (!isRecord(value) || !hasExactKeys(value, ['items', 'risks', 'readiness', 'strengths', 'weaknesses', 'verdict', 'conclusion'])) return false;
+  // 🔒 锁定 (Issue #1412): `aiLocked`, present only when some part is locked, names items and 总评/主要优点/主要问题; the store
+  // holds each name to the profile.
+  if (!isRecord(value) || !hasExactKeys(value, ['items', 'risks', 'readiness', 'strengths', 'weaknesses', 'verdict', 'conclusion', ...('aiLocked' in value ? ['aiLocked'] : [])])) return false;
+  if ('aiLocked' in value && !(Array.isArray(value.aiLocked) && value.aiLocked.length >= 1 && value.aiLocked.length <= 40 &&
+    value.aiLocked.every((key) => isBoundedString(key, 64)))) return false;
   const lines = (list: unknown): boolean => Array.isArray(list) && list.length <= 64 && list.every((line) => isBoundedString(line, 2_000, true));
   return Array.isArray(value.items) && value.items.length <= 32 && value.items.every((item) => isRecord(item) &&
       hasExactKeys(item, ['itemId', 'score', 'notRated', 'comment', ...('adjustment' in item ? ['adjustment'] : [])]) && isBoundedString(item.itemId, 64) &&
@@ -292,6 +298,19 @@ function validMarkKind(value: unknown): boolean {
 
 function validHighlightColor(value: unknown): boolean {
   return value === null || value === 1 || value === 2 || value === 3;
+}
+
+/** 图书交付包's ticked documents (Issue #1405): absent, or distinct documents each at one revision, within the bound. */
+function validPackageDocumentChoices(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_BOOK_DELIVERY_PACKAGE_DOCUMENT_CHOICES) return false;
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry) || Object.keys(entry).length !== 2 || !validUuid(entry['documentId']) || !validUuid(entry['revisionId'])) return false;
+    if (seen.has(entry['documentId'])) return false;
+    seen.add(entry['documentId']);
+  }
+  return true;
 }
 
 function validUuid(value: unknown): value is string {
@@ -2663,6 +2682,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'commitReplacementRevisions': {
+      const input = requireInput(value.input, ['previewId', 'windowStartBlockId'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId) ||
+          !isBoundedString(input.windowStartBlockId, 28) || !MARK_BLOCK_PATTERN.test(input.windowStartBlockId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'dismissReplacementPreview':
     case 'startReplacementCommit':
     case 'commitReplacement': {
@@ -2855,9 +2882,46 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || input.selection === null || !validSelection(input.selection)) throw new ProtocolError(tentativeId);
       break;
     }
-    case 'inspectFastInteractionRequest': {
+    case 'inspectFastInteractionRequest':
+    case 'inspectScopedAiEdit': {
       const input = requireInput(value.input, ['bookId', 'requestId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.requestId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 🔒 锁定 and 就选中部分让 AI 修改 (Issue #1412): a manuscript branch, its lock targets and the exact frozen scope.
+    case 'inspectAiEditLocks': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId'], tentativeId);
+      if (!validUuid(input.manuscriptId) || !validUuid(input.branchId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'setAiEditLocks': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'targets', 'locked', 'expectedLocksDigest'], tentativeId);
+      if (!validUuid(input.manuscriptId) || !validUuid(input.branchId) || typeof input.locked !== 'boolean' ||
+          !isBoundedString(input.expectedLocksDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedLocksDigest) ||
+          !Array.isArray(input.targets) || input.targets.length < 1 || input.targets.length > MAX_AI_EDIT_LOCK_TARGETS ||
+          !input.targets.every((target) => isRecord(target) && (
+            (hasExactKeys(target, ['kind', 'blockId']) && target.kind === 'block' && isBoundedString(target.blockId, 28) && MARK_BLOCK_PATTERN.test(target.blockId)) ||
+            (hasExactKeys(target, ['kind', 'headingBlockId']) && target.kind === 'section' && isBoundedString(target.headingBlockId, 28) && MARK_BLOCK_PATTERN.test(target.headingBlockId))))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'startScopedAiEdit': {
+      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], tentativeId);
+      const scope = input.scope;
+      const validScope = isRecord(scope) && (
+        (hasExactKeys(scope, ['mode', 'span']) && scope.mode === 'selected-only' && Array.isArray(scope.span) && scope.span.length >= 1 &&
+          scope.span.length <= MAX_SELECTION_SPAN_BLOCKS && scope.span.every((pin) => isRecord(pin) && hasExactKeys(pin, ['blockId', 'blockDigest', 'fromGrapheme', 'toGrapheme']) &&
+            isBoundedString(pin.blockId, 28) && MARK_BLOCK_PATTERN.test(pin.blockId) && isBoundedString(pin.blockDigest, 64) && HEX_DIGEST_PATTERN.test(pin.blockDigest) &&
+            isSafeInteger(pin.fromGrapheme, 0) && isSafeInteger(pin.toGrapheme, 0))) ||
+        (hasExactKeys(scope, ['mode', 'range']) && scope.mode === 'unlocked-only' && isRecord(scope.range) && (
+          (hasExactKeys(scope.range, ['kind']) && scope.range.kind === 'document') ||
+          (hasExactKeys(scope.range, ['kind', 'headingBlockId']) && scope.range.kind === 'section' && isBoundedString(scope.range.headingBlockId, 28) && MARK_BLOCK_PATTERN.test(scope.range.headingBlockId)))));
+      if (!validUuid(input.bookId) || !validUuid(input.manuscriptId) || !validUuid(input.branchId) || !validUuid(input.baseRevisionId) ||
+          !isSafeInteger(input.expectedJournalSequence, 0) || !isBoundedString(input.expectedLocksDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedLocksDigest) ||
+          !isBoundedString(input.instruction, MAX_SCOPED_AI_EDIT_INSTRUCTION_CHARACTERS * 2) || !validScope) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'regenerateProposalConflictUnit': {
@@ -2878,15 +2942,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 图书交付包 (Issue #416, S67a): the route's Book, and for 准备 the purpose within its bound and the content's digest.
+    // Since Issue #1405 both may name the derivative documents ticked for it, each at one saved version.
     case 'inspectBookDeliveryPackage': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['documents'], tentativeId);
+      if (!validUuid(input.bookId) || !validPackageDocumentChoices(input.documents)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareBookDeliveryPackage': {
-      const input = requireInput(value.input, ['bookId', 'purpose', 'expectedContentDigest'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'purpose', 'expectedContentDigest'], ['documents'], tentativeId);
       if (!validUuid(input.bookId) || !validPublicationText(input.purpose, MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS) ||
-          !isBoundedString(input.expectedContentDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedContentDigest)) {
+          !isBoundedString(input.expectedContentDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedContentDigest) ||
+          !validPackageDocumentChoices(input.documents)) {
         throw new ProtocolError(tentativeId);
       }
       break;

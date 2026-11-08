@@ -688,7 +688,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     return confirm;
   };
 
-  /** 定归属: one Book, a Series once Series exist, or the house — none chosen until the editor chooses. */
+  /** 定归属: one Book, a Series once Series exist, or the house — the first Book listed chosen to begin with. */
   const attributionChooser = (material: LibraryMaterialProjection, state: Extract<Chooser, { kind: 'attribution' }>): HTMLElement => {
     const section = el('section', 'library-chooser library-attribution-chooser');
     const fieldset = el('fieldset');
@@ -788,12 +788,16 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     return section;
   };
 
+  /** The attribution offered first (Issue #1410 item 29): the first Book listed, or the house when there is none. */
+  const defaultAttribution = (): string => books?.[0] === undefined ? 'house' : `book:${books[0].bookId}`;
+
   const open = (material: LibraryMaterialProjection, kind: 'attribution' | 'eligibility'): void => {
     if (busy) return;
     refusal = null;
+    // Each chooser opens on its recommendation (Issue #1410 item 29): the material's own Book, else 稍后决定.
     chooser = kind === 'attribution'
-      ? { materialId: material.materialId, kind, choice: null, book: null }
-      : { materialId: material.materialId, kind, choice: null, reason: '' };
+      ? { materialId: material.materialId, kind, choice: books === null ? null : defaultAttribution(), book: books?.[0] ?? null }
+      : { materialId: material.materialId, kind, choice: material.attribution?.scope === 'book' ? 'book' : 'deferred', reason: '' };
     // The Books an attribution can name come from 书库's first page, read when the choice is first opened.
     if (kind === 'attribution' && books === null) {
       void loadBooks(material);
@@ -814,6 +818,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       books = page.items.map((item) => ({ bookId: item.bookId, title: item.title }));
       onFirstBooksPage = first || restart;
       booksCursor = page.nextCursor;
+      if (first && chooser?.kind === 'attribution' && chooser.choice === null) { chooser.choice = defaultAttribution(); chooser.book = books[0] ?? null; }
       busy = false;
       setStatus(LIBRARY_STATUS.opened);
       const added = books[0];
@@ -870,7 +875,10 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
         return;
       }
       preview = read;
-      draft = { title: read.suggestedTitle, kind: read.suggestedKind };
+      // The file chosen in the system's own dialog goes into 资料库 at once (Issue #1410 item 29), under its own title and the
+      // suggested kind (a document when none is suggested); its card changes either afterwards. Without a title it waits here.
+      draft = { title: read.suggestedTitle, kind: read.suggestedKind ?? 'document' };
+      if (draft.title.trim().length > 0) { await commit(); return; }
       setStatus(libraryPreviewHeading(read));
       paint('.library-preview h3');
     } catch (error) {

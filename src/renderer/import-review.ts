@@ -114,8 +114,10 @@ export function createImportReview(options: ImportReviewOptions) {
         bind: (control) => { control.disabled = true; }, setBusy: () => undefined };
     }
     const key = `${staged.draftId}:${staged.draftVersion}:${staged.source.sourceSha256}`;
-    let selected = wordIntakeFormChoices.get(key) ?? projection.savedChoice ??
+    // Choosing 直接并入正文 · 定稿基线 is its confirmation (Issue #1410 item 32A): no separate box to tick.
+    const chosen = wordIntakeFormChoices.get(key) ?? projection.savedChoice ??
       { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false };
+    let selected: WordTrackedChangesChoice = { ...chosen, acceptedBaselineConfirmed: chosen.mode === 'accepted-baseline' };
     wordIntakeFormChoices.set(key, { ...selected });
     while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
     groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未建立稿件基线。`);
@@ -125,11 +127,10 @@ export function createImportReview(options: ImportReviewOptions) {
       input.name = `word-import-mode-${staged.draftId}`; input.value = mode; input.dataset['wordImportMode'] = mode;
       line.append(input, element('span', undefined, wordImportModeOption(mode))); group.append(line); modes.push({ input, mode });
       input.addEventListener('change', () => { if (!input.checked || busy) return;
-        selected = { ...selected, mode, acceptedBaselineConfirmed: false }; changed(); });
+        selected = { ...selected, mode, acceptedBaselineConfirmed: mode === 'accepted-baseline' }; changed(); });
     }
-    const confirmationLabel = element('label', 'choice'); const confirmation = element('input'); confirmation.type = 'checkbox';
-    confirmation.dataset['wordAcceptedBaselineConfirmation'] = '';
-    confirmationLabel.append(confirmation, element('span', undefined, '我确认以接受修订后的文字建立稿件基线，原始修订留在原文件中。'));
+    const confirmationLabel = element('p', 'field-note', '以接受修订后的文字建立稿件基线，原始修订留在原文件中。');
+    confirmationLabel.dataset['wordAcceptedBaselineNote'] = '';
     const learningLabel = element('label', 'choice'); const learning = element('input'); learning.type = 'checkbox'; learning.dataset['wordLearnFromEdits'] = '';
     learningLabel.append(learning, element('span', undefined, '允许按当前学习设置在本机保留原始修改对 · 关闭与排除优先，本次不创建编辑记忆、更新审阅偏好或调用模型。'));
     const notice = element('p', 'field-note'); notice.dataset['wordReadingAvailability'] = '';
@@ -140,20 +141,17 @@ export function createImportReview(options: ImportReviewOptions) {
       (selected.mode === 'suggestions' ? !selected.acceptedBaselineConfirmed : selected.acceptedBaselineConfirmed);
     const paint = (): void => {
       for (const { input, mode } of modes) { input.checked = selected.mode === mode; input.disabled = busy; }
-      confirmation.checked = selected.acceptedBaselineConfirmed; confirmation.disabled = busy || selected.mode !== 'accepted-baseline';
+      confirmationLabel.hidden = selected.mode !== 'accepted-baseline';
       learning.checked = selected.learnFromEdits; learning.disabled = busy;
       const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
       notice.textContent = !reading.usable ? reading.blockCount === 0
         ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
           : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
         : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
-        : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'
-          : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
+        : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
       for (const control of buttons) control.disabled = busy || !allowed();
     };
     const changed = (): void => { wordIntakeFormChoices.set(key, { ...selected }); paint(); };
-    confirmation.addEventListener('change', () => { if (busy) return;
-      selected = { ...selected, acceptedBaselineConfirmed: selected.mode === 'accepted-baseline' && confirmation.checked }; changed(); });
     learning.addEventListener('change', () => { if (busy) return; selected = { ...selected, learnFromEdits: learning.checked }; changed(); });
     paint();
     return { elements: [group], choice: () => ({ ...selected }), allowed,
@@ -451,6 +449,8 @@ export function createImportReview(options: ImportReviewOptions) {
       const sameBookMatches = [...new Set(staged.identityFindings
         .filter((finding) => finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')
         .map((finding) => finding.sourceVersionId))];
+      // The same Book's exact source is reused to begin with (Issue #1410 item 32B); the editor may choose another.
+      if (sameBookMatches.length > 0 && reuseSourceVersionId === undefined) reuseSourceVersionId = sameBookMatches[0]!;
       if (sameBookMatches.length > 0) {
         const reuseChoices = element('fieldset');
         reuseChoices.setAttribute('role', 'radiogroup');
@@ -512,6 +512,10 @@ export function createImportReview(options: ImportReviewOptions) {
           finding.identityClass.kind === 'immutable-original')
         .map((finding) => finding.sourceVersionId))];
       const verifiedLineageSources = selectedChoice.reimportLineageSourceVersionIds;
+      // The first verified source, else 来源关系未确认, and the exact same-Book source, else a new one, are chosen to begin with
+      // (Issue #1410 item 32B); each stays changeable.
+      if (reimportLineageChoice === undefined) reimportLineageChoice = verifiedLineageSources[0] ?? 'unconfirmed';
+      if (reuseSourceVersionId === undefined) reuseSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
 
       const lineageChoices = element('fieldset');
       lineageChoices.setAttribute('role', 'radiogroup');
@@ -619,6 +623,7 @@ export function createImportReview(options: ImportReviewOptions) {
 
       const actions = element('div', 'button-row');
       if (reimportLineageChoice !== undefined && reuseSourceVersionId !== undefined) {
+        const lineageChosen: ReimportLineageChoice = reimportLineageChoice;
         let activePreparationJob: ServiceJobProjection | null = null;
         const cancelPreparation = button('取消当前操作', 'secondary', async () => {
           if (activePreparationJob === null) return;
@@ -643,9 +648,9 @@ export function createImportReview(options: ImportReviewOptions) {
                 kind: 'existing-book',
                 bookId: selectedChoice.bookId,
                 relationship: 'reimport',
-                lineage: reimportLineageChoice === 'unconfirmed'
+                lineage: lineageChosen === 'unconfirmed'
                   ? { kind: 'unconfirmed' }
-                  : { kind: 'verified-source-version', sourceVersionId: reimportLineageChoice },
+                  : { kind: 'verified-source-version', sourceVersionId: lineageChosen },
                 reuseSourceVersionId: reuseSourceVersionId ?? null,
               },
             });
@@ -935,6 +940,7 @@ export function createImportReview(options: ImportReviewOptions) {
     recoveryNotice?: string,
     recoveryReturn?: RecoveryReturnContext,
     mappingAfter: number | null = null,
+    commitNow = false,
   ): void {
     const content = panel();
     content.dataset['importReviewKind'] = 'reimport';
@@ -1012,8 +1018,9 @@ export function createImportReview(options: ImportReviewOptions) {
     }
     fidelity.append(fidelityList);
     if (review.degradationDecision.state === 'required-unselected') {
-      fidelity.append(element('p', 'attention-note', '必须明确接受完整降级集合后才能提交本次重新导入。'));
-      const accept = button('明确接受完整降级集合', 'secondary', async () => {
+      // Accepting the listed degradations and committing are one step (Issue #1410 item 32C).
+      fidelity.append(element('p', 'attention-note', '提交本次重新导入即接受上面列出的全部降级。'));
+      const accept = button(review.comparison.changed ? '接受降级并提交稿件重新导入' : '接受降级并记录', 'primary', async () => {
         accept.disabled = true;
         setStatus('正在持久化重新导入降级接受…', 'busy');
         try {
@@ -1021,7 +1028,7 @@ export function createImportReview(options: ImportReviewOptions) {
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
           });
-          renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
+          renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter, true);
           setStatus('完整降级集合已明确接受', 'success');
         } catch (error) {
           accept.disabled = false;
@@ -1233,6 +1240,8 @@ export function createImportReview(options: ImportReviewOptions) {
       });
       commit.dataset['commitManuscriptReimport'] = review.target.bookId;
       actions.append(commit, cancelCommit);
+      // Reached from 接受降级并提交: the commit follows in the same step.
+      if (commitNow) queueMicrotask(() => commit.click());
     }
     actions.append(abandon);
     // The sticky `.commit-bar` the other two reviews use, so this review's commit and cancel stay

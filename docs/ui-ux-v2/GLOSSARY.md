@@ -30,6 +30,8 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Actionable Attention Count | 待处理计数 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Attention Projection Item | 待处理投影项 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Manuscript Editing Mode | 稿件编辑模式 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Reading and Revision Mode | 阅读与修订模式 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Applied Revision Marker | ✎ 已改 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Contextual Collaboration Mode | 上下文协作模式 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Dedicated Work Workspace | 专门工作区 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Editorial Focus Mode | 编辑专注模式 | [AI7 V2 UI/UX](./CONTEXT.md) |

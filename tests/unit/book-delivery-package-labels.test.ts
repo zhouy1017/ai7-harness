@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as labels from '../../src/renderer/book-delivery-package-labels.js';
+import { mountBookDeliveryPackage } from '../../src/renderer/book-delivery-package.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import type { BookDeliveryPackageProjection } from '../../src/shared/protocol.js';
+import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 import {
   BOOK_DELIVERY_PACKAGE_ARCHIVE_CHECKSUMS,
   BOOK_DELIVERY_PACKAGE_ARCHIVE_MANIFEST,
@@ -34,7 +38,8 @@ describe('the words of 图书交付包', () => {
     expect(labels.PACKAGE_PURPOSE_LABEL).toBe('交付包用途');
     expect(labels.PACKAGE_PURPOSE_HINT).toBe('写明为什么准备这一版，例如「交出版社存档」。');
     expect(labels.PACKAGE_PREPARE).toBe('准备图书交付包');
-    expect(labels.PACKAGE_PURPOSE_NEEDED).toBe('先写明交付包用途。');
+    expect(labels.PACKAGE_PURPOSE_NEEDED).toBe('交付包用途过长。');
+    expect(labels.PACKAGE_PURPOSE_DEFAULT).toBe('常规交付打包');
     expect([labels.PACKAGE_VERSIONS_HEADING, labels.PACKAGE_VERSIONS_TRUNCATED, labels.PACKAGE_CURRENT_MARK, labels.PACKAGE_PREPARED])
       .toEqual(['已准备的版本', '更早的版本保留在记录中。', '当前', '图书交付包已准备']);
     expect(labels.PACKAGE_STATUS_LINES).toEqual({ preparing: '正在准备图书交付包…', prepareFailed: '无法准备图书交付包。', refreshFailed: '无法读取图书交付包。' });
@@ -56,6 +61,7 @@ describe('the words of 图书交付包', () => {
       notForThisBook: '本书不做',
       documentMissing: '尚未创建',
       documentUndelivered: '尚未交付',
+      documentUnchosen: '未选入本包',
       documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
       documentCreateRoute: '前往生产文档',
       documentDeliverRoute: '交付…',
@@ -80,6 +86,7 @@ describe('the words of 图书交付包', () => {
     expect(evaluationUnreadableDetail('评估记录已损坏。')).toBe('评估记录无法读取：评估记录已损坏。');
     expect(BOOK_DELIVERY_PACKAGE_REFUSALS).toEqual({
       changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
+      selection: '所选稿件或版本已不在本书中，请重新勾选。',
       purpose: '请写明交付包用途（1–80 个字）。',
     });
     expect(bookDeliveryPackageNotReady(['营销要点'])).toBe('还不能准备图书交付包：营销要点未满足。');
@@ -109,7 +116,7 @@ describe('the words of 图书交付包', () => {
       reviewFailed: '无法准备图书交付包的导出。',
       choosing: '正在打开系统的文件夹对话框…',
       cancelled: '已取消选择位置，没有写入任何文件。',
-      prepared: '已准备好导出文件，等待你确认。',
+      prepared: '已准备好导出文件，正在写入。',
       chooseFailed: '未能准备导出文件。',
       writing: '正在写入所选文件夹…',
       approveFailed: '未能导出图书交付包。',
@@ -193,5 +200,54 @@ describe('the version a Captured Procedure version link focuses (Issue #66, S31b
   it('focuses no version when the card was opened without a link', () => {
     expect(new labels.LinkedPackageVersionFocus(null).take(versions)).toBeNull();
     expect(new labels.LinkedPackageVersionFocus('v1').take([])).toBeNull();
+  });
+});
+
+// Issue #1410 item 1: 准备图书交付包 prepares under the routine purpose when the editor writes none.
+describe('准备图书交付包 with the routine purpose', () => {
+  const BOOK = '11111111-1111-4111-8111-111111111111';
+  let uninstall: () => void;
+  beforeEach(() => { uninstall = installMiniDom(); setTechnicalLayerVisible(false); });
+  afterEach(() => uninstall());
+
+  const reading = (): BookDeliveryPackageProjection => ({
+    bookId: BOOK, statement: '', conditions: [], ready: true, unmet: [], versions: [], versionsTruncated: false, changedSinceLatest: false, documents: [],
+    content: { digest: 'c'.repeat(64), included: [], includedTruncated: false, excluded: [], limitations: [], limitationsTruncated: false },
+  });
+  const settle = async (): Promise<void> => { for (let index = 0; index < 8; index += 1) await Promise.resolve(); };
+  async function mount() {
+    const root = miniDocument.createElement('section');
+    miniDocument.body.append(root);
+    const prepareBookDeliveryPackage = vi.fn(async (_input: unknown) => ({ bookId: BOOK, outcome: 'prepared', version: 1, package: reading() }));
+    const api = { inspectBookDeliveryPackage: vi.fn(async () => reading()), prepareBookDeliveryPackage };
+    const surface = mountBookDeliveryPackage({ root: root as unknown as HTMLElement, bookId: BOOK, api: api as never,
+      technicalDetails: () => miniDocument.createElement('details') as unknown as HTMLElement,
+      setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, route: vi.fn() });
+    surface.refresh();
+    await settle();
+    const purpose = root.querySelector('[data-package-field="purpose"]') as MiniElement & { value: string; placeholder: string };
+    const prepare = root.querySelector('[data-package-action="prepare"]') as MiniElement;
+    return { purpose, prepare, prepareBookDeliveryPackage };
+  }
+
+  it('prepares an empty purpose as 常规交付打包, and nothing else is asked first', async () => {
+    const { purpose, prepare, prepareBookDeliveryPackage } = await mount();
+    expect(purpose.value).toBe('');
+    expect(purpose.placeholder).toBe('常规交付打包（可改写）');
+    expect(prepare.disabled).toBe(false);
+    prepare.click();
+    await settle();
+    expect(prepareBookDeliveryPackage.mock.calls).toEqual([[{ purpose: '常规交付打包', expectedContentDigest: 'c'.repeat(64) }]]);
+  });
+
+  it('holds an over-long purpose with its reason and sends nothing', async () => {
+    const { purpose, prepare, prepareBookDeliveryPackage } = await mount();
+    purpose.value = '长'.repeat(81);
+    purpose.dispatchEvent({ type: 'input' });
+    expect(prepare.disabled).toBe(true);
+    expect(prepare.textContent).toContain('交付包用途过长。');
+    prepare.click();
+    await settle();
+    expect(prepareBookDeliveryPackage).not.toHaveBeenCalled();
   });
 });

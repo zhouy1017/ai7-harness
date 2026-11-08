@@ -67,6 +67,8 @@ const PAGES: Record<string, { status: number; body: string }> = {
 type Relation = { sourceRef: string; relation: string; excerptRef: string | null; lineage: string | null };
 interface Scenario {
   claimStages?: boolean;
+  assertionsInEveryUnit?: boolean;
+  atSourceMessage?: (message: string) => void;
   extractionAnswer?: 'recover' | 'invalid' | 'unknown';
   missingCredential?: 'model' | 'search';
   claimSearches?: number;
@@ -159,6 +161,7 @@ async function setup(initial: Scenario): Promise<void> {
     const tools = body.messages.filter((message) => message.role === 'tool').length;
     const declared = (body.tools?.length ?? 0) > 0;
     if (header !== null) {
+      scenario.atSourceMessage?.(unit);
       if (header.ordinal === 1 && initial.extractionAnswer !== undefined) {
         if (initial.extractionAnswer === 'unknown') return new Response('data: {"choices":[{"index":0,"delta":{"content":"synthetic"}}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
         if (firstExtraction || initial.extractionAnswer === 'invalid') {
@@ -173,7 +176,7 @@ async function setup(initial: Scenario): Promise<void> {
       }
       if (declared && header.ordinal === 1 && tools === 0) return answer({ content: null, tool_calls: [{ id: 'call_search', type: 'function', function: { name: 'websearch', arguments: JSON.stringify({ query: 'public background fact for a provider-free verification regression' }) } }] });
       if (declared && header.ordinal === 1 && tools === 1) return answer({ content: null, tool_calls: [{ id: 'call_fetch', type: 'function', function: { name: 'webfetch', arguments: JSON.stringify({ url: MUSEUM }) } }] });
-      const cited = header.ordinal === 1 ? quoteFrom(unit) : null;
+      const cited = header.ordinal === 1 || scenario.assertionsInEveryUnit ? quoteFrom(unit) : null;
       const v2 = body.messages[0]!.content?.includes('ai7.factual-review.unit-result/2') === true;
       if (scenario.invalidUnit === true) return answer({ content: '{}' });
       const citations = cited === null || scenario.noAssertions === true ? [] : [cited, ...(scenario.twoAssertions === true ? [quoteFrom(unit, 12)].filter((entry) => entry !== null) : [])];
@@ -187,7 +190,8 @@ async function setup(initial: Scenario): Promise<void> {
     }
     if (initial.claimStages && unit.startsWith('{')) {
       if (initial.claimModelUnknown) return new Response('data: {"choices":[{"index":0,"delta":{"content":"synthetic"}}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
-      const claim = JSON.parse(unit) as { claimId: string };
+      const claim = JSON.parse(unit) as { claimId: string; sourceUnitMessage: string };
+      scenario.atSourceMessage?.(claim.sourceUnitMessage);
       const second = body.messages.filter((message) => message.role === 'user').length > 1;
       const searches = initial.claimSearches ?? 1;
       const search = (ordinal: number) => answer({ content: null, tool_calls: [{ id: `search_${ordinal}`, type: 'function', function: {
@@ -252,10 +256,11 @@ async function newBook(name: string): Promise<Book> {
 /** One 事实核查 Review Run of the whole Book, at the level named (left at the default 标准核查 when none is). */
 async function review(book: Book, level?: EvidenceAssuranceLevel, hooks: {
   decisionId?: string;
+  scope?: import('../../src/shared/protocol.js').ReviewRunScopeRequest;
   prepared?: (reviewRunId: string) => void;
   steps?: (steps: ReviewRunDriveSteps) => ReviewRunDriveSteps;
 } = {}): Promise<{ reviewRunId: string; results: FactualVerificationResultProjection[] }> {
-  let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy,
+  let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], hooks.scope ?? { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy,
     null, [], null, null, null, undefined, hooks.decisionId);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const reviewRunId = work.projection!.run!.reviewRunId;
@@ -368,6 +373,40 @@ function syntheticClaimLedger() {
 }
 
 describe('factual claim occurrence ledger', () => {
+  it('starts a first factual selection through the ordinary claim pipeline and reuses it outside a later range', async () => {
+    await setup({ claimStages: true, assertionsInEveryUnit: true, relations: [] });
+    const book = await newBook('范围事实核查');
+    const blocks = store.factualReviewLedger.readWorkingBlocks(book.branchId);
+    const scope = (position: number) => ({ kind: 'selection' as const, fromChapterBlockId: blocks[position - 1]!.blockId, toChapterBlockId: blocks[position - 1]!.blockId });
+    let allowed = new Set([blocks[1]!.blockId]);
+    scenario.atSourceMessage = message => {
+      const ids = [...message.matchAll(/\[(blk_[0-9a-f]{24})\]/gu)].map(match => match[1]!);
+      expect(ids.length > 0 && ids.every(id => allowed.has(id))).toBe(true);
+    };
+    const first = await review(book, undefined, { scope: scope(2), prepared: () => {
+      const plan = store.inspectFactualReview(book.bookId);
+      expect(plan.taskIntent!.mode).toBe('review-first-range');
+      expect(store.factualReviewLedger.definitionForDigest(plan.planEnvelope!.promptContractDigest).factualClaims).toBeDefined();
+      const selected = plan.update!.reusePlan!.units.filter(unit => unit.disposition === 'recomputed');
+      expect(selected.map(unit => [unit.startPosition, unit.endPosition])).toEqual([[2, 2]]);
+      const unit = plan.coverageManifest!.units.find(unit => unit.startPosition === 2)!;
+      expect(unit.blockIds).toEqual([blocks[1]!.blockId]);
+      expect(unit.overlapBlockIds).toEqual([]);
+      expect(unit.headingText).toBeNull();
+    } });
+    const revision = store.inspectFactualReview(book.bookId).resultSetRevision!;
+    expect(revision.coverage.unitsOutOfScope).toBeGreaterThan(0);
+    expect(store.inspectReviewWorkspace(book.bookId, first.reviewRunId).run!.state).toBe('settled');
+    await review(book, undefined, { scope: scope(2) });
+    expect(store.inspectFactualReview(book.bookId).resultSetRevision!.ordinal).toBe(2);
+    expect(first.results.length).toBeGreaterThan(0);
+    expect(sends.search).toBeGreaterThan(0);
+    const chapter = store.inspectReviewWorkspace(book.bookId, null).scopeOptions.chapters.chapters.at(-1)!;
+    allowed = new Set(blocks.filter(b => b.position >= chapter.position && b.position <= chapter.endPosition).map(b => b.blockId));
+    await review(book, undefined, { scope: { kind: 'chapters', fromChapterBlockId: chapter.blockId, toChapterBlockId: chapter.blockId }, prepared: () => { expect(store.inspectFactualReview(book.bookId).update!.reusePlan!.counts.reused).toBeGreaterThan(0); } });
+    expect(store.inspectFactualReview(book.bookId).resultSetRevision!.coverage.unitsReused).toBeGreaterThan(0);
+  });
+
   it('reads repeated factual history without a configured current model or new transmissions', async () => {
     await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('无模型配置时读取既有核查');
@@ -383,13 +422,13 @@ describe('factual claim occurrence ledger', () => {
     expect(history.reviewRunId).toBe(original.reviewRunId);
     expect(history.categories).toEqual(original.categories);
     expect(store.inspectFactualReview(book.bookId).taskIntent).toMatchObject({ mode: 'review-again', modeLabel: '再次核查' });
-    expect(store.inspectFactualReview(book.bookId).updateControls).toBeNull();
+    expect(store.inspectFactualReview(book.bookId).updateControls?.actions['review-range']).toBeDefined();
     expect(lens(book, repeated.reviewRunId).results.map(r => r.findingId)).toEqual(repeated.results.map(r => r.findingId));
     expect(() => {
       let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'],
         { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, unconfigured.policy);
       while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
-    }).toThrowError(expect.objectContaining({ code: 'REVIEW_CATEGORY_UNAVAILABLE' }));
+    }).toThrowError(expect.objectContaining({ code: 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED' }));
     expect(sends).toEqual(before);
   });
 
@@ -524,7 +563,7 @@ describe('factual claim occurrence ledger', () => {
         let migrated: EditorialStore | undefined;
         try {
           migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 109, dataVersion: 1 });
+          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 111, dataVersion: 1 });
           expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
         } finally { migrated?.close(); await migration.dispose(); }
       }
@@ -717,6 +756,7 @@ describe('factual claim occurrence ledger', () => {
 
   it('excludes a source through an immutable decision and prepares explicit supplemental verification', async () => {
     await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    scenario.assertionsInEveryUnit = true;
     const book = await newBook('补充核查');
     const first = (await review(book)).results[0]!;
     const recorded = store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: first.resultId, resultVersion: first.version,

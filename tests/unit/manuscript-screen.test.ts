@@ -20,7 +20,8 @@ const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> }>,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
+  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
 }));
@@ -61,10 +62,15 @@ vi.mock('../../src/renderer/position-rail.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/editorial-marks.js')>(),
-  mountEditorialMarks: () => ({
-    selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
-    ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
-  }),
+  mountEditorialMarks: () => {
+    const surface = {
+      selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
+      ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
+      quickRevise: vi.fn(() => false), revealRevision: vi.fn(async () => undefined), recordAndApplyEditorRevision: vi.fn(async () => 'mark-applied'),
+    };
+    children.marks.push(surface);
+    return surface;
+  },
 }));
 vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/reading-return.js')>(),
@@ -88,6 +94,10 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
       highlightJump: vi.fn(), highlightAppliedRange: vi.fn(),
+      inputModeValue: 'reading-revision' as 'reading-revision' | 'direct-edit',
+      inputMode() { return this.inputModeValue; },
+      setInputMode: vi.fn(function (this: { inputModeValue: string }, mode: string) { this.inputModeValue = mode; }),
+      selectedRange: vi.fn(() => ({ kind: 'none' })),
       currentBlockStyle: () => ({ kind: 'paragraph', level: null }),
       setBlockStyle: vi.fn(),
       isComposing: () => false,
@@ -103,7 +113,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
 const windowOf = (bookId: string): ManuscriptWindowProjection => ({
   bookId, manuscriptId: `${bookId}-manuscript`, branchId: 'branch-main', revisionId: 'rev-2', revisionLabel: 'r2',
   journalSequence: 4, workingDigest: 'a'.repeat(64), deliverable: 'manuscript', recoveredStateReview: null,
-  position: { label: '第 3 段', proportion: 0.25, structureLabel: '第一章' },
+  position: { label: '第 3 段', proportion: 0.25, structureLabel: '第一章', totalCharacters: 12_345 },
   previousCursor: null, nextCursor: null, marks: [], marksTruncated: false,
   blocks: [{ blockId: 'blk_3', kind: 'paragraph', text: '合成段落。', position: 3, digest: 'b'.repeat(64) }],
 }) as unknown as ManuscriptWindowProjection;
@@ -137,7 +147,7 @@ function shell(rendererApi = api) {
     showing = null;
     screen.replaceChildren(content);
   };
-  const open = (initialWindow: ManuscriptWindowProjection): void => mountManuscriptScreen({
+  const open = (initialWindow: ManuscriptWindowProjection, extra: Partial<ScreenOptions> = {}): void => mountManuscriptScreen({
     api: rendererApi, initialWindow, bookTitle: '合成书', persistenceStatus, contextView,
     viewPreferences: {} as ScreenOptions['viewPreferences'],
     preferences: { current: { 'analysis.lastViewedRevision': {} }, viewAnalysis: vi.fn() } as unknown as ScreenOptions['preferences'],
@@ -151,6 +161,8 @@ function shell(rendererApi = api) {
     renderEditorWindow: vi.fn(), renderBookAnalysis: vi.fn(),
     renderBookReview: vi.fn(), renderBookDeliverables: vi.fn(),
     renderProposalConflict: vi.fn(), renderProposalWorkspace: vi.fn(), returnToRecoveryComparison: vi.fn(),
+    openPrimaryManuscript: vi.fn(async () => undefined), openProductionDocument: vi.fn(async () => undefined), openWritingPlan: vi.fn(),
+    ...extra,
   });
   return {
     persistenceStatus, screen, contextView, open,
@@ -177,6 +189,7 @@ beforeEach(() => {
   children.editorSurfaces.length = 0;
   children.protections.length = 0;
   children.rails.length = 0;
+  children.marks.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
@@ -364,7 +377,7 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['撤销', '重做', '重试权威刷新']);
+      .toEqual(['模式：阅读与修订（防误触）', '让 AI 修改…', '撤销', '重做', '重试权威刷新']);
     app.showing?.destroy();
   });
 
@@ -400,7 +413,7 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
-  it('labels capped chapter counts as partial and omits counts for chapters outside the retained rail', async () => {
+  it('counts a chapter\'s marks only where it has some, and the outline\'s own headings in its footer', async () => {
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
       const entries = ['blk_3', 'omitted'].map((blockId) => ({ blockId, kind: 'heading', level: 1, text: blockId, displayTextTruncated: false }));
@@ -411,11 +424,11 @@ describe('the Manuscript screen lifecycle', () => {
         chapters: [{ blockId: 'blk_3', title: '第一章', level: 1, proportion: .25, suggestions: 0, annotations: 1, notes: 0 }], chaptersTruncated: true,
         marks: [], marksTruncated: false, uncovered: null });
       await vi.advanceTimersByTimeAsync(0);
-      const rows = app.screen.querySelectorAll('.outline-list button');
-      expect(rows[0]!.querySelector('.outline-counts')?.textContent).toContain('批注 1');
-      expect(rows[1]!.querySelector('.outline-counts')).toBeNull();
-      expect(rows[1]!.querySelector('.outline-percent')).toBeNull();
-      expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('已显示 1 个章节 · 标记计数为已显示部分');
+      // A chapter's marks are one light count where it has some (Issue #1409); none is drawn for a chapter without.
+      const rows = app.screen.querySelectorAll('.outline-list .outline-entry');
+      expect(rows[0]!.querySelector('.outline-marks')?.textContent).toBe('1 处标记');
+      expect(rows[1]!.querySelector('.outline-marks')).toBeNull();
+      expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('共 2 个章节标题');
       app.showing?.destroy();
     } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
   });
@@ -475,3 +488,71 @@ it('scans the manuscript screen in ordinary mode (#1315)', () => {
 });
 
 vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
+
+describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
+  const documentOf = (bookId: string, title: string) => ({
+    title, documentId: `${bookId}-manuscript`, branchId: 'branch-main', createdAt: '2026-11-07T00:00:00.000Z',
+    origin: { sourceVersionId: 'source', displayName: '新闻稿.docx', marksNotCarried: 0, drafted: false, blank: true },
+    versions: [{ revisionId: 'rev-2', label: '版本 1', ordinal: 1, createdAt: '2026-11-07T00:00:00.000Z', revisionDigest: 'a'.repeat(64) }],
+    versionsTruncated: false, changedSinceVersion: false, journalSequence: 4, workingDigest: 'a'.repeat(64),
+    deliveries: [], deliveriesTruncated: false, changedSinceDelivery: false,
+    workflow: { profile: { id: 'p', name: '流程', version: '1', activatedAt: '2026-11-07T00:00:00.000Z' }, summary: '', next: [], phases: [], transitions: 0 },
+  });
+  const documentsOf = (bookId: string, title: string) => ({
+    bookId, configuration: { schema: 's', version: '1', digest: 'd' }, unavailableReason: null, sources: [], sourcesTruncated: false,
+    types: [{ typeId: 'news-release', label: '新闻稿', notForThisBook: false, documents: [documentOf(bookId, title)], document: documentOf(bookId, title) }],
+  });
+
+  it('lists the manuscript and its documents, and renames the open document in place without remounting its editor', async () => {
+    setTechnicalLayerVisible(false);
+    const rename = vi.fn(async ({ title }: { title: string }) => ({
+      bookId: 'book-one', typeId: 'news-release', notice: null, documents: documentsOf('book-one', title), document: documentOf('book-one', title),
+    }));
+    const methods = {
+      inspectProductionDocuments: async () => documentsOf('book-one', '首发通稿'),
+      inspectWritingTask: async () => ({ bookId: 'book-one', unavailable: null, task: null, types: [], references: {}, consequences: {} }),
+      renameProductionDocument: rename,
+    };
+    const app = shell(new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) }));
+    app.open({ ...windowOf('book-one'), deliverable: 'production-document' } as ManuscriptWindowProjection,
+      { productionDocument: { typeId: 'news-release', typeLabel: '新闻稿', document: documentOf('book-one', '首发通稿') as never } });
+    await vi.advanceTimersByTimeAsync(0);
+    const switches = [...app.screen.querySelectorAll<HTMLButtonElement>('[data-manuscript-switch]')].map((node) => [node.dataset['manuscriptSwitch'], node.textContent, node.getAttribute('aria-current')]);
+    expect(switches).toEqual([['primary', '主稿件（《合成书》）', null], ['document', '[新闻稿] 首发通稿', 'page'], ['new', '+ 新建 / 导入衍生稿件', null]]);
+    // Ordinary mode: no seven phases, no 交付 in the document's lens, and its 批注栏 is offered.
+    expect(app.screen.querySelector('.document-lens')?.textContent).not.toContain('交付');
+    expect(app.screen.querySelector('[data-edge-entry="comments"]')).not.toBeNull();
+    const editors = children.editors.length;
+    app.screen.querySelector<HTMLButtonElement>('[data-document-action="rename"]')!.click();
+    const input = app.screen.querySelector<HTMLInputElement>('.document-title-input')!;
+    expect(input.value).toBe('首发通稿');
+    input.value = '书展宣传稿';
+    (input as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Enter' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rename).toHaveBeenCalledWith({ documentId: 'book-one-manuscript', title: '书展宣传稿' });
+    expect(app.screen.querySelector('.document-title-heading')?.textContent).toBe('书展宣传稿');
+    expect(app.screen.querySelector('.document-title-input')).toBeNull();
+    expect(app.screen.querySelector('[data-manuscript-switch="document"]')?.textContent).toBe('[新闻稿] 书展宣传稿');
+    // Only the name moved: the same editor holds the text.
+    expect(children.editors.length).toBe(editors);
+    expect(children.destroyed).not.toContain('editor');
+    app.showing?.destroy();
+  });
+
+  it('cancels a rename with Escape and keeps the title', async () => {
+    setTechnicalLayerVisible(false);
+    const rename = vi.fn();
+    const methods = { inspectProductionDocuments: async () => documentsOf('book-one', '首发通稿'), renameProductionDocument: rename };
+    const app = shell(new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) }));
+    app.open({ ...windowOf('book-one'), deliverable: 'production-document' } as ManuscriptWindowProjection,
+      { productionDocument: { typeId: 'news-release', typeLabel: '新闻稿', document: documentOf('book-one', '首发通稿') as never } });
+    app.screen.querySelector<HTMLButtonElement>('[data-document-action="rename"]')!.click();
+    const input = app.screen.querySelector<HTMLInputElement>('.document-title-input')!;
+    input.value = '别的题目';
+    (input as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape' });
+    expect(rename).not.toHaveBeenCalled();
+    expect(app.screen.querySelector('.document-title-heading')?.textContent).toBe('首发通稿');
+    expect(app.screen.querySelector('.document-title-input')).toBeNull();
+    app.showing?.destroy();
+  });
+});

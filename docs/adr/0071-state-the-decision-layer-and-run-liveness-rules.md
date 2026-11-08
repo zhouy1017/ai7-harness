@@ -1,5 +1,6 @@
 ---
 status: accepted
+amended-by: ADR 0096 §4.2 (2026-11, Owner #1400 / #1414) — ordinary mode shows no not-do lists; the technical layer is developer-mode only (editor surfaces, LAYER-001～008 tightened reading)
 ---
 
 # State the decision-layer and Run-liveness rules for every editor-facing surface
@@ -21,9 +22,9 @@ No other clause moves. In particular the exact-disclosure requirements (V2-UX-RE
 
 ### 1 · Two layers on every surface
 
-Every editor-facing surface separates a **Decision Layer** from a **Technical Identity Layer**. The Decision Layer answers, in the product's editorial Chinese and in local time, what the surface is about, what an action will read, what it will produce, what it will not do, what it costs, and the one safe next action. The Technical Identity Layer carries digests, record identifiers, references, schema and version identifiers, and machine instants, closed by default behind one disclosure affordance per surface and opened without changing any state.
+Every editor-facing surface separates a **Decision Layer** from a **Technical Identity Layer**. The Decision Layer answers, in the product's editorial Chinese and in local time, what the surface is about, what an action will read, what it will produce, what it costs, and the one safe next action. In ordinary mode it carries no list of what the action will not do and no fixed disclaimer; named non-effects belong to developer mode's technical layer and to Help ([ADR 0096 §4.2](0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#42-ordinary-mode-carries-no-not-do-lists)). The Technical Identity Layer carries digests, record identifiers, references, schema and version identifiers, and machine instants, closed by default behind one disclosure affordance per surface and opened without changing any state.
 
-What may never be demoted: named non-effects, the Run Budget Ceiling state, the scope of reading and the Outbound Data Category, the exact blocker, the Provider decision, the consequence of the primary action, and any decision the editor must weigh before acting. Nothing leaves the record: every identity stays reachable, copyable, and unabridged.
+What may never be demoted: the Run Budget Ceiling state, the scope of reading and the Outbound Data Category, the exact blocker, the Provider decision, the consequence of the primary action, and any decision the editor must weigh before acting. Nothing leaves the record: every identity stays reachable, copyable, and unabridged.
 
 ### 2 · Vocabulary, time, and reach
 
@@ -56,7 +57,7 @@ The four renderer sites #303's sweep routed to #304 (`src/renderer/index.ts:2166
 
 ## Rejected alternatives
 
-- **Hide technical identities from ordinary surfaces.** Rejected: V2-UX-VIS-003 and the exact-disclosure requirements exist because an editor sometimes needs the exact digest; the defect was rank, not presence.
+- **Hide technical identities from ordinary surfaces.** Rejected: V2-UX-VIS-003 and the exact-disclosure requirements exist because an editor sometimes needs the exact digest; the defect was rank, not presence. Owner #1314 (2026-11-04) later chose this for ordinary mode: technical identities are reachable only in developer mode, which still carries them unabridged ([editor surfaces](../ui-ux-v2/editor-surfaces.md), LAYER-001～008 的收紧读法).
 - **An estimated percentage or spinner between increments.** Rejected, as V2-UX-RUN-007 already rejects it: motion the system cannot vouch for is the one thing this product must not show. Every composing fact of the liveness signal is something the system recorded.
 - **A fixed stall timeout.** Rejected: ninety seconds is normal for this model and ten minutes is not, and the product can measure the difference from its own steps instead of guessing in advance.
 - **Fix the pill, the timestamps, and the workbench actions one by one.** Rejected: P3, P4, and P7 are one defect — a surface asserting something not derived from current state or ranked by what an editor needs — and Phase 2 builds four families of new surfaces that would repeat it.

@@ -151,7 +151,30 @@ export function updateWorkingOffsetNodes(db: DatabaseSync, branchId: string, pos
 }
 
 
+let nestedTransactions = 0;
+
+/**
+ * One bounded write: its own `BEGIN IMMEDIATE`, or — inside a caller's transaction, as a replacement written as per-occurrence
+ * revisions is (Issue #1411) — a savepoint that the caller's commit or rollback decides with everything else it wrote.
+ */
 export function transact<T>(db: DatabaseSync, operation: () => T): T {
+  if (db.isTransaction) {
+    const savepoint = `ai7_bounded_${++nestedTransactions}`;
+    db.exec(`SAVEPOINT ${savepoint}`);
+    try {
+      const result = operation();
+      db.exec(`RELEASE ${savepoint}`);
+      return result;
+    } catch (error) {
+      try {
+        db.exec(`ROLLBACK TO ${savepoint}`);
+        db.exec(`RELEASE ${savepoint}`);
+      } catch (rollbackError) {
+        throw new BoundedStoreFatalError(new AggregateError([error, rollbackError], 'SQLite savepoint rollback failed.'));
+      }
+      throw error;
+    }
+  }
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = operation();

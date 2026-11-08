@@ -11,6 +11,8 @@ import {
   type BookDeliveryPackageExportSummaryProjection,
   type BookDeliveryPackageItemProjection,
   type BookDeliveryPackageProjection,
+  type BookDeliveryPackageDocumentChoice,
+  type BookDeliveryPackageDocumentOptionProjection,
   type BookDeliveryPackageVersionProjection,
   type ReadersReportTemplate,
   type ReviewRunState,
@@ -116,6 +118,8 @@ export const BOOK_DELIVERY_PACKAGE_WORDS = {
   notForThisBook: '本书不做',
   documentMissing: '尚未创建',
   documentUndelivered: '尚未交付',
+  /** A derivative document the editor did not tick (Issue #1405). */
+  documentUnchosen: '未选入本包',
   documentNotice: '交付后有修改：可以再交付，也可以按交付过的版本打包。',
   documentCreateRoute: '前往生产文档',
   documentDeliverRoute: '交付…',
@@ -150,12 +154,31 @@ export function evaluationUnreadableDetail(reason: string): string {
 
 export const BOOK_DELIVERY_PACKAGE_REFUSALS = {
   changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
+  selection: '所选稿件或版本已不在本书中，请重新勾选。',
   purpose: `请写明交付包用途（1–${MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS} 个字）。`,
 } as const;
 
 /** `第 2 次交付 · 版本 3`: a document's latest delivery, never 已交付 (PUB-009's words stay out of 交付物). */
 function deliveryLabel(ordinal: number, versionLabel: string): string {
   return `第 ${ordinal} 次交付 · ${versionLabel}`;
+}
+
+/** The most saved versions a package's choice of one document lists (Issue #1405); any saved version may still be ticked. */
+const PACKAGE_DOCUMENT_VERSIONS_OFFERED = 20;
+
+/** One derivative document as the package offers it (Issue #1405): its saved versions newest first and the one held now. */
+function documentOption(type: PackageDocumentReading, selectedRevisionId: string | null): BookDeliveryPackageDocumentOptionProjection {
+  const documentNow = type.document!;
+  const versions = documentNow.versions ?? [];
+  return {
+    documentId: documentNow.documentId,
+    typeId: type.typeId,
+    // The house type's own name, as 稿件's switcher says it; the title beside it is the document's.
+    typeLabel: BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label ?? type.typeLabel,
+    title: documentNow.title ?? type.typeLabel,
+    versions: versions.slice(0, PACKAGE_DOCUMENT_VERSIONS_OFFERED).map((version) => ({ revisionId: version.revisionId, label: version.versionLabel, savedAt: version.recordedAt })),
+    selectedRevisionId,
+  };
 }
 
 function publicationLabel(milestoneLabel: string, revisionLabel: string): string {
@@ -202,7 +225,14 @@ export interface PackageDocumentReading {
   typeLabel: string;
   notForThisBook: boolean;
   multiple?: boolean;
-  document: null | { title?: string; documentId: string; changedSinceDelivery: boolean; deliveries: ReadonlyArray<PackageDeliveryReading> };
+  document: null | {
+    title?: string;
+    documentId: string;
+    changedSinceDelivery: boolean;
+    deliveries: ReadonlyArray<PackageDeliveryReading>;
+    /** Every saved version newest first (Issue #1405): a package may hold any of them, delivered or not. */
+    versions?: ReadonlyArray<{ version: number; versionLabel: string; revisionId: string; revisionDigest: string; recordedAt: string }>;
+  };
 }
 
 /** One Review Run of the Book, oldest first: its state and its newest report version. */
@@ -274,7 +304,8 @@ export interface PackageContent {
   bookId: string;
   publication: null | Omit<PackagePublicationReading, 'changedSince' | 'withdrawn'>;
   documents: ReadonlyArray<
-    | { typeId: string; title?: string; exportKey?: string; disposition: 'included'; documentId: string; version: number; revisionId: string; revisionDigest: string; deliveryId: string; deliveryIds: ReadonlyArray<string> }
+    // A ticked saved version (Issue #1405) names no `deliveryId`; `deliveryIds` are the document's Delivery Records of that version.
+    | { typeId: string; title?: string; exportKey?: string; disposition: 'included'; documentId: string; version: number; revisionId: string; revisionDigest: string; deliveryId?: string; deliveryIds: ReadonlyArray<string> }
     | { typeId: string; disposition: 'not-for-this-book' }
   >;
   reviewReports: ReadonlyArray<{ reviewRunId: string; reportId: string; version: number; digest: string }>;
@@ -289,6 +320,8 @@ export interface PackageContent {
 
 /** Everything a read derives from the records: the table, the preview, and the content to freeze. */
 interface PackageReading {
+  /** Every derivative document the package can hold, and the version it holds now (Issue #1405). */
+  options: BookDeliveryPackageDocumentOptionProjection[];
   conditions: BookDeliveryPackageConditionProjection[];
   unmet: string[];
   content: PackageContent;
@@ -321,10 +354,10 @@ export class BookDeliveryPackages {
   }
 
   /** 图书交付包 of one Book: the condition table, what a package made now would hold, and its frozen versions. */
-  inspect(bookId: string): BookDeliveryPackageProjection {
+  inspect(bookId: string, choices?: ReadonlyArray<BookDeliveryPackageDocumentChoice>): BookDeliveryPackageProjection {
     requirePackage(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     requirePackage(this.#db.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-    const reading = this.#read(bookId);
+    const reading = this.#read(bookId, choices);
     const rows = this.#db.prepare(
       'SELECT * FROM book_delivery_package_versions WHERE book_id = ? ORDER BY version DESC LIMIT ?',
     ).all(bookId, MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED + 1) as SqlRow[];
@@ -339,6 +372,7 @@ export class BookDeliveryPackages {
       versions,
       versionsTruncated: rows.length > MAX_BOOK_DELIVERY_PACKAGE_VERSIONS_LISTED,
       changedSinceLatest: versions[0] !== undefined && versions[0].technical.contentDigest !== reading.contentDigest,
+      documents: reading.options,
     };
   }
 
@@ -348,12 +382,12 @@ export class BookDeliveryPackages {
    * version is that version, unchanged; anything else is the next version, naming the one before it. Nothing is
    * written anywhere else, and no file is made.
    */
-  prepare(input: { bookId: string; purpose: string; expectedContentDigest: string }): { outcome: 'prepared' | 'unchanged'; version: number } {
+  prepare(input: { bookId: string; purpose: string; expectedContentDigest: string; documents?: ReadonlyArray<BookDeliveryPackageDocumentChoice> }): { outcome: 'prepared' | 'unchanged'; version: number } {
     requirePackage(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
     requirePackage(this.#db.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
     const purpose = publicationText(input.purpose, MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS);
     requirePackage(purpose !== null, 'BOOK_DELIVERY_PACKAGE_PURPOSE_INVALID', BOOK_DELIVERY_PACKAGE_REFUSALS.purpose);
-    const reading = this.#read(input.bookId);
+    const reading = this.#read(input.bookId, input.documents);
     requirePackage(reading.contentDigest === input.expectedContentDigest, 'BOOK_DELIVERY_PACKAGE_CHANGED', BOOK_DELIVERY_PACKAGE_REFUSALS.changed);
     requirePackage(reading.unmet.length === 0 && reading.content.publication !== null, 'BOOK_DELIVERY_PACKAGE_NOT_READY', bookDeliveryPackageNotReady(reading.unmet));
     const latest = this.#db.prepare(
@@ -387,8 +421,12 @@ export class BookDeliveryPackages {
     return { outcome: 'prepared', version };
   }
 
-  /** The condition table and the content, read from the records as they stand. */
-  #read(bookId: string): PackageReading {
+  /**
+   * The condition table and the content, read from the records as they stand. Without `choices` each type holds its latest
+   * delivered version, as it always did; with them (Issue #1405) exactly the ticked documents at their ticked saved versions are
+   * held — no Delivery Record or workflow phase is asked for — and every other document is left out by the editor's choice.
+   */
+  #read(bookId: string, choices?: ReadonlyArray<BookDeliveryPackageDocumentChoice>): PackageReading {
     const conditions: BookDeliveryPackageConditionProjection[] = [];
     const included: BookDeliveryPackageItemProjection[] = [];
     const excluded: BookDeliveryPackageItemProjection[] = [];
@@ -418,9 +456,56 @@ export class BookDeliveryPackages {
       if (publication.changedSince) limitations.push(`稿件：${PUBLICATION_CHANGE_NOTICE}，本包按发稿版本。`);
     }
 
-    // One row per house type: 本书不做, or its latest delivered version.
+    // One row per house type: 本书不做, or its latest delivered version — or, with choices, the ticked saved version.
     const documents: PackageContent['documents'][number][] = [];
-    for (const type of this.#sources.documents(bookId)) {
+    const readings = this.#sources.documents(bookId);
+    const chosen = choices === undefined ? null : new Map(choices.map((choice) => [choice.documentId, choice.revisionId]));
+    const options: BookDeliveryPackageDocumentOptionProjection[] = [];
+    if (chosen !== null) {
+      const known = new Map(readings.filter((type) => !type.notForThisBook && type.document !== null).map((type) => [type.document!.documentId, type.document!]));
+      requirePackage(chosen.size === choices!.length &&
+        choices!.every((choice) => known.get(choice.documentId)?.versions?.some((version) => version.revisionId === choice.revisionId) === true),
+      'BOOK_DELIVERY_PACKAGE_SELECTION_INVALID', BOOK_DELIVERY_PACKAGE_REFUSALS.selection);
+    }
+    for (const type of readings) {
+      if (chosen !== null && !type.notForThisBook) {
+        if (type.document === null) continue;
+        const documentNow = type.document;
+        const revisionId = chosen.get(documentNow.documentId) ?? null;
+        const saved = revisionId === null ? undefined : documentNow.versions?.find((version) => version.revisionId === revisionId);
+        options.push(documentOption(type, saved === undefined ? null : saved.revisionId));
+        conditions.push({
+          key: 'document',
+          documentId: documentNow.documentId,
+          typeId: type.typeId,
+          label: type.typeLabel,
+          met: true,
+          stateLabel: saved === undefined ? BOOK_DELIVERY_PACKAGE_WORDS.documentUnchosen : saved.versionLabel,
+          notice: null,
+          route: null,
+          routeLabel: null,
+        });
+        if (saved === undefined) {
+          excluded.push({ kind: 'exclusion', label: type.typeLabel, detail: BOOK_DELIVERY_PACKAGE_WORDS.documentUnchosen });
+          continue;
+        }
+        const defaultTitle = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label;
+        const namedMember = type.multiple === true || (documentNow.title !== undefined && documentNow.title !== defaultTitle);
+        documents.push({
+          typeId: type.typeId,
+          disposition: 'included',
+          ...(namedMember ? { exportKey: type.multiple === true ? `document:${documentNow.documentId}` : `document:${type.typeId}`,
+            ...(documentNow.title === undefined ? {} : { title: documentNow.title }) } : {}),
+          documentId: documentNow.documentId,
+          version: saved.version,
+          revisionId: saved.revisionId,
+          revisionDigest: saved.revisionDigest,
+          deliveryIds: documentNow.deliveries.filter((delivery) => delivery.revisionId === saved.revisionId).map((delivery) => delivery.deliveryId),
+        });
+        included.push({ kind: 'document', label: `${type.typeLabel} · ${saved.versionLabel}`, detail: null });
+        continue;
+      }
+      if (type.document !== null && !type.notForThisBook) options.push(documentOption(type, type.document.deliveries[0]?.revisionId ?? null));
       const latest = type.document?.deliveries[0];
       const met = type.notForThisBook || latest !== undefined;
       const notice = !type.notForThisBook && latest !== undefined && type.document!.changedSinceDelivery ? BOOK_DELIVERY_PACKAGE_WORDS.documentNotice : null;
@@ -588,6 +673,7 @@ export class BookDeliveryPackages {
     // unfinished review reports are disclosed above, never preparation rituals.
     const unmet = conditions.filter((condition) => condition.key === 'publication' && !condition.met).map((condition) => condition.label);
     return {
+      options,
       conditions,
       unmet,
       content,
@@ -648,6 +734,27 @@ export class BookDeliveryPackages {
       held.push({ bookId: record.bookId, packageVersionId: record.packageVersionId, version: record.version, preparedAt: record.preparedAt });
     }
     return { packages: held, total: integer(total) };
+  }
+
+  /**
+   * The saved document versions the editor ticked into this Book's frozen package versions (Issue #1405), by document, each with
+   * the package version and when it was prepared; a version that held the earlier delivered reading names its Delivery Record
+   * instead and is read through it. Every record is verified against its digest.
+   */
+  packagedDocumentVersions(bookId: string): Map<string, Array<{ version: number; versionLabel: string; revisionId: string; revisionDigest: string; recipientLabel: string; recordedAt: string }>> {
+    const byDocument = new Map<string, Array<{ version: number; versionLabel: string; revisionId: string; revisionDigest: string; recipientLabel: string; recordedAt: string }>>();
+    const rows = this.#db.prepare('SELECT * FROM book_delivery_package_versions WHERE book_id = ? ORDER BY version').all(bookId) as SqlRow[];
+    for (const row of rows) {
+      const { record } = verifiedVersion(row);
+      for (const entry of record.content.documents) {
+        if (entry.disposition !== 'included' || entry.deliveryId !== undefined) continue;
+        const list = byDocument.get(entry.documentId) ?? [];
+        list.push({ version: entry.version, versionLabel: `版本 ${entry.version}`, revisionId: entry.revisionId, revisionDigest: entry.revisionDigest,
+          recipientLabel: `图书交付包 v${record.version}`, recordedAt: record.preparedAt });
+        byDocument.set(entry.documentId, list);
+      }
+    }
+    return byDocument;
   }
 
   /** One frozen version of this Book's package, its record verified against its digest, or `null` when it is none of it. */

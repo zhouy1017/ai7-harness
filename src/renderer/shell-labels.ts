@@ -24,7 +24,7 @@ export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination;
   { key: 'series', label: '书系', icon: 'i-series' },
   { key: 'knowledge', label: '知识库', icon: 'i-kb' },
   { key: 'quality', label: '质量与学习', icon: 'i-learn' },
-  { key: 'global-agent', label: '全域智能体', icon: 'i-learn' },
+  { key: 'global-agent', label: '全域智能体', icon: 'i-agent' },
 ]);
 
 /** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */
@@ -55,7 +55,7 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
  * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
  * section, and nothing opens it on its own.
  */
-export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-ms', state: 'agent-workspace' } as const);
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-workspace', state: 'agent-workspace' } as const);
 
 export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
 
@@ -65,6 +65,8 @@ export const SHELL_LABELS = Object.freeze({
   pinnedHeading: '置顶',
   recentHeading: '最近打开',
   noBooks: '打开过的图书会列在这里。',
+  moreBooks: (count: number) => `更多图书（${count}）`,
+  moreBooksHint: (shortcut: string | null) => `其余置顶与最近打开的图书${shortcut === null ? '' : `；也可按 ${shortcut} 快速切换`}`,
   currentBook: '当前图书',
   application: 'AI7 编辑工作台',
   collapse: '收起侧栏',
@@ -152,7 +154,7 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
 export const SETTINGS_HUB_WORDS = Object.freeze({
   section: '设置',
   title: '设置',
-  lede: '本机怎样连接模型服务、怎样保存数据、怎样显示。打开一项设置不会更改任何记录。',
+  lede: '本机怎样连接模型服务、怎样保存数据、怎样显示。',
   comingSoon: '即将提供',
   opened: '设置已打开',
 });

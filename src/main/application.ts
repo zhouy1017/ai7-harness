@@ -34,6 +34,10 @@ import {
   type AgentWorkspaceProposalSetInput,
   type AskAboutSelectionInput,
   type InspectFastInteractionRequestInput,
+  type InspectAiEditLocksInput,
+  type SetAiEditLocksInput,
+  type StartScopedAiEditInput,
+  type InspectScopedAiEditInput,
   type PolishSelectionInput,
   type ConvertDialogueToChangeSuggestionInput,
   type DialogueAttemptInput,
@@ -3086,6 +3090,61 @@ export function registerRendererHandlers(
       return result;
     }),
   );
+  // 🔒 锁定 and 就选中部分让 AI 修改 (Issue #1412): a manuscript this window holds, of the route's Book; a scoped edit is read
+  // again bound to the route's Book.
+  ipcMain.handle(IPC_CHANNELS.inspectAiEditLocks, (event, input: InspectAiEditLocksInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      requireManuscriptCapability(owned, input);
+      return service.call('inspectAiEditLocks', { manuscriptId: input.manuscriptId, branchId: input.branchId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.setAiEditLocks, (event, input: SetAiEditLocksInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        return service.call('setAiEditLocks', { manuscriptId: input.manuscriptId, branchId: input.branchId, targets: input.targets,
+          locked: input.locked, expectedLocksDigest: input.expectedLocksDigest });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.startScopedAiEdit, (event, input: StartScopedAiEditInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        requireManuscriptCapability(owned, input);
+        const result = await service.call('startScopedAiEdit', { bookId: route.bookId, manuscriptId: input.manuscriptId, branchId: input.branchId,
+          baseRevisionId: input.baseRevisionId, expectedJournalSequence: input.expectedJournalSequence, expectedLocksDigest: input.expectedLocksDigest,
+          instruction: input.instruction, scope: input.scope });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectScopedAiEdit, (event, input: InspectScopedAiEditInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectScopedAiEdit', { bookId: route.bookId, requestId: input.requestId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '这次请求不属于当前图书工作台。');
+      return result;
+    }),
+  );
   registerProductionAndPackageHandlers({ chooseExportFolder, choosePackageArchiveFile, requireSender, requireAuthority, requireCurrentBookRoute, service, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration, requireManuscriptCapability });
 
   // ④ 导出 (Issue #413, plan slice S64) belongs to 交付物's Book the same way: the renderer never names a Book
@@ -3322,6 +3381,18 @@ export function registerRendererHandlers(
         if (result.previewId !== input.previewId || capability.branchId !== result.branchId) {
           throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '替换提交结果不属于当前稿件分支。');
         }
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.commitReplacementRevisions, (event, input: ServiceOperationMap['commitReplacementRevisions']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireEditorResource(owned, 'preview', input.previewId);
+        const result = await service.call('commitReplacementRevisions', input);
+        if (result.previewId !== input.previewId) throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '替换提交结果不属于当前稿件分支。');
         return result;
       });
     }),
@@ -3746,7 +3817,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 109, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 111, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -4085,7 +4156,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v25.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v26.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },

@@ -26,6 +26,7 @@ import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asStrin
   HISTORY_BATCH, MIGRATION_BATCH, type OffsetSegment } from './manuscript/bounded-kernel.js';
 import { withNoteReferences } from './manuscript/note-blocks.js';
 import type { ManuscriptSourceObjects } from './manuscript/source-objects.js';
+import { aiLocksOfWindow } from './ai-edit-locks.js';
 import { historyStale, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
 import { blockDigest, blockShapeFromDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
 export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
@@ -2928,7 +2929,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === 109 || version === 110 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2979,7 +2980,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === 106 || version === 107 || version === 108 || version === 109 || version === 110 || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -4699,6 +4700,7 @@ export class BoundedManuscriptStore {
       },
       blocks,
       ...marksOfWindow(this.#db, branchId, asNumber(first.position)),
+      ...aiLocksOfWindow(this.#db, branchId, asNumber(first.position)),
       // A Production Document says so on every window of it, whichever way it was reached (Issue #415, S66).
       ...((this.#db.prepare('SELECT role FROM manuscripts WHERE manuscript_id = ?').get(manuscriptId) as SqlRow | undefined)?.role === 'production-document'
         ? { deliverable: 'production-document' as const }
@@ -5495,6 +5497,65 @@ export class BoundedManuscriptStore {
       };
     });
     return result;
+  }
+
+  /**
+   * 全部替换 written as per-occurrence editor revisions (Issue #1411): the frozen, fully validated matches of `previewId`, under the
+   * very baseline checks `commitReplacement` makes — frozen, every included range validated, the branch still exactly at the
+   * state the preview froze — in the order they can be written one at a time: earlier blocks first, and inside a block from its
+   * last match back, so each range still holds its own words when its turn comes. Nothing is written here; the caller writes
+   * every revision and `closeReplacementAsRevisions` in one transaction.
+   */
+  replacementRevisionPlan(previewId: string): {
+    manuscriptId: string; branchId: string; query: string; replacement: string;
+    matches: ReadonlyArray<{ blockId: string; fromGrapheme: number; toGrapheme: number }>;
+  } {
+    const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+    requireBounded(asString(preview.state) === 'frozen' && asNumber(preview.validated_ordinal) > 0, 'REPLACEMENT_NOT_READY', '替换尚未完成复核。');
+    const unvalidated = asNumber(one(this.#db.prepare(
+      'SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 1 AND ordinal > ?',
+    ).all(previewId, asNumber(preview.validated_ordinal)) as SqlRow[], 'REPLACEMENT_NOT_READY', '替换匹配缺失。').total);
+    requireBounded(unvalidated === 0, 'REPLACEMENT_NOT_READY', '替换尚未完成全部精确范围复核。');
+    const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+    this.#requireBranchEditable(binding.branchId);
+    requireBounded(
+      binding.revisionId === asString(preview.revision_id) && binding.journalSequence === asNumber(preview.journal_sequence) &&
+        binding.workingDigest === asString(preview.working_digest),
+      'REPLACEMENT_STALE',
+      '稿件已变化，替换未提交，请刷新预览。',
+    );
+    const rows = this.#db.prepare(
+      `SELECT rm.block_id, rm.from_grapheme, rm.to_grapheme
+       FROM manuscript_replacement_matches rm
+       JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = rm.block_id
+       WHERE rm.preview_id = ? AND rm.included = 1
+       ORDER BY wb.position, rm.from_grapheme DESC`,
+    ).all(binding.branchId, previewId) as SqlRow[];
+    requireBounded(rows.length === asNumber(preview.included_matches) && rows.length > 0, 'REPLACEMENT_NOT_READY', '替换匹配缺失。');
+    return {
+      manuscriptId: binding.manuscriptId, branchId: binding.branchId,
+      query: asString(preview.query), replacement: asString(preview.replacement),
+      matches: rows.map((row) => ({ blockId: asString(row.block_id), fromGrapheme: asNumber(row.from_grapheme), toGrapheme: asNumber(row.to_grapheme) })),
+    };
+  }
+
+  /** What a revision written now stands on: the branch's revision and journal position, and the block's digest. */
+  revisionPin(manuscriptId: string, branchId: string, blockId: string): { revisionId: string; journalSequence: number; workingDigest: string; blockDigest: string } {
+    const binding = this.#binding(manuscriptId, branchId);
+    const block = one(this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, blockId) as SqlRow[],
+      'BLOCK_NOT_FOUND', '内容块不存在。');
+    return { revisionId: binding.revisionId, journalSequence: binding.journalSequence, workingDigest: binding.workingDigest, blockDigest: asString(block.digest) };
+  }
+
+  /** The replacement preview whose matches were all written as revisions is committed: it cannot be committed again. */
+  closeReplacementAsRevisions(previewId: string): void {
+    requireBounded(
+      this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'")
+        .run(new Date().toISOString(), previewId).changes === 1,
+      'REPLACEMENT_STATE_CHANGED',
+      '替换预览状态已变化。',
+    );
+    this.#pruneReplacementRecords(0);
   }
 
   /**

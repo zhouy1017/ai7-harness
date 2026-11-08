@@ -1480,6 +1480,9 @@ async function dispatch(
         op: request.op,
         result: store.commitReplacement(request.input.previewId),
       };
+    // 全部替换 as per-occurrence revision cards (Issue #1411): one applied 修改建议 per occurrence.
+    case 'commitReplacementRevisions':
+      return { id: request.id, ok: true, op: request.op, result: store.commitReplacementRevisions(request.input) };
     case 'saveMilestone':
       return {
         id: request.id,
@@ -1502,7 +1505,7 @@ async function dispatch(
     case 'inspectProductionDocuments':
       return { id: request.id, ok: true, op: request.op, result: store.inspectProductionDocuments(request.input.bookId) };
     case 'inspectBookDeliveryPackage':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBookDeliveryPackage(request.input.bookId, request.input.documents) };
     case 'prepareBookDeliveryPackage':
       return { id: request.id, ok: true, op: request.op, result: store.prepareBookDeliveryPackage(request.input) };
     // Its export (Issue #416, S67b): local only, and only under this launch's verified External Export Policy, as ④ 导出.
@@ -1688,6 +1691,18 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.polish(request.input.bookId, { selection: request.input.selection })) };
     case 'inspectFastInteractionRequest':
       return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.inspect(request.input.bookId, request.input.requestId)) };
+    // 🔒 锁定 and 就选中部分让 AI 修改 (Issue #1412): the locks of a manuscript branch, and a scoped edit checked and frozen at
+    // once, answered beside this loop and applied only inside its frozen scope; read again until it settles.
+    case 'inspectAiEditLocks':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectAiEditLocks(request.input) };
+    case 'setAiEditLocks':
+      return { id: request.id, ok: true, op: request.op, result: store.setAiEditLocks(request.input) };
+    case 'startScopedAiEdit': {
+      const { bookId, ...input } = request.input;
+      return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.scopedEdit(bookId, input)) };
+    }
+    case 'inspectScopedAiEdit':
+      return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.inspectScopedEdit(request.input.bookId, request.input.requestId)) };
     // ① 任务面 (Issue #423, plan slice S77a): the Book's Tasks, read as 待我处理 reads them.
     case 'inspectBookTasks':
       return {

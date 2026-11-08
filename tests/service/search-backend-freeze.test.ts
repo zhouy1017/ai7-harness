@@ -48,7 +48,7 @@ describe('a review Run freezes its search backend', () => {
       const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === route)!, credentialReference: randomUUID() };
       store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', route);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      expect(policy.providerProcessing.version).toBe('v34');
+      expect(policy.providerProcessing.version).toBe('v35');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '生产检索密钥回归');

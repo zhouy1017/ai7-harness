@@ -1,10 +1,11 @@
 ---
 status: accepted
+amended-by: root ADR 0096 §4.1–4.2 (2026-11, Owner #1400 / #1414) — prefilled one-press designation; disclaimer sentence in developer mode only
 ---
 
 # Use “发稿版本” as the user-facing projection of Public Release Permission
 
-The target-house UI uses `设为发稿版本` and `发稿版本` instead of `公开发布候选`, `公开发布许可`, or a generic approval workflow. A Publication Version is a special exact-version designation over one immutable Milestone Version, not a free-form label. The same deterministic interaction creates or links a separately identified internal Public Release Permission bound to that exact version, identified publication scope/public channel, actor, time, and basis. The designation and permission remain distinct records even though ordinary users experience one familiar action.
+The target-house UI uses `设为发稿版本` and `发稿版本` instead of `公开发布候选`, `公开发布许可`, or a generic approval workflow. A Publication Version is a special exact-version designation over one immutable Milestone Version, not a free-form label. The same deterministic interaction creates or links a separately identified internal Public Release Permission bound to that exact version, identified publication scope/public channel, actor, time, and basis. The designation and permission remain distinct records even though ordinary users experience one familiar action. The compact form opens on the newest Milestone Version with the publication scope `全书定稿` and basis `编辑审定通过` written in; the editor may choose another milestone or change either text, a cleared text falls back to its default, and one `设为发稿版本` records — no two-step preview and no required free-text fields ([root ADR 0096 §4.1](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action)).
 
 Ordinary local export neither displays nor requires this interaction and cannot create or imply the permission. A Publication Version means only that its exact content version may be used for the stated publication purpose. It does not authorize an export Effect, prove that a file was sent, or mean that AI7 published anything. AI7 V1 remains local-export-only. Materially changed content requires another exact Publication Version designation; replacement or withdrawal appends history rather than rewriting the earlier record.
 
@@ -17,7 +18,7 @@ Ordinary local export neither displays nor requires this interaction and cannot 
 
 ## Consequences
 
-The UI must prevent `发稿版本` from looking like `已发布`: exact version, scope, actor/time, basis, and `AI7 不会自动发布或发送` remain available in compact detail. Later material edits show a Publication Version Change Notice and never inherit the designation. Version history preserves earlier publication designations and their internal permission identities. If a later release adds actual publishing or external transmission, it still requires a separate exact Effect Approval and Effect Receipt; the Publication Version record is permission evidence, never execution evidence.
+The UI must prevent `发稿版本` from looking like `已发布`: exact version, scope, actor/time and basis remain available in compact detail, and no ordinary label says 已发布 or 已发送; the fixed sentence `AI7 不会自动发布或发送` stays in developer mode's technical layer and Help (root ADR 0096 §4.2). Later material edits show a Publication Version Change Notice and never inherit the designation. Version history preserves earlier publication designations and their internal permission identities. If a later release adds actual publishing or external transmission, it still requires a separate exact Effect Approval and Effect Receipt; the Publication Version record is permission evidence, never execution evidence.
 
 ## Later refinement
 

@@ -1,4 +1,4 @@
-import { technicalWords, identityWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
@@ -15,7 +15,6 @@ import {
   type ProductionDocumentTypeProjection,
   type PublicationVersionProjection,
   type RendererApi,
-  type ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
 import {
   DELIVERABLES_LEDE,
@@ -29,6 +28,8 @@ import {
   PUBLICATION_ACTION_LABELS,
   PUBLICATION_ACTOR,
   PUBLICATION_BASIS_HINT,
+  PUBLICATION_BASIS_DEFAULT,
+  PUBLICATION_SCOPE_DEFAULT,
   PUBLICATION_BASIS_LABEL,
   PUBLICATION_CURRENT_MARK,
   PUBLICATION_FORM_HEADING,
@@ -80,8 +81,6 @@ import {
   DOCUMENT_CHANGED_SINCE_VERSION,
   DOCUMENT_DELIVERIES_HEADING,
   DOCUMENT_NOT_DELIVERED,
-  DOCUMENT_NO_SOURCES,
-  DOCUMENT_SOURCE_LEGEND,
   DOCUMENT_STATE_NONE,
   DOCUMENT_STATE_NOT_FOR_THIS_BOOK,
   DOCUMENT_STATUS_LINES,
@@ -90,19 +89,16 @@ import {
   documentActionName,
   documentCardLine,
   documentOriginMarksLine,
-  documentCreatedLine,
   documentCurrentTextChoice,
   documentDeliveredLine,
   documentDeliveryExportLine,
   documentDeliveryLine,
   documentExportLabel,
-  documentSourceLine,
   type DocumentAction,
 } from './production-document-labels.js';
 import { mountBookDeliveryPackage } from './book-delivery-package.js';
 import { mountMaintenance } from './maintenance-cases.js';
 import { renderWorkflowCardSummary } from './production-document-workflow.js';
-import { mountWritingTask } from './writing-task.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -122,8 +118,6 @@ export interface DeliverablesSurface {
   start(): void;
   /** Let nothing still in flight paint again: the screen is being replaced. */
   destroy(): void;
-  /** 新建文档 · 写作任务 reads again (Issue #432, S84a): the Task Drawer's bar started or recorded its Task. */
-  refreshWriting(): void;
 }
 
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
@@ -132,8 +126,7 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'acknowledgeImportCompletion' | 'abandonImportDraft' | 'renameProductionDocument' | 'selectAndStageManuscript' | 'prepareSourceImportReview' | 'commitSourceImport' | 'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
-  'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'>;
+  'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -157,17 +150,8 @@ export interface MountDeliverablesOptions {
   openReview(): void;
   /** 录入定价与首印… (Issue #430, S82): the destination is left for 设置 › 评估校准与预测, with this Book's entry open. */
   openActuals?(bookId: string): void;
-  /** 新建文档 · 写作任务 (Issue #432, S84a): a preparation job followed to its end, and the Task's plan in the Task Drawer. */
-  awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
-  openWritingPlan(taskIntentId: string, note?: string): void;
-}
-
-/** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
-interface DocumentForm {
-  title: string;
-  typeId: string;
-  sourceVersionId: string | null;
-  problem: string | null;
+  /** 前往稿件 (Issue #1403): 新闻稿、简介等衍生稿件 are written, imported and renamed on 稿件. */
+  openManuscript(): void;
 }
 
 /** 交付…'s inline form while it is open (DELIV-003): the version, who it goes to and the note, none preselected. */
@@ -247,7 +231,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   let working = false;
   let form: DesignateForm | null = null;
   let block: HTMLElement | undefined;
-  let documentForm: DocumentForm | null = null;
   let deliveryForm: DeliveryForm | null = null;
   let documentsBlock: HTMLElement | undefined;
 
@@ -261,9 +244,19 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   const documentsSlot = el('div', 'deliverables-documents-slot');
   // 图书交付包 (Issue #416) comes last, the Book-level total of the other two, in a slot of its own.
   const packageSlot = el('div', 'deliverables-package-slot');
-  // 新建文档 · 写作任务 (Issue #432, S84a) stands with 交付 · 生产文档: a draft becomes one of its documents.
-  const writingSlot = el('div', 'deliverables-writing-slot');
-  host.append(blockSlot, exportSlot, documentsSlot, writingSlot, packageSlot);
+  host.append(blockSlot, exportSlot, documentsSlot, packageSlot);
+  // Ordinary 交付物 holds no derivative document's daily work (Issue #1405): it says where that went. The technical layer keeps the
+  // documents' earlier Delivery Records and workflow for audit.
+  if (!technicalLayerVisible) {
+    const pointer = el('section', 'deliverables-manuscript-pointer');
+    pointer.append(el('p', 'field-note', '新闻稿、内容简介等衍生稿件的日常编写、导入与改名已归入「稿件」选项卡；这里只需勾选要随书打包的稿件版本。'));
+    const go = el('button', 'secondary', '前往稿件');
+    go.type = 'button';
+    go.dataset['deliverablesAction'] = 'open-manuscript';
+    go.addEventListener('click', () => options.openManuscript());
+    pointer.append(go);
+    documentsSlot.replaceChildren(pointer);
+  }
   options.root.append(
     el('h2', undefined, DELIVERABLES_SECTION_LABEL),
     el('p', 'lede', DELIVERABLES_LEDE),
@@ -305,20 +298,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-menu] > summary`) ?? null,
   });
 
-  const writing = mountWritingTask({
-    root: writingSlot,
-    api,
-    setStatus: options.setStatus,
-    errorMessage: options.errorMessage,
-    awaitServiceJob: options.awaitServiceJob,
-    openPlan: options.openWritingPlan,
-    openDocument: (document, type) => options.openDocument(document, type),
-    documentsChanged: () => {
-      refreshDocuments();
-      bundle.refresh();
-    },
-  });
-
   const bundle = mountBookDeliveryPackage({
     root: packageSlot,
     bookId,
@@ -332,6 +311,11 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         options.openReview();
         return;
       }
+      // Ordinary 交付物 holds no document card (Issue #1405): a document's route leads to 稿件, where it is written.
+      if (route.kind === 'document' && !technicalLayerVisible) {
+        options.openManuscript();
+        return;
+      }
       // The 发稿 block's 设为发稿版本…, or the type card's own next action: the editor acts there, on this page.
       let target: HTMLElement | null = null;
       if (route.kind === 'publication') target = block?.querySelector<HTMLElement>('[data-publication-action="designate"]') ?? null;
@@ -339,7 +323,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         const typeCard = documentsBlock?.querySelector<HTMLElement>(`li.production-document-card[data-document-type-id="${CSS.escape(route.typeId)}"]`) ?? null;
         const scope = route.documentId === undefined ? typeCard
           : typeCard?.querySelector<HTMLElement>(`li.production-document-row[data-document-id="${CSS.escape(route.documentId)}"]`) ?? null;
-        target = (['deliver', 'redeliver', 'create', 'blank', 'notForThisBook'] as const)
+        target = (['deliver', 'redeliver', 'notForThisBook'] as const)
           .map((action) => scope?.querySelector<HTMLButtonElement>(`[data-document-action="${action}"]`) ?? null)
           .find((button) => button !== null && !button.disabled) ?? null;
       }
@@ -373,7 +357,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
 
   /** Read 交付 · 生产文档 again and draw it; an answer overtaken by a newer read or a command never paints. */
   function refreshDocuments(): void {
-    if (destroyed) return;
+    if (destroyed || !technicalLayerVisible) return;
     const ticket = ++documentsGeneration;
     void api.inspectProductionDocuments().then(
       (next) => {
@@ -557,7 +541,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const list = el('ol', 'publication-versions');
     for (const designation of designations) list.append(renderDesignation(designation));
     section.append(list);
-    const outside = maintenance.renderOutsideHistory(designations);
+    // 维护事项 stay in the technical layer only (Issue #1405): the editor changes the text and saves a version.
+    const outside = technicalLayerVisible ? maintenance.renderOutsideHistory(designations) : null;
     if (outside !== null) section.append(outside);
     return section;
   }
@@ -588,7 +573,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         ...fact(DELIVERABLES_TECHNICAL_TERMS.events, publicationEventsLine(designation.technical.events)),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.recordedAt, designation.createdAt),
       ),
-      maintenance.render(designation),
+      ...(technicalLayerVisible ? [maintenance.render(designation)] : []),
     );
     return item;
   }
@@ -691,7 +676,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         input.rows = 3;
       }
       input.value = value;
-      input.required = true;
       input.disabled = working;
       input.dataset['publicationField'] = name;
       input.placeholder = hint;
@@ -710,8 +694,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const basis = field('basis', PUBLICATION_BASIS_LABEL, PUBLICATION_BASIS_HINT, state.basis, (text) => { state.basis = text; });
 
     // The fixed sentence stands beside the exact action and is on screen whenever the form is (PUB-004).
+    // The fixed sentence is the technical layer's alone (Issue #1413 cluster 4); 设为发稿版本 itself says what it records.
     const statement = el('p', 'publication-statement', next.publication.statement);
     statement.id = uid('statement');
+    statement.hidden = !technicalLayerVisible;
     const problem = el('p', 'publication-problem');
     problem.setAttribute('role', 'alert');
     const reason = el('span', 'publication-confirm-reason');
@@ -751,7 +737,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       }
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;
-      const why = publicationDesignateReason(publicationDesignateBlockers({ milestoneChosen: chosen !== null, scope: state.scope, basis: state.basis }));
+      const why = publicationDesignateReason(publicationDesignateBlockers({ milestoneChosen: chosen !== null, ...designationWords(state) }));
       reason.textContent = why ?? '';
       reason.hidden = why === null;
       reasonLabel.hidden = why === null;
@@ -771,10 +757,22 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     return node;
   }
 
+  /**
+   * The form opens on the newest milestone with the routine scope and basis (Issue #1410 item 22): each stays editable, and a
+   * field the editor clears is recorded with its default.
+   */
   function openForm(): void {
     if (destroyed || working || projection === null || !projection.publication.designate.available) return;
-    form ??= { milestoneId: null, scope: '', basis: '', problem: null };
+    form ??= { milestoneId: projection.publication.milestones[0]?.milestoneId ?? null, scope: PUBLICATION_SCOPE_DEFAULT, basis: PUBLICATION_BASIS_DEFAULT, problem: null };
     render('form');
+  }
+
+  /** What 设为发稿版本 records for the form as it stands: an empty field is its default. */
+  function designationWords(state: DesignateForm): { scope: string; basis: string } {
+    return {
+      scope: state.scope.trim().length === 0 ? PUBLICATION_SCOPE_DEFAULT : state.scope,
+      basis: state.basis.trim().length === 0 ? PUBLICATION_BASIS_DEFAULT : state.basis,
+    };
   }
 
   function closeForm(): void {
@@ -792,7 +790,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     if (destroyed || working || projection === null || form !== state) return;
     const milestoneId = state.milestoneId;
     const chosen = milestoneId !== null && projection.publication.milestones.some((milestone) => milestone.milestoneId === milestoneId);
-    if (milestoneId === null || publicationDesignateBlockers({ milestoneChosen: chosen, scope: state.scope, basis: state.basis }).length > 0) return;
+    const words = designationWords(state);
+    if (milestoneId === null || publicationDesignateBlockers({ milestoneChosen: chosen, ...words }).length > 0) return;
     working = true;
     // Any read still in flight is older than the answer this action will carry.
     generation += 1;
@@ -802,7 +801,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     options.setStatus(DELIVERABLES_STATUS_LINES.designating, 'busy');
     try {
-      const result = await api.designatePublicationVersion({ milestoneId, scope: state.scope, basis: state.basis });
+      const result = await api.designatePublicationVersion({ milestoneId, ...words });
       if (destroyed) return;
       if (result.bookId !== bookId || result.deliverables.bookId !== bookId) throw new Error(DELIVERABLES_STATUS_LINES.designateFailed);
       working = false;
@@ -830,14 +829,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
    */
   function drawDocuments(next: ProductionDocumentsProjection, focus: DocumentFocus): void {
     const documents = next;
-    if (documentForm !== null && (documents.unavailableReason !== null ||
-      !documents.types.some((type) => type.typeId === documentForm!.typeId && !type.notForThisBook))) {
-      documentForm = null;
-    }
-    if (documentForm !== null && documentForm.sourceVersionId !== null &&
-      !documents.sources.some((source) => source.sourceVersionId === documentForm!.sourceVersionId)) {
-      documentForm.sourceVersionId = null;
-    }
     const deliverable = deliveryForm === null ? undefined : documents.types.find((type) => type.typeId === deliveryForm!.typeId);
     const selectedDocument = deliverable?.documents.find((doc) => doc.documentId === deliveryForm?.documentId);
     if (deliveryForm !== null && (selectedDocument == null || deliverable?.notForThisBook)) deliveryForm = null;
@@ -915,80 +906,18 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     card.dataset['documentTypeId'] = type.typeId;
     card.append(el('h4', undefined, type.label));
+    // New documents are made on 稿件 (Issue #1403); this technical card keeps 本书不做 and the documents' records.
     const row = el('div', 'button-row compact-actions');
-    const add = (label: string, action: string, run: () => void): HTMLButtonElement => {
-      const button = el('button', 'secondary', label);
-      button.type = 'button';
-      button.dataset['documentAction'] = action;
-      button.disabled = working || next.unavailableReason !== null || type.notForThisBook;
-      button.addEventListener('click', run);
-      row.append(button);
-      return button;
-    };
-    add('空白文档', 'blank', () => void createDirect(type));
-    add('AI7 写作任务', 'writing', () => { writing.open(type.typeId); writingSlot.scrollIntoView({ block: 'nearest' }); });
-    const sourceButton = add('从本书来源材料创建…', 'create', () => {
-      documentForm = documentForm?.typeId === type.typeId ? null : { typeId: type.typeId, title: '', sourceVersionId: null, problem: null };
-      drawDocuments(next, { typeId: type.typeId, action: 'source' });
-    });
-    sourceButton.disabled ||= next.sources.length === 0;
-    const sourceReason = next.unavailableReason ?? (next.sources.length === 0 ? DOCUMENT_NO_SOURCES : null);
-    if (sourceReason !== null) {
-      const reason = el('span', 'document-create-reason', sourceReason);
-      reason.id = uid('document-create-reason');
-      sourceButton.setAttribute('aria-describedby', reason.id);
-      row.append(reason);
-    }
-    add('导入文件…', 'import', () => void createDirect(type, true));
     const decideButton = documentButton(type.notForThisBook ? 'restore' : 'notForThisBook', type, 'quiet');
     decideButton.addEventListener('click', () => void decide(type, !type.notForThisBook));
     row.append(decideButton);
     card.append(row);
     if (type.notForThisBook) card.append(el('p', 'document-not-for-this-book', DOCUMENT_STATE_NOT_FOR_THIS_BOOK));
-    if (documentForm?.typeId === type.typeId) card.append(renderDocumentForm(next, type, documentForm));
     const list = el('ol', 'production-document-list');
     for (const document of type.documents) list.append(renderDocumentRow(next, { ...type, document }));
     if (type.documents.length === 0) card.append(el('p', 'document-state-none', DOCUMENT_STATE_NONE));
     card.append(list);
     return card;
-  }
-
-  async function createDirect(type: ProductionDocumentTypeProjection, fromFile = false): Promise<void> {
-    if (working || destroyed) return;
-    working = true;
-    lockDocuments();
-    try {
-      let sourceVersionId: string | null = null;
-      let title: string | undefined;
-      if (fromFile) {
-        const picked = await api.selectAndStageManuscript();
-        if (picked.status === 'cancelled') return;
-        const staged = picked.staged;
-        if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) {
-          await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion, preserveBookRoute: true });
-          throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
-        }
-        const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion,
-          target: { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: null } });
-        const imported = await api.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
-          reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
-        await api.acknowledgeImportCompletion({ commitId: imported.commitId });
-        sourceVersionId = imported.sourceVersionId;
-        title = Array.from(staged.source.displayName.replace(/\.[^.]+$/, '').normalize('NFC').trim()).slice(0, 80).join('');
-      }
-      const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId, ...(title === undefined ? {} : { title }) });
-      if (destroyed || result.document === null) return;
-      documentsProjection = result.documents;
-      bundle.refresh();
-      working = false;
-      drawDocuments(result.documents, 'keep');
-      await openDocument(result.document, type, result.notice);
-    } catch (error) {
-      if (!destroyed) options.setStatus(options.errorMessage(error, DOCUMENT_STATUS_LINES.createFailed), 'error');
-    } finally {
-      working = false;
-      if (!destroyed && documentsProjection !== null) drawDocuments(documentsProjection, 'keep');
-    }
   }
 
   function renderDocumentRow(next: ProductionDocumentsProjection, type: ProductionDocumentTypeProjection): HTMLElement {
@@ -1028,50 +957,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       open.disabled = working || documents.unavailableReason !== null;
       open.addEventListener('click', () => void openDocument(documentNow, type));
       actions.append(open);
-      const rename = el('button', 'quiet', '改名');
-      rename.type = 'button';
-      rename.dataset['documentAction'] = 'rename';
-      rename.disabled = working;
-      rename.addEventListener('click', () => {
-        rename.disabled = true;
-        const form = el('div', 'button-row');
-        const title = el('input');
-        title.value = documentNow.title;
-        title.maxLength = 80;
-        title.setAttribute('aria-label', '文档题目');
-        const save = el('button', 'secondary', '保存题目');
-        save.type = 'button';
-        save.dataset['documentAction'] = 'confirmRename';
-        save.addEventListener('click', async () => {
-          if (working) return;
-          working = true;
-          save.disabled = true;
-          title.disabled = true;
-          cancel.disabled = true;
-          try {
-            const result = await api.renameProductionDocument({ documentId: documentNow.documentId, title: title.value });
-            if (destroyed) return;
-            working = false;
-            documentsProjection = result.documents;
-            drawDocuments(result.documents, 'keep');
-            bundle.refresh();
-            options.setStatus('文档题目已保存', 'success');
-          } catch (error) {
-            working = false;
-            save.disabled = false;
-            title.disabled = false;
-            cancel.disabled = false;
-            options.setStatus(options.errorMessage(error, '题目无法保存'), 'error');
-          }
-        });
-        const cancel = el('button', 'quiet', '取消');
-        cancel.type = 'button';
-        cancel.addEventListener('click', () => { form.remove(); rename.disabled = false; rename.focus(); });
-        form.append(title, save, cancel);
-        item.append(form);
-        title.focus();
-      });
-      actions.append(rename, exporter.menu({ kind: 'document', documentId: documentNow.documentId, revisionId: documentNow.versions[0]!.revisionId }, `${documentNow.title} · ${documentNow.versions[0]!.label}`));
+      actions.append(exporter.menu({ kind: 'document', documentId: documentNow.documentId, revisionId: documentNow.versions[0]!.revisionId }, `${documentNow.title} · ${documentNow.versions[0]!.label}`));
       // Its Deliverable Workflow at a glance (Issue #415, S66c; WORK-005): the summary, the first 下一项 and the seven phases —
       // before 交付状态, in the order §9 总览页 and DELIV-001 give (Issue #626).
       item.append(renderWorkflowCardSummary(documentNow.workflow));
@@ -1296,82 +1182,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
   }
 
-  /** The Book's source-only materials as choices, none preselected; 创建文档 waits for one. */
-  function renderDocumentForm(next: ProductionDocumentsProjection, type: ProductionDocumentTypeProjection, state: DocumentForm): HTMLElement {
-    const form = el('form', 'document-create');
-    form.noValidate = true;
-    form.addEventListener('submit', (event) => event.preventDefault());
-    const fieldset = el('fieldset');
-    fieldset.append(el('legend', undefined, `${DOCUMENT_SOURCE_LEGEND} · 文档从材料创建，材料本身不变`));
-    for (const source of next.sources) {
-      const label = el('label', 'choice-row');
-      const input = el('input');
-      input.type = 'radio';
-      input.name = 'document-source';
-      input.value = source.sourceVersionId;
-      input.checked = state.sourceVersionId === source.sourceVersionId;
-      input.disabled = working;
-      input.addEventListener('change', () => {
-        state.sourceVersionId = source.sourceVersionId;
-        state.problem = null;
-        const confirm = form.querySelector<HTMLButtonElement>('[data-document-action="confirmCreate"]');
-        if (confirm !== null) confirm.disabled = working;
-      });
-      label.append(input, el('span', undefined, documentSourceLine(source, localInstantLabel(source.createdAt))));
-      fieldset.append(label);
-    }
-    const title = el('input');
-    title.setAttribute('aria-label', '文档题目');
-    title.placeholder = '文档题目（可选）';
-    title.maxLength = 80;
-    title.value = state.title;
-    title.addEventListener('input', () => { state.title = title.value; });
-    form.append(title, fieldset);
-    if (state.problem !== null) form.append(el('p', 'attention-note', state.problem));
-    const row = el('div', 'button-row compact-actions');
-    const confirm = documentButton('confirmCreate', type, 'primary');
-    confirm.disabled = working || state.sourceVersionId === null;
-    confirm.addEventListener('click', () => void createDocument(type, state));
-    const cancel = documentButton('cancel', type, 'quiet');
-    cancel.addEventListener('click', () => {
-      documentForm = null;
-      drawDocuments(next, { typeId: type.typeId, action: 'create' });
-    });
-    row.append(confirm, cancel);
-    form.append(row);
-    return form;
-  }
-
   function lockDocuments(): void {
     documentsBlock?.setAttribute('aria-busy', 'true');
     for (const control of documentsBlock?.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input') ?? []) control.disabled = true;
-  }
-
-  async function createDocument(type: ProductionDocumentTypeProjection, state: DocumentForm): Promise<void> {
-    if (destroyed || working || documentForm !== state || state.sourceVersionId === null) return;
-    working = true;
-    generation += 1;
-    lockDocuments();
-    options.setStatus(DOCUMENT_STATUS_LINES.creating, 'busy');
-    try {
-      const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId: state.sourceVersionId, ...(state.title.trim() === '' ? {} : { title: state.title }) });
-      if (destroyed) return;
-      if (result.bookId !== bookId || result.documents.bookId !== bookId || result.document === null) throw new Error(DOCUMENT_STATUS_LINES.createFailed);
-      working = false;
-      documentForm = null;
-      documentsGeneration += 1;
-      documentsProjection = result.documents;
-      bundle.refresh();
-      drawDocuments(result.documents, 'keep');
-      options.setStatus(documentCreatedLine(type.label), 'success');
-      await openDocument(result.document, type, result.notice);
-    } catch (error) {
-      working = false;
-      if (destroyed || documentsProjection === null) return;
-      state.problem = options.errorMessage(error, DOCUMENT_STATUS_LINES.createFailed);
-      drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmCreate' });
-      options.setStatus(state.problem, 'error');
-    }
   }
 
   async function decide(type: ProductionDocumentTypeProjection, notForThisBook: boolean): Promise<void> {
@@ -1385,7 +1198,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (destroyed) return;
       if (result.bookId !== bookId || result.documents.bookId !== bookId) throw new Error(DOCUMENT_STATUS_LINES.decideFailed);
       working = false;
-      if (documentForm?.typeId === type.typeId) documentForm = null;
       if (deliveryForm?.typeId === type.typeId) deliveryForm = null;
       documentsGeneration += 1;
       documentsProjection = result.documents;
@@ -1451,7 +1263,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     start: () => {
       refresh();
       refreshDocuments();
-      writing.refresh();
       bundle.refresh();
     },
     destroy: () => {
@@ -1459,10 +1270,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       generation += 1;
       documentsGeneration += 1;
       exporter.destroy();
-      writing.destroy();
       bundle.destroy();
       maintenance.destroy();
     },
-    refreshWriting: () => writing.refresh(),
   };
 }

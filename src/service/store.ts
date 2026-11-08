@@ -1,3 +1,8 @@
+import { commitReplacementAsRevisions } from './replacement-revisions.js';
+import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
+import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
+import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
+import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
 import { customAnalysisModeGoal } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
@@ -133,6 +138,7 @@ import {
   type RecordProductionDocumentDeliveryInput,
   type TransitionProductionDocumentPhaseInput,
   type BookDeliveryPackageProjection,
+  type BookDeliveryPackageDocumentChoice,
   type BookDeliveryPackageResultProjection,
   type PrepareBookDeliveryPackageInput,
   type ApproveBookDeliveryPackageExportInput,
@@ -465,6 +471,7 @@ import {
   WORD_TRACKED_IMPORT_SCHEMA_VERSION,
   EDITORIAL_MEMORY_SCHEMA_VERSION,
   initializeTaskAuthorizationSchema,
+  initializeFactualRangeTaskSchema,
   EDITORIAL_LEARNING_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   TaskAuthorizationError,
@@ -1112,7 +1119,7 @@ import { graphemesOf } from '../shared/mark-anchor.js';
 import { SeriesKnowledgeError, SeriesKnowledgeLedger, initializeSeriesKnowledgeSchema } from './series-knowledge.js';
 import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
-import { readExemplarBook, type ExemplarSources } from './exemplars.js';
+import { readExemplarBook, withPackagedVersions, type ExemplarSources } from './exemplars.js';
 import * as capturedProcedureOperations from './captured-procedures.js';
 import { CapturedProcedures, initializeCapturedProcedureSchema } from './captured-procedures.js';
 import {
@@ -3246,6 +3253,9 @@ export class EditorialStore {
         new SupervisionDirectives(authority).validate();
         new HouseReviewPreferenceLedger(authority).validate();
       }
+      initializeFactualRangeTaskSchema(authority);
+      // Revision 111 (Issue #1412): the 🔒 AI edit lock ledger; `initializeTaskAuthorizationSchema` stamps the version.
+      initializeAiEditLockSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3308,6 +3318,7 @@ export class EditorialStore {
       store.#codeRoot = codeRoot;
       const localLaunch = { operationalScope: 'development-ci' as const, live: null,
         policy: resolveSourceCheckoutLaunchPolicySync(codeRoot), localFixtureRuntime: () => store.localFixtureRuntime(),
+        editorialMemory: (bookId: string, taskKind: string) => store.editorialMemory(bookId, taskKind),
         retainedPolicyFor: (pin: import('../shared/protocol.js').ResultSetPolicyPin, binding: ConfiguredProviderBinding) => readRetainedBoundAnalysisPolicySync(codeRoot, pin, binding) };
       store.#baselineAnalysis.bindLaunch(localLaunch);
       store.#factualReview.bindLaunch(localLaunch);
@@ -6960,7 +6971,11 @@ export class EditorialStore {
     return {
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
       archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
-      documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
+      // Delivered versions, and since Issue #1405 the saved versions ticked into a frozen 图书交付包.
+      documents: (bookId) => {
+        const packaged = this.#packageCall(() => this.#bookDeliveryPackages.packagedDocumentVersions(bookId));
+        return this.#productionDocuments.deliveryReadings(bookId).map((document) => withPackagedVersions(document, packaged.get(document.documentId) ?? []));
+      },
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
       readersReports: (bookId, designation) => this.#readersReportExemplarsOf(bookId, designation),
     };
@@ -13319,11 +13334,50 @@ export class EditorialStore {
    * connection.
    */
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection {
+    this.#refuseAiLocked(input.branchId, [input.markId]);
     return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.apply(input)));
   }
 
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): ManuscriptApplyCommandProjection {
+    this.#refuseAiLocked(input.branchId, input.markIds);
     return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.applyBatch(input)));
+  }
+
+  /** 🔒 锁定 (Issue #1412): an AI7 suggestion is never applied to a block locked now, whichever task made it. */
+  #refuseAiLocked(branchId: unknown, markIds: unknown): void {
+    if (typeof branchId !== 'string' || !Array.isArray(markIds) || !markIds.every((markId) => typeof markId === 'string')) return;
+    const refusal = this.#markCall(() => aiLockedMarkRefusal(this.#authority, branchId, markIds as string[]));
+    requireStore(refusal === null, 'AI_EDIT_LOCKED', refusal ?? '');
+  }
+
+  /**
+   * 全部替换 as per-occurrence revision cards (Issue #1411): Lane 3A's `commitReplacementAsRevisions` in
+   * `./replacement-revisions.js`, on the authority connection the marks and the Apply records write through, so every
+   * occurrence's revision is written in one transaction or none is.
+   */
+  commitReplacementRevisions(input: CommitReplacementRevisionsInput): ReplacementRevisionsProjection {
+    return this.#markCall(() => this.#boundedCall(() => commitReplacementAsRevisions({
+      db: this.#authority, manuscript: this.#boundedAuthority, marks: this.#editorialMarks, apply: this.#manuscriptApply,
+    }, input)));
+  }
+
+  /** 🔒 锁定 (Issue #1412): a manuscript branch's AI edit locks. */
+  inspectAiEditLocks(input: InspectAiEditLocksInput): AiEditLocksProjection {
+    return this.#markCall(() => inspectAiEditLocks(this.#authority, input));
+  }
+
+  /** Lock or unlock blocks or sections against the lock set the editor saw; one appended row per changed target. */
+  setAiEditLocks(input: SetAiEditLocksInput): AiEditLocksProjection {
+    return this.#markCall(() => setAiEditLocks(this.#authority, input, (work) => this.#transaction(this.#authority, work)));
+  }
+
+  /** The working blocks a scoped AI edit reads, with their locks now (Issue #1412): a read of the authority's working state. */
+  scopedEditWorkingBlocks(manuscriptId: string, branchId: string, selector: Parameters<typeof scopedEditWorkingBlocks>[2]): ReturnType<typeof scopedEditWorkingBlocks> {
+    return this.#markCall(() => {
+      requireStore(this.#authority.prepare('SELECT 1 FROM manuscript_branches WHERE manuscript_id = ? AND branch_id = ?').get(manuscriptId, branchId) !== undefined,
+        'MANUSCRIPT_NOT_FOUND', '稿件不存在。');
+      return scopedEditWorkingBlocks(this.#authority, branchId, selector);
+    });
   }
 
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): ManuscriptApplyCommandProjection {
@@ -13898,6 +13952,16 @@ export class EditorialStore {
    */
   learningInfluenceGuard(runRecordId: string): string | null {
     this.#assertAvailable();
+    const row = this.#authority.prepare(`SELECT t.book_id, t.kind, p.canonical_json FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+      JOIN analysis_plan_records p ON p.sha256 = a.plan_envelope_sha256 AND p.component = 'plan-envelope'
+      WHERE r.run_record_id = ?`).get(runRecordId);
+    if (row !== undefined) {
+      const frozen = (JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown }).editorialMemory;
+      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), String(row.kind))))
+        return '本社与本书编辑偏好已变化，请重新准备任务。';
+    }
     return this.#reviewRuns.learningReadGuard(runRecordId) ?? this.#preferenceGovernanceGuard(runRecordId);
   }
 
@@ -14649,8 +14713,8 @@ export class EditorialStore {
   }
 
   /** 图书交付包 of one Book (Issue #416, S67a): the condition table, the Manifest Preview and the frozen versions. */
-  inspectBookDeliveryPackage(bookId: string): BookDeliveryPackageProjection {
-    return this.#packageCall(() => this.#bookDeliveryPackages.inspect(bookId));
+  inspectBookDeliveryPackage(bookId: string, documents?: ReadonlyArray<BookDeliveryPackageDocumentChoice>): BookDeliveryPackageProjection {
+    return this.#packageCall(() => this.#bookDeliveryPackages.inspect(bookId, documents));
   }
 
   /**
@@ -14660,7 +14724,7 @@ export class EditorialStore {
    */
   prepareBookDeliveryPackage(input: PrepareBookDeliveryPackageInput): BookDeliveryPackageResultProjection {
     const outcome = this.#packageCall(() => this.#transaction(this.#authority, () => this.#bookDeliveryPackages.prepare(input)));
-    return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId) };
+    return { bookId: input.bookId, outcome: outcome.outcome, version: outcome.version, package: this.inspectBookDeliveryPackage(input.bookId, input.documents) };
   }
 
   /** `导出…` of one package version (Issue #416, S67b): the files it writes, each reviewed as S64 reviews a file. */
@@ -15598,8 +15662,23 @@ export class EditorialStore {
     });
   }
 
+  /** Automatic house context for Global Agent; book context for selection dialogue and workspace turns. */
+  dialogueEditorialMemory(dialogueId: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
+    const task = this.#dialogues.task(dialogueId);
+    return this.editorialMemory(task?.bookId ?? null, task?.origin === 'agent-workspace' ? 'agent-workspace' : task ? 'editorial-dialogue' : 'global-agent');
+  }
+
+  editorialMemory(bookId: string | null, taskKind: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
+    const launch = this.#baselineAnalysis.launch;
+    if (launch.operationalScope !== 'ordinary-production' || launch.policy?.selectedPolicyIdentity?.providerProcessingVersion !== 'v35') return null;
+    return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).memory(launch.operationalScope,
+      { bookId, taskKind, ...(taskKind.startsWith('custom-analysis/') ? { categoryId: taskKind.slice('custom-analysis/'.length) } : {}) },
+      learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+  }
+
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
-    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding)));
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding.route === 'ai7-local-deterministic' || binding.reasoningEffort !== undefined ? binding :
+      { ...binding, reasoningEffort: effectiveModelReasoningEffort(modelProfileFor(binding.route, binding.model)) })));
   }
 
   openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number, now: Date = new Date()): void {

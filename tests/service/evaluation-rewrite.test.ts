@@ -1,4 +1,4 @@
-import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
@@ -38,7 +38,7 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { KIND_COUPLED_ANALYSIS_RELATIONS, constructPre94PolicyEncoding, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
-import { AUTHORED_REWRITE_OBSERVATIONS, AUTHORED_REWRITE_WORDS, EVALUATION_REWRITE_FIXTURE_IDENTITY, J11_REWRITE_ADJUSTMENTS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
+import { AUTHORED_REWRITE_OBSERVATIONS, AUTHORED_REWRITE_WORDS, EVALUATION_REWRITE_FIXTURE_IDENTITY, EVALUATION_REWRITE_V1_FIXTURE_IDENTITY, J11_REWRITE_ADJUSTMENTS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -365,15 +365,15 @@ describe('the market section and 按我的评分重写评语 over the real store
     });
   }, 300_000);
 
-  it('requires a saved departure from AI7’s initial scores before preparing a rewrite', async () => {
+  it('requires a saved change to AI7’s report before preparing a rewrite', async () => {
     await withBook(async (book) => {
       await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
       finalizeAsJ11(book.store, book.bookId);
       const draft = book.store.startEvaluation(book.bookId, true).record!;
       expect(book.store.inspectEvaluation(book.bookId, draft.recordId).rewrite.prepare)
-        .toEqual({ allowed: false, reason: '先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。' });
+        .toEqual({ allowed: false, reason: '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。' });
       expect(await refusal(() => book.store.createEvaluationRewritePreparationWork(book.bookId, draft.recordId, launchPolicy)))
-        .toBe('EVALUATION_REWRITE_UNAVAILABLE:先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。');
+        .toBe('EVALUATION_REWRITE_UNAVAILABLE:先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。');
       const adjusted = book.store.saveEvaluation({
         bookId: book.bookId, recordId: draft.recordId, expectedEntries: 1, finalize: false,
         content: { ...draft.content, items: draft.content.items.map((item) => {
@@ -393,10 +393,10 @@ describe('the market section and 按我的评分重写评语 over the real store
       const taskIntentId = prepared.taskIntent!.taskIntentId;
       const plan = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'evaluation-rewrite', ref: taskIntentId });
       expect(plan).toMatchObject({ kind: 'evaluation-rewrite', ref: taskIntentId, state: { key: 'ready' }, start: { readiness: 'ready', needsModelConnection: false } });
-      expect(plan.goal.sentence).toBe('按你在第 3 版评估（第 2 次保存）中的评分重写各项评语与总评，分数不变；重写后由你决定采用还是放弃');
-      expect(plan.steps.map((step) => step.label)).toEqual(['逐章读取，记下能说明你所给分数的依据', '按你的评分重写评语']);
-      expect(plan.notDo.editorial).toEqual(expect.arrayContaining(['不改分数：只重写评语与总评，每一项的分数照你保存的', '不自动写入评估：重写的评语要你采用后才记入这一版']));
-      expect(plan.scope.reference[0]).toBe('第 3 版评估（第 2 次保存）：你的评分（文学品质与作者声音 16.5 / 20、主题、价值与社会文化语境 15 / 20、结构、叙事逻辑与连贯 13 / 20、中文语言与表达 14 / 20、读者与市场潜力 10 / 20）、调分原因、现在的评语与总评，以及 AI7 初评的分数与评语');
+      expect(plan.goal.sentence).toBe('按你在第 3 版评估（第 2 次保存）中的修改重新生成评估报告（各项评语、总评、优点与问题），分数与结论不变；生成后由你决定采用还是放弃');
+      expect(plan.steps.map((step) => step.label)).toEqual(['逐章读取，记下能说明你所给分数与修改的依据', '按你的修改重新生成评估报告']);
+      expect(plan.notDo.editorial).toEqual(expect.arrayContaining(['不改分数：每一项的分数照你保存的', '不自动写入评估：新版报告要你采用后才记入这一版', '不改你选定的结论，不改风险项']));
+      expect(plan.scope.reference[0]).toBe('第 3 版评估（第 2 次保存）：你的评分（文学品质与作者声音 16.5 / 20、主题、价值与社会文化语境 15 / 20、结构、叙事逻辑与连贯 13 / 20、中文语言与表达 14 / 20、读者与市场潜力 10 / 20）、调分原因、现在的评语、优点、问题、总评、风险与结论，以及 AI7 原报告');
       expect(book.store.inspectEvaluation(book.bookId, record.recordId).rewrite.task)
         .toMatchObject({ taskIntentId, recordId: record.recordId, recordOrdinal: 3, entryOrdinal: 2, state: 'prepared' });
     });
@@ -416,6 +416,27 @@ describe('the market section and 按我的评分重写评语 over the real store
     });
   }, 300_000);
 
+  it('replays contract /2 from its own exact authored fixture, the /1 fixture keeping its bytes (Issue #1407)', async () => {
+    // The fixture registration: exact file bytes and lineage, the frozen `/2` prompt contract, and every entry the file adds answered.
+    expect(fixture.lineage).toEqual([
+      { identity: 'sample1-evaluation-report-authored', sha256: 'ff13f5e34129324daf3b281c9309011288472bd89f690a6002c601a202bacf8e' },
+      { identity: 'sample1-readers-report-authored', sha256: '5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128' },
+      { identity: 'sample1-evaluation-authored', sha256: '8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c' },
+      { identity: 'sample1-baseline-happy', sha256: '9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a' },
+    ]);
+    const v1 = await loadModelFixture(FIXTURES_ROOT, EVALUATION_REWRITE_V1_FIXTURE_IDENTITY);
+    expect(v1.lineage[0]).toEqual({ identity: 'sample1-evaluation-rewrite-authored', sha256: '9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194' });
+    // Keyed apart from the `/1` fixture: eight units and the `/2` synthesis (the Run Report reflection asks the same as under `/1`).
+    const own = [...fixture.entries].filter(([key]) => !v1.entries.has(key));
+    expect(own.map(([, entry]) => entry.unitOrdinal).sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(own.filter(([, entry]) => entry.response.kind === 'unit-result' && entry.response.text.startsWith('{"schema":"ai7.evaluation-rewrite.synthesis-result/2"'))).toHaveLength(1);
+    await withProposal(async (book) => {
+      const settled = book.store.inspectEvaluationRewrite(book.bookId)!;
+      expect(settled.planEnvelope!.promptContractDigest).toBe('b9a85f8724528a22b03c0bf6a84b8d443cec34be73780973eaee2848efc8817c');
+      expect(settled.resultSetRevision!.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
+    });
+  }, 300_000);
+
   it('settles a complete rewrite with qualified assurance and reconciled usage', async () => {
     await withProposal(async (book) => {
       const settled = book.store.inspectEvaluationRewrite(book.bookId)!;
@@ -423,7 +444,9 @@ describe('the market section and 按我的评分重写评语 over the real store
       const revision = settled.resultSetRevision!;
       expect(revision.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
       expect(revision.assurance).toMatchObject({ state: 'qualified', statement: EVALUATION_REWRITE_ASSURANCE_STATEMENT });
-      expect(revision.rewrite.words).toEqual({ items: AUTHORED_REWRITE_WORDS.items, verdict: AUTHORED_REWRITE_WORDS.verdict, withheld: [] });
+      // Contract `/2` (Issue #1407): the whole report — 评语, 总评 with the next step, strengths and problems.
+      expect(revision.rewrite.words).toEqual({ items: AUTHORED_REWRITE_WORDS.items, verdict: AUTHORED_REWRITE_WORDS.verdict, withheld: [],
+        strengths: AUTHORED_REWRITE_WORDS.strengths, weaknesses: AUTHORED_REWRITE_WORDS.weaknesses });
       expect(revision.rewrite.observations).toHaveLength(12);
       expect(runReportUsageReconciles(settled.taskOutcome!.report!, revision.usage)).toBe(true);
     });
@@ -444,6 +467,8 @@ describe('the market section and 按我的评分重写评语 over the real store
       })));
       expect(proposal.items.map((item) => item.evidence.length)).toEqual([3, 2, 4, 3, 0]);
       expect(proposal.verdict).toEqual({ before: null, after: AUTHORED_REWRITE_WORDS.verdict });
+      expect(proposal.strengths).toEqual({ before: record.content.strengths, after: AUTHORED_REWRITE_WORDS.strengths });
+      expect(proposal.weaknesses).toEqual({ before: record.content.weaknesses, after: AUTHORED_REWRITE_WORDS.weaknesses });
     });
   }, 300_000);
 
@@ -472,8 +497,11 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect(record.content.items.map((item) => item.adjustment)).toEqual(adjusted.content.items.map((item) => item.adjustment));
       expect(record.content.items.map((item) => item.comment)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
       expect(record.content.verdict).toBe(AUTHORED_REWRITE_WORDS.verdict);
-      expect([record.content.risks, record.content.readiness, record.content.strengths, record.content.weaknesses, record.content.conclusion])
-        .toEqual([adjusted.content.risks, adjusted.content.readiness, adjusted.content.strengths, adjusted.content.weaknesses, adjusted.content.conclusion]);
+      // The regenerated report's strengths and problems are taken; risks, what is still missing, the conclusion and the 初评
+      // snapshot behind the market section and evidence stay exactly as they were (Issue #1407).
+      expect([record.content.strengths, record.content.weaknesses]).toEqual([AUTHORED_REWRITE_WORDS.strengths, AUTHORED_REWRITE_WORDS.weaknesses]);
+      expect([record.content.risks, record.content.readiness, record.content.conclusion, record.initial])
+        .toEqual([adjusted.content.risks, adjusted.content.readiness, adjusted.content.conclusion, adjusted.initial]);
       expect(accepted.rewrite).toMatchObject({ proposal: null, decided: { decision: 'accepted', entryOrdinal: 3 } });
       expect(ai7Words(book.bookId, record.recordId)).toEqual(wordsOf(AUTHORED_REWRITE_WORDS.items.map((item) => item.itemId), { taskIntentId, analysisRevisionId: proposal.revisionId }, true));
     });
@@ -808,7 +836,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     withDatabase((database) => {
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql)
-          .toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+          .toBe(table === 'analysis_task_intents' ? FACTUAL_RANGE_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(Object.keys(EVALUATION_REWRITE_TRIGGER_SQL).every((name) => database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
     });
@@ -825,5 +853,112 @@ describe('the market section and 按我的评分重写评语 over the real store
     const refused = await openStore().then((store) => { store.close(); return 'opened'; },
       (error: unknown) => (error instanceof Error && 'code' in error ? `${String((error as { code: unknown }).code)}:${error.message}` : String(error)));
     expect(refused).toBe('SCHEMA_INVALID:分析任务账本表（修订版 62） analysis_task_intents 结构不兼容。');
+  }, 300_000);
+});
+
+/**
+ * One 按我的修改重新生成 Run over the real store and execution owner whose model answers every unit with the authored
+ * observations and the synthesis with `answer` — here deliberately rewriting what the editor locked (Issue #1412).
+ */
+async function answeredRewrite(store: EditorialStore, bookId: string, recordId: string, answer: unknown): Promise<void> {
+  let contract = '';
+  let synthesisContract = '';
+  let observationSet = '';
+  const units = new Map<number, { digest: string; requestDigest: string }>();
+  const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const unit = parseEvaluationRewriteUnitMessageHeader(message);
+    if (request.stage === 'units' && unit !== null) {
+      const expected = units.get(unit.ordinal);
+      if (expected === undefined || unit.unitDigest !== expected.digest || request.contractDigest !== contract || request.requestDigest !== expected.requestDigest) return undefined;
+      return { kind: 'unit-result', text: JSON.stringify({ schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
+        unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! }), usage: { inputTokens: 100, outputTokens: 50 } };
+    }
+    const synthesis = parseEvaluationRewriteSynthesisMessageHeader(message);
+    if (request.stage === 'cross-unit-reduction' && synthesis !== null && synthesis.setDigest === observationSet && request.contractDigest === synthesisContract) {
+      return { kind: 'unit-result', text: JSON.stringify(answer), usage: { inputTokens: 2600, outputTokens: 560 } };
+    }
+    if (request.stage === 'run-report-reflection' && parseRunReportReflectionMessageHeader(message) !== null) {
+      return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+    }
+    return undefined;
+  });
+  try {
+    const prepared = prepareRewrite(store, bookId, recordId, captured.policy);
+    const manifest = prepared.coverageManifest!;
+    contract = prepared.planEnvelope!.promptContractDigest;
+    observationSet = evaluationRewriteObservationSetDigest(manifest.units.map((unit) => ({
+      unitOrdinal: unit.ordinal,
+      result: { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! },
+    })));
+    const authorized = store.authorizeEvaluationRewrite(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    synthesisContract = authorized.ledger.definition.crossUnit!.promptContractDigest;
+    for (const unit of manifest.units) units.set(unit.ordinal, { digest: unit.digest, requestDigest: authorized.ledger.definition.requestDigest(unit.ordinal, unit.digest) });
+    captured.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
+    await captured.owner.whenIdle();
+  } finally {
+    await captured.owner.dispose();
+    captured.assertMatched();
+  }
+}
+
+describe('🔒 锁定 evaluation dimensions through successive regenerations (Issue #1412)', () => {
+  it('keeps every locked 评语, 总评 and list exactly as the editor left them, in the proposal and in the adopted entry, over two rounds', async () => {
+    let bookId = '';
+    let record!: EvaluationRecordProjection;
+    await withAdjustedBook(async (book, adjusted) => { bookId = book.bookId; record = adjusted; });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    try {
+      // The editor writes their own 总评 and 文学品质 评语 and locks both; the scores stay the constraints they were.
+      const ownComment = '编辑自己的文学品质评语，锁定后不再改动。';
+      const ownVerdict = '编辑自己的总评：先补结构照应，再谈出版。';
+      const locked: EvaluationContent = {
+        ...record.content,
+        items: record.content.items.map((item) => item.itemId === 'literary-quality' ? { ...item, comment: ownComment } : item),
+        verdict: ownVerdict,
+        aiLocked: ['verdict', 'literary-quality'],
+      };
+      const saved = store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: record.entries, content: locked, finalize: false }).record!;
+      // Stored in the profile's order, items first: the canonical form a later read and digest agree on.
+      expect(saved.content.aiLocked).toEqual(['literary-quality', 'verdict']);
+      // An entry without locks keeps its exact shape: no `aiLocked` key at all.
+      expect(Object.hasOwn(record.content, 'aiLocked')).toBe(false);
+      // Round 1: the model rewrites everything it can, the locked 评语 and 总评 included.
+      await answeredRewrite(store, bookId, record.recordId, AUTHORED_REWRITE_WORDS);
+      const proposal = store.inspectEvaluation(bookId, record.recordId).rewrite.proposal!;
+      expect(proposal.items.map((item) => item.itemId)).not.toContain('literary-quality');
+      expect(proposal.verdict).toBeNull();
+      const round1 = store.decideEvaluationRewrite(bookId, proposal.revisionId, 'accept').record!;
+      expect(round1.content.items.find((item) => item.itemId === 'literary-quality')!.comment).toBe(ownComment);
+      expect(round1.content.verdict).toBe(ownVerdict);
+      expect(round1.content.aiLocked).toEqual(['literary-quality', 'verdict']);
+      expect(round1.content.items.find((item) => item.itemId === 'theme-and-context')!.comment)
+        .toBe(AUTHORED_REWRITE_WORDS.items.find((item) => item.itemId === 'theme-and-context')!.comment);
+      expect(scoresOf(round1.content)).toEqual(scoresOf(record.content));
+      // Round 2: the editor is content with 主题 and 主要优点 too, locks them, and regenerates again with a different answer.
+      const theme = round1.content.items.find((item) => item.itemId === 'theme-and-context')!.comment;
+      const strengths = round1.content.strengths;
+      const relocked = store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: round1.entries,
+        content: { ...round1.content, aiLocked: ['literary-quality', 'verdict', 'theme-and-context', 'strengths'] }, finalize: false }).record!;
+      const second = { ...AUTHORED_REWRITE_WORDS, items: AUTHORED_REWRITE_WORDS.items.map((item) => ({ ...item, comment: `第二轮：${item.comment}` })),
+        verdict: '第二轮的总评，不应被采用。', strengths: ['第二轮的优点，不应被采用。'] };
+      await answeredRewrite(store, bookId, record.recordId, second);
+      const proposal2 = store.inspectEvaluation(bookId, record.recordId).rewrite.proposal!;
+      const round2 = store.decideEvaluationRewrite(bookId, proposal2.revisionId, 'accept').record!;
+      expect(round2.content.items.find((item) => item.itemId === 'literary-quality')!.comment).toBe(ownComment);
+      expect(round2.content.items.find((item) => item.itemId === 'theme-and-context')!.comment).toBe(theme);
+      expect(round2.content.verdict).toBe(ownVerdict);
+      expect(round2.content.strengths).toEqual(strengths);
+      expect(round2.content.items.find((item) => item.itemId === 'chinese-language')!.comment).toMatch(/^第二轮：/u);
+      expect(round2.content.weaknesses).toEqual(second.weaknesses);
+      expect(scoresOf(round2.content)).toEqual(scoresOf(relocked.content));
+      // Everything locked leaves nothing to regenerate: the Task is refused before a plan is made.
+      const all = store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: round2.entries, content: { ...round2.content,
+        aiLocked: [...round2.content.items.map((item) => item.itemId), 'verdict', 'strengths', 'weaknesses'] }, finalize: false }).record!;
+      expect(all.content.aiLocked).toHaveLength(round2.content.items.length + 3);
+      expect(await refusal(() => store.createEvaluationRewritePreparationWork(bookId, record.recordId, launchPolicy))).toContain('都已锁定');
+      store.markCleanShutdown();
+    } finally { store.close(); }
   }, 300_000);
 });

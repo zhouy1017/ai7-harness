@@ -1,5 +1,5 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-// The generator of the authored fixture `sample1-evaluation-rewrite-authored` (Issue #429, plan slice S81b2). The observations
+// The generator of the authored fixture `sample1-evaluation-report-authored` (Issue #429, plan slice S81b2; contract `/2`, Issue #1407). The observations
 // and the rewritten words in `tests/support/evaluation-rewrite.ts` are the authored part: each observation rests on blocks the
 // authored 初评 and 审稿意见 fixtures cite — themselves written after reading exact `sample1` (ADR 0043) — and the words rewrite the
 // 评语 and the 总评 to J-11's 第 15 版 scores from those observations alone. Everything else in the fixture — every request digest,
@@ -167,7 +167,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_REWRITE_FIXTURE'] === '1')('gene
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: EVALUATION_REWRITE_FIXTURE_IDENTITY,
-    description: '评语重写契约 v1 的人工撰写夹具：回答 J-11 第 15 版评估（从 AI7 初评开始，结构、叙事逻辑与连贯调为 13 分、打分偏高，读者与市场潜力调为 10 分、依据不足，保存一次）按编辑评分重写评语时发出的八个单元请求与一次全书综合。每条依据都引用 sample1（ADR 0043 收录的 Public SampleBook）的初评与审稿意见夹具已经引用过的内容块，说明它如何印证编辑所给的分数；「读者与市场潜力」在书稿中没有依据。全书综合只依据这一版的评分、调分原因、现有评语与这些依据，为五个已打分的评分项各重写一段评语并写出总评，不写任何分数。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-readers-report-authored 之上：同一次启动既能运行基线分析、AI7 初评与审稿意见，也能重写评语；各自的请求摘要互不相同，叠加不改变任何条目的键。',
+    description: '评估报告重新生成契约 v2（评语重写契约 /2）的人工撰写夹具：回答 J-11 第 15 版评估（从 AI7 初评开始，结构、叙事逻辑与连贯调为 13 分、打分偏高，读者与市场潜力调为 10 分、依据不足，保存一次）按编辑的修改重新生成评估报告时发出的八个单元请求与一次全书综合。每条依据都引用 sample1（ADR 0043 收录的 Public SampleBook）的初评与审稿意见夹具已经引用过的内容块，说明它如何印证编辑所给的分数；「读者与市场潜力」在书稿中没有依据。全书综合依据这一版修改后的报告、AI7 原报告与这些依据，为五个已打分的评分项各重写一段评语，写出含下一步建议的总评以及新版主要优点与主要问题，不写任何分数或结论。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。契约 /1 的前身夹具 sample1-evaluation-rewrite-authored 保持原字节，不被本夹具替代。本夹具叠加在 sample1-readers-report-authored 之上：同一次启动既能运行基线分析、AI7 初评与审稿意见，也能重新生成评估报告；各自的请求摘要互不相同，叠加不改变任何条目的键。',
     basedOn: 'sample1-readers-report-authored',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',

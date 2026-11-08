@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 // J-06 (Issue #57, plan slice S22; ADR 0085): 稿件冲突 of a single 修改建议. An editor types inside the words
 // a suggestion would replace; the suggestion says 原文已变, 接受并应用 is blocked, and 解决冲突… opens 稿件冲突
@@ -650,7 +650,7 @@ async function suggest(renderer, blockId, proposedText, rationale, name) {
 async function typeAt(renderer, blockId, offset, text, name) {
   if (await renderer.evaluate(`window.__j06.card() !== null || window.__j06.menu() !== null`)) await press(renderer, 'Escape');
   await waitFor(renderer, `window.__j06.card() === null && window.__j06.menu() === null`, `${name}-card-closed`, 10_000);
-  await assertRenderer(renderer, `window.__j06.place(${JSON.stringify(blockId)}, ${offset}, ${offset}) && document.execCommand('insertText', false, ${JSON.stringify(text)})`, `${name}-typed`);
+  await assertRenderer(renderer, `window.__j06.place(${JSON.stringify(blockId)}, ${offset}, ${offset}) && ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(text)})`, `${name}-typed`);
   await settled(renderer, `${name}-settled`);
 }
 
@@ -664,7 +664,14 @@ async function openCard(renderer, markId, blockId, name) {
     if (await renderer.evaluate(`window.__j06.card()?.dataset.markCard === ${JSON.stringify(markId)}`)) return;
     await assertRenderer(renderer, `window.__j06.markById(${JSON.stringify(markId)}) !== null && window.__j06.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await assertRenderer(renderer, `window.__j06.markById(${JSON.stringify(markId)}).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
+    // ✎ 已改 (Issue #1411): a click on exact applied words brings their card forward in the 批注栏; its floating card opens from
+    // the mark's own menu (打开修改建议).
+    if (await renderer.evaluate(`(() => { const mark = window.__j06.markById(${JSON.stringify(markId)}); return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`)) {
+      await assertRenderer(renderer, `window.__j06.rightClick(window.__j06.markById(${JSON.stringify(markId)}))`, `${name}-menu`);
+      const menu = Date.now() + 1_500;
+      while (Date.now() < menu && !(await renderer.evaluate(`window.__j06.item('open-card')?.disabled === false`))) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      await renderer.evaluate(`window.__j06.item('open-card')?.click()`);
+    } else await assertRenderer(renderer, `window.__j06.markById(${JSON.stringify(markId)}).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
     const settle = Date.now() + 1_500;
     while (Date.now() < settle) {
       if (await renderer.evaluate(`window.__j06.card()?.dataset.markCard === ${JSON.stringify(markId)}`)) return;
@@ -1056,7 +1063,7 @@ async function main() {
     await openCard(renderer, versionId, first, 'reversal-card');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
-      const reverse = card.querySelector('[data-mark-action="prepare-reverse"]');
+      const reverse = card.querySelector('[data-mark-action="reverse-revision"]');
       return card.querySelector('[data-mark-state]')?.textContent === '已应用 · 之后又改过' && reverse instanceof HTMLButtonElement && reverse.disabled &&
         card.querySelector('[data-mark-action="resolve-conflict"]') !== null;
     })()`, 'reversal-blocked-and-offers-resolve-conflict');

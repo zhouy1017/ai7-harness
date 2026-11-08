@@ -57,6 +57,7 @@ import {
 import { graphemeLength, writingDraftBlocks, writingWords } from '../../src/service/writing-tasks.js';
 import {
   WRITING_CONSEQUENCE_TERMS,
+  writingConsequenceRows,
   WRITING_REFERENCE_TERMS,
   WRITING_QUICK_PICK_TYPE,
   WRITING_STATUS,
@@ -71,6 +72,7 @@ import {
   writingQuickStarting,
   writingTaskLine,
 } from '../../src/renderer/writing-task-labels.js';
+import { setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 
 // Unit suite for Writing Contract v1 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004): the frozen input, the parsers, the
 // reference bound that refuses a copied exemplar, and the words the plan and the page say. Synthetic words only.
@@ -825,6 +827,17 @@ describe('the draft and the page\'s words', () => {
 
   it('speaks editor-surfaces §9\'s words', () => {
     expect(WRITING_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
+    // 不会做 is the technical layer's alone (ADR 0096 §4.2): ordinary mode keeps what it reads, sends and costs.
+    const consequences = { read: '当前稿件的全部 97 个段落', send: '发往已选模型', notDo: '不直接修改稿件', cost: '先看计划后显示' };
+    const shown = technicalLayerVisible;
+    try {
+      setTechnicalLayerVisible(false);
+      expect(writingConsequenceRows(consequences)).toEqual([['会读取', consequences.read], ['会发送', consequences.send], ['费用', consequences.cost]]);
+      setTechnicalLayerVisible(true);
+      expect(writingConsequenceRows(consequences)).toEqual([
+        ['会读取', consequences.read], ['会发送', consequences.send], ['不会做', consequences.notDo], ['费用', consequences.cost],
+      ]);
+    } finally { setTechnicalLayerVisible(shown); }
     expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息']);
     // 资料库 under 允许参考 (Issue #428): one box per item, and how many more were not listed.
     expect(writingMaterialLabel({ title: '参考资料甲', characters: 1234, scope: 'book' })).toBe('《参考资料甲》 · 已提取 1,234 字 · 本书资料');

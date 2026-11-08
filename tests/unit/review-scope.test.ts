@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   FACTUAL_AGAIN_REASON,
   FACTUAL_CHANGED_REASON,
-  FACTUAL_CHAPTERS_REASON,
-  FACTUAL_SELECTION_REASON,
   LEADS_ABSENT_REASON,
   LEADS_CHANGED_REASON,
   NEVER_REVIEWED_REASON,
@@ -56,13 +54,12 @@ describe('the scope a category reads', () => {
     expect(contract(CURRENT)).toEqual({ kind: 'task', mode: 'review-range', selectedRange: { startPosition: 3, endPosition: 3 } });
     expect(reviewCategoryScopePlan('baseline-leads', null, SELECTION, NEVER)).toEqual({ kind: 'leads', selectedRange: { startPosition: 3, endPosition: 3 } });
     expect(reviewCategoryScopePlan('baseline-leads', null, SELECTION, { ...NEVER, baselineRevision: false })).toEqual({ kind: 'refused', reason: LEADS_ABSENT_REASON });
-    expect(reviewCategoryScopePlan('factual-review-kind', null, SELECTION, NEVER)).toEqual({ kind: 'refused', reason: FACTUAL_SELECTION_REASON });
+    expect(reviewCategoryScopePlan('factual-review-kind', null, SELECTION, NEVER)).toEqual({ kind: 'task', mode: 'review-first-range', selectedRange: SELECTION.selectedRange });
     expect(reviewCategoryScopePlan('series-knowledge', '加入书系后才能选。', SELECTION, NEVER)).toEqual({ kind: 'refused', reason: '加入书系后才能选。' });
     for (const executor of ['review-category-contract', 'baseline-leads', 'factual-review-kind'] as const) {
       expect(reviewCategoryScopePlan(executor, null, { kind: 'selection', selectedRange: null }, CURRENT)).toEqual({ kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON });
     }
     expect(SELECTION_UNAVAILABLE_REASON).toBe('在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。');
-    expect(FACTUAL_SELECTION_REASON).toBe('事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。');
     expect(reviewScopeLabel(SELECTION)).toBe('当前选区 · 段落 3–3');
     // A category the ledger holds a revision of, from 当前选区 Runs only, has reviewed no chapter (Issue #423 review, P1-3).
     expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: false })).toEqual({ kind: 'refused', reason: NEVER_REVIEWED_REASON });
@@ -81,10 +78,14 @@ describe('the scope a category reads', () => {
     expect(reviewCategoryScopePlan('baseline-leads', null, WHOLE, { ...NEVER, baselineRevision: false })).toEqual({ kind: 'refused', reason: LEADS_ABSENT_REASON });
   });
 
-  it('checks facts over the whole manuscript once, and says why every other scope waits for the factual update modes', () => {
+  it('starts factual chapters and selections without prior results or a supplement decision', () => {
     expect(reviewCategoryScopePlan('factual-review-kind', null, WHOLE, NEVER)).toEqual({ kind: 'task', mode: 'whole-manuscript', selectedRange: null });
     expect(reviewCategoryScopePlan('factual-review-kind', null, WHOLE, CURRENT)).toEqual({ kind: 'refused', reason: FACTUAL_AGAIN_REASON });
-    expect(reviewCategoryScopePlan('factual-review-kind', null, CHAPTERS, NEVER)).toEqual({ kind: 'refused', reason: FACTUAL_CHAPTERS_REASON });
+    expect(reviewCategoryScopePlan('factual-review-kind', null, CHAPTERS, NEVER)).toEqual({ kind: 'task', mode: 'review-first-range', selectedRange: CHAPTERS.selectedRange });
+    for (const scope of [CHAPTERS, SELECTION]) {
+      expect(reviewCategoryScopePlan('factual-review-kind', null, scope, CURRENT)).toEqual({ kind: 'task', mode: 'review-range', selectedRange: scope.selectedRange });
+    }
+    expect(reviewCategoryScopePlan('factual-review-kind', null, { kind: 'chapters', selectedRange: null }, NEVER)).toEqual({ kind: 'refused', reason: NO_CHAPTERS_REASON });
     expect(reviewCategoryScopePlan('factual-review-kind', null, CHANGED, STALE)).toEqual({ kind: 'refused', reason: FACTUAL_CHANGED_REASON });
   });
 

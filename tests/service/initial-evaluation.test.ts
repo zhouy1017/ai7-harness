@@ -1,4 +1,4 @@
-import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
@@ -308,6 +308,25 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     }
   }, 300_000);
 
+  it('lets the newest report begin a version past an unfinished empty one, which stays as it was (Issue #1406)', async () => {
+    await withBook(async (book) => {
+      const blank = book.store.startEvaluation(book.bookId).record!;
+      await runInitialEvaluation(book);
+      const page = book.store.inspectEvaluation(book.bookId, null);
+      const revisionId = page.initial.latest!.revisionId;
+      expect(page.start).toEqual({ allowed: true, kind: 'again', fromInitial: { revisionId, ordinal: 1 }, skipDamaged: null,
+        blankReason: '第 1 版还没有定稿；定稿后才能重新评估。' });
+      expect(await refusal(() => book.store.startEvaluation(book.bookId))).toBe('EVALUATION_OPEN:第 1 版还没有定稿；定稿后才能重新评估。');
+      const report = book.store.startEvaluation(book.bookId, true).record!;
+      expect(report).toMatchObject({ ordinal: 2, state: 'draft', seededFrom: 1, initial: { revisionId } });
+      expect(report.content.items.map((item) => item.score)).toEqual(AI7_SCORES);
+      expect(book.store.inspectEvaluation(book.bookId, blank.recordId).record).toMatchObject({ ordinal: 1, state: 'editing', entries: 1, initial: null });
+      // The same report never begins a second version while the first still holds it.
+      expect(book.store.inspectEvaluation(book.bookId, null).start).toEqual({ allowed: false, reason: '第 2 版还没有定稿；定稿后才能重新评估。' });
+      expect(await refusal(() => book.store.startEvaluation(book.bookId, true))).toBe('EVALUATION_OPEN:第 2 版已经是这份 AI7 评估报告，直接在报告上修改即可。');
+    });
+  }, 300_000);
+
   it('scores nothing when the synthesis does not close, says so, and begins no version from it', async () => {
     await withBook(async (book) => {
       // Only the first range is answered, and the synthesis over it is not: one closed range is enough to ask for it.
@@ -457,7 +476,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_RANGE_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_initial_drafts'").get()).toBeDefined();
     } finally {

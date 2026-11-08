@@ -96,7 +96,7 @@ async function sourceDecisions(admitLegacy = true) {
   const create = (selected: readonly string[], title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
     signalIds: selected, applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
   const current = (itemId: string): EditorialMemoryVersion => {
-    const version = inspect().items.find((entry) => entry.current.itemId === itemId)!.current;
+    const version = subject.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0, detailItemId: itemId }).items.find((entry) => entry.current.itemId === itemId)!.current;
     expect(version.schema).toBe('ai7.global-editorial-memory/2');
     if (version.schema !== 'ai7.global-editorial-memory/2') throw new Error('Expected governed memory');
     return version;
@@ -158,6 +158,49 @@ it('sets up a legacy feedback preference through its learning admission before m
     expectedDecisions: material.decisions, choice: 'house', note: null });
   subject.rebuildHouseReviewPreference();
   expect(subject.inspectGlobalAgent().items.some(isLegacy)).toBe(true);
+});
+
+it('learns a confirmed suggested reason as a clean rule without decision statistics', async () => {
+  const { subject, book, explicit } = await sourceDecisions();
+  if (explicit.kind === 'word-tracked-edit' || explicit.kind === 'manual-edit-journal') throw new Error('Expected decision signal');
+  const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+    markId: explicit.source.markId!, decisionId: explicit.source.decisionId, expectedFeedback: explicit.source.reasonRevision,
+    action: 'revise', reason: '保留作者有意采用的表达。', reasonSource: 'suggested' });
+  const material = subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+    expectedDecisions: material.decisions, choice: 'house', note: null });
+  subject.rebuildHouseReviewPreference();
+  const memory = subject.editorialMemory(book.bookId, 'editorial-review/typos-and-usage');
+  expect(memory?.block).toContain('保留作者有意采用的表达。');
+  expect(memory?.block).not.toMatch(/采纳[0-9]|未采纳[0-9]|应用后常再改/u);
+});
+
+it('creates and edits an immediately active Book rule in ordinary preferences with the technical layer hidden', async () => {
+  const { subject, book } = await sourceDecisions(false);
+  const view = await ordinaryMemory(subject);
+  const submit = async (form: Element, text: string) => {
+    (form.querySelector('textarea') as HTMLTextAreaElement).value = text;
+    form.dispatchEvent({ type: 'submit' } as Event);
+    for (let index = 0; index < 4; index++) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  try {
+    const form = view.root.querySelector('[data-preference-editor="new"]')!;
+    const selects = form.querySelectorAll('select');
+    (selects[0] as HTMLSelectElement).value = 'style-and-format';
+    (selects[1] as HTMLSelectElement).value = book.bookId;
+    await submit(form, '保留合成书中有意使用的短句。');
+    const rule = subject.inspectGlobalAgent().items.find((entry) => entry.text === '保留合成书中有意使用的短句。')!;
+    expect(rule).toMatchObject({ state: 'active', bookId: book.bookId, categoryId: 'style-and-format' });
+    expect(subject.editorialMemory(book.bookId, 'agent-workspace')?.block).toContain(rule.text);
+    expect(subject.editorialMemory(null, 'global-agent')).toBeNull();
+    await view.click(`[data-review-preference="${rule.itemId}"]`, '编辑偏好');
+    await submit(view.root.querySelector(`[data-preference-editor="${rule.itemId}"]`)!, '保留短句，避免机械合并。');
+    expect(subject.editorialMemory(book.bookId, 'writing')?.block).toContain('保留短句，避免机械合并。');
+    expect(subject.editorialMemory(book.bookId, 'writing')?.block).not.toContain(rule.text);
+    await view.remount();
+    expect(view.root.textContent).toContain('保留短句，避免机械合并。');
+  } finally { view.close(); }
 });
 
 it('refreshes ordinary preference pins after memory acceptance before stopping feedback-derived preferences', async () => {
@@ -250,7 +293,7 @@ it('publishes two same-category memories with true automatic/explicit ancestry, 
   govern([current(a.itemId)], 'correct', '界'.repeat(160));
   const before = subject.inspectHouseReviewPreference().current!.versionId;
   const directiveCount = subject.inspectGlobalAgent().directives.length;
-  expect(() => govern([current(b.itemId)], 'correct', '界'.repeat(41))).toThrow(/12 条/u);
+  expect(() => govern([current(b.itemId)], 'correct', '界'.repeat(1201))).toThrow();
   expect(subject.inspectHouseReviewPreference().current!.versionId).toBe(before);
   expect(subject.inspectGlobalAgent().directives).toHaveLength(directiveCount);
   expect(current(b.itemId).versionId).toBe(b.versionId);
@@ -448,12 +491,12 @@ it('keeps no-growth governance usable while derived lines yield to memory lines,
   const memory = accept(make(create([signals[0]!.signalId], '合成保留记忆。')));
   const preference = (text: string) => subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
     categoryId: 'style-and-format', text, effect: 'guide' });
-  for (let index = 0; index < 10; index += 1) preference(`合成偏好${index}`);
+  for (let index = 0; index < 63; index += 1) preference(`合成偏好${index}`);
   const other = subject.inspectLearningMaterial(book.bookId, signals[3]!.source.materialKey);
   subject.decideLearningMaterial({ bookId: book.bookId, materialKey: other.materialKey, materialDigest: other.digest, expectedDecisions: 0, choice: 'book', note: null });
   const trimmed = subject.inspectHouseReviewPreference().current!;
   expect(trimmed.legacyBasis!.lines).toHaveLength(2);
-  expect(trimmed.lines).toHaveLength(12);
+  expect(trimmed.lines).toHaveLength(64);
   expect(trimmed.lines.some((line) => line.owner?.kind === 'editorial-memory' && line.owner.itemId === memory.itemId)).toBe(true);
   expect(trimmed.lines.some((line) => line.bookId === book.bookId)).toBe(false);
   govern([current(memory.itemId)], 'supervise', '只记录方向，不加文字。', 'guide');
@@ -462,7 +505,7 @@ it('keeps no-growth governance usable while derived lines yield to memory lines,
     categoryId: 'style-and-format', text: '旧版条目也只记录方向。', effect: 'guide' });
   expect(subject.inspectHouseReviewPreference().current!.lines.map((line) => line.text)).toEqual(trimmed.lines.map((line) => line.text));
   const before = subject.inspectHouseReviewPreference().current!.versionId;
-  expect(() => preference('超出界限的合成偏好')).toThrow(/12/u);
+  expect(() => preference('超出界限的合成偏好')).toThrow(/64/u);
   expect(subject.inspectHouseReviewPreference().current!.versionId).toBe(before);
 });
 
@@ -484,7 +527,7 @@ it('marks a completed Task withdrawn only by the lines it actually read', async 
     applicability: { kind: 'house' }, title: '未被读取的合成记忆。', editorialDimension: 'typos-and-usage', confidence: 0 }));
   const later = subject.inspectLearningMaterial(book.bookId, signals[3]!.source.materialKey);
   subject.decideLearningMaterial({ bookId: book.bookId, materialKey: later.materialKey, materialDigest: later.digest, expectedDecisions: 0, choice: 'house', note: null });
-  for (let index = 1; index <= 4; index += 1) subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+  for (let index = 1; index <= 14; index += 1) subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
     categoryId: 'typos-and-usage', text: `合成较新偏好${index}`, effect: 'guide' });
   const run = prepare();
   const task = run.categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
@@ -555,7 +598,7 @@ it('keeps original memory words and revisions stable when people change', async 
 
 it('reserves capacity for still-active memories across a Book exclusion, refuses only the overflowing admission and restores without a second accept', async () => {
   const { subject, book, signals, make, create, accept, current, govern, sourceBook } = await sourceDecisions();
-  const fromA = Array.from({ length: 7 }, (_, index) => accept(make(create([signals[0]!.signalId], `合成甲${index}`))));
+  const fromA = Array.from({ length: 59 }, (_, index) => accept(make(create([signals[0]!.signalId], `合成甲${index}`))));
   subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
   const other = await sourceBook('合成第二来源');
   const fromB = (title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
@@ -564,15 +607,15 @@ it('reserves capacity for still-active memories across a Book exclusion, refuses
   expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.owner?.kind === 'editorial-memory')).toHaveLength(5);
   const sixth = make(fromB('合成乙5'));
   const before = { preference: subject.inspectHouseReviewPreference().current!.versionId, history: subject.inspectHouseReviewPreference().history.length };
-  expect(() => accept(sixth)).toThrow(/12 条/u);
+  expect(() => accept(sixth)).toThrow(/64 条/u);
   expect(current(sixth.itemId)).toMatchObject({ versionId: sixth.versionId, state: 'proposed' });
   expect(subject.inspectHouseReviewPreference()).toMatchObject({ current: { versionId: before.preference } });
   expect(subject.inspectHouseReviewPreference().history).toHaveLength(before.history);
   // A merge counts its successor once; freezing or deactivating an owner releases its place.
   const merged = govern([b[0]!, b[1]!], 'merge', '合成乙合并');
-  expect(merged.items.filter((entry) => entry.kind === 'memory' && entry.state === 'active')).toHaveLength(11);
+  expect(merged.items.filter((entry) => entry.kind === 'memory' && entry.state === 'active')).toHaveLength(63);
   accept(sixth);
-  expect(() => accept(make(fromB('合成乙6')))).toThrow(/12 条/u);
+  expect(() => accept(make(fromB('合成乙6')))).toThrow(/64 条/u);
   govern([b[2]!], 'supervise', '冻结一条合成记忆。', 'freeze');
   const seventh = accept(make(fromB('合成乙7')));
   const stop = current(b[3]!.itemId);
@@ -580,36 +623,42 @@ it('reserves capacity for still-active memories across a Book exclusion, refuses
   accept(make(fromB('合成乙8')));
   subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
   const restored = subject.inspectHouseReviewPreference().current!;
-  expect(restored.lines).toHaveLength(12);
+  expect(restored.lines).toHaveLength(64);
   expect(restored.lines.every((line) => line.owner?.kind === 'editorial-memory')).toBe(true);
   for (const memory of [...fromA, seventh]) expect(current(memory.itemId).versionId).toBe(memory.versionId);
   expect(fromA.every((memory) => restored.lines.some((line) => line.owner?.itemId === memory.itemId))).toBe(true);
 });
 
-it('holds the 200-grapheme reservation across exclusion, active correction, explicit legacy lines and name changes', async () => {
+function reserveLibrarySpace(subject: EditorialStore): void {
+  for (let index = 0; index < 5; index += 1) subject.recordLearningSupervision({ operation: 'create', targets: [],
+    scope: { kind: 'house' }, categoryId: 'style-and-format', text: String(index) + '留'.repeat(1159), effect: 'guide' });
+}
+
+it('holds the 6000-grapheme reservation across exclusion, active correction, explicit legacy lines and name changes', async () => {
   const { subject, book, signals, make, create, accept, current, govern, sourceBook } = await sourceDecisions();
+  reserveLibrarySpace(subject);
   const long = accept(make(create([signals[0]!.signalId], '甲'.repeat(120))));
   subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
   const other = await sourceBook('合成字数来源');
   const fromB = (title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
     signalIds: [other.signals[0]!.signalId], applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
-  expect(() => accept(make(fromB('乙'.repeat(100))))).toThrow(/200 字/u);
+  expect(() => accept(make(fromB('乙'.repeat(100))))).toThrow(/6,000 字/u);
   const exact = accept(make(fromB(`合成丙丁${'乙'.repeat(76)}`)));
-  // Exactly 200 reserved: an active correction replaces its own slot, and one more grapheme refuses atomically.
+  // Exactly 6000 reserved: an active correction replaces its own slot, and one more grapheme refuses atomically.
   const corrected = govern([exact], 'correct', `合成丙丁${'丙'.repeat(76)}`);
   const sameSize = current(exact.itemId);
   expect(sameSize.title).toBe(`合成丙丁${'丙'.repeat(76)}`);
   const directives = corrected.directives.length;
-  expect(() => govern([sameSize], 'correct', `合成丙丁${'丙'.repeat(77)}`)).toThrow(/200 字/u);
+  expect(() => govern([sameSize], 'correct', `合成丙丁${'丙'.repeat(77)}`)).toThrow(/6,000 字/u);
   expect(subject.inspectGlobalAgent().directives).toHaveLength(directives);
   expect(current(exact.itemId).versionId).toBe(sameSize.versionId);
   expect(() => subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format',
-    text: '合成旧版偏好', effect: 'guide' })).toThrow(/200 字/u);
+    text: '合成旧版偏好', effect: 'guide' })).toThrow(/6,000 字/u);
   // People changes preserve the original words and their existing capacity reservation.
   const people = subject.getBookOverview(other.book.bookId).people;
   subject.updateBookPeople({ bookId: other.book.bookId, expectedVersion: people.version, authors: ['合成丙丁'], editors: [], related: [] });
   expect(subject.inspectHouseReviewPreference().current!.lines.find((line) => line.owner?.itemId === exact.itemId)!.text).toBe('合成丙丁' + '丙'.repeat(76));
-  expect(() => accept(make(fromB('乙')))).toThrow(/200 字/u);
+  expect(() => accept(make(fromB('乙')))).toThrow(/6,000 字/u);
   subject.updateBookPeople({ bookId: other.book.bookId, expectedVersion: people.version + 1, authors: [], editors: [], related: [] });
   subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
   const restored = subject.inspectHouseReviewPreference().current!;
@@ -619,13 +668,14 @@ it('holds the 200-grapheme reservation across exclusion, active correction, expl
   // An explicit legacy line reserves its place too, and freezing an owner releases it.
   govern([current(long.itemId)], 'supervise', '冻结长记忆。', 'freeze');
   subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format', text: '合'.repeat(100), effect: 'guide' });
-  expect(() => accept(make(fromB('乙'.repeat(21))))).toThrow(/200 字/u);
+  expect(() => accept(make(fromB('乙'.repeat(21))))).toThrow(/6,000 字/u);
   accept(make(fromB('乙'.repeat(20))));
 });
 
 it.each(['material', 'book'] as const)('reserves a legacy correction whose source is reversibly excluded (%s), so restoration never overflows', async (exclusion) => {
   const { subject, book, explicit, make, accept, sourceBook } = await sourceDecisions();
   const legacyItem = () => subject.inspectGlobalAgent().items.find((entry) => entry.kind === 'preference' && entry.categoryId === 'typos-and-usage');
+  reserveLibrarySpace(subject);
   const derived = legacyItem()!;
   // A still-eligible automatic signal of another Book, so neither exclusion reaches the memory's own source.
   const other = (await sourceBook('合成另一来源')).signals[0]!;
@@ -648,16 +698,16 @@ it.each(['material', 'book'] as const)('reserves a legacy correction whose sourc
   expect(subject.inspectGlobalAgent().items.some((entry) => entry.itemId === derived.itemId)).toBe(exclusion === 'book');
   const versions = subject.inspectHouseReviewPreference().history.length;
   const overflowing = make(create('乙'.repeat(81)));
-  expect(() => accept(overflowing)).toThrow(/200 字/u);
+  expect(() => accept(overflowing)).toThrow(/6,000 字/u);
   expect(subject.inspectHouseReviewPreference().history).toHaveLength(versions);
   const fitting = accept(make(create('乙'.repeat(80))));
   restore();
   const restored = subject.inspectHouseReviewPreference().current!;
-  expect(restored.lines.map((line) => line.text).sort()).toEqual(['合'.repeat(120), '乙'.repeat(80)].sort());
+  expect(restored.lines.filter((line) => line.categoryId === 'typos-and-usage').map((line) => line.text).sort()).toEqual(['合'.repeat(120), '乙'.repeat(80)].sort());
   expect(restored.lines.find((line) => line.owner?.itemId === fitting.itemId)).toBeDefined();
 });
 
-it('reserves a line for an excluded legacy correction beside twelve memories, and freezing the correction releases it', async () => {
+it('reserves a line for an excluded legacy correction beside sixty-four memories, and freezing the correction releases it', async () => {
   const { subject, book, signals, explicit, make, create, accept } = await sourceDecisions();
   const legacyItem = () => subject.inspectGlobalAgent().items.find((entry) => entry.kind === 'preference' && entry.categoryId === 'typos-and-usage')!;
   const item = legacyItem();
@@ -666,22 +716,23 @@ it('reserves a line for an excluded legacy correction beside twelve memories, an
   const material = () => subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
   subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'excluded', note: null });
   const other = signals.find((entry) => entry.signalId !== explicit.signalId)!;
-  for (let index = 0; index < 11; index += 1) accept(make(create([other.signalId], `合成记忆${index}`)));
+  for (let index = 0; index < 63; index += 1) accept(make(create([other.signalId], `合成记忆${index}`)));
   const twelfth = make(create([other.signalId], '合成记忆11'));
-  expect(() => accept(twelfth)).toThrow(/12 条/u);
+  expect(() => accept(twelfth)).toThrow(/64 条/u);
   subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'house', note: null });
-  expect(subject.inspectHouseReviewPreference().current!.lines).toHaveLength(12);
+  expect(subject.inspectHouseReviewPreference().current!.lines).toHaveLength(64);
   const corrected = legacyItem();
   subject.recordLearningSupervision({ operation: 'supervise', targets: [{ itemId: corrected.itemId, revisionId: corrected.revisionId }], scope: { kind: 'house' },
     categoryId: 'typos-and-usage', text: '冻结更正。', effect: 'freeze' });
   accept(twelfth);
-  expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.owner?.kind === 'editorial-memory')).toHaveLength(12);
+  expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.owner?.kind === 'editorial-memory')).toHaveLength(64);
 });
 
 it('counts a legacy merge over an excluded derived parent once, and its deactivation releases the place', async () => {
   const { subject, book, signals, explicit, make, create, accept } = await sourceDecisions();
   const legacy = () => subject.inspectGlobalAgent().items.filter((entry) => entry.kind === 'preference' && entry.categoryId === 'typos-and-usage' && entry.state === 'active');
   subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '合'.repeat(40), effect: 'guide' });
+  reserveLibrarySpace(subject);
   const parents = legacy();
   expect(parents).toHaveLength(2);
   subject.recordLearningSupervision({ operation: 'merge', targets: parents.map(({ itemId, revisionId }) => ({ itemId, revisionId })), scope: { kind: 'house' },
@@ -690,10 +741,10 @@ it('counts a legacy merge over an excluded derived parent once, and its deactiva
   subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'excluded', note: null });
   expect(legacy()).toEqual([]);
   const other = signals.find((entry) => entry.signalId !== explicit.signalId)!;
-  expect(() => accept(make(create([other.signalId], '乙'.repeat(101))))).toThrow(/200 字/u);
+  expect(() => accept(make(create([other.signalId], '乙'.repeat(101))))).toThrow(/6,000 字/u);
   const fitting = accept(make(create([other.signalId], '乙'.repeat(100))));
   subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'house', note: null });
-  expect(subject.inspectHouseReviewPreference().current!.lines.map((line) => line.text).sort()).toEqual(['并'.repeat(100), '乙'.repeat(100)].sort());
+  expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.categoryId === 'typos-and-usage').map((line) => line.text).sort()).toEqual(['并'.repeat(100), '乙'.repeat(100)].sort());
   const merged = legacy()[0]!;
   subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: merged.itemId, revisionId: merged.revisionId }], scope: { kind: 'house' },
     categoryId: 'typos-and-usage', text: '', effect: 'guide' });
@@ -706,7 +757,7 @@ it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position
   const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
   const memory = accept(make(create([signals[0]!.signalId], '冻结后仍保持 /2。')));
   govern([current(memory.itemId)], 'supervise', '冻结这条合成记忆。', 'freeze');
-  const newer = Array.from({ length: 5 }, (_, index) => `合成新偏好${index + 1}`);
+  const newer = Array.from({ length: 15 }, (_, index) => `合成新偏好${index + 1}`);
   for (const text of newer) subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
     categoryId: 'typos-and-usage', text, effect: 'guide' });
   const published = subject.inspectHouseReviewPreference().current!;
@@ -714,7 +765,7 @@ it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position
   expect(published.lines.find((line) => line.owner?.kind === 'legacy-preference' && line.owner.itemId.startsWith('preference:'))!.categoryId).toBe('typos-and-usage');
   const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
   try {
-    // The derived line dates from its older admitting decision, as in /1; the five newer editor lines take the Top-5.
+    // The derived line dates from its older admitting decision, as in /1; the fifteen newer editor lines take the Top-15.
     const used = new HouseReviewPreferenceLedger(db).use('ordinary-production', book.bookId, 'typos-and-usage')!;
     expect([...used.lines].sort()).toEqual([...newer].sort());
   } finally { db.close(); }

@@ -27,7 +27,7 @@ const FIXTURES = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta
 const CASES = [
   ['initial-evaluation', 'sample1-evaluation-authored'],
   ['readers-report', 'sample1-readers-report-authored'],
-  ['evaluation-rewrite', 'sample1-evaluation-rewrite-authored'],
+  ['evaluation-rewrite', 'sample1-evaluation-report-authored'],
   ['writing', 'sample1-writing-authored'],
   ['review-run', 'sample1-review-cross-chapter-authored'],
 ] as const;

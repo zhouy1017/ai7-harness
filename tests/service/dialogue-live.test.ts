@@ -489,6 +489,34 @@ describe('就这段提问… on the live route (provider-free)', () => {
     } finally { await dialogues.dispose(); store.close(); }
   });
 
+  it.each([false, true])('carries current Book and house rules through selection dialogue and workspace (workspace=%s)', async (workspace) => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '合成对话记忆');
+    const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
+    const connection = store.saveModelServiceConnection('合成连接', null, 'ready', binding.route);
+    const configured = { ...binding, credentialReference: connection.credentialReference };
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+      live: { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+    for (const scope of [{ kind: 'house' as const }, { kind: 'book' as const, bookId: book.bookId }])
+      store.recordLearningSupervision({ operation: 'create', targets: [], scope, categoryId: 'style-and-format',
+        text: scope.kind === 'book' ? '本书保留合成短句。' : '全社统一合成标点。', effect: 'guide' });
+    const calls: StubCall[] = [];
+    const dialogues = liveOwner(store, productionDialogueRoute({ scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => ANSWER) },
+      () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-dialogue-memory' }));
+    try {
+      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION }, new Date(), workspace ? 'agent-workspace' : undefined);
+      if (workspace) dialogues.beginWorkspaceTurn({ ...turn, settled: () => {} }); else dialogues.begin(turn);
+      const result = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), settled, 'memory turn settled');
+      expect(result.attempts[0]!.state).toBe('completed');
+      expect(calls).toHaveLength(1);
+      const prompt = JSON.parse(calls[0]!.body).messages[0].content as string;
+      expect(prompt).toContain('本书保留合成短句。'); expect(prompt).toContain('全社统一合成标点。');
+      expect(prompt.indexOf('本书保留合成短句。')).toBeLessThan(prompt.indexOf('全社统一合成标点。'));
+      expect(prompt).toContain('不改变本任务要求的输出格式');
+    } finally { await dialogues.dispose(); store.close(); }
+  });
+
   it('production dialogue sends repeated input twice without opening a development cache, then uses the newly selected route', async () => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '正式使用对话');
@@ -945,7 +973,7 @@ describe('revision 72 (Issue #811)', () => {
       operationalScope: 'ordinary-production' as const, behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: DIALOGUE_PROMPT_CONTRACT_DIGEST,
       providerProcessingVersion: 'v13', policyRuleId: 'ordinary-production-editorial-dialogue', boundAt: new Date().toISOString() };
     store.bindDialogueAttempt(turn.attemptId, binding);
-    expect(readBinding(turn.attemptId)).toEqual(binding);
+    expect(readBinding(turn.attemptId)).toEqual({ ...binding, reasoningEffort: null });
   });
 
   it('refuses an official-route developer-live binding after migration', () => {

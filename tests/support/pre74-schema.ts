@@ -1,7 +1,7 @@
 import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
-import { FACTUAL_CLAIM_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION, FACTUAL_TASK_INTENTS_SQL, CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
+import { FACTUAL_CLAIM_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION, FACTUAL_RANGE_TASK_INTENTS_SQL, CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from '../../src/service/task-intent-drafts.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
@@ -110,7 +110,7 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
  * Revision 74 widens one CHECK; revision 75 adds its four empty ledgers and their immutable triggers; revision 76 (Issue #892)
  * adds the Material Index's two layer ledgers and their triggers beside a store's revision-67 relations, when it has them;
  * revision 77 (Issue #902) adds its five relations and their triggers and widens `proposal_item_decisions`' CHECK;
- * revision 78 (Issue #901) adds its four factual verification relations and immutable triggers.
+ * revision 78 (Issue #901) adds its four factual verification relations and immutable triggers; the current store also widens `analysis_task_intents`' CHECK to admit `review-first-range` (Issue #1401, revision 110).
  */
 export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]): Array<{ name: string; sql: unknown }> {
   const materialIndex = rows.some((row) => row.name === 'material_index_builds');
@@ -121,7 +121,7 @@ export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]
     ...Object.entries({ ...TASK_INTENT_DRAFT_SCHEMA_SQL, ...TASK_INTENT_DRAFT_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, ...CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL }
-      : row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_TASK_INTENTS_SQL }
+      : row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_RANGE_TASK_INTENTS_SQL }
       : row.name === 'analysis_run_authorizations' ? { ...row, sql: CURATION_SCHEMA_SQL[row.name] }
       : row.name === 'analysis_result_sets' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets }
       : row.name === 'analysis_result_set_revisions' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions }

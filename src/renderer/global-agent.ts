@@ -65,7 +65,7 @@ export function mountGlobalAgent(options: {
   state.dataset['globalAgentPolicy'] = 'state';
   const items = el('fieldset');
   items.className = 'global-agent-sources';
-  items.append(el('legend', '本社审阅偏好与记忆'), el('p', '勾选后用于提问或管理；只有可用的记忆正文随问题发送。'));
+  items.append(el('legend', '本社审阅偏好与记忆'), el('p', '勾选后用于提问或管理。'));
   const list = el('div');
   list.className = 'global-agent-choice-list';
   items.append(list);
@@ -100,12 +100,12 @@ export function mountGlobalAgent(options: {
   const bookField = field('图书', book);
   form.append(el('h3', '管理所选记忆'), field('操作', operation), field('作用范围', scope), field('审阅类别', category), bookField,
     field('记忆内容 / 监督指令 · 最多 200 字', text), effectField,
-    el('p', '勾选上方记忆后管理；只有点击记录才会修改记忆，对话不会自动成为指令。'), save);
+    el('p', '勾选「引用范围」里的记忆后管理。'), save);
   const directives = el('section');
   directives.className = 'global-agent-directives';
   const history = el('section');
   history.className = 'global-agent-history';
-  history.append(el('h3', '全域对话历史'), el('p', '可在这里或「质量与学习」查看已记录的问题与回答。'));
+  history.append(el('h3', '全域对话历史'));
   const historyList = el('div');
   historyList.className = 'global-agent-history-list';
   const answer = el('section');
@@ -129,8 +129,7 @@ export function mountGlobalAgent(options: {
   const confirmed = new Set<string>();
   const submitted = el('details'); submitted.append(el('summary', '本次提交内容'));
   const submittedContent = el('div'); submitted.append(submittedContent);
-  answer.append(answerQuestion, answerStatus, prose, answerActions, tools, proposals, submitted,
-    el('p', '回答仅供参考；治理必须单独操作。修改稿件请返回相应图书。'));
+  answer.append(answerQuestion, answerStatus, prose, answerActions, tools, proposals, submitted);
   let displayedAttempt: string | null = null;
   let displayedFragments = 0;
   let latestDialogue: GlobalAgentDialogueProjection | null = null;
@@ -333,7 +332,35 @@ export function mountGlobalAgent(options: {
   audit.type = 'button';
   audit.addEventListener('click', options.openAudit);
   audit.className = 'btn ' + ('quiet');
-  root.append(state, conversation, questionForm, items, scopeList, form, directives, history, audit);
+  // Issue #1413 cluster 7: the dialogue and the composer are the page. 引用范围, 记忆与治理 and 全局指令 are compact pills
+  // above the composer that open as popovers; the dialogue history is a short list beside the conversation.
+  const pills = el('div'); pills.className = 'global-agent-pills';
+  pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', '提问设置');
+  const pill = (label: string, key: string, ...content: HTMLElement[]): HTMLDetailsElement => {
+    const details = el('details'); details.className = 'global-agent-pill'; details.dataset['globalAgentPill'] = key;
+    const summary = el('summary', label);
+    const pop = el('div'); pop.className = 'global-agent-pop'; pop.append(...content);
+    details.append(summary, pop);
+    details.addEventListener('toggle', () => {
+      if (!details.open) return;
+      for (const other of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill')) if (other !== details) other.open = false;
+    });
+    details.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !details.open) return;
+      event.preventDefault(); event.stopPropagation(); details.open = false; summary.focus();
+    });
+    return details;
+  };
+  pills.append(pill('引用范围', 'scope', items, scopeList), pill('记忆与治理', 'governance', form), pill('全局指令', 'directives', directives));
+  root.addEventListener('pointerdown', (event) => {
+    if (!(event.target instanceof Node) || pills.contains(event.target)) return;
+    for (const details of pills.querySelectorAll<HTMLDetailsElement>('details.global-agent-pill[open]')) details.open = false;
+  });
+  const main = el('div'); main.className = 'global-agent-main';
+  main.append(state, conversation, pills, questionForm);
+  const side = el('aside'); side.className = 'global-agent-side';
+  side.append(history, audit);
+  root.append(main, side);
   let current: GlobalAgentProjection | null = null;
   let busy = false;
   const selected = new Map<string, GlobalMemoryItem>();

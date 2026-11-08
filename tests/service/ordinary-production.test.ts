@@ -1,3 +1,5 @@
+import * as egressGate from '../../src/service/provider/egress-gate.js';
+import { recordedMarkModel, markModelLabels } from '../../src/service/editorial-mark-source.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
@@ -1031,7 +1033,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const bookId = await sample1Book(store, 'L2 正式后台分析');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
     const selected = production.policy;
-    expect(selected.providerProcessing.version).toBe('v34');
+    expect(selected.providerProcessing.version).toBe('v35');
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
       .toBe('enrolled-background-manuscript-analysis-processing');
@@ -1108,6 +1110,42 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(code(() => store.inspectBaselineAnalysis(bookId, () => null))).toBe('ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED');
   });
 
+  it.each([{ model: 'deepseek-flash', effort: undefined, label: 'DeepSeek V4.1 Flash' },
+    { model: 'deepseek-v4-pro', effort: 'high', label: 'deepseek-v4-pro@high' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
+    const { store, production } = await openProductionStore();
+    const credentialReference = await configure(store, production, 'deepseek-open-platform');
+    store.selectMainRoleModel('deepseek-open-platform', model);
+    const configured = { ...OFFICIAL, model, credentialReference };
+    production.live = { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' };
+    production.policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+    const egress = vi.spyOn(egressGate, 'evaluateEgress');
+    const bookId = await sample1Book(store, '合成基线记忆');
+    store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'academic-integrity',
+      text: '对合成引用应区分作者观点和外部证据。', effect: 'guide' });
+    const prepared = prepare(store, bookId, production.policy);
+    const digest = prepared.planEnvelope!.promptContractDigest;
+    expect(store.baselineAnalysisLedger.definitionForDigest(digest).systemPrompt).toContain('对合成引用应区分作者观点和外部证据。');
+    const calls: StubCall[] = [];
+    const settled = await run(store, owner(store, production, stubTransport(calls, await chainAnswers(prepared)), []), bookId, prepared);
+    expect(settled.run?.state).toBe('completed');
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((call) => JSON.parse(call.body).model === model && JSON.parse(call.body).reasoning_effort === effort)).toBe(true);
+    expect(calls.every((call) => JSON.parse(call.body).messages[0].content.includes('必须优先遵循以下本社偏好'))).toBe(true);
+    expect(egress.mock.calls.some(([, binding]) => binding.contractCategories?.has('house-review-preference-excerpt'))).toBe(true);
+    // Read the producing plan, after today's selection changes; no provider is called for author projection.
+    await configure(store, production, 'opencode-go');
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const author = recordedMarkModel(db, prepared.taskIntent!.taskIntentId, new Date().toISOString());
+      expect(author).toEqual({ route: 'deepseek-open-platform', model, reasoningEffort: effort });
+      expect(markModelLabels(author)).toEqual({ modelLabel: label, modelTechnicalLabel: `DeepSeek 开放平台（官方） · ${model}${effort ? `@${effort}` : ''}` });
+    } finally { db.close(); }
+    const prior = store.baselineAnalysisLedger.definitionForDigest(digest).systemPrompt;
+    store.markCleanShutdown(); store.close();
+    const reopened = await openProductionStore();
+    expect(reopened.store.baselineAnalysisLedger.definitionForDigest(digest).systemPrompt).toBe(prior);
+  });
+
   it('runs the configured DeepSeek 官方 route on the editor\'s own reference, with no cache, ledger or validation', async () => {
     const { store, production } = await openProductionStore();
     const reference = await configure(store, production, 'deepseek-open-platform');
@@ -1121,7 +1159,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v34' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v35' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -1138,8 +1176,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v34' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v34' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v35' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v35' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
@@ -1417,7 +1455,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       expect(result.kind).toBe('translated');
       if (result.kind !== 'translated') throw new Error('production translation failed');
       expect(result.made).toMatchObject({ model: fast.model, route: fast.route, policyRuleId: 'ordinary-production-material-translation',
-        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v34',
+        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v35',
           usage: { inputTokens: 12, outputTokens: 7 }, failureCode: null } });
       expect(calls).toEqual([{ url: fast.endpoint, model: 'gpt-5.6-sol', cap: 512 },
         { url: fast.endpoint, model: fast.model, cap: 512 }, { url: fast.endpoint, model: fast.model, cap: 8192 }]);
@@ -1440,7 +1478,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const record = JSON.parse(String(translations[0]!.canonical_json));
         expect(record.provenance).toMatchObject({ role: 'Fast Interaction Role', route: fast.route, model: fast.model,
           endpoint: fast.endpoint, credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
-          policyVersion: 'v34', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
+          policyVersion: 'v35', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
         expect(record.label).toBe('来源译文');
         expect(JSON.stringify(record)).not.toContain('public-synthetic-opaque-reasoning');
       } finally { database.close(); }
@@ -1489,15 +1527,15 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     store.saveModelServiceConnection('Retained probe', null, 'ready', 'openai-platform');
     const status = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport([], 'AI7_OK') },
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v34' } });
+    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v35' } });
     store.close();
-    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v33', 'v24']) {
+    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v33', 'v34', 'v24']) {
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       try {
         database.prepare("UPDATE model_service_connections SET connection_test = ? WHERE provider_id = 'openai-platform'")
           .run(JSON.stringify({ ...status, provenance: { ...status.provenance, policyVersion } }));
       } finally { database.close(); }
-      if (!['v25', 'v26', 'v27', 'v32', 'v33'].includes(policyVersion)) {
+      if (!['v25', 'v26', 'v27', 'v32', 'v33', 'v34'].includes(policyVersion)) {
         await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('连接测试来历无效。');
         continue;
       }
@@ -1673,7 +1711,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 109, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 111, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

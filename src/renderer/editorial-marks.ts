@@ -1,4 +1,4 @@
-import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard } from './editorial-mark-card.js';
+import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard } from './editorial-mark-card.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
@@ -61,10 +61,19 @@ import {
   SAFE_MERGE_LINE,
   markDriftNote,
   markTimeLabel,
-  reverseApplyNote,
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
+import { READING_REVISION_CLIPBOARD_REASON, type EditorInputMode } from './editor-input-mode.js';
+import {
+  AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_MENU_LABEL, openScopedAiEditComposer, selectionLockTargets, selectionLocked,
+  setAiLocks, type ScopedAiEditHost,
+} from './scoped-ai-edit.js';
+import {
+  EDITOR_REVISION_RATIONALE, QUICK_REVISE_APPLIED, QUICK_REVISE_FIELD, QUICK_REVISE_FIELD_HINT, QUICK_REVISE_HINT, QUICK_REVISE_LABEL,
+  QUICK_REVISE_NOTE, QUICK_REVISE_RATIONALE, QUICK_REVISE_SPAN_HINT, QUICK_REVISE_SUBMIT, QUICK_REVISE_TITLE, QUICK_REVISE_UNCHANGED,
+  REVERSE_REVISION_DONE, REVERSE_REVISION_LABEL, spanRevisionSegments, type RevisionSegment,
+} from './editor-revisions.js';
 import { spanGraphemes } from '../shared/selection-span.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
 import { sheetChosenApartLine } from './captured-procedure-labels.js';
@@ -125,6 +134,17 @@ export interface EditorialMarksSurface {
   composeProcedures(range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number }): void;
   /** Open one mark's card, as a click on it would: 审阅's 回到原文 arrives at a finding's mark this way. */
   openMark(markId: string): Promise<void>;
+  /** 修改此处 (Issue #1411): the selection's revision composer, prefilled with the selected words; `false` when nothing is selected. */
+  quickRevise(): boolean;
+  /**
+   * The editor's own revision (Issue #1411): one 修改建议 of theirs on exactly these words — `编辑修订` unless they said why — applied
+   * at once; its mark identity once applied, or `null` when it was not (the surface said why). Never for an AI result.
+   */
+  recordAndApplyEditorRevision(range: Omit<RevisionSegment, 'proposedText'>, proposedText: string, rationale?: string | null): Promise<string | null>;
+  /** An applied revision's card brought forward in the 批注栏 (Issue #1411): opened, scrolled to and highlighted. */
+  revealRevision(markId: string): Promise<void>;
+  /** 让 AI 修改… with nothing selected (Issue #1412): the unlocked parts of the section the caret is in, or of the whole text. */
+  composeScopedAiEdit(): void;
   /**
    * Whether the pane's position is this surface's doing: a composer or a Mark Card is open — bringing
    * one into view may rest the pane at its edge — or one just closed and the pane, shorter by the
@@ -143,7 +163,7 @@ interface MountOptions {
   api: Pick<
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
-    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
+    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'reverseAppliedChangeSuggestion' |
     'inspectProposalWorkspace' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
     // A factual finding's sources on its card (Issue #1174), read as its review card reads them.
     'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'inspectResearchEvidence'
@@ -216,6 +236,15 @@ interface MountOptions {
   writeManuscript<T extends ManuscriptApplyCommandProjection>(operation: () => Promise<T>, done: string): Promise<T | undefined>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
+  /** 阅读与修订模式 (Issue #1411): while the text is guarded, the menu's 剪切 and 粘贴 are refused with their reason. */
+  inputMode?(): EditorInputMode;
+  /** Open the 批注栏 for a card it should show; `false` where it cannot show now (专注模式), and the card floats instead. */
+  revealComments?(): boolean;
+  /**
+   * 就选中部分让 AI 修改… and 🔒 锁定 (Issue #1412), on the Book's manuscript and on a derivative document alike: the request, the
+   * lock calls and the reload after them are the scoped edit's own; `sectionOf` names the heading whose section holds a block.
+   */
+  scopedAiEdit?: { readonly host: ScopedAiEditHost; sectionOf(blockId: string): string | null };
 }
 
 /** Window-only memory. A new projection/version fences every outstanding read, including failed reads. */
@@ -503,6 +532,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
   let activeComment: string | undefined;
+  /** The card an applied revision's badge brought forward (Issue #1411), and whether it is still to be scrolled to. */
+  let revealed: { readonly markId: string; readonly pending: boolean } | undefined;
+  /** The pane position a reveal scrolled the text to: this surface's own movement, which never pages the window. */
+  let revealScroll: { top: number } | undefined;
   let commentsReading = 0;
   let commentCardReads = 0;
   let commentsIdentity = '';
@@ -685,6 +718,28 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }
     }
     const placed = stackEditorialComments(items);
+    // ✎ 已改 (Issue #1411): the card an applied revision's badge asked for carries the active frame, and is brought into view and
+    // focused the first time it is laid out ready.
+    for (const [id, entry] of commentNodes) {
+      const classes = entry.node.className.split(' ').filter((name) => name !== '' && name !== 'editorial-mark-card-active');
+      entry.node.className = [...classes, ...(id === revealed?.markId ? ['editorial-mark-card-active'] : [])].join(' ');
+    }
+    const forward = revealed?.pending === true ? placed.find((item) => item.mark.markId === revealed!.markId && item.node.dataset['revalidating'] !== 'true') : undefined;
+    if (forward !== undefined && revealed !== undefined) {
+      revealed = { markId: revealed.markId, pending: false };
+      forward.node.scrollIntoView?.({ block: 'nearest' });
+      forward.node.focus({ preventScroll: true });
+    } else if (revealed?.pending === true && revealScroll === undefined) {
+      // Opening the pane narrows the text and its words may have moved out of view, where no card is laid out: they are
+      // brought to the middle of the pane once.
+      const mark = editor.currentWindow().marks.find((entry) => entry.markId === revealed!.markId);
+      const anchor = mark === undefined ? null : commentAnchor(mark);
+      if (anchor !== null) {
+        anchor.scrollIntoView?.({ block: 'center' });
+        revealScroll = { top: options.scroll.scrollTop };
+        scheduleCommentsLayout();
+      }
+    }
     for (const [index, item] of placed.entries()) {
       item.node.style.top = `${item.top}px`;
       item.node.dataset['active'] = String(item.mark.markId === activeComment);
@@ -949,6 +1004,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       form.append(note);
     }
     form.append(problem, row);
+    // Ctrl/Cmd+Enter submits from any field (Issue #1411: 修改此处 applies with it); Enter alone stays a line break.
+    form.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing || !(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      form.requestSubmit();
+    });
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '', procedure: '', chosenApart: '' };
@@ -1146,6 +1207,94 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       },
     });
   };
+
+  /** The editor's revision of each part of their selection, applied at once: one Effect, so one 撤销本次修改 takes it all back. */
+  async function recordAndApplySegments(segments: ReadonlyArray<RevisionSegment>, rationale: string | null): Promise<string | null> {
+    if (destroyed || refuseWhileBusy() || segments.length === 0) return null;
+    const markIds: string[] = [];
+    const recorded = await command(async () => {
+      await editor.flush();
+      const current = editor.currentWindow();
+      for (const segment of segments) {
+        const result = await api.createEditorialMark({
+          ...binding(),
+          clientMarkId: crypto.randomUUID(),
+          baseRevisionId: current.revisionId,
+          expectedJournalSequence: current.journalSequence,
+          blockId: segment.blockId,
+          baseBlockDigest: segment.blockDigest,
+          fromGrapheme: segment.fromGrapheme,
+          toGrapheme: segment.toGrapheme,
+          selectedText: segment.text,
+          kind: 'change-suggestion',
+          highlightColor: null,
+          body: '',
+          proposedText: segment.proposedText,
+          rationale: rationale?.trim() || EDITOR_REVISION_RATIONALE,
+        });
+        markIds.push(result.markId);
+        applyCommand(result);
+      }
+    }, '修订未能记录。');
+    if (!recorded || markIds.length !== segments.length) return null;
+    const first = markIds[0]!;
+    await writeManuscript(first, (clientEffectId) => markIds.length === 1
+      ? api.applyChangeSuggestion({ ...binding(), markId: first, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null })
+      : api.applyChangeSuggestionBatch({ ...binding(), markIds, clientEffectId }), QUICK_REVISE_APPLIED, undefined, false);
+    return editor.currentWindow().marks.find((mark) => mark.markId === first)?.status === 'applied' ? first : null;
+  }
+
+  const recordAndApplyEditorRevision: EditorialMarksSurface['recordAndApplyEditorRevision'] = (range, proposedText, rationale) =>
+    recordAndApplySegments([{ ...range, proposedText }], rationale ?? null);
+
+  /** 修改此处 (Issue #1411): the composer below the selection, prefilled with its words; 应用修改 records and applies the revision. */
+  const composeQuickRevision = async (): Promise<void> => {
+    if (refuseWhileBusy()) return;
+    const words = await settledWords();
+    if (words === null) return;
+    const span = words.kind === 'span' ? words.span : null;
+    openComposer(words.blockId, {
+      id: 'quick-revise',
+      title: QUICK_REVISE_TITLE,
+      quote: null,
+      fields: [
+        { name: 'proposedText', label: QUICK_REVISE_FIELD, value: words.text, required: false, hint: span === null ? QUICK_REVISE_FIELD_HINT : QUICK_REVISE_SPAN_HINT },
+        { name: 'rationale', label: QUICK_REVISE_RATIONALE, value: '', required: false },
+      ],
+      submitLabel: QUICK_REVISE_SUBMIT,
+      note: QUICK_REVISE_NOTE,
+      submit: async (values) => {
+        const textOf = (blockId: string): string | undefined => editor.currentWindow().blocks.find((block) => block.blockId === blockId)?.text;
+        const segments = span === null
+          ? (values.proposedText === words.text ? QUICK_REVISE_UNCHANGED : [{ blockId: words.blockId, blockDigest: words.blockDigest, fromGrapheme: words.fromGrapheme,
+              toGrapheme: words.toGrapheme, text: words.text, proposedText: values.proposedText }])
+          : spanRevisionSegments(span, textOf, values.proposedText);
+        if (typeof segments === 'string') { options.setStatus(segments, 'error'); return; }
+        const applied = await recordAndApplySegments(segments, values.rationale.trim().length > 0 ? values.rationale : null);
+        if (applied !== null) {
+          closeFloating();
+          editor.focus();
+        }
+      },
+      cancel: () => {
+        closeFloating();
+        editor.focus();
+      },
+    });
+    const field = floating?.querySelector<HTMLTextAreaElement>('[data-mark-field="proposedText"]');
+    queueMicrotask(() => { field?.focus(); field?.select(); });
+  };
+
+  /** The 批注栏 opened on an applied revision's card, scrolled to it and highlighted; its floating card where the pane cannot show. */
+  async function revealRevision(markId: string): Promise<void> {
+    if (destroyed) return;
+    if (options.revealComments?.() !== true) { await openCard(markId); return; }
+    // The pane lays the card out once it is read; the layout brings it forward then (see `layoutComments`), however long that takes.
+    revealed = { markId, pending: true };
+    revealScroll = undefined;
+    activateComment(markId);
+    refreshComments();
+  }
 
   const update = (
     markId: string,
@@ -1508,19 +1657,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (form) {
           yours.append(buildForm(form(reopen)));
         } else if (exact) {
-          more.append(cardAction('prepare-reverse', '准备撤销本次应用', 'secondary', () => void api.prepareReverseApply({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, markId: card.markId }).then((preparation) => { if (!preparation.ready) { options.setStatus(preparation.reason, 'error'); return; } showCard(card, (cancel) => ({
-            id: 'reverse-apply',
-            title: '撤销本次应用',
-            quote: null,
-            fields: [],
-            submitLabel: '确认撤销本次应用',
-            note: `${reverseApplyNote(shown, suggestion.currentText)} ${preparation.reason}${technicalLayerVisible ? ` 当前修订 ${preparation.revisionId} · 修订日志序号 ${preparation.journalSequence}。` : ''}范围：${preparation.ranges.map((range) => `第 ${range.position} 段 ${range.fromGrapheme}–${range.toGrapheme}`).join('；')}`,
-            submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
-            cancel,
-          })); }).catch((error) => options.setStatus(options.errorMessage(error, '无法准备撤销。'), 'error'))));
+          // 撤销本次修改 (Issue #1411): one click writes the original back as a reversal Effect (Issue #1410 item 7: no prepared second step).
+          disposition.append(cardAction('reverse-revision', REVERSE_REVISION_LABEL, 'secondary', () => void writeManuscript(card.markId,
+            (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), REVERSE_REVISION_DONE)));
           yours.append(disposition);
         } else {
-          more.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'));
+          // Issue #1410 item 7: the one undo is 撤销本次修改; when the applied words changed again it says why it cannot act.
+          disposition.append(disabledAction('reverse-revision', REVERSE_REVISION_LABEL, '应用后的文字又改过，不能直接撤销这次应用。'));
+          yours.append(disposition);
           yours.append(...resolveConflict());
           if (card.conflict?.state === 'resolved' && card.conflict.outcome === 'new-version') {
             const correction = el('p', 'muted', REVERSAL_CORRECTION_LINE);
@@ -1559,7 +1703,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
         );
         yours.append(disposition, ...safeMerge());
-        more.append(inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'), el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
+        more.append(inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'));
         if (form) yours.append(buildForm(form(reopen)));
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
@@ -1643,6 +1787,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     technical.append(identities);
     more.append(technicalDisclosure(technical));
+    settleEditorialMarkCard({ more, actions });
 
     if (inline) return panel;
     floating?.remove();
@@ -1882,6 +2027,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         control.type = 'button';
         control.setAttribute('role', 'menuitem');
         control.dataset['markAction'] = item.action;
+        if (item.action === 'quick-revise') control.dataset['markQuickRevise'] = 'true';
         const caption = el('span', 'menu-caption');
         if (item.seriesId !== undefined) control.dataset['seriesId'] = item.seriesId;
         if (item.swatch !== undefined) {
@@ -1999,8 +2145,48 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
       })),
       polishItem(selectionReason),
+      ...scopedAiEditItems(selectionReason),
     ],
   });
+
+  /** 就选中部分让 AI 修改… and the selection's 🔒 (Issue #1412): offered wherever the surface passes the scoped edit. */
+  const scopedAiEditItems = (selectionReason: string | undefined): MenuItem[] => {
+    const scoped = options.scopedAiEdit;
+    if (scoped === undefined) return [];
+    const range = editor.selectedRange();
+    const words = range.kind === 'range' || range.kind === 'span' ? range : null;
+    const reading = words === null ? null : selectionInputOf(words);
+    const locked = reading !== null && selectionLocked(editor.currentWindow(), reading);
+    return [
+      { action: 'scoped-ai-edit', label: SCOPED_AI_EDIT_MENU_LABEL, ...(selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeScopedOnSelection() }) },
+      { action: locked ? 'ai-unlock-selection' : 'ai-lock-selection', label: locked ? AI_UNLOCK_SELECTION_LABEL : AI_LOCK_SELECTION_LABEL,
+        ...(selectionReason !== undefined || reading === null ? { disabledReason: selectionReason ?? '先选中文字' }
+          : { run: () => void setAiLocks(scoped.host, selectionLockTargets(reading), !locked) }) },
+    ];
+  };
+  /** The scoped edit's composer below a paragraph, closed once its request settles. */
+  const openScopedComposer = (blockId: string, selection: DialogueSelectionInput | null, quote?: string): void => {
+    const scoped = options.scopedAiEdit;
+    if (scoped === undefined) return;
+    close();
+    const holder = el('section', 'editorial-mark-composer scoped-ai-edit-holder');
+    holder.dataset['markComposer'] = 'scoped-ai-edit';
+    placeBelowBlock(holder, blockId);
+    layer.append(holder);
+    floating = holder;
+    floatingBlockId = blockId;
+    openScopedAiEditComposer(scoped.host, {
+      selection, ...(quote === undefined ? {} : { quote }), sectionHeadingBlockId: scoped.sectionOf(blockId), mount: holder,
+      onSettled: () => { if (floating === holder) closeFloating(); },
+    });
+    holder.scrollIntoView?.({ block: 'nearest' });
+  };
+  const composeScopedOnSelection = async (): Promise<void> => {
+    if (refuseWhileBusy()) return;
+    const reading = await spanNow();
+    if (reading === null) return;
+    openScopedComposer(reading.span.blockId, reading.span, reading.span.selectedText);
+  };
 
   /**
    * 润色这段 (Issue #842; the Owner's decision 18 of 2026-10-13): the selected words go to the model at once with their paragraph's
@@ -2110,7 +2296,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: [{
         name: 'procedure',
         label: SELECTION_TASK_FIELD,
-        value: preselect !== undefined && offered.choices.some((choice) => choice.value === preselect) ? preselect : '',
+        // Issue #1410 item 17: the first offered Task is chosen to begin with, so 开始任务 acts at once.
+        value: preselect !== undefined && offered.choices.some((choice) => choice.value === preselect) ? preselect : offered.choices[0]?.value ?? '',
         required: true,
         hint: selectionTaskContextLine({
           bookTitle: start.bookTitle,
@@ -2301,14 +2488,23 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
+    const guardedText = options.inputMode?.() === 'reading-revision';
+    const writes = (run: () => void): Pick<MenuItem, 'run' | 'disabledReason'> => guardedText ? { disabledReason: READING_REVISION_CLIPBOARD_REASON } : { run };
+    // 修改此处 (Issue #1411) leads: the selected words, across paragraphs too, revised with a card and applied at once.
+    const reviseReason = range.kind === 'range' || range.kind === 'span' ? undefined : range.kind === 'none' ? '先选中文字' : why ?? selectionMenuReason(range.kind);
     showMenu('selection', '稿件右键菜单', [
+      ...(range.kind === 'none' ? [] : [{
+        label: '修订',
+        items: [{ action: 'quick-revise', label: QUICK_REVISE_LABEL, hint: QUICK_REVISE_HINT,
+          ...(reviseReason !== undefined ? { disabledReason: reviseReason } : { run: () => void composeQuickRevision() }) }],
+      }]),
       {
         label: range.kind === 'none' ? '文字处理' : `文字处理 · ${selected}`,
         items: [
-          { action: 'cut', label: '剪切', ...(needsSelection ? { disabledReason: needsSelection } : { run: () => void runClipboard('cut') }) },
+          { action: 'cut', label: '剪切', ...(needsSelection ? { disabledReason: needsSelection } : writes(() => void runClipboard('cut'))) },
           { action: 'copy', label: '复制', ...(needsSelection ? { disabledReason: needsSelection } : { run: () => void runClipboard('copy') }) },
-          { action: 'paste', label: '粘贴', run: () => void runClipboard('paste') },
-          { action: 'paste-plain-text', label: '粘贴为纯文本', run: () => void runClipboard('paste-plain-text') },
+          { action: 'paste', label: '粘贴', ...writes(() => void runClipboard('paste')) },
+          { action: 'paste-plain-text', label: '粘贴为纯文本', ...writes(() => void runClipboard('paste-plain-text')) },
         ],
       },
       ...(range.kind === 'none' ? [] : [{
@@ -2443,7 +2639,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       items = [
         { action: 'open-card', label: '打开修改建议', run: () => void openCard(mark.markId) },
         mark.status === 'applied'
-          ? { action: 'prepare-reverse', label: '准备撤销本次应用', run: () => void openCard(mark.markId) }
+          // The menu's undo is the card's one click (Issue #1410 item 7); the service refuses it when the words changed again.
+          ? { action: 'reverse-revision', label: REVERSE_REVISION_LABEL, run: () => void writeManuscript(mark.markId,
+              (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: mark.markId, clientEffectId }), REVERSE_REVISION_DONE) }
           : mark.disposition === null && exact
             ? {
                 action: 'accept-and-apply',
@@ -2505,8 +2703,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     else showSelectionMenu(at);
   };
   const onClick = (event: MouseEvent): void => {
-    if (event.button !== 0 || editor.selectedRange().kind !== 'none') return;
+    if (event.button !== 0) return;
+    // ✎ 已改 (Issue #1411): the badge, or the applied words themselves, bring the revision's card forward in the 批注栏.
+    const badge = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-applied-mark-id]') : null;
+    if (badge !== null) { event.preventDefault(); void revealRevision(badge.dataset['appliedMarkId']!); return; }
+    // 🔒 (Issue #1412): the badge beside a locked block unlocks it.
+    const lock = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-ai-lock-block]') : null;
+    if (lock !== null && options.scopedAiEdit !== undefined) {
+      event.preventDefault();
+      void setAiLocks(options.scopedAiEdit.host, [{ kind: 'block', blockId: lock.dataset['aiLockBlock']! }], false);
+      return;
+    }
+    if (editor.selectedRange().kind !== 'none') return;
     const mark = markAt(event.target, false);
+    // A drifted one still opens its floating card, where its conflict is resolved.
+    if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied' && mark.anchorState === 'exact') { void revealRevision(mark.markId); return; }
     if (mark !== undefined && mark.markId !== openCardId) void openCard(mark.markId);
   };
   const onDocumentMouseDown = (event: MouseEvent): void => {
@@ -2579,7 +2790,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       void composeTask(undefined, true);
     },
     openMark: (markId) => openCard(markId),
-    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
+    quickRevise: () => {
+      const kind = editor.selectedRange().kind;
+      if (kind !== 'range' && kind !== 'span') return false;
+      void composeQuickRevision();
+      return true;
+    },
+    recordAndApplyEditorRevision,
+    revealRevision,
+    composeScopedAiEdit: () => {
+      const blockId = editor.captureContinuity().head.blockId;
+      if (blockId !== undefined) openScopedComposer(blockId, null);
+    },
+    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top) ||
+      (revealScroll !== undefined && options.scroll.scrollTop === revealScroll.top),
     destroy: () => {
       destroyed = true;
       cardCache.clear();

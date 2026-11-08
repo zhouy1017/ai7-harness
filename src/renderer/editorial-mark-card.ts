@@ -40,6 +40,17 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   panel.dataset['markAnchor'] = card.anchorState;
   const header = node('header', 'editorial-mark-card-header');
   header.append(node('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]), options.dismiss);
+  // The author, time and state pill are the header's second line (Issue #1413 cluster 3).
+  const author = node('p', 'editorial-mark-author');
+  author.dataset['markBlock'] = 'author';
+  const source = node('span', 'editorial-mark-source', `${markSourceLine({ ...card, convertedFrom: null, resolvedFrom: null }, options.technical)} · ${markTimeLabel(card.createdAt)}`);
+  source.dataset['markSource'] = card.source.kind;
+  const fullState = markStateLabel(card);
+  const compactState = fullState.split(' · ').slice(0, 2).join(' · ');
+  const state = node('span', 'state-term status-pill', compactState);
+  state.dataset['markState'] = card.suggestion?.decision?.disposition ?? card.status;
+  author.append(source, state);
+  header.append(author);
   panel.append(header);
   const content = node('div', 'editorial-mark-content');
   content.dataset['markRegion'] = 'content';
@@ -47,13 +58,21 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
     const suggestion = card.suggestion;
     const shown = suggestion.decision?.editedText ?? suggestion.proposedText;
     content.dataset['markChange'] = suggestion.changeType;
-    const proposed = node('div', 'editorial-mark-block editorial-mark-proposed');
-    proposed.dataset['markBlock'] = 'proposed';
-    proposed.append(node('small', 'muted', '修改后'), wording('ins', shown || '（删去这段文字）', suggestion.currentText));
+    // 原文 → 修改后 (Issue #1413 cluster 3): the original struck through first, then the proposed words; a short change
+    // reads as one line, a long one keeps two blocks. The 修改前 / 修改后 words stay for assistive technology.
+    const before = suggestion.currentText || '插入位置';
+    const after = shown || '（删去这段文字）';
+    const inline = Array.from(before).length + Array.from(after).length <= SHORT_DIFF_GRAPHEMES && !/\n/u.test(before + after);
     const original = node('div', 'editorial-mark-block editorial-mark-original');
     original.dataset['markBlock'] = 'original';
-    original.append(node('small', 'muted', '修改前'), wording('del', suggestion.currentText || '插入位置', shown));
-    content.append(proposed, original);
+    original.append(node('small', inline ? 'visually-hidden' : 'muted', '修改前'), wording('del', before, shown));
+    const proposed = node('div', 'editorial-mark-block editorial-mark-proposed');
+    proposed.dataset['markBlock'] = 'proposed';
+    proposed.append(node('small', inline ? 'visually-hidden' : 'muted', '修改后'), wording('ins', after, suggestion.currentText));
+    content.classList.add(inline ? 'editorial-mark-diff-inline' : 'editorial-mark-diff-stacked');
+    const arrow = node('span', 'editorial-mark-diff-arrow', '→');
+    arrow.setAttribute('aria-hidden', 'true');
+    content.append(original, arrow, proposed);
     panel.append(content);
     if (suggestion.rationale.trim()) {
       const rationale = node('p', 'editorial-mark-rationale', suggestion.rationale);
@@ -80,19 +99,12 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
     quote.dataset['markBlock'] = 'quote';
     panel.append(content, quote);
   }
-  const author = node('p', 'editorial-mark-author');
-  author.dataset['markBlock'] = 'author';
-  const source = node('span', 'editorial-mark-source', `${markSourceLine({ ...card, convertedFrom: null, resolvedFrom: null }, options.technical)} · ${markTimeLabel(card.createdAt)}`);
-  source.dataset['markSource'] = card.source.kind;
-  const fullState = markStateLabel(card);
-  const compactState = fullState.split(' · ').slice(0, 2).join(' · ');
-  const state = node('span', 'state-term status-pill', compactState);
-  state.dataset['markState'] = card.suggestion?.decision?.disposition ?? card.status;
-  author.append(source, state);
   const more = node('details', 'editorial-mark-more');
   more.dataset['markBlock'] = 'more';
   more.open = options.moreOpen.get(card.markId) ?? false;
-  more.append(node('summary', '', '更多'));
+  const summary = node('summary', '', '更多');
+  summary.setAttribute('aria-label', '更多操作与说明');
+  more.append(summary);
   if (card.convertedFrom !== null || card.resolvedFrom) {
     const provenance = node('p', 'editorial-mark-provenance', markSourceLine(card, options.technical));
     provenance.dataset['markProvenance'] = 'true';
@@ -107,6 +119,52 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   const actions = node('section', 'editorial-mark-region editorial-mark-actions');
   actions.dataset['markRegion'] = 'disposition';
   actions.dataset['markBlock'] = 'actions';
-  panel.append(author, more, actions);
+  panel.append(more, actions);
   return { panel, more, actions };
 }
+
+/** A change reads on one line when both sides together are at most this many characters. */
+const SHORT_DIFF_GRAPHEMES = 48;
+/** At most two core buttons stand on the card (Issue #1413 cluster 1); the rest move into 更多. */
+const CORE_ACTIONS = 2;
+/** Folded first when a row holds more than two: the editing variants of a decision the row already offers. */
+const FOLD_FIRST: ReadonlySet<string> = new Set(['accept-with-edit', 'edit']);
+
+function actionOf(item: Element): string {
+  const control = item instanceof HTMLElement && item.dataset['markAction'] !== undefined ? item : item.querySelector<HTMLElement>('[data-mark-action]');
+  return control?.dataset['markAction'] ?? '';
+}
+
+function shown(child: Element): boolean {
+  if (child.tagName === 'SUMMARY' || (child instanceof HTMLElement && child.hidden)) return false;
+  return !(child instanceof HTMLElement && child.dataset['technicalLayer'] === 'true' && child.childElementCount === 0);
+}
+
+/**
+ * Settle a card once its caller has filled it: each action row keeps at most two core buttons and moves the others, in
+ * their order, to the top of 更多; 更多 is hidden when it holds nothing a reader would see.
+ */
+export function settleEditorialMarkCard(parts: { more: HTMLDetailsElement; actions: HTMLElement }): void {
+  const { more, actions } = parts;
+  const folded: Element[] = [];
+  for (const row of Array.from(actions.children)) {
+    if (!row.classList.contains('button-row')) continue;
+    const items = Array.from(row.children).filter((item) => !(item instanceof HTMLElement && item.hidden));
+    const moved: Element[] = [];
+    while (items.length > CORE_ACTIONS) {
+      let index = -1;
+      for (let at = items.length - 1; at >= 0; at--) if (FOLD_FIRST.has(actionOf(items[at]!))) { index = at; break; }
+      if (index < 0) index = items.length - 1;
+      moved.push(...items.splice(index, 1));
+    }
+    const all = Array.from(row.children);
+    folded.push(...moved.sort((a, b) => all.indexOf(a) - all.indexOf(b)));
+  }
+  if (folded.length > 0) {
+    const row = node('div', 'button-row editorial-mark-more-actions');
+    row.append(...folded);
+    more.querySelector('summary')!.after(row);
+  }
+  more.hidden = !Array.from(more.children).some(shown);
+}
+

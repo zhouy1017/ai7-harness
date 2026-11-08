@@ -1,3 +1,4 @@
+import { editorialMemoryDefinition, editorialMemoryDigest, editorialMemoryPrompt } from '../learning/editorial-memory.js';
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
 import { withProcedureDefinition } from '../procedures/execution.js';
 import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
@@ -30,7 +31,7 @@ export interface LiveKindRule {
 /** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
 export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding): AdmittedProviderRule | null {
   if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
-    (policy.providerProcessing.version !== 'v31' && (policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33' && policy.providerProcessing.version !== 'v34')) || policy.providerProcessing.decision !== 'eligible-only' ||
+    (policy.providerProcessing.version !== 'v31' && (policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33' && policy.providerProcessing.version !== 'v34' && policy.providerProcessing.version !== 'v35')) || policy.providerProcessing.decision !== 'eligible-only' ||
     policy.providerProcessing.liveTransmissionAllowed !== true) return null;
   const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-learning-curation') ?? [];
   const rule = rules.length === 1 ? rules[0]! : null;
@@ -213,7 +214,14 @@ export function liveKindAdmission(
   policy: LaunchPolicyProjection | undefined,
   definition: LiveKindDefinition,
   binding: LiveKindBinding,
-): LiveKindRule | null {
+ ): LiveKindRule | null {
+  const memory = editorialMemoryDefinition(definition);
+  if (memory !== null) {
+    if (policy?.providerProcessing.version !== 'v35' || liveKindRule(policy, definition.kind, ['house-review-preference-excerpt']) === null ||
+      definition.promptContractDigest !== editorialMemoryDigest(memory.base.promptContractDigest, memory.memory) ||
+      definition.systemPrompt !== editorialMemoryPrompt(memory.base.systemPrompt, memory.memory)) return null;
+    return liveKindAdmission(policy, memory.base, binding);
+  }
   if (definition.procedureBinding !== undefined) {
     const { base, document, pin } = definition.procedureBinding;
     const expected = withProcedureDefinition(base, document, pin);
@@ -262,6 +270,8 @@ export function liveKindAdmission(
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
+  const memory = definition === undefined ? null : editorialMemoryDefinition(definition);
+  if (memory !== null) return [...liveKindContractCategories(kind, memory.base), 'house-review-preference-excerpt'];
   if (definition?.procedureBinding !== undefined) return [...liveKindContractCategories(kind, definition.procedureBinding.base), 'editor-task-instruction'];
   if (definition !== undefined && liveSeriesConsistencyContract(definition) !== null) return ['series-knowledge-excerpt'];
   const series = definition === undefined ? null : liveSeriesContract(definition);

@@ -1,3 +1,4 @@
+import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import { ImportedExemplarError, readImportedExemplar } from './imported-exemplars.js';
@@ -608,7 +609,7 @@ export class WritingTasks {
     requireWriting(sha256Hex(json) === text(row.sha256), 'WRITING_RECORD_INVALID', CORRUPT);
     const envelope = JSON.parse(json) as unknown;
     requireWriting(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'WRITING_RECORD_INVALID', CORRUPT);
-    return envelope.promptContractDigest;
+    return editorialMemoryBasePromptDigest(envelope);
   }
 
   /** The recorded material boundary only: consuming a cached ledger must not rebuild its writing contract. */

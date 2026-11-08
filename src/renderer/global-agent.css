@@ -1,10 +1,27 @@
 .global-agent {
-  width: min(100%, 70rem);
+  width: min(100%, 76rem);
   min-width: 0;
   margin-inline: auto;
   display: grid;
-  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem 1.5rem;
+  align-items: start;
 }
+/* Issue #1413 cluster 7: the conversation and the composer are the page; the history is a short list beside them. */
+.global-agent-heading { grid-column: 1 / -1; }
+.global-agent-main, .global-agent-side { display: grid; gap: .8rem; min-width: 0; }
+@media (min-width: 1000px) {
+  .global-agent { grid-template-columns: minmax(0, 1fr) 15rem; }
+  .global-agent-side { position: sticky; top: 1rem; }
+}
+.global-agent-pills { position: relative; display: flex; flex-wrap: wrap; gap: .4rem; }
+.global-agent-pill > summary { display: inline-flex; align-items: center; gap: .3rem; min-height: 28px; padding: .15rem .75rem; border: 1px solid var(--boundary-strong); border-radius: 999px; background: var(--surface); color: var(--action-text); font-size: .86rem; font-weight: 700; list-style: none; }
+.global-agent-pill > summary::-webkit-details-marker { display: none; }
+.global-agent-pill > summary::after { content: '▾'; font-size: .75em; }
+.global-agent-pill[open] > summary { border-color: var(--selection-boundary); background: var(--selection); color: var(--selection-text); }
+.global-agent-pop { position: absolute; z-index: 20; left: 0; top: calc(100% + .35rem); display: grid; gap: .8rem; width: min(40rem, 100%); max-height: min(60vh, 34rem); overflow: auto; padding: .9rem 1rem; border: 1px solid var(--boundary); border-radius: .75rem; background: var(--surface); box-shadow: 0 12px 32px var(--shadow); }
+/* Inside a popover the sections are told apart by spacing and a soft background, never another box. */
+.global-agent-pop > :is(.global-agent-sources, .global-agent-scope, .global-agent-governance, .global-agent-directives) { padding: .6rem .7rem; border: 1px solid transparent; border-radius: .5rem; background: var(--surface-subdued); }
 .global-agent [hidden] { display: none !important; }
 .global-agent h2, .global-agent h3, .global-agent h4, .global-agent p { margin: 0; }
 .global-agent-heading, .global-agent-conversation, .global-agent-previous-turns,
@@ -15,7 +32,7 @@
 }
 .global-agent-status { border-left: 3px solid var(--boundary-strong); padding-left: .8rem; }
 .global-agent-composer, .global-agent-governance, .global-agent-sources, .global-agent-scope,
-.global-agent-directives, .global-agent-history {
+.global-agent-directives {
   min-width: 0;
   border: 1px solid var(--boundary);
   border-radius: .75rem;
@@ -54,8 +71,13 @@
 .global-agent summary { cursor: pointer; color: var(--action-text); }
 .global-agent-technical { color: var(--text-subdued); font-size: .85rem; }
 .global-agent-technical pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: inherit; }
-.global-agent-history-list { display: grid; gap: .35rem; max-height: 18rem; overflow: auto; }
-.global-agent-history-entry { text-align: left; overflow-wrap: anywhere; }
+.global-agent-history { display: grid; gap: .5rem; min-width: 0; padding: .7rem .8rem; border-radius: .75rem; background: var(--surface-subdued); }
+.global-agent-history h3 { font-size: .92rem; }
+.global-agent-history > p { color: var(--text-subdued); font-size: .8rem; line-height: 1.5; }
+.global-agent-history-list { display: grid; gap: .2rem; max-height: 22rem; overflow: auto; }
+.global-agent-history-entry { justify-content: flex-start; text-align: left; overflow-wrap: anywhere; border-color: transparent; background: transparent; font-size: .86rem; }
+.global-agent-history-entry:hover:not(:disabled) { background: var(--surface); }
+.global-agent-source-card, .global-agent-tool-card, .global-agent-proposal-card { border-color: transparent; }
 .global-agent-directives p { padding-block: .4rem; border-bottom: 1px solid var(--boundary); line-height: 1.7; }
 @media (min-width: 900px) {
   .global-agent-scope .global-agent-choice-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }

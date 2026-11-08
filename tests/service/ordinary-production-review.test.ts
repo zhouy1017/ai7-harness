@@ -141,7 +141,7 @@ async function productionReview(
   answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall' | 'tools' | 'repeated',
   project: (policy: LaunchPolicyProjection) => LaunchPolicyProjection = (policy) => policy,
   useMaterial = false,
-  usePreferences: boolean | 'top-five' = false,
+  usePreferences: boolean | 'over-cap' = false,
   control: ProductionReviewControl = {},
 ) {
   roots = await createServiceTestRoots('ai7-production-review-');
@@ -233,8 +233,8 @@ async function productionReview(
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
   if (usePreferences) store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
     categoryId: categories.includes('academic-integrity') ? 'academic-integrity' : 'typos-and-usage', text: '统一编辑用语，保留有意的节奏。', effect: 'guide' });
-  // Seven editor rules made at distinct instants: recency, not ledger order, decides which five a request reads.
-  if (usePreferences === 'top-five') for (let index = 2; index <= 7; index += 1) {
+  // Seventeen editor rules made at distinct instants: recency, not ledger order, decides which fifteen a request reads (#1408).
+  if (usePreferences === 'over-cap') for (let index = 2; index <= 17; index += 1) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 5));
     store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
       categoryId: 'typos-and-usage', text: `合成偏好${index}：统一用语。`, effect: 'guide' });
@@ -1067,19 +1067,19 @@ it('offers a local ask only on the third same-category accepted edit within a Ru
 
 it('sends only selected preference lines, records exact unit/finding versions, exports them and measures adoption from decisions', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage', 'publication-risk'],
-    (category, ordinal, prior) => category === 'typos-and-usage' && ordinal === 1 && prior === 0 ? 'tools' : 'valid', (policy) => policy, false, 'top-five');
+    (category, ordinal, prior) => category === 'typos-and-usage' && ordinal === 1 && prior === 0 ? 'tools' : 'valid', (policy) => policy, false, 'over-cap');
   const result = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
   const finding = result.findings.find((entry) => entry.categoryId === 'typos-and-usage')!;
   expect(finding).toBeDefined();
   const version = opened.inspectHouseReviewPreference().current!;
-  expect(version.lines).toHaveLength(7);
-  // The newest five rules, newest first; the two oldest (ledger lines 0 and 1) are left out.
-  expect(finding.referencedRuleVersions).toEqual([6, 5, 4, 3, 2].map((lineIndex) =>
+  expect(version.lines).toHaveLength(17);
+  // The newest fifteen rules, newest first; the two oldest (ledger lines 0 and 1) are left out.
+  expect(finding.referencedRuleVersions).toEqual(Array.from({ length: 15 }, (_, offset) => 16 - offset).map((lineIndex) =>
     ({ versionId: version.versionId, ordinal: version.ordinal, lineIndex, text: version.lines[lineIndex]!.text })));
   const selected = finding.referencedRuleVersions!;
-  expect(selected).toHaveLength(5);
+  expect(selected).toHaveLength(15);
   const segmenter = new Intl.Segmenter('zh', { granularity: 'grapheme' });
-  expect(selected.reduce((sum, line) => sum + [...segmenter.segment(line.text)].length, 0)).toBeLessThanOrEqual(200);
+  expect(selected.reduce((sum, line) => sum + [...segmenter.segment(line.text)].length, 0)).toBeLessThanOrEqual(1_200);
   const rule = finding.referencedRuleVersions![0]!;
   expect(requests.filter((entry) => entry.category === 'typos-and-usage').every((entry) =>
     selected.every((line) => entry.body.includes(line.text)) && version.lines.slice(0, 2).every((line) => !entry.body.includes(line.text)))).toBe(true);
@@ -1105,7 +1105,7 @@ it('sends only selected preference lines, records exact unit/finding versions, e
   expect(opened.inspectHouseReviewPreference().current?.versionId).toBe(rule.versionId);
 }, 60_000);
 
-it('dates a derived line by its verified admitting decision, so five later editor rules outrank it', async () => {
+it('dates a derived line by its verified admitting decision, so fifteen later editor rules outrank it', async () => {
   const { store: opened, bookId, reviewRunId } = await productionReview(['typos-and-usage'], () => 'repeated');
   // One judged finding admitted for the house first: its derived line is the oldest fact in the ledger.
   const finding = opened.inspectReviewWorkspace(bookId, reviewRunId).run!.findings[0]!;
@@ -1114,7 +1114,7 @@ it('dates a derived line by its verified admitting decision, so five later edito
   opened.decideLearningMaterial({ bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice: 'house', note: null });
   const derived = opened.inspectHouseReviewPreference().current!.lines.find((line) => line.sources.length > 0)!;
   expect(derived).toMatchObject({ categoryId: 'typos-and-usage', bookId: null });
-  for (let index = 1; index <= 5; index += 1) {
+  for (let index = 1; index <= 15; index += 1) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 5));
     opened.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: `合成规则${index}：统一用语。`, effect: 'guide' });
   }
@@ -1124,7 +1124,7 @@ it('dates a derived line by its verified admitting decision, so five later edito
   try {
     // Dated by the version's own (newest) instant the derived line would lead; dated by its admission it is the one left out.
     const use = new HouseReviewPreferenceLedger(db).use('ordinary-production', bookId, 'typos-and-usage')!;
-    expect(use.lines).toEqual([5, 4, 3, 2, 1].map((index) => `合成规则${index}：统一用语。`));
+    expect(use.lines).toEqual(Array.from({ length: 15 }, (_, offset) => `合成规则${15 - offset}：统一用语。`));
     expect(use.lines).not.toContain(derived.text);
   } finally { db.close(); }
 }, 60_000);

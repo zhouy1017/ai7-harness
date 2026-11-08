@@ -36,7 +36,7 @@ describe('the words of 就这段提问…', () => {
       interrupted: '回答中断 · 内容不完整',
       failed: '回答未能完成 · 内容不完整',
     });
-    expect(labels.DIALOGUE_ACTIONS).toEqual({ stop: '停止回答', continue: '继续回答', regenerate: '重新回答', convert: '转为修改建议' });
+    expect(labels.DIALOGUE_ACTIONS).toEqual({ stop: '停止回答', continue: '继续回答', regenerate: '重新回答', convert: '转为修改建议', 'convert-edit': '编辑后转为修改建议…' });
     expect(labels.DIALOGUE_AUTHORITY_NOTE).toBe('回答是生成的内容，只供参考：它不改稿件，也不是事实结论或修改建议。');
     expect(labels.DIALOGUE_CONVERT_INCOMPLETE).toBe('内容不完整的回答不能转为修改建议。');
   });

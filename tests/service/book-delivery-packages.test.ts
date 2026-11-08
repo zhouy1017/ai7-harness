@@ -221,6 +221,45 @@ describe('图书交付包 (S67a)', () => {
     }
   }, 180_000);
 
+  it('holds ticked saved versions of derivative documents with no delivery or phase, and keeps the default reading as it was (Issue #1405)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store, await compose('勾选打包组稿', [1, 2, 3]));
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '定稿', 'stage-archive', null, '');
+      store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '书展宣传稿' })).document!;
+      const legacy = store.inspectBookDeliveryPackage(book.bookId);
+      // Without a choice the package reads as it always did: nothing delivered, nothing held.
+      expect(legacy.content.included.map((item) => item.kind)).toEqual(['publication']);
+      expect(legacy.documents.map((entry) => [entry.typeLabel, entry.title, entry.versions.map((version) => version.label), entry.selectedRevisionId]))
+        .toEqual([['新闻稿', '首发通稿', ['版本 1'], null], ['新闻稿', '书展宣传稿', ['版本 1'], null]]);
+      const documents = [{ documentId: second.documentId, revisionId: second.versions[0]!.revisionId }];
+      const chosen = store.inspectBookDeliveryPackage(book.bookId, documents);
+      expect(chosen.content.included.map((item) => [item.kind, item.label])).toEqual([
+        ['publication', '发稿版本「定稿」 · r1'], ['document', '新闻稿 · 《书展宣传稿》 · 版本 1'],
+      ]);
+      expect(chosen.conditions.filter((condition) => condition.key === 'document').map((condition) => [condition.documentId, condition.met, condition.stateLabel, condition.route]))
+        .toEqual([[first.documentId, true, '未选入本包', null], [second.documentId, true, '版本 1', null]]);
+      expect(chosen.documents.map((entry) => entry.selectedRevisionId)).toEqual([null, second.versions[0]!.revisionId]);
+      expect(chosen.content.digest).not.toBe(legacy.content.digest);
+      // The digest names the ticked content: preparing with another selection is refused, the same one freezes it.
+      expect(code(() => store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交营销', expectedContentDigest: chosen.content.digest })))
+        .toBe('BOOK_DELIVERY_PACKAGE_CHANGED');
+      const prepared = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交营销', expectedContentDigest: chosen.content.digest, documents });
+      expect([prepared.outcome, prepared.version, prepared.package.changedSinceLatest]).toEqual(['prepared', 1, false]);
+      expect(prepared.package.versions[0]!.summary).toContain('生产文档 1 份');
+      // Only this Book's documents at versions they saved.
+      expect(code(() => store.inspectBookDeliveryPackage(book.bookId, [{ documentId: first.documentId, revisionId: second.versions[0]!.revisionId }])))
+        .toBe('BOOK_DELIVERY_PACKAGE_SELECTION_INVALID');
+      expect(code(() => store.inspectBookDeliveryPackage(book.bookId, [{ documentId: book.manuscriptId, revisionId: second.versions[0]!.revisionId }])))
+        .toBe('BOOK_DELIVERY_PACKAGE_SELECTION_INVALID');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  });
+
   it('discloses unfinished review reports without requiring them for package preparation', () => {
     // The work-records row over stand-in readings: a real Run needs a provider fixture, and the row reads only states.
     const database = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });

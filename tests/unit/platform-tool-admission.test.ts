@@ -72,7 +72,7 @@ describe('platform tool registration admission', () => {
     expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4-flash')).toBe(true);
     for (const allowed of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
       const policy = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', { ...allowed, credentialReference: randomUUID() });
-      expect(policy.providerProcessing.version).toBe('v34');
+      expect(policy.providerProcessing.version).toBe('v35');
       const rule = liveKindRule(policy, 'factual-review')!;
       // The selected rule and protocol implementation admit tools without model-specific live evidence.
       expect(rule.platformTools).not.toBeNull();

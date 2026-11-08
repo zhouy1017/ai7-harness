@@ -167,19 +167,25 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
     approve.focus();
   };
 
-  /** A preparation that ended: the prepared file to approve, nothing written, or why not. */
-  const settlePreparation = (ended: DatabaseExportActivityProjection): void => {
+  /**
+   * A preparation that ended: the prepared file, nothing written, or why not. A prepared file answers its id: the place chosen in
+   * the system's Save dialog is the approval (Issue #1410 item 2), so the caller writes it at once; `按上述方式导出` stays beside
+   * the prepared file only to try again after a write that stopped or was refused.
+   */
+  const settlePreparation = (ended: DatabaseExportActivityProjection): string | null => {
     // The controls are enabled before focus moves to one: a disabled control takes no focus (Issue #434 review).
     setBusy(false);
     if (ended.state === 'prepared' && ended.preparation !== null) {
       showPrepared(ended.preparation);
       setStatus(DATABASE_EXPORT_STATUS_LINES.prepared, 'success');
+      return ended.preparation.preparationId;
     } else if (ended.state === 'cancelled') {
       setStatus(DATABASE_EXPORT_STATUS_LINES.closed);
       choose.focus();
     } else {
       setStatus(ended.failure?.message ?? DATABASE_EXPORT_STATUS_LINES.prepareFailed, 'error');
     }
+    return null;
   };
 
   /**
@@ -226,7 +232,8 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
       setStatus(DATABASE_EXPORT_STATUS_LINES.packing, 'busy');
       const ended = await follow(result.activity);
       if (ended === null) return;
-      settlePreparation(ended);
+      const preparationId = settlePreparation(ended);
+      if (preparationId !== null) await approveFile(preparationId);
     } catch (error) {
       if (!root.isConnected) return;
       setStatus(errorMessage(error, DATABASE_EXPORT_STATUS_LINES.prepareFailed), 'error');
@@ -257,8 +264,10 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
     try {
       const ended = await follow(activity);
       if (ended === null || !root.isConnected) return;
-      if (ended.kind === 'prepare') settlePreparation(ended);
-      else await settleApproval(ended);
+      if (ended.kind === 'prepare') {
+        const preparationId = settlePreparation(ended);
+        if (preparationId !== null) await approveFile(preparationId);
+      } else await settleApproval(ended);
     } catch (error) {
       if (!root.isConnected) return;
       setStatus(errorMessage(error, activity.kind === 'prepare' ? DATABASE_EXPORT_STATUS_LINES.prepareFailed : DATABASE_EXPORT_STATUS_LINES.approveFailed), 'error');

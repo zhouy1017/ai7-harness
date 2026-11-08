@@ -1,3 +1,4 @@
+import { editorialMemoryDefinition } from '../learning/editorial-memory.js';
 import { majorityGapReason } from '../../shared/analysis-run-summary.js';
 import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
@@ -2277,7 +2278,9 @@ export class BaselineAnalysisExecutionOwner {
         }),
         // Under ordinary production the baseline's own rule names the categories its unit messages carry.
         ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories),
-          ...(definition.procedureBinding === undefined ? {} : { contractCategories: new Set(['editor-task-instruction'] as const) }) } : {}),
+          ...(editorialMemoryDefinition(definition) !== null
+            ? { contractCategories: new Set(liveKindContractCategories(definition.kind, definition)) }
+            : definition.procedureBinding === undefined ? {} : { contractCategories: new Set(['editor-task-instruction'] as const) }) } : {}),
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: localVersion, liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : production !== null
@@ -3369,7 +3372,7 @@ export class BaselineAnalysisExecutionOwner {
       if (definition.factualClaims !== undefined) {
         const claimOwner = ledger.factualVerification;
         const claims = claimOwner.freezeClaims(facts.runRecordId, freezeFactualClaimLedger({ manifest, blocks: blocksById,
-          units: outcomes.flatMap((outcome) => outcome.state !== 'closed' ? [] : [{ result: outcome.result as FactualReviewUnitResult,
+          units: outcomes.flatMap((outcome) => outcome.state !== 'closed' || reusedOrdinals.has(outcome.unitOrdinal) ? [] : [{ result: outcome.result as FactualReviewUnitResult,
             sourceUnitMessage: unitMessages.get(outcome.unitOrdinal)! }]) }));
         const rule = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;
         if (rule === undefined || rule.procedureId !== facts.compositionOptions?.procedure?.procedureId ||

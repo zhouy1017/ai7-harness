@@ -212,14 +212,17 @@ export function registerProductionAndPackageHandlers(context: {
     if (bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '图书交付包不属于当前图书工作台。');
   };
 
-  ipcMain.handle(IPC_CHANNELS.inspectBookDeliveryPackage, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectBookDeliveryPackage, (event, input?: Omit<ServiceOperationMap['inspectBookDeliveryPackage']['input'], 'bookId'>) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectBookDeliveryPackage', { bookId: route.bookId });
+      const result = await service.call('inspectBookDeliveryPackage', {
+        bookId: route.bookId,
+        ...(input?.documents === undefined ? {} : { documents: input.documents }),
+      });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       requireBookDeliveryPackageOfRoute(route, result.bookId);
       return result;
@@ -239,6 +242,7 @@ export function registerProductionAndPackageHandlers(context: {
             bookId: route.bookId,
             purpose: input.purpose,
             expectedContentDigest: input.expectedContentDigest,
+            ...(input.documents === undefined ? {} : { documents: input.documents }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           requireBookDeliveryPackageOfRoute(route, result.bookId);

@@ -24,19 +24,19 @@ import { canonicalJson } from './analysis/canonical.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v25, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v26, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v34, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v35, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v25' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v25.json';
+export const ACTIVE_SET_VERSION = 'v26' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v26.json';
 const ACTIVE_SET_SHA256 = CURRENT_ACTIVE_SET_SHA256;
 const PROVIDER_PINS = {
   'development-ci': {
@@ -50,8 +50,8 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v34',
-    canonicalPath: 'docs/policies/provider-processing-policy.v34.json',
+    version: 'v35',
+    canonicalPath: 'docs/policies/provider-processing-policy.v35.json',
     sha256: CURRENT_PRODUCTION_POLICY_SHA256,
   },
   'developer-live': {
@@ -492,7 +492,7 @@ function sameValue(actual: unknown, expected: unknown): boolean {
  * every research rule unreadable: the launch denies rather than guess.
  */
 function expectedPlatformTools(scope: 'developer-live' | 'ordinary-production', version?: unknown): Record<string, unknown> {
-  const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped || (scope === 'ordinary-production' && version === 'v34' && (entry.id === 'search-openai' || entry.id === 'search-anthropic')));
+  const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped || (scope === 'ordinary-production' && (version === 'v34' || version === 'v35') && (entry.id === 'search-openai' || entry.id === 'search-anthropic')));
   requirePolicy(shipped.length > 0 && shipped.every((entry) => entry.keyRequired && entry.endpoint !== null && entry.host !== null));
   return {
     websearch: {
@@ -603,15 +603,15 @@ function verifySourceTranslation(rule: Record<string, unknown>, allowed: boolean
 /** The outbound data category of the house's review-preference block (Provider Processing v20 and v21, Issue #910): the review rule alone names it. */
 export const HOUSE_REVIEW_PREFERENCE_CATEGORY = 'house-review-preference-excerpt' as const satisfies OutboundDataCategoryId;
 /** The most lines, and the most graphemes in total, one request's house review-preference block may carry. The bounds are this build's constants. */
-export const HOUSE_REVIEW_PREFERENCE_MAX_LINES = 12;
-export const HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES = 200;
+export const HOUSE_REVIEW_PREFERENCE_MAX_LINES = 15;
+export const HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES = 1_200;
 
 /** The Chinese-first statement of the category's declaration, with the exact bounds, as the policy writes it. */
 function houseReviewPreferenceDescriptionZh(scope: 'developer-live' | 'ordinary-production'): string {
   const source = scope === 'developer-live'
     ? '开发直连下只取自已获准的公开或合成图书（Owner 指定的公开样书）'
     : '普通生产下只取自普通生产来源（编辑自己的稿件所属的本社判断记录）';
-  return `本社审阅偏好摘录：由本社编辑自己对审阅发现已作出的判断（采纳、改后采纳、忽略并说明理由）归纳出的类别偏好行与理由短语，随审阅请求一并发出。每次请求至多 ${HOUSE_REVIEW_PREFERENCE_MAX_LINES} 行、合计至多 ${HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES} 个字素；必须标明所依据的偏好记录版本；绝不含稿件正文，绝不含作者或编辑姓名；${source}。`;
+  return `本社审阅偏好摘录：由本社编辑自己对审阅发现已作出的判断（采纳、改后采纳、忽略并说明理由）归纳出的类别偏好行与理由短语，随审阅请求一并发出。每次请求至多 12 行、合计至多 200 个字素；必须标明所依据的偏好记录版本；绝不含稿件正文，绝不含作者或编辑姓名；${source}。`;
 }
 
 /**
@@ -631,8 +631,8 @@ function verifyHouseReviewPreference(rule: Record<string, unknown>, scope: 'deve
   requirePolicy(sameValue(declaration, {
     category: HOUSE_REVIEW_PREFERENCE_CATEGORY,
     derivedFrom: 'judged-review-decisions-of-the-same-house',
-    maxLines: HOUSE_REVIEW_PREFERENCE_MAX_LINES,
-    maxGraphemesTotal: HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES,
+    maxLines: 12,
+    maxGraphemesTotal: 200,
     attributedToRecordVersion: true,
     manuscriptTextAllowed: false,
     housePeopleNamesAndRolesStripped: true,
@@ -1922,7 +1922,7 @@ const SEARCH_CONNECTION_TEST_TERMS = ['ruleId', 'purpose', 'operationalScope', '
  * cannot read.
  */
 function readSearchConnectionTest(block: unknown, version?: unknown, native = false): SearchConnectionTestPolicy {
-  const successor = version === 'v34';
+  const successor = (version === 'v34' || version === 'v35');
   requirePolicy(isRecord(block) && exactKeys(block, [...SEARCH_CONNECTION_TEST_TERMS, ...(successor && !native ? ['candidates', 'credentialFallbackSlot'] : [])]));
   const candidate = searchBackendCandidate(String(block['backendId']), String(block['candidateId']));
   const slot = native ? candidate.backendId === 'search-openai' ? 'openai-platform' : 'anthropic-claude' : candidate.credentialSlot;
@@ -1966,9 +1966,9 @@ function readNativeSearchConnectionTests(block: unknown): ReadonlyArray<SearchCo
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === ({ v30: '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3',
-    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058', v33: '8b75acbe8c662abf00981b7762f91d87347a6267c0bde5ab2bcd3843d14eab46', v34: '486c831bdc752a413fe7e194981dd0c5e838318dcba255aa392ed8baa26a9a5f' } as Record<string, string>)[String(policy['version'])]);
+    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058', v33: '8b75acbe8c662abf00981b7762f91d87347a6267c0bde5ab2bcd3843d14eab46', v34: '486c831bdc752a413fe7e194981dd0c5e838318dcba255aa392ed8baa26a9a5f', v35: '39bda0ce5df15d5dfcd198b71e98e080c01887ae5c44c881bd8d6c220266404d' } as Record<string, string>)[String(policy['version'])]);
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
-  const admission = (policy['version'] === 'v32' || policy['version'] === 'v33' || policy['version'] === 'v34') ? readFamilyAdmission(policy) : null;
+  const admission = (policy['version'] === 'v32' || policy['version'] === 'v33' || (policy['version'] === 'v34' || policy['version'] === 'v35')) ? readFamilyAdmission(policy) : null;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
@@ -2035,7 +2035,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30' || policy['version'] === 'v31' || (policy['version'] === 'v32' || policy['version'] === 'v33' || policy['version'] === 'v34')) return projectOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30' || policy['version'] === 'v31' || (policy['version'] === 'v32' || policy['version'] === 'v33' || (policy['version'] === 'v34' || policy['version'] === 'v35'))) return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -2372,8 +2372,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v25.schema.json', '528351fc5d082d3716cb0a6a60638d44de09c03a09a69a2e33b8e49bce4464a8'],
-      ['docs/policies/provider-processing-policy.v34.schema.json', '8432bc19fe31e317feb34a771b3c6ebe184a50d28d7e3b46cb374e6dd1a219c3'],
+      ['docs/policies/active-policy-set.v26.schema.json', 'b7d9d3e20324360afb3bc53437ec7bfe37b2c24c9f79dfff540083e033843ecd'],
+      ['docs/policies/provider-processing-policy.v35.schema.json', '3e61970bb537085a0f18fabc3f07fafa52431c83840d2bcf91bfb96b9d8646e8'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(

@@ -24,7 +24,8 @@ import {
   EXCLUSIONS_HISTORY_MORE,
   EXCLUSIONS_KIND_LEGEND,
   EXCLUSIONS_NOTE,
-  EXCLUSIONS_PREVIEW_ACTION,
+  EXCLUSIONS_ADD_ACTION,
+  EXCLUSIONS_CHANGE_ACTION,
   EXCLUSIONS_PREVIEW_HEADING,
   EXCLUSIONS_REASON_CHANGE_LABEL,
   EXCLUSIONS_REASON_LABEL,
@@ -183,11 +184,13 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     const toolbar = el('div', 'button-row');
     const add = action(EXCLUSIONS_ADD_OPEN, 'secondary', 'add-open', () => {
       if (busy) return;
-      chooser = { kind: null, targets: null, next: null, later: false, selected: null, reason: '' };
+      // The first kind is chosen and its targets read at once (Issue #1410 item 30); the first target not yet excluded is chosen.
+      chooser = { kind: EXCLUSION_KIND_CHOICES[0]?.kind ?? null, targets: null, next: null, later: false, selected: null, reason: '' };
       change = null;
       preview = null;
       refusal = null;
       paint('input[name="series-exclusion-kind"]');
+      void loadTargets(true);
     });
     add.disabled = busy || chooser !== null || change !== null || preview !== null;
     toolbar.append(add);
@@ -217,7 +220,7 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     box.append(reasonField('series-exclusion-change-reason', EXCLUSIONS_REASON_CHANGE_LABEL, change?.reason ?? current, (value) => {
       if (change !== null) change.reason = value;
     }));
-    const look = action(EXCLUSIONS_PREVIEW_ACTION, 'primary', 'change-preview', () => {
+    const look = action(EXCLUSIONS_CHANGE_ACTION, 'primary', 'change-preview', () => {
       if (change === null) return;
       void ask({ seriesId: options.seriesId, action: 'change', exclusionId: change.exclusionId, target: null, reason: change.reason });
     });
@@ -296,7 +299,7 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
       box.append(targets);
     }
     box.append(reasonField('series-exclusion-reason', EXCLUSIONS_REASON_LABEL, open.reason, (value) => { open.reason = value; }));
-    const look = action(EXCLUSIONS_PREVIEW_ACTION, 'primary', 'preview', () => {
+    const look = action(EXCLUSIONS_ADD_ACTION, 'primary', 'preview', () => {
       if (open.kind === null || open.selected === null) return;
       void ask({ seriesId: options.seriesId, action: 'add', exclusionId: null, target: { kind: open.kind, id: open.selected.id }, reason: open.reason });
     });
@@ -419,6 +422,7 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
       open.next = page.nextCursor;
       open.later = !fresh;
       const first = page.targets.find((target) => !target.excluded);
+      if (open.selected === null && first !== undefined) open.selected = first;
       paint(first === undefined ? `input[name="series-exclusion-kind"][value="${kind}"]` : `input[name="series-exclusion-target"][value="${first.id}"]`);
     } catch (error) {
       busy = false;
@@ -467,8 +471,9 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
       busy = false;
       chooser = null;
       change = null;
-      paint('.series-exclusion-preview-heading');
-      setStatus(EXCLUSIONS_PREVIEW_HEADING);
+      // 添加 / 保存修改 / 停止 is one step (Issue #1410 item 30): the revision is recorded against exactly the impact just read,
+      // and the history keeps the impact it showed.
+      await submit();
     } catch (error) {
       busy = false;
       preview = null;

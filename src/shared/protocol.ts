@@ -2,6 +2,7 @@ import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/g
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 import type { JournalEditInput } from './protocol/manuscript-structure.js';
 import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
+import type { AiEditLocksProjection, InspectAiEditLocksInput, InspectScopedAiEditInput, ScopedAiEditProjection, SetAiEditLocksInput, StartScopedAiEditInput } from './protocol/scoped-edit.js';
 import type { GlobalAttentionProjection } from './protocol/global-attention.js';
 import type {
   ModelServiceBindingProjection,
@@ -84,6 +85,8 @@ import type {
   SearchResultsProjection,
   ReplacementDismissalProjection,
   ReplacementCommitProjection,
+  CommitReplacementRevisionsInput,
+  ReplacementRevisionsProjection,
   SaveMilestoneInput,
   MilestoneProjection,
   HistoricalRevisionProjection,
@@ -319,7 +322,14 @@ export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
 
-export const SERVICE_PROTOCOL_VERSION = 198 as const;
+export * from './protocol/scoped-edit.js';
+
+/**
+ * Protocol 200 (Issue #1400 Batch 3): 局部 AI 修改与 🔒 锁定 (#1412) — setAiEditLocks, inspectAiEditLocks, startScopedAiEdit,
+ * inspectScopedAiEdit and the window's optional `aiLockedBlockIds`/`aiLocksDigest` — and 全部替换 as per-occurrence revision
+ * cards (#1411) — commitReplacementRevisions.
+ */
+export const SERVICE_PROTOCOL_VERSION = 200 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -778,6 +788,11 @@ export const IPC_CHANNELS = {
   inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
   polishSelection: 'ai7:j05:polish-selection',
   inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
+  inspectAiEditLocks: 'ai7:j05:inspect-ai-edit-locks',
+  setAiEditLocks: 'ai7:j05:set-ai-edit-locks',
+  startScopedAiEdit: 'ai7:j05:start-scoped-ai-edit',
+  inspectScopedAiEdit: 'ai7:j05:inspect-scoped-ai-edit',
+  commitReplacementRevisions: 'ai7:j02:commit-replacement-revisions',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
   approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
@@ -1788,6 +1803,12 @@ export interface ReimportLineageSourceVersionPageProjection {
 
 export interface ManuscriptWindowProjection {
   bookId: string;
+  /**
+   * 🔒 锁定 (Issue #1412): the blocks of this window AI7 may not change — locked one by one or inside a locked section — and
+   * the digest of the branch's lock set, which a scoped AI edit or a lock change names. Absent from a store without locks.
+   */
+  aiLockedBlockIds?: ReadonlyArray<string>;
+  aiLocksDigest?: string;
   manuscriptId: string;
   branchId: string;
   revisionId: string;
@@ -2704,19 +2725,19 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
 
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25';
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
 
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
 /** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
 export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
 
-export const CURRENT_ACTIVE_SET_SHA256 = '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d';
+export const CURRENT_ACTIVE_SET_SHA256 = '20ce6301a65f5a661117d66d1c5f9d185d8211c65c65c660f5ad3d2976809eaa';
 
-export const CURRENT_PRODUCTION_POLICY_SHA256 = '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5';
+export const CURRENT_PRODUCTION_POLICY_SHA256 = 'ca506c18c7d84308be2cb69f08400187a6ae49d595d32211356ea987dfbe3bcb';
 
 export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
 
@@ -2730,15 +2751,15 @@ export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cef
 export function isSupportedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
   if (scope === 'development-ci') return version === 'v1' || version === 'v29';
   if (scope === 'developer-live') return ['v5', 'v8', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22', 'v24'].some((entry) => entry === version);
-  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34'].some((entry) => entry === version);
+  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].some((entry) => entry === version);
   return false;
 }
 
 /** Identity of the actual verified selected documents; this metadata grants no execution authority. */
 export interface SelectedPolicyIdentity {
-  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34';
+  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
   readonly providerProcessingSha256: string;
-  readonly activePolicySetVersion: 'v21' | 'v22' | 'v23' | 'v24' | 'v25';
+  readonly activePolicySetVersion: 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
   readonly activePolicySetSha256: string;
 }
 
@@ -2776,7 +2797,7 @@ const SELECTED_PROVIDER_DIGESTS = {
   v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
   v29: LOCAL_FIXTURE_POLICY_SHA256,
   v30: ORIGINAL_FIELDS_POLICY_SHA256,
-  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: CURRENT_PRODUCTION_POLICY_SHA256,
+  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5', v35: CURRENT_PRODUCTION_POLICY_SHA256,
 } as const;
 
 const LOCAL_FIXTURE_REGISTERED_PROFILES: readonly LocalFixtureRegisteredProfile[] = [
@@ -2793,12 +2814,12 @@ export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
   const version = value['providerProcessingVersion'];
   const set = value['activePolicySetVersion'];
-  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? CURRENT_ACTIVE_SET_SHA256 : null;
-  if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31' && (version !== 'v32' && version !== 'v33' && version !== 'v34')) ||
+  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d' : set === 'v26' ? CURRENT_ACTIVE_SET_SHA256 : null;
+  if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31' && (version !== 'v32' && version !== 'v33' && version !== 'v34' && version !== 'v35')) ||
       value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] || setSha256 === null || value['activePolicySetSha256'] !== setSha256 ||
-      !((set === 'v21' && ['v24', 'v29', 'v30'].includes(version)) || (set === 'v22' && ['v1', 'v24', 'v31'].includes(version)) || (set === 'v23' && ['v1', 'v24', 'v32'].includes(version)) || (set === 'v24' && ['v1', 'v24', 'v33'].includes(version)) || (set === 'v25' && ['v1', 'v24', 'v34'].includes(version)))) return null;
+      !((set === 'v21' && ['v24', 'v29', 'v30'].includes(version)) || (set === 'v22' && ['v1', 'v24', 'v31'].includes(version)) || (set === 'v23' && ['v1', 'v24', 'v32'].includes(version)) || (set === 'v24' && ['v1', 'v24', 'v33'].includes(version)) || (set === 'v25' && ['v1', 'v24', 'v34'].includes(version)) || (set === 'v26' && ['v1', 'v24', 'v35'].includes(version)))) return null;
   return { providerProcessingVersion: version, providerProcessingSha256: SELECTED_PROVIDER_DIGESTS[version],
-    activePolicySetVersion: set as 'v21' | 'v22' | 'v23' | 'v24' | 'v25', activePolicySetSha256: setSha256 };
+    activePolicySetVersion: set as 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26', activePolicySetSha256: setSha256 };
 }
 
 /** Shape and document equality only; the actual fixture/caller/message conjunction is checked by the fixture owner. */
@@ -2880,11 +2901,11 @@ export type ResultSetPolicyPin =
  */
 const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArray<readonly [string, string]>>> = {
   'development-ci': [...['v3', 'v4', 'v5', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19']
-    .map((set) => ['v1', set] as const), ['v29', 'v21'], ['v1', 'v22'], ['v1', 'v23'], ['v1', 'v24'], ['v1', 'v25']],
+    .map((set) => ['v1', set] as const), ['v29', 'v21'], ['v1', 'v22'], ['v1', 'v23'], ['v1', 'v24'], ['v1', 'v25'], ['v1', 'v26']],
   'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
-    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22', 'v23', 'v24', 'v25'].map((set) => ['v24', set] as const)],
+    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22', 'v23', 'v24', 'v25', 'v26'].map((set) => ['v24', set] as const)],
   'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
-    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25']],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22'], ['v32', 'v23'], ['v33', 'v24'], ['v34', 'v25'], ['v35', 'v26']],
 };
 
 /** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */
@@ -6691,6 +6712,16 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   polishSelection: { input: PolishSelectionInput & { bookId: string }; output: EditorialPolishProjection };
   /** A 润色这段 or 基于当前稿件重新生成建议 request of the Book, read again until it settles (Issue #842): a read. */
   inspectFastInteractionRequest: { input: InspectFastInteractionRequestInput & { bookId: string }; output: FastInteractionRequestProjection };
+  /** 🔒 锁定 (Issue #1412): a manuscript branch's AI edit locks, a read. */
+  inspectAiEditLocks: { input: InspectAiEditLocksInput; output: AiEditLocksProjection };
+  /** Lock or unlock blocks or sections against the lock set the editor saw (Issue #1412). */
+  setAiEditLocks: { input: SetAiEditLocksInput; output: AiEditLocksProjection };
+  /** 就选中部分让 AI 修改 (Issue #1412): checked at once, answered beside the loop, applied only inside its frozen scope. */
+  startScopedAiEdit: { input: StartScopedAiEditInput & { bookId: string }; output: ScopedAiEditProjection };
+  /** A scoped AI edit of the Book, read again until it settles (Issue #1412): a read. */
+  inspectScopedAiEdit: { input: InspectScopedAiEditInput & { bookId: string }; output: ScopedAiEditProjection };
+  /** 全部替换 as durable per-occurrence revision cards (Issue #1411): each occurrence an applied 修改建议. */
+  commitReplacementRevisions: { input: CommitReplacementRevisionsInput; output: ReplacementRevisionsProjection };
   reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
@@ -7169,7 +7200,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 交付 · 生产文档 of that Book (Issue #415): one card per house type and the materials a document can start from. */
   inspectProductionDocuments(): Promise<ProductionDocumentsProjection>;
   /** 图书交付包 of that Book (Issue #416): its conditions, what a package would hold, and its versions. */
-  inspectBookDeliveryPackage(): Promise<BookDeliveryPackageProjection>;
+  inspectBookDeliveryPackage(input?: Omit<InspectBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageProjection>;
   /** `准备图书交付包`: freeze exactly the content read, with its purpose; it creates no file and sends nothing. */
   prepareBookDeliveryPackage(input: Omit<PrepareBookDeliveryPackageInput, 'bookId'>): Promise<BookDeliveryPackageResultProjection>;
   /** `导出…` of one version of that Book's package (Issue #416, S67b): the files it would write. */
@@ -7235,6 +7266,14 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   polishSelection(input: PolishSelectionInput): Promise<EditorialPolishProjection>;
   /** A 润色这段 or 基于当前稿件重新生成建议 request of the Book this window shows, read again until it settles: a read. */
   inspectFastInteractionRequest(input: InspectFastInteractionRequestInput): Promise<FastInteractionRequestProjection>;
+  /** 🔒 锁定 (Issue #1412): the AI edit locks of a manuscript this window holds. */
+  inspectAiEditLocks(input: InspectAiEditLocksInput): Promise<AiEditLocksProjection>;
+  setAiEditLocks(input: SetAiEditLocksInput): Promise<AiEditLocksProjection>;
+  /** 就选中部分让 AI 修改 on the Book this window shows (Issue #1412). */
+  startScopedAiEdit(input: StartScopedAiEditInput): Promise<ScopedAiEditProjection>;
+  inspectScopedAiEdit(input: InspectScopedAiEditInput): Promise<ScopedAiEditProjection>;
+  /** 全部替换 with per-occurrence revision cards (Issue #1411). */
+  commitReplacementRevisions(input: CommitReplacementRevisionsInput): Promise<ReplacementRevisionsProjection>;
   /**
    * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
    * revision with unsaved edits is saved as a revision first.

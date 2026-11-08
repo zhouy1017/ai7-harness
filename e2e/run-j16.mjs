@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx } from './composed-docx.mjs';
-import { MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 
@@ -340,8 +340,6 @@ async function createEmptyBook(renderer, title, name) {
   await click(renderer, '新建图书', `${name}-open`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
   await fill(renderer, '#empty-book-title', title, `${name}-title`);
-  await click(renderer, '复核创建', `${name}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
   await click(renderer, '新建图书', `${name}-commit`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${name}-created`, 120_000);
   const created = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);
@@ -941,7 +939,8 @@ async function main() {
         !visible.includes('@base') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/i.test(visible);
     })()`, 'global-agent-unified-readable-memory');
 
-    // #1377 / J-16: an existing preference stays reachable in ordinary quality without its engineering forms.
+    // #1377 / J-16: an existing preference stays reachable in ordinary quality without its engineering forms; #1408 adds only the
+    // ordinary rule editor (one to add a rule, 编辑偏好 on an active one).
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
       await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `quality-mode-${developer}-settings-ready`);
@@ -952,7 +951,7 @@ async function main() {
       if (developer === 'true') continue;
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
       await waitFor(renderer, `document.querySelector('[data-review-preference]')?.textContent.includes('保留作者有意使用的短句。')`, 'ordinary-existing-preference-visible');
-      await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); return row.textContent.includes('已启用') && Array.from(row.querySelectorAll('button')).some(button=>button.textContent==='停用') && !root.querySelector('form') && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
+      await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); const buttons=Array.from(row.querySelectorAll('button'), button=>button.textContent); return row.textContent.includes('已启用') && buttons.includes('停用') && buttons.includes('编辑偏好') && Array.from(root.querySelectorAll('form')).every(form=>form.matches('form.preference-editor[data-preference-editor]')) && root.querySelectorAll('form[data-preference-editor="new"]').length===1 && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-preference-return-global');
     await waitFor(renderer, `document.querySelector('[data-global-agent-item]') && document.querySelector('[data-global-agent-save]')`, 'ordinary-preference-developer-preserved');
@@ -1252,7 +1251,7 @@ async function main() {
       if (!(block instanceof HTMLElement)) return false;
       block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-      document.execCommand('insertText', false, ${JSON.stringify(LEAVE_WORDS)});
+      ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(LEAVE_WORDS)});
       return block.textContent?.endsWith(${JSON.stringify(LEAVE_WORDS)}) === true;
     })()`, 'leave-typed');
     // At once, well inside the half second before the words would write themselves.
@@ -1384,7 +1383,7 @@ async function main() {
     const stopped = await waitForDialogue(renderer, (dialogue) => dialogue.attempts[0]?.state === 'stopped', 'dialogue-stopped');
     requireJourney(stopped.attempts[0].label === '回答已停止 · 内容不完整' && stopped.attempts[0].incomplete === '你停止了回答；只保留了完整的句子。' &&
       JSON.stringify(stopped.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
-      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled']]), 'dialogue-stopped-words', stopped);
+      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled'], ['convert-edit', '编辑后转为修改建议…', 'disabled']]), 'dialogue-stopped-words', stopped);
     await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]')?.title === '内容不完整的回答不能转为修改建议。'`, 'dialogue-stopped-convert-why');
 
     at('dialogue-continue-after-mid-stream-stop');
@@ -1408,7 +1407,7 @@ async function main() {
     requireJourney(regenerated.attempts[0].state === 'stopped' && JSON.stringify(regenerated.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
       regenerated.attempts[2].kind === 'regenerate' && regenerated.attempts[2].heading === '第 3 次 · 重新回答' && regenerated.attempts[2].label === '回答完成' &&
       JSON.stringify(regenerated.attempts[2].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[2].incomplete === null &&
-      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled']]), 'dialogue-regenerated-words', regenerated);
+      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled'], ['convert-edit', '编辑后转为修改建议…', 'enabled']]), 'dialogue-regenerated-words', regenerated);
     const attempts = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.map((attempt) => [attempt.ordinal, attempt.kind, attempt.state, attempt.source]))`);
     requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'continue', 'completed', 'ledger'], [3, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
 
@@ -1506,7 +1505,8 @@ async function main() {
     at('dialogue-convert');
     // 转为修改建议 on the completed answer (DIALOG-016): a 修改建议 on the selected words, from AI7 and the dialogue Task, which
     // the editor still decides; the manuscript is exactly as it was.
-    await dialogueAction(renderer, 'convert', 'dialogue-convert-open');
+    // 编辑后转为修改建议… keeps the editable form (Issue #1410 item 10); 转为修改建议 alone converts the answer's words at once.
+    await dialogueAction(renderer, 'convert-edit', 'dialogue-convert-open');
     await waitFor(renderer, `(() => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); const rationale = form?.querySelector('textarea[name="rationale"]'); return proposed instanceof HTMLTextAreaElement && document.activeElement === proposed && proposed.value.trim().length > 0 && rationale?.value === '' && form.querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(selectedWords)}; })()`, 'dialogue-convert-form', 10_000);
     // An Escape that ends an input method's composition in the form closes neither the form nor the side slot (J-14).
     await assertRenderer(renderer, `(async () => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); if (!(proposed instanceof HTMLTextAreaElement)) return false; proposed.dispatchEvent(new CompositionEvent('compositionstart', { data: '平缓', bubbles: true })); proposed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', isComposing: true, bubbles: true, cancelable: true })); proposed.dispatchEvent(new CompositionEvent('compositionend', { data: '平缓', bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 100)); return form.isConnected && document.querySelector('#task-drawer')?.hidden === false && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue'; })()`, 'dialogue-convert-ime-escape');
@@ -1596,13 +1596,13 @@ async function main() {
     const position = context?.[5] ?? null;
     const offered = new Map(composer?.options ?? []);
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
-      composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
-      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '发起任务' &&
+      // Issue #1410 item 17: the first offered Task is chosen, and the button says 开始任务.
+      composer.chosen !== '' && composer.chosen === composer.options[1]?.[0] && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
+      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
+      // #1401: a first 事实核查 may read just this selection, so it is offered beside the other range reviews.
+      offered.get('review:factual-review') === '审阅这段 · 「事实核查」' && composer.submit === '开始任务' &&
       composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
-    // Nothing is prepared before a Task is chosen.
-    await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-submit-empty');
-    await waitFor(renderer, `window.__j16.composer()?.querySelector('.editorial-mark-problem')?.textContent === '请填写「工序」。' && document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-pick-first', 10_000);
 
     at('selection-task-review-prepare');
     // 审阅这段 · 「情节逻辑与前后一致」: 准备任务 prepares a 审阅 of 当前选区 — that one paragraph, kept by its identity — and its plan
@@ -1841,7 +1841,7 @@ async function main() {
       requireJourney(await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]') === null`), 'selection-task-gone-mappings-valid');
       if (await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`)) {
         const before = await reviewVersion();
-        await click(renderer, '明确接受完整降级集合', 'selection-task-gone-degradation');
+        await clickSelector(renderer, '[data-accept-reimport-degradation]', 'selection-task-gone-degradation');
         await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)}`, 'selection-task-gone-degradation-persisted', 60_000);
         continue;
       }
@@ -2002,7 +2002,7 @@ async function main() {
     // 提交为修改建议: both proposals become 修改建议 marks through the produced-mark path — AI7's, from the round's dialogue Task — in
     // independent marks; the manuscript's words stay as they were until a decision on the existing Mark Cards.
     await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="promote"]', 'workspace-promote-click');
-    await waitFor(renderer, `document.querySelector('[data-agent-workspace-promoted]')?.dataset.agentWorkspacePromoted === '2'`, 'workspace-promoted', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') !== null && document.querySelector('.editorial-mark-layer [data-mark-card]') !== null`, 'workspace-promoted', 60_000);
     const promotedState = await workspaceState();
     const newMarks = promotedState.marks.filter((markId) => !proposeBefore.marks.includes(markId));
     requireJourney(promotedState.digest === proposeBefore.digest && promotedState.text === proposeBefore.text && newMarks.length === 2, 'workspace-promote-text-unchanged', promotedState);
@@ -2018,7 +2018,8 @@ async function main() {
     // Independent paragraph edits are decided directly on their manuscript cards.
     const firstMark = promotedCards.find((card) => card.suggestion.currentText === WORKSPACE_FIRST_ANCHOR).markId;
     const secondMark = promotedCards.find((card) => card.suggestion.currentText === WORKSPACE_SECOND_ANCHOR).markId;
-    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="open-marks"]', 'workspace-open-marks');
+    // The promote already opened the manuscript at a new card; the first proposal's card is the one decided first.
+    await assertRenderer(renderer, `(() => { if (document.querySelector('.editorial-mark-layer [data-mark-card]')?.dataset.markCard === ${JSON.stringify(firstMark)}) return true; const mark = document.querySelector('[data-screen="editor"] [data-mark-id=${JSON.stringify(firstMark)}]'); if (!(mark instanceof HTMLElement)) return false; mark.click(); return true; })()`, 'workspace-first-card-open');
     await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card]')?.dataset.markCard === ${JSON.stringify(firstMark)} && document.querySelector('.editorial-mark-layer [data-mark-action="accept-and-apply"]')?.disabled === false`, 'workspace-mark-card', 60_000);
     await clickSelector(renderer, '.editorial-mark-layer [data-mark-card] [data-mark-action="accept-and-apply"]', 'workspace-mark-accept');
     await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card] [data-mark-application]') !== null`, 'workspace-mark-applied', 60_000);

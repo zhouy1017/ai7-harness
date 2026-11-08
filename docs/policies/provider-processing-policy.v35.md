@@ -1,0 +1,9 @@
+# Provider Processing Policy v35
+
+Status: Owner-authorized ordinary-production successor to v34, selected by [active-policy-set v26](active-policy-set.v26.json) under [Issue #1408](https://github.com/zhouy1017/ai7-harness/issues/1408).
+
+The [canonical JSON](provider-processing-policy.v35.json) and [exact schema](provider-processing-policy.v35.schema.json) admit editor-confirmed house and book preferences on editorial Agent requests: review and fact checking, book dialogue and workspace, Global Agent, writing, readers reports, evaluation and rewriting, baseline and custom analysis. Related polish, conflict, translation, curation and factual recheck rules use the same declaration. Material indexing and review reduction retain their existing source boundaries.
+
+Each request selects at most 15 whole rules and 1,200 graphemes from a library of at most 64 rules and 6,000 graphemes. Book rules precede house rules; dimensions match the task. Confirmed preferences take priority over generic defaults in editorial discretion and prose style, supply no external factual evidence and preserve the task's JSON/output format. The prompt identifies the preference version. Explicitly created and corrected rules are active immediately; disabled learning, exclusions and withdrawn sources still prevent future use.
+
+The selected memory is frozen with the task plan or dialogue binding. Historical records, no-memory contract digests, predecessor policy documents and all fixed fixtures retain their identities. Development-ci remains provider-free v1; fixture recording v2, developer-live v24 and external export v2 retain their exact pins. Existing source, role, credential, egress, native search, tool and background boundaries remain in force; this policy adds no Apply, export, publication or release authority.

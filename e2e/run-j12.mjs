@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -42,6 +42,31 @@ function requireJourney(condition, name, detail) {
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
+}
+
+/** Seed synthetic author metadata through the real mark owner while Electron is closed; never edit ledger rows. */
+async function seedModelAuthor(dataRoot, runRoot, book) {
+  const { build } = await import('esbuild');
+  const outfile = resolve(runRoot, 'model-author-store.mjs');
+  await build({ entryPoints: [resolve(ROOT, 'src/service/store.ts')], outfile, bundle: true, platform: 'node',
+    format: 'esm', target: 'node24', logLevel: 'silent', plugins: [{ name: 'runner-packages', setup(builder) {
+      builder.onResolve({ filter: /^[^./]/ }, ({ path }) => isAbsolute(path) ? undefined
+        : { path: import.meta.resolve(path), external: true });
+    } }] });
+  const { EditorialStore } = await import(pathToFileURL(outfile).href);
+  const store = await EditorialStore.open(dataRoot, await realpath(ROOT));
+  try {
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const block = window.blocks.find((entry) => entry.kind === 'paragraph' && Array.from(entry.text).length >= 4);
+    requireJourney(block !== undefined, 'model-author-seed-anchor');
+    const markId = store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 0, toGrapheme: 4,
+      pinnedText: Array.from(block.text).slice(0, 4).join(''), kind: 'annotation', body: '公开合成模型批注',
+      proposedText: null, rationale: null, atomicGroupId: null, basis: [],
+      source: { kind: 'ai7', origin: 'task', label: '公开合成任务', taskId: randomUUID() },
+      sourceModelBinding: { route: 'openai-platform', model: 'gpt-6-luna', reasoningEffort: 'high' } });
+    store.markCleanShutdown();
+    return markId;
+  } finally { store.close(); }
 }
 
 async function awaitCdpOperation(operation, deadline) {
@@ -464,8 +489,6 @@ async function createEmptyBook(renderer, title) {
   await click(renderer, '新建图书', 'empty-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-form');
   await fill(renderer, '#empty-book-title', title, 'empty-title');
-  await click(renderer, '复核创建', 'empty-review');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-review-ready');
   await click(renderer, '新建图书', 'empty-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-created', 120_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
@@ -505,7 +528,7 @@ async function importFirstManuscript(renderer, bookId) {
 async function saveEdit(renderer, suffix) {
   const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
   requireJourney(before !== null, 'edit-scope');
-  const inserted = await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`);
+  const inserted = await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`);
   requireJourney(inserted === true, 'edit-inserted');
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   await click(renderer, '保存', 'edit-save');
@@ -905,7 +928,7 @@ async function main() {
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
     // #1371: ordinary mode keeps the native source explanation and unmeasured disclosure, with five manual cards.
     // Production admission/request construction is exercised by composed ordinary-production service tests; this Journey sends nothing.
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v25' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v26' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backend]').length===5 && ['openai-native-search-v1','anthropic-native-search-v1'].every(id => { const card=document.querySelector('[data-search-candidate="'+id+'"]'); return card?.textContent.includes('未实测') && card.textContent.includes('自动用于随渠道检索') && !card.textContent.includes('不能用于任务'); })`, 'ordinary-native-source-disclosure');
 
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
@@ -936,6 +959,82 @@ async function main() {
     await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
+    // #1408: an editor's own rule is an active rule the moment it is saved. Ordinary mode, public synthetic text; the rule is
+    // created, edited as the same rule, then stopped, so this stage leaves no active preference behind.
+    const preferenceText = 'J12 合成偏好：保留有意使用的短句。';
+    const editedPreferenceText = 'J12 合成偏好：短句保持原样，不机械合并。';
+    const memorySection = `document.querySelector('[data-screen="quality-learning"] [data-editorial-memory]')`;
+    const preferenceRow = (itemId) => `${memorySection}.querySelector('[data-review-preference="${itemId}"]')`;
+    const preferenceState = (text) => `window.ai7.inspectGlobalAgent().then(state=>({
+      directives: state.directives.length,
+      label: state.categories.find(category=>category.categoryId==='style-and-format')?.label ?? null,
+      items: state.items.filter(item=>item.text===${JSON.stringify(text)}).map(item=>({itemId:item.itemId,kind:item.kind,state:item.state,bookId:item.bookId,categoryId:item.categoryId})),
+    }))`;
+    const directivesBeforePreference = await primary.evaluate(`window.ai7.inspectGlobalAgent().then(state=>state.directives.length)`);
+    await assertRenderer(primary, `(() => {
+      const section=${memorySection}; const form=section?.querySelector('[data-preference-editor="new"]');
+      if(!form||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
+      const category=form.querySelector('select[aria-label="适用维度"]'), scope=form.querySelector('select[aria-label="适用范围"]');
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      const save=Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='新增并启用偏好');
+      return Boolean(category&&scope&&text&&save)&&save.type==='submit'&&!save.disabled&&text.required&&text.value===''&&
+        Array.from(category.options).some(option=>option.value==='style-and-format')&&
+        scope.options[0].value===''&&scope.options[0].textContent==='全社'&&
+        Array.from(scope.options).slice(1).every(option=>option.textContent.startsWith('本书：《'));
+    })()`, 'ordinary-preference-editor-shape');
+    await assertRenderer(primary, `(() => {
+      const form=${memorySection}.querySelector('[data-preference-editor="new"]');
+      form.querySelector('select[aria-label="适用维度"]').value='style-and-format';
+      form.querySelector('select[aria-label="适用范围"]').value='';
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      text.value=${JSON.stringify(preferenceText)}; text.dispatchEvent(new Event('input',{bubbles:true}));
+      Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='新增并启用偏好').click();
+      return true;
+    })()`, 'ordinary-preference-create');
+    await waitFor(primary, `Array.from(${memorySection}.querySelectorAll('[data-review-preference]')).some(row=>row.querySelector('p')?.textContent===${JSON.stringify(preferenceText)})`, 'ordinary-preference-created-row');
+    const createdPreference = await primary.evaluate(preferenceState(preferenceText));
+    const createdRule = createdPreference.items[0];
+    requireJourney(createdPreference.items.length === 1 && createdRule.kind === 'preference' && createdRule.state === 'active' &&
+      createdRule.bookId === null && createdRule.categoryId === 'style-and-format' && typeof createdRule.itemId === 'string' &&
+      typeof createdPreference.label === 'string' && createdPreference.directives === directivesBeforePreference + 1, 'ordinary-preference-created-active');
+    // The saved rule reads as active and whole-house on the page, with its two controls, and the editor starts empty again.
+    await waitFor(primary, `(() => {
+      const row=${preferenceRow(createdRule.itemId)}; const section=${memorySection};
+      const names=Array.from(row?.querySelectorAll('.preference-actions > button')??[], node=>node.textContent+(node.disabled?':disabled':''));
+      const fresh=section?.querySelector('[data-preference-editor="new"] textarea');
+      return Boolean(row)&&row.querySelectorAll('p')[1]?.textContent===${JSON.stringify(`${createdPreference.label} · 本社 · 已启用`)}&&
+        names.join(',')==='停用,编辑偏好'&&fresh?.value===''&&section.querySelector('[role="status"]')?.textContent==='学习记录已更新。'&&
+        !/ordinary-production|developer-live|查看技术详情|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/u.test(section.textContent);
+    })()`, 'ordinary-preference-active-row');
+    await assertRenderer(primary, `(() => { const edit=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='编辑偏好'); if(!edit||edit.disabled)return false; edit.click(); return true; })()`, 'ordinary-preference-edit-open');
+    await waitFor(primary, `(() => {
+      const form=${preferenceRow(createdRule.itemId)}?.querySelector('[data-preference-editor="${createdRule.itemId}"]');
+      if(!form)return false;
+      const category=form.querySelector('select[aria-label="适用维度"]'), scope=form.querySelector('select[aria-label="适用范围"]');
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      const save=Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='保存偏好');
+      // An edit changes the sentence of the same rule; its dimension and scope are the rule's and stay fixed.
+      return Boolean(category&&scope&&text&&save)&&category.value==='style-and-format'&&category.disabled&&scope.value===''&&scope.disabled&&
+        text.value===${JSON.stringify(preferenceText)}&&!save.disabled&&form.parentElement.children.length===1;
+    })()`, 'ordinary-preference-edit-fields');
+    await assertRenderer(primary, `(() => {
+      const form=${preferenceRow(createdRule.itemId)}.querySelector('[data-preference-editor="${createdRule.itemId}"]');
+      const text=form.querySelector('textarea[aria-label="一句话偏好规则"]');
+      text.value=${JSON.stringify(editedPreferenceText)}; text.dispatchEvent(new Event('input',{bubbles:true}));
+      Array.from(form.querySelectorAll('button')).find(node=>node.textContent==='保存偏好').click();
+      return true;
+    })()`, 'ordinary-preference-edit-save');
+    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return Boolean(row)&&!row.querySelector('form')&&row.querySelector('p')?.textContent===${JSON.stringify(editedPreferenceText)}&&row.querySelectorAll('p')[1]?.textContent===${JSON.stringify(`${createdPreference.label} · 本社 · 已启用`)}; })()`, 'ordinary-preference-edited-row');
+    const editedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
+    const replacedPreference = await primary.evaluate(preferenceState(preferenceText));
+    requireJourney(editedPreference.items.length === 1 && editedPreference.items[0].itemId === createdRule.itemId && editedPreference.items[0].state === 'active' &&
+      editedPreference.items[0].bookId === null && editedPreference.items[0].categoryId === 'style-and-format' &&
+      replacedPreference.items.every((item) => item.state !== 'active') && editedPreference.directives === directivesBeforePreference + 2, 'ordinary-preference-edited-same-rule');
+    await assertRenderer(primary, `(() => { const stop=Array.from(${preferenceRow(createdRule.itemId)}.querySelectorAll('.preference-actions > button')).find(node=>node.textContent==='停用'); if(!stop||stop.disabled)return false; stop.click(); return true; })()`, 'ordinary-preference-stop');
+    await waitFor(primary, `(() => { const row=${preferenceRow(createdRule.itemId)}; return !row||(row.querySelectorAll('p')[1]?.textContent.endsWith('已停用')&&!Array.from(row.querySelectorAll('.preference-actions > button')).some(node=>node.textContent==='停用'||node.textContent==='编辑偏好')); })()`, 'ordinary-preference-stopped-row');
+    const stoppedPreference = await primary.evaluate(preferenceState(editedPreferenceText));
+    requireJourney(stoppedPreference.items.every((item) => item.state !== 'active') && stoppedPreference.directives === directivesBeforePreference + 3, 'ordinary-preference-stopped');
+    const directivesAfterPreference = stoppedPreference.directives;
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
@@ -951,7 +1050,7 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
-    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`), 'global-agent-entry-no-work');
+    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`), 'global-agent-entry-no-work');
     await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
@@ -1064,7 +1163,7 @@ async function main() {
     const beforeRiskEdit = await primary.evaluate(CAPTURE_JOURNAL_EDIT);
     requireJourney(beforeRiskEdit !== null, 'close-risk-edit-scope');
     const routeRiskSuffix = '，J12 路由风险保护';
-    const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
+    const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
     requireJourney(riskyEditInserted === true, 'close-risk-edit-inserted');
     await waitFor(primary, `document.documentElement.dataset.ai7CloseRisk==='true' && !(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'close-risk-advertised');
     at('close-risk-same-window-request');
@@ -1187,7 +1286,7 @@ async function main() {
         historicalRoute.revisionId === revisionOne,
       'historical-exact-route-owned',
     );
-    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.textContent.includes('不提供写入'); })()`, 'immutable-readonly-reconstruction');
+    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.querySelector('.lede')?.textContent.endsWith(' · 只读') === true; })()`, 'immutable-readonly-reconstruction');
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && document.querySelector('[data-return-to-current-revision]')!==null`, 'j14-zoom-200-reflow');
@@ -1446,7 +1545,8 @@ async function main() {
     await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
-    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); if(!(reuse instanceof HTMLInputElement))return false; reuse.click(); return reuse.checked; })()`, 'preflight-reuse-source');
+    // Issue #1410 item 32B: the same-Book match is chosen to begin with.
+    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
@@ -1459,6 +1559,7 @@ async function main() {
 
     at('restart-and-data-location');
     await close();
+    const modelAuthorMark = await seedModelAuthor(dataRoot, runRoot, bookAWork);
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'restart-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-landing');
@@ -1473,6 +1574,118 @@ async function main() {
       const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
       return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
+    // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-author-settings-ready');
+    await click(primary, '帮助', 'model-author-help');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle)return false; if(toggle.checked)toggle.click(); return true; })()`, 'model-author-ordinary-toggle');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-ordinary-mode');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'model-author-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-author-library-ready');
+    await clickBook(primary, bookA, 'model-author-book');
+    await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]')`, 'model-author-anchor');
+    await assertRenderer(primary, `(() => { document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]').scrollIntoView({block:'center'}); const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`, 'model-author-comments');
+    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ')`, 'model-author-comments-label');
+    await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
+    await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
+    await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
+    // #1401: the first factual review offers ranges before any whole-book result; no review is started here. This launch has
+    // no model adapter, route or search source, so whether 事实核查 can start is the service's own verdict: it is read and
+    // told truthfully below, never forced, bypassed or required (true first-range prepare/execute/out-of-scope is J-04's).
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('review')), 'factual-first-scope-review');
+    await waitFor(primary, `document.querySelector('[data-screen="book-review"] .review-workspace-card')?.dataset.reviewState==='empty' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'factual-first-scope-empty');
+    const factualVerdict = await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>{
+      const factual=workspace.categories.find(category=>category.categoryId==='factual-review');
+      const blocked=factual?.networkUnavailable===true;
+      return {
+        empty: workspace.runs.length===0 && workspace.run===null,
+        // One verdict, said the same way everywhere: a category that cannot start names why on itself and on every scope it offers.
+        consistent: factual!==undefined && factual.available===(factual.unavailableReason===null) &&
+          (factual.available || Object.values(factual.scopes).every(scope=>!scope.available && scope.unavailableReason===factual.unavailableReason)) &&
+          (!blocked || (!factual.available && factual.unavailableReason!=='')),
+        networkUnavailable: blocked,
+        // The sheet's scope choices are the manuscript's: 全书 and 选章 are offered, 当前选区 needs a real selection.
+        scopeChoices: workspace.scopeOptions.whole.available && workspace.scopeOptions.chapters.available && !workspace.scopeOptions.selection.available,
+        // Choosable now (it may still wait for 联网检索), or refused for a reason of its own that the sheet must tell.
+        factualChoosable: factual?.available === true || blocked,
+        factualReason: factual?.unavailableReason ?? null,
+      };
+    })`);
+    requireJourney(factualVerdict?.empty === true && factualVerdict.consistent === true, 'factual-first-scope-verdict');
+    requireJourney(factualVerdict.scopeChoices === true, 'factual-first-scope-choices');
+    const factualNetworkUnavailable = factualVerdict.networkUnavailable === true;
+    const factualChoosable = factualVerdict.factualChoosable === true;
+    // A refused 事实核查 (here: a Book outside the admitted public SampleBooks under the provider-free launch) stays on the sheet,
+    // disabled and saying the service's own reason; the range round trip is then made with the category this Book can choose.
+    const rangeCategory = factualChoosable ? 'factual-review' : 'local-text-check';
+    const factualReasonLine = factualVerdict.factualReason === null ? null : `${String(factualVerdict.factualReason).split(/[；。]/u)[0]}。`;
+    const tasksBeforeFactualSheet = await primary.evaluate(`window.ai7.inspectBookTasks().then(tasks=>JSON.stringify(tasks))`);
+    requireJourney(typeof tasksBeforeFactualSheet === 'string', 'factual-first-scope-tasks-before');
+    await assertRenderer(primary, `(() => { const open=document.querySelector('[data-review-action="new-review"]'); if(!open||open.disabled)return false; open.click(); return true; })()`, 'factual-first-scope-new');
+    await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-first-scope-sheet');
+    // The first unmet step is recorded as the failure detail (step names only, no page content).
+    const factualRoundtrip = await primary.evaluate(`(() => {
+      const sheet=document.querySelector('dialog.review-sheet');
+      // A category toggle redraws the whole sheet, so every control is read fresh and none is held across a change.
+      const scope=kind=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]');
+      const factual=()=>sheet.querySelector('input[name="review-category"][value="factual-review"]');
+      const chosen=()=>sheet.querySelector('input[name="review-category"][value=${JSON.stringify(rangeCategory)}]');
+      const factualReason=()=>factual().closest('label').querySelector('.review-category-reason');
+      const chapter=which=>sheet.querySelector('[data-review-chapter="'+which+'"]');
+      const checkedIds=()=>Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value);
+      for(let step=0; step<20 && sheet.querySelector('input[name="review-category"]:checked'); step++)sheet.querySelector('input[name="review-category"]:checked').click();
+      if(checkedIds().length!==0)return 'cleared';
+      if(!factual()||!chosen())return 'offered-missing';
+      if(${JSON.stringify(!factualChoosable)}){
+        const why=factualReason();
+        if(!factual().disabled||factual().checked||factual().dataset.unavailableReason!==${JSON.stringify(factualVerdict.factualReason)}||!why||why.hidden||why.textContent!==${JSON.stringify(factualReasonLine)})return 'refused-told';
+      }
+      if(chosen().disabled)return 'offered-disabled';
+      for(const kind of ['whole','chapters']){ if(!scope(kind))return 'offered-'+kind+'-missing'; if(scope(kind).disabled)return 'offered-'+kind+'-disabled'; }
+      // 当前选区 is handed over from the manuscript; with none, it stays disabled with its reason.
+      if(!scope('selection')||!scope('selection').disabled||!scope('selection').dataset.unavailableReason)return 'selection-held';
+      chosen().click(); scope('whole').click();
+      if(!chosen().checked||chosen().disabled||!scope('whole').checked)return 'whole-chosen';
+      scope('chapters').click();
+      if(!chosen().checked||chosen().disabled||!chapter('from')||!chapter('to')||chapter('from').disabled||chapter('to').disabled||chapter('from').options.length<3)return 'chapters-offered';
+      const range=chapter('from').options[2].value;
+      chapter('from').value=range; chapter('from').dispatchEvent(new Event('change',{bubbles:true}));
+      chapter('to').value=range; chapter('to').dispatchEvent(new Event('change',{bubbles:true}));
+      const kept=()=>checkedIds().join(',')===${JSON.stringify(rangeCategory)}&&!chosen().disabled&&chapter('from').value===range&&chapter('to').value===range;
+      if(!kept())return 'range-chosen';
+      scope('whole').click();
+      if(!scope('whole').checked||!kept())return 'whole-kept';
+      scope('chapters').click();
+      if(!scope('chapters').checked||!kept()||document.documentElement.dataset.technicalLayerVisible!=='false')return 'chapters-kept';
+      // The chosen factual review is told as the service's verdict reads it, and nothing is started either way.
+      const blocked=${JSON.stringify(factualNetworkUnavailable)};
+      const reason=factualReason();
+      const notice=sheet.querySelector('.review-network-notice');
+      const start=sheet.querySelector('[data-review-action="start"]'), prepare=sheet.querySelector('[data-review-action="prepare"]');
+      if(!reason||!notice||!start||!prepare)return 'controls';
+      if(blocked){
+        if(reason.hidden||reason.textContent!=='此类别需要联网检索。')return 'blocked-reason';
+        if(notice.hidden||notice.textContent!=='联网检索尚未就绪，请到设置中配置后再开始。')return 'blocked-notice';
+        return start.disabled&&prepare.disabled ? 'ok' : 'blocked-actions';
+      }
+      if(${JSON.stringify(!factualChoosable)})return factual().disabled&&!factual().checked&&notice.hidden ? 'ok' : 'refused-kept';
+      return reason.hidden&&notice.hidden ? 'ok' : 'open-reason-or-notice';
+    })()`);
+    requireJourney(factualRoundtrip === 'ok', 'factual-first-category-range-roundtrip',
+      { step: factualRoundtrip, verdict: factualNetworkUnavailable ? 'network-blocked' : factualChoosable ? 'open' : 'refused' });
+    await assertRenderer(primary, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click(); return true; })()`, 'factual-first-scope-close');
+    await waitFor(primary, `document.querySelector('dialog.review-sheet')?.open===false`, 'factual-first-scope-closed');
+    requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
+    requireJourney(await primary.evaluate(`window.ai7.inspectBookTasks().then(tasks=>JSON.stringify(tasks))`) === tasksBeforeFactualSheet, 'factual-first-scope-no-task');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-restore-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-author-restore-settings-ready');
+    await click(primary, '帮助', 'model-author-restore-help');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle.checked)toggle.click(); return true; })()`, 'model-author-restore-development');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'model-author-development-mode');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'model-author-return-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-author-return-library-ready');
+    await clickBook(primary, bookA, 'model-author-return-book');
+    await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'model-author-return-editor');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('overview')), 'restart-back-overview');
     await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'restart-overview');
     // V2-UX-BOOK-001: the overview leads with the manuscript anchor — 修订版 · 上次位置 · 保存状态 —
@@ -1487,7 +1700,7 @@ async function main() {
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
       return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
-        anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
+        anchorSection.querySelector('.button-row button')?.textContent==='继续编辑稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
         readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
@@ -1566,9 +1779,9 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v25.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v26.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 198 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 200 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1891,8 +2104,8 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-        firstConnection.policy?.activePolicySetVersion === 'v25' &&
+        // Synchronized delta with Issue #1408: selected active set v26; new local Plans use Provider Processing v1.
+        firstConnection.policy?.activePolicySetVersion === 'v26' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
@@ -2002,19 +2215,11 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'database-export-open-settings-hub');
     await click(primary, '数据与存储', 'database-export-open');
     await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
+    // Issue #1410 item 2: the destination chosen in the save dialog is written at once; there is no 按上述方式导出 step. The
+    // Books the export holds are this library's, read from the service before the write.
+    const booksShown = await primary.evaluate(`window.ai7.listBooks({ after: null }).then((page) => page.nextCursor === null ? page.items.length : null)`);
+    requireJourney(Number.isSafeInteger(booksShown) && booksShown >= 1, 'database-export-books-known', booksShown);
     await click(primary, '导出数据库…', 'database-export-choose');
-    await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.preparationId !== undefined`, 'database-export-prepared');
-    const preparedRows = await primary.evaluate(`Array.from(document.querySelectorAll('.database-export-prepared dt')).map((term) => [term.textContent, term.nextElementSibling?.textContent ?? null])`);
-    const booksShown = Number(/^(\d+) 本图书/u.exec(Array.isArray(preparedRows) ? preparedRows.find((row) => row[0] === '内容')?.[1] ?? '' : '')?.[1]);
-    requireJourney(
-      Array.isArray(preparedRows) && preparedRows.length === 5 &&
-        JSON.stringify(preparedRows.map((row) => row[0])) === JSON.stringify(['文件', '位置', '方式', '内容', '版本']) &&
-        preparedRows[0][1].startsWith('「AI7 数据库.ai7db」 · ') && preparedRows[1][1] === databaseExportPath && preparedRows[2][1] === '新建文件' &&
-        Number.isSafeInteger(booksShown) && booksShown >= 1 && /^数据版本 1 · 软件 \d+\.\d+\.\d+/u.test(preparedRows[4][1]),
-      'database-export-prepared-words',
-      preparedRows,
-    );
-    await click(primary, '按上述方式导出', 'database-export-approve');
     await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
     // The outcome line is drawn with the outcome; 导出记录 and its count follow one read later, and only then are the export's
     // controls released and focus moved to 导出数据库…. On a slow runner the one-shot check landed between the two (#656), and a

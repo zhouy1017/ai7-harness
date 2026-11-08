@@ -60,7 +60,7 @@ describe('the words of 交付 · 生产文档', () => {
       notForThisBook: '本书不做',
       restore: '恢复',
       saveVersion: '保存为版本',
-      back: '返回交付物',
+      back: '返回稿件',
       deliver: '交付…',
       redeliver: '再交付…',
       confirmDeliver: '交付',
@@ -94,6 +94,7 @@ describe('the words of 交付 · 生产文档', () => {
     ];
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
+    expect([labels.DOCUMENT_VERSIONS_LIGHT_LABEL, labels.DOCUMENT_VERSIONS_LIGHT_HEADING]).toEqual(['版本', '已保存的版本']);
     expect(labels.DOCUMENT_MATERIALS_HEADING).toBe('这份文档的材料');
     expect(labels.DOCUMENT_MATERIALS_EMPTY).toBe('暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。');
     for (const words of surface) {

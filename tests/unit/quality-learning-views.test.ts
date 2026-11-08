@@ -50,7 +50,8 @@ it('puts candidates first, accepts and excludes them, disables memory and keeps 
   await mountEditorialMemory(root, renderer, vi.fn());
   expect(Array.from(root.querySelectorAll<HTMLElement>('[data-memory-item]'), (item) => item.dataset['memoryItem'])).toEqual(['candidate', 'active']);
   expect(root.textContent).toContain('错别字与规范用语');
-  expect(root.querySelector('form')).toBeNull();
+  expect(root.querySelector('[data-preference-editor="new"]') !== null).toBe(true);
+  expect(root.querySelector('[data-memory-candidate-form]')).toBeNull();
   expect(root.textContent).not.toMatch(/token|1–10|SHA|日志|candidate-version|active-version/iu);
   expect(root.querySelector('details')!.textContent).toContain(AT);
   click(root.querySelector('[data-memory-item="candidate"]')!, '接受记忆'); await settle();
@@ -81,7 +82,7 @@ it('preserves the developer budget, signal synthesis and full memory lineage', a
   expect(root.querySelector('[data-memory-candidate-form]')).not.toBeNull();
   expect(root.textContent).toContain('来源与版本历史');
   expect(root.textContent).toContain('信心 80%');
-  expect(api.inspectGlobalAgent).not.toHaveBeenCalled();
+  expect(api.inspectGlobalAgent).toHaveBeenCalledOnce();
 });
 
 const feedback = (): FeedbackHistoryProjection => ({ books: [
@@ -113,4 +114,66 @@ it.each([false, true])('shows the ordinary two-filter rows and preserves all dev
   else { book.value = 'b'; (book as unknown as MiniElement).dispatchEvent({ type: 'change' }); }
   await settle();
   expect(api.inspectFeedbackHistory).toHaveBeenLastCalledWith(expect.objectContaining({ bookId: 'b', after: null, signal: null, author: null, editor: null }));
+});
+
+// Issue #1410 item 28: a new rule or memory starts on the narrowest scope that is really known — never a guessed Book.
+const BOOK_A = '20000000-0000-4000-8000-00000000000a';
+const BOOK_B = '20000000-0000-4000-8000-00000000000b';
+const signal = (signalId: string, bookId: string) => ({
+  signalId, kind: 'rejected', bookTitle: bookId === BOOK_A ? '甲书' : '乙书', recordedAt: AT, attribution: { authors: [], editors: [] },
+  source: { bookId, decisionId: `${signalId}-decision`, revisionId: `${signalId}-revision`, journalSequence: 1 },
+  memoryCandidate: { editorialDimension: 'typos-and-usage' }, currentEligibility: 'book', eligibility: { decisionId: null }, rewriteDistance: null,
+}) as unknown as EditorialLearningProjection['signals'][number];
+function scoped(books: Array<{ bookId: string; title: string }>, route: { bookId: string } | null, signals: EditorialLearningProjection['signals'] = []) {
+  const { api, renderer } = learning();
+  const base = (): EditorialLearningProjection => ({ basis: '', enabled: true, controlEntries: 2, excludedBooks: [], excludedMaterials: [], signals, items: [],
+    nextSignalOffset: null, nextItemOffset: null, nextExclusionOffset: null, curation: { available: false, disclosure: '', envelope: null, passesUsed: 0, reservedTokens: 0, recentRuns: [] } } as unknown as EditorialLearningProjection);
+  const create = vi.fn(async () => base());
+  Object.assign(api, {
+    inspectGlobalAgent: vi.fn(async () => ({ categories: [{ categoryId: 'typos-and-usage', label: '错别字与规范用语' }], books, directives: [], items: [] })),
+    getBookWorkbenchRoute: vi.fn(async () => route), createEditorialMemory: create,
+  });
+  if (signals.length > 0) api.inspectEditorialLearning.mockImplementation(async () => base());
+  return { api, renderer, create };
+}
+const scopeOf = (root: HTMLElement) => root.querySelector<HTMLSelectElement>('[data-preference-editor="new"] select[aria-label="适用范围"]')!;
+
+it('starts a new ordinary rule on the Book being worked on, saving it for that Book', async () => {
+  const root = host(); const { api, renderer } = scoped([{ bookId: BOOK_A, title: '甲书' }, { bookId: BOOK_B, title: '乙书' }], { bookId: BOOK_B });
+  await mountEditorialMemory(root, renderer, vi.fn());
+  expect(scopeOf(root).value).toBe(BOOK_B);
+  const text = root.querySelector<HTMLTextAreaElement>('[data-preference-editor="new"] textarea')!; text.value = '保留作者的短句';
+  (root.querySelector('[data-preference-editor="new"]') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await settle();
+  expect(api.recordLearningSupervision).toHaveBeenCalledWith(expect.objectContaining({ operation: 'create', scope: { kind: 'book', bookId: BOOK_B } }));
+});
+
+it('keeps 全社 when no Book can be told: no working Book among several, or a working Book not listed', async () => {
+  for (const route of [null, { bookId: '20000000-0000-4000-8000-0000000000ff' }]) {
+    const root = host(); const { renderer } = scoped([{ bookId: BOOK_A, title: '甲书' }, { bookId: BOOK_B, title: '乙书' }], route);
+    await mountEditorialMemory(root, renderer, vi.fn());
+    expect(scopeOf(root).value).toBe('');
+  }
+  const only = host(); const single = scoped([{ bookId: BOOK_A, title: '甲书' }], null);
+  await mountEditorialMemory(only, single.renderer, vi.fn());
+  expect(scopeOf(only).value).toBe(BOOK_A);
+});
+
+it('scopes a developer memory candidate to its sources\' Book, and refuses sources from two Books under it', async () => {
+  setTechnicalLayerVisible(true);
+  const root = host(); const { create, renderer } = scoped([], null, [signal('s1', BOOK_A), signal('s2', BOOK_A), signal('s3', BOOK_B)]);
+  await mountEditorialMemory(root, renderer, vi.fn());
+  const form = root.querySelector('[data-memory-candidate-form]') as unknown as MiniElement;
+  // The mini DOM has no constraint validation; the title is filled below, so the form is valid.
+  Object.assign(form, { reportValidity: () => true });
+  expect(root.querySelector<HTMLSelectElement>('[data-memory-candidate-form] select')!.value).toBe('book');
+  const tick = (id: string) => { const box = root.querySelector<HTMLInputElement>(`[data-memory-source="${id}"]`)!; box.checked = true; (box as unknown as MiniElement).dispatchEvent({ type: 'change' }); };
+  root.querySelector<HTMLInputElement>('[data-memory-candidate-form] input')!.value = '保留作者的短句';
+  tick('s1'); tick('s3');
+  form.dispatchEvent({ type: 'submit' }); await settle();
+  expect(create).not.toHaveBeenCalled();
+  expect(root.querySelector('[role="status"]')!.textContent).toContain('不止一本书');
+  const untick = root.querySelector<HTMLInputElement>('[data-memory-source="s3"]')!; untick.checked = false; (untick as unknown as MiniElement).dispatchEvent({ type: 'change' });
+  tick('s2');
+  form.dispatchEvent({ type: 'submit' }); await settle();
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ signalIds: ['s1', 's2'], applicability: { kind: 'book', bookId: BOOK_A } }));
 });

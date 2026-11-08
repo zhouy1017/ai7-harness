@@ -1,4 +1,6 @@
+import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
+import { effectiveModelReasoningEffort, modelProfileFor } from '../provider/model-profile.js';
 import * as requestAdmissionOperations from './request-admission-operations.js';
 import * as clarificationOperations from './clarification-operations.js';
 import * as runCheckpointOperations from './run-checkpoint-operations.js';
@@ -566,14 +568,9 @@ export class BaselineAnalysisStore {
   }
 
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
-  #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
+  #planDefinition(edits: PlanEdits, _mode?: string): AnalysisKindDefinition {
     if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
-    // A whole-book repeat keeps the admitted claim pipeline; historical range updates retain their frozen contract.
-    if (mode !== undefined && mode !== 'whole-manuscript' && mode !== 'review-again' && this.#definition.factualClaims !== undefined) {
-      const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
-      return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
-        modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };
-    }
+    // New range tasks use the same admitted claim pipeline as whole-book tasks. Frozen plans resolve by digest.
     return this.#factualDefinitionFor(planEditAssuranceLevel(edits));
   }
 
@@ -586,11 +583,19 @@ export class BaselineAnalysisStore {
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
     const row = this.#db.prepare(`SELECT p.canonical_json, p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id
       WHERE p.component = 'plan-envelope' AND t.kind = ? AND json_extract(p.canonical_json, '$.promptContractDigest') = ?
-      AND json_extract(p.canonical_json, '$.basePromptContractDigest') IS NOT NULL LIMIT 1`).get(this.#definition.kind, promptContractDigest);
+      AND (json_extract(p.canonical_json, '$.basePromptContractDigest') IS NOT NULL OR json_extract(p.canonical_json, '$.editorialMemory') IS NOT NULL) LIMIT 1`).get(this.#definition.kind, promptContractDigest);
     if (row !== undefined) {
-      const plan = parseCanonicalJson(asString(row.canonical_json)) as { basePromptContractDigest: string };
-      const member = readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
-      return withProcedureDefinition(this.#baseDefinitionForDigest(plan.basePromptContractDigest), member.document, member.pin);
+      const json = asString(row.canonical_json);
+      requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '计划记录已损坏。');
+      const plan = parseCanonicalJson(json) as { basePromptContractDigest?: string; editorialMemoryBasePromptContractDigest?: string; editorialMemory?: EditorialMemorySnapshot };
+      let definition = this.#baseDefinitionForDigest(plan.basePromptContractDigest ?? plan.editorialMemoryBasePromptContractDigest!);
+      if (plan.basePromptContractDigest !== undefined) {
+        const member = readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
+        definition = withProcedureDefinition(definition, member.document, member.pin);
+      }
+      definition = withEditorialMemoryDefinition(definition, plan.editorialMemory ?? null);
+      requireAnalysis(definition.promptContractDigest === promptContractDigest, 'ANALYSIS_RECORD_INVALID', '计划的编辑记忆契约不一致。');
+      return definition;
     }
     return this.#baseDefinitionForDigest(promptContractDigest);
   }
@@ -632,7 +637,8 @@ export class BaselineAnalysisStore {
     const assurance = this.factualRunAssurance(runRecordId);
     if (assurance?.effectiveLevel !== 'quick') return planned;
     const quick = this.#factualDefinitionFor('quick');
-    return planned.procedureBinding === undefined ? quick : withProcedureDefinition(quick, planned.procedureBinding.document, planned.procedureBinding.pin);
+    return withEditorialMemoryDefinition(planned.procedureBinding === undefined ? quick : withProcedureDefinition(quick, planned.procedureBinding.document, planned.procedureBinding.pin),
+      editorialMemoryDefinition(planned)?.memory ?? null);
   }
 
   procedureForRun(runRecordId: string): import('../../shared/protocol/procedures.js').ProcedureDefinitionDocument | null {
@@ -773,7 +779,10 @@ export class BaselineAnalysisStore {
     // Preserve own fields for callers that spread/rebind the launch. Its policy/live accessors must still read the
     // caller's current connection with their original receiver; the retained reader alone falls back to the Store's.
     const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
-    if (launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) this.#launch = launch;
+    // Editorial memory is read from the Store that owns this ledger, which binds its reader first: a launch carried over from
+    // another (possibly closed) Store never redirects a plan's memory read to that Store's database.
+    const editorialMemory = this.#launch.editorialMemory ?? launch.editorialMemory;
+    if ((launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) && launch.editorialMemory === editorialMemory) this.#launch = launch;
     else {
       const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(launch);
       for (const key of Reflect.ownKeys(descriptors)) {
@@ -782,7 +791,8 @@ export class BaselineAnalysisStore {
         if (descriptor.set !== undefined) descriptor.set = descriptor.set.bind(launch);
       }
       this.#launch = Object.defineProperties({}, { ...descriptors,
-        retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }) as LaunchBinding;
+        ...(retainedPolicyFor === undefined ? {} : { retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }),
+        ...(editorialMemory === undefined ? {} : { editorialMemory: { value: editorialMemory, enumerable: true } }) }) as LaunchBinding;
     }
     this.#refreshClarificationDefinition();
   }
@@ -1532,7 +1542,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25', 'v26'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34', 'v35'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -1994,7 +2004,8 @@ export class BaselineAnalysisStore {
   /** History keeps its intent vocabulary when today's model/policy is unconfigured.
    * Preparation still uses the current definition's admitted modes and update controls. */
   #recordedMode(mode: AnalysisTaskMode) {
-    return (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
+    return this.#definition.modes.find(entry => entry.mode === mode)
+      ?? (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
       ?? this.#definition.mode(mode);
   }
 
@@ -2013,9 +2024,16 @@ export class BaselineAnalysisStore {
    * leaves out-of-scope units unreviewed gets the scope plan, and the baseline kind gets the reuse plan
    * it has always had, from the same untouched function and therefore with the same bytes.
    */
+  #currentEditorialMemory(bookId: string): EditorialMemorySnapshot | null {
+    // Category review keeps its existing exact preference pins, assembled by the same memory builder.
+    return this.#definition.kind.startsWith('editorial-review/') || this.#launch.operationalScope !== 'ordinary-production' ||
+      this.#launch.policy?.providerProcessing.version !== 'v35' ? null : this.#launch.editorialMemory?.(bookId, this.#definition.kind) ?? null;
+  }
+
   #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
     const pin = selectedProcedureForBook(this.#db, bookId, base.kind);
-    return pin === null ? base : ((member) => withProcedureDefinition(base, member.document, member.pin))(resolveProcedureForKind(this.#db, pin, base.kind));
+    return withEditorialMemoryDefinition(pin === null ? base : ((member) => withProcedureDefinition(base, member.document, member.pin))(resolveProcedureForKind(this.#db, pin, base.kind)),
+      this.#currentEditorialMemory(bookId));
   }
 
   #derivePlan(
@@ -2023,7 +2041,7 @@ export class BaselineAnalysisStore {
     selectedRange: BaselineAnalysisSelectedRange | null,
     manifest: CoverageManifestProjection,
     predecessor: ReusePlanPredecessor | ScopePlanPredecessor | null,
-    definition = this.#selectedDefinition(this.#definition, manifest.manuscript.bookId),
+    definition = this.#selectedDefinition(this.#planDefinition(NO_PLAN_EDITS, mode), manifest.manuscript.bookId),
   ): AnalysisPlanRecord {
     const prior = predecessor === null ? null : this.#revisionBody(this.#revisionRowById(predecessor.revisionId));
     const priorDefinition = prior === null ? null : this.definitionForDigest(String((prior.bindingPin as Record<string, unknown>).promptContractDigest));
@@ -2035,7 +2053,7 @@ export class BaselineAnalysisStore {
         procedureCompatible,
         kind: this.#definition.kind,
         contractVersion: this.#definition.contractVersion,
-        schemaDigest: this.#definition.schemaDigest,
+        schemaDigest: this.#definition.kind === FACTUAL_REVIEW_KIND ? definition.schemaDigest : this.#definition.schemaDigest,
         ...(this.#definition.contractIdentity?.categoryConfiguration === undefined ? {} : { categoryConfigurationIdentity: canonicalJson(this.#definition.contractIdentity.categoryConfiguration) }),
         mode,
         recompute: this.#definition.mode(mode).recompute,
@@ -2062,7 +2080,9 @@ export class BaselineAnalysisStore {
     const intentDraftVersionId = isRecord(record) && typeof record.intentDraftVersionId === 'string' && UUID_PATTERN.test(record.intentDraftVersionId)
       ? record.intentDraftVersionId : null;
     requireAnalysis(isRecord(record) && (record.intentDraftVersionId === undefined || intentDraftVersionId !== null) &&
-      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal : isDraftGoal(goal) && record.goal === goal),
+      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal ||
+        this.#definition.kind === FACTUAL_REVIEW_KIND && goal === FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode)?.goal
+        : isDraftGoal(goal) && record.goal === goal),
     'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
@@ -3448,6 +3468,10 @@ export class BaselineAnalysisStore {
     // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
     const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
     const blocks = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
+    const factualRange = this.#definition.kind === FACTUAL_REVIEW_KIND && input.selectedRange !== null;
+    const priorManifest = !factualRange || intent.predecessorRevisionId === null ? null
+      : this.#planPredecessor(this.#revisionRowById(intent.predecessorRevisionId)).manifest;
+    const positions = new Map(blocks.map(block => [block.blockId, block.position]));
     const manifest = deriveCoverageManifest({
       bookId: checkpoint.bookId,
       manuscriptId: checkpoint.manuscriptId,
@@ -3456,6 +3480,9 @@ export class BaselineAnalysisStore {
       revisionLabel: checkpoint.revisionLabel,
       revisionDigest: checkpoint.revisionDigest,
       blocks,
+      ...(factualRange ? { exactRange: input.selectedRange!, priorRangeBoundaries: priorManifest?.units
+        .filter(unit => unit.overlapBlockIds.length === 0)
+        .flatMap(unit => { const position = positions.get(unit.blockIds[0]!); return position === undefined ? [] : [position]; }) ?? [] } : {}),
     });
     const live = this.#launch.live;
     const production = live !== null && live.scope === 'ordinary-production' ? live : null;
@@ -3471,7 +3498,14 @@ export class BaselineAnalysisStore {
       if (currentId !== null) validateProcedureEdit(resolveProcedureDefinition(this.#db, currentId, currentPreinstalledVersion(currentId)).document,
         { procedureId: null, basedOn: selected, title: document.title, editorInstruction: document.editorInstruction, stages: document.stages });
     }
-    const definition = selected === undefined || document === null ? baseDefinition : withProcedureDefinition(baseDefinition, document, selected);
+    const unwrappedDefinition = selected === undefined || document === null ? baseDefinition : withProcedureDefinition(baseDefinition, document, selected);
+    // Plan edits keep their original memory; a newly initiated task selects current enabled rules.
+    const firstEnvelope = ordinal === 1 ? undefined : this.#db.prepare(
+      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'plan-envelope'",
+    ).get(taskIntentId);
+    const memory = ordinal === 1 ? this.#currentEditorialMemory(checkpoint.bookId)
+      : firstEnvelope === undefined ? null : (parseCanonicalJson(asString(firstEnvelope.canonical_json)) as { editorialMemory?: EditorialMemorySnapshot }).editorialMemory ?? null;
+    const definition = withEditorialMemoryDefinition(unwrappedDefinition, memory);
     if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
     if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null) {
       requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
@@ -3599,7 +3633,9 @@ export class BaselineAnalysisStore {
               : { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
-        ? { kind: live.route, model: live.model, endpoint: live.endpoint }
+        ? { kind: live.route, model: live.model, endpoint: live.endpoint,
+            ...(effectiveModelReasoningEffort(modelProfileFor(live.route, live.model)) === null ? {} :
+              { reasoningEffort: effectiveModelReasoningEffort(modelProfileFor(live.route, live.model)) }) }
         : this.#route === null
           ? { kind: 'none', reason: 'j04-model-adapter-control-absent' }
           : {
@@ -3640,8 +3676,8 @@ export class BaselineAnalysisStore {
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};
-    const clarificationPin = definition.clarificationBase === undefined ? {} : {
-      clarificationBasePromptContractDigest: definition.clarificationBase.promptContractDigest,
+    const clarificationPin = unwrappedDefinition.clarificationBase === undefined ? {} : {
+      clarificationBasePromptContractDigest: unwrappedDefinition.clarificationBase.promptContractDigest,
     };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
@@ -3684,6 +3720,7 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
+      ...(memory === null ? {} : { editorialMemory: memory, editorialMemoryBasePromptContractDigest: unwrappedDefinition.promptContractDigest }),
       ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest }),
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,

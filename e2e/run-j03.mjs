@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -540,9 +540,8 @@ async function createEmptyBook(renderer, cancellation) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'cross-book-form');
   await fill(renderer, '#empty-book-title', 'J-03 路由边界图书', 'cross-book-title');
   await fill(renderer, '#empty-book-number', 'J03-ROUTE-BOUNDARY', 'cross-book-number');
-  await click(renderer, '复核创建', 'cross-book-review');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'cross-book-review-ready');
   cancellation.throwIfRequested();
+  // 新建图书 creates the Book in one step (Issue #1410 item 20): no review page between.
   await click(renderer, '新建图书', 'cross-book-commit');
   await waitFor(renderer, `document.querySelector('.book-overview[data-manuscript-state="empty"]')`, 'cross-book-created');
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
@@ -560,7 +559,7 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   cancellation.throwIfRequested();
   const before = await renderer.evaluate(CAPTURE_JOURNAL_EDIT);
   requireJourney(before !== null, 'edit-scope');
-  await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
+  await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
   await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
@@ -1091,11 +1090,12 @@ async function main() {
       full.terms['用量上限'] === '不发送，没有模型用量' && full.terms['所需时间'] === '暂无可靠估计' &&
       full.terms['预算上限'] === '未设置任务预算上限' && full.terms['账户限额'] === '未知 · 提供方未返回' &&
       JSON.stringify(full.outcomes) === JSON.stringify(['一条运行记录：只记录这次运行授权，不派发，不产出重点清单']) &&
+      // 不会做 shows on the technical layer this Journey runs with (Issue #1413 cluster 4 hides it in ordinary mode).
       JSON.stringify(full.notDo) === JSON.stringify(['不会开始运行（只记录）', '不会直接修改稿件', '不导出或发布', '不存里程碑版本', '不读这本书以外的内容']) &&
       JSON.stringify(full.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(full.adaptable) === JSON.stringify(['无']) &&
       JSON.stringify(full.askFirst) === JSON.stringify(['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作']) &&
-      full.controls['default-rule']?.text === '设为快速开始默认…' && full.controls['default-rule'].disabled === true &&
+      full.controls['default-rule']?.text === '设为快速开始默认' && full.controls['default-rule'].disabled === true &&
       ['查看技术详情', '记录信息'].includes(full.controls.technical?.text) && full.footer === '计划说明，不是运行授权', 'drawer-full-plan', full);
     const technical = full.technical;
     requireJourney(technical['task-intent'] === prepared.taskIntent.taskIntentId &&
@@ -1252,7 +1252,7 @@ async function main() {
       blockedBoundary?.planEnvelopeDigest === authorized.planEnvelope.digest && blockedBoundary?.authorizationId === authorized.authorization.authorizationId &&
       blockedBoundary?.runRecordId === authorized.runRecord.runRecordId && blockedBoundary?.runAuthority === 'record-only-no-dispatch' &&
       blockedBoundary?.launchPolicy?.integrityState === 'verified' && blockedBoundary?.launchPolicy?.operationalScope === 'development-ci' &&
-      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v25' &&
+      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v26' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v1' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
       blockedBoundary?.launchPolicy?.providerProcessing?.liveTransmissionAllowed === false &&

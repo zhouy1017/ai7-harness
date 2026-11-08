@@ -368,6 +368,8 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     instruction.value = '';
     options.setStatus(promotion.label, 'success');
     paint(promotion.workspace);
+    // Submitting opens the new 修改建议 in the manuscript in the same step (Issue #1410 item 9); 在稿件中查看 stays if it is left.
+    options.openMarks(promotion);
   }, words.promoteFailed);
 
   const runDiscard = (proposalSetId: string): Promise<void> => act(async () => {

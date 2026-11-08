@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
-import { FastRoleExecutionOwner, fastRoleLiveRoutes, fastRoleRouteRefusal, type FastRoleLiveRoutes } from '../../src/service/fast-role/fast-role-execution.js';
+import { FastRoleExecutionOwner, productionFastRoleRoutes, fastRoleLiveRoutes, fastRoleRouteRefusal, type FastRoleLiveRoutes } from '../../src/service/fast-role/fast-role-execution.js';
 import { FastRoleRequests, fastInteractionRoutes, polishWordsOf, regenerationRegionOf } from '../../src/service/fast-role/fast-role-suggestions.js';
 import { EDITORIAL_POLISH_PROMPT_CONTRACT, buildEditorialPolishMessage } from '../../src/service/fast-role/polish-contract.js';
 import { CONFLICT_REGENERATE_PROMPT_CONTRACT, buildConflictRegenerateMessage } from '../../src/service/fast-role/conflict-regenerate-contract.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
 import { proxyAwareFetch } from '../../src/service/provider/proxy-setting.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
@@ -320,4 +320,33 @@ describe('基于当前稿件重新生成建议 on the live route (provider-free)
     expect(drafted.draft!.resolutions[unitIndex]).toEqual({ resolution: 'edited', text: AUTHORED_REGENERATION });
     expect(drafted.draft!.regeneration?.unitIndex).toBe(unitIndex);
   });
+});
+
+it('uses Book memory in actual production polish and conflict regeneration', async () => {
+  const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
+  const connection = store.saveModelServiceConnection('合成记忆连接', null, 'ready', binding.route);
+  const configured = { ...binding, credentialReference: connection.credentialReference };
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+    live: { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+  store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'book', bookId: book.bookId },
+    categoryId: 'style-and-format', text: '本书保留合成叙述节奏。', effect: 'guide' });
+  const calls: StubCall[] = [];
+  let answer = AUTHORED_POLISH_ANSWER;
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+    { scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => answer) }, () => policy, () => connection.credentialReference,
+    { resolve: async () => 'synthetic-memory-fast' }) });
+  const fast = new FastRoleRequests(owner, store);
+  try {
+    const polish = await settled(fast, fast.polish(book.bookId, { selection: polishSelectionOf(store, book) }).taskId);
+    expect(polish.kind === 'editorial-polish' && polish.polish.state).toBe('suggested');
+    const { markId } = constructSample1Conflict(store, book);
+    const conflict = conflictOf(store, book, markId);
+    answer = AUTHORED_REGENERATION_ANSWER;
+    const regenerated = await settled(fast, fast.regenerate({ manuscriptId: book.manuscriptId, branchId: book.branchId, markId,
+      basisDigest: conflict.basisDigest, unitIndex: conflictUnitIndex(conflict) }).requestId);
+    expect(regenerated.kind === 'conflict-regenerate' && regenerated.regeneration.outcome).toBe('drafted');
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(JSON.parse(call.body).messages[0].content).toContain('本书保留合成叙述节奏。');
+  } finally { owner.dispose(); await fast.settled(); }
 });

@@ -1,4 +1,5 @@
 import type { WritingTaskMaterialProjection, WritingTaskProjection } from '../shared/protocol.js';
+import { technicalLayerVisible } from './technical-layer.js';
 
 /**
  * The words of 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, plan slice S84a; editor-surfaces §9; V2-UX-DELIV-007, KB-004).
@@ -38,8 +39,22 @@ export const WRITING_FIELD_MOST = { audience: MAX_WRITING_AUDIENCE_GRAPHEMES, ch
 export function writingFieldTooLong(key: keyof typeof WRITING_FIELD_MOST): string {
   return `${key === 'requirements' ? '其他要求' : WRITING_FIELD_LABELS[key]}最多 ${WRITING_FIELD_MOST[key]} 个字，只能写在一行里。`;
 }
-/** editor-surfaces §9's 四行后果, in the 新建审阅 sheet's terms. */
+/** editor-surfaces §9's consequence rows, in the 新建审阅 sheet's terms. */
 export const WRITING_CONSEQUENCE_TERMS = ['会读取', '会发送', '不会做', '费用'] as const;
+
+/**
+ * The sheet's consequence rows from the service's words. 不会做 is the technical layer's alone (ADR 0096 §4.2, Issue
+ * #1413 cluster 4): ordinary mode reads 会读取 · 会发送 · 费用.
+ */
+export function writingConsequenceRows(consequences: WritingTaskProjection['consequences']): ReadonlyArray<readonly [string, string]> {
+  const [read, send, notDo, cost] = WRITING_CONSEQUENCE_TERMS;
+  return [
+    [read, consequences.read],
+    [send, consequences.send],
+    ...(technicalLayerVisible ? [[notDo, consequences.notDo] as const] : []),
+    [cost, consequences.cost],
+  ];
+}
 export const WRITING_ACTIONS = {
   open: '新建文档…',
   plan: '先看计划',

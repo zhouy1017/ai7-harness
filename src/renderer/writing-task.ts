@@ -13,7 +13,6 @@ import { taskPlanQuickStartFellBack } from './task-drawer-labels.js';
 import { acknowledgeTaskMaterialRemovals, reconcileTaskMaterialSelection, similarMaterialsField } from './task-material-selection.js';
 import {
   WRITING_ACTIONS,
-  WRITING_CONSEQUENCE_TERMS,
   WRITING_EXEMPLAR_PICK_TYPE,
   WRITING_FIELD_HINTS,
   WRITING_FIELD_LABELS,
@@ -25,6 +24,7 @@ import {
   WRITING_REFERENCE_TERMS,
   WRITING_STATUS,
   WRITING_TYPE_LEGEND,
+  writingConsequenceRows,
   writingDraftedLine,
   writingFieldTooLong,
   writingMaterialLabel,
@@ -55,9 +55,18 @@ const GRAPHEMES = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 export interface WritingTaskSurface {
   /** Read 新建文档 · 写作任务 again and paint it; a Run under way is followed until it settles. */
   refresh(): void;
-  open(typeId: string): void;
+  /** The sheet for one type, its 稿件题目 already written when the editor wrote it first (Issue #1404). */
+  open(typeId: string, title?: string): void;
   destroy(): void;
 }
+
+/**
+ * The 稿件题目 an editor wrote before AI 写作 began (Issue #1404), by Book and type, for as long as the window lives: the draft is
+ * made under it, and opened by itself, once the Task has written it.
+ */
+const rememberedTitles = new Map<string, string>();
+const titleKey = (bookId: string, typeId: string): string => `${bookId}:${typeId}`;
+const MAX_DOCUMENT_TITLE = 80;
 
 type WritingApi = Partial<Pick<RendererApi, 'inspectTaskPlan' | 'authorizeWritingTask'>> & Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'> & Partial<Pick<RendererApi, 'searchReferableMaterials'>>;
 
@@ -73,6 +82,12 @@ export interface MountWritingTaskOptions {
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void>;
   /** A document was made: 交付 · 生产文档 and 图书交付包 read again. */
   documentsChanged(): void;
+  /** The 稿件题目 offered for a type until the editor writes their own (Issue #1404). */
+  suggestTitle?(typeId: string): string;
+  /** 稿件 hosts the sheet (Issue #1403): no opener of its own, since 新建 / 导入衍生稿件 opens it with its title and type. */
+  embedded?: boolean;
+  /** Whether a Task is under way or a draft waits to be opened, for the host's own line. */
+  onState?(state: { underWay: boolean; drafted: number }): void;
 }
 
 /** A Run of the writing kind still going on: the page reads again until it settles. */
@@ -81,6 +96,9 @@ const POLL_MS = 400;
 
 /** The sheet while it is open: what the editor has chosen and written so far, and the service's last refusal. */
 interface Sheet {
+  /** 稿件题目, the sheet's first field (Issue #1404), and whether the editor wrote it rather than took the suggestion. */
+  title: string;
+  titleEdited: boolean;
   typeId: string | null;
   audience: string;
   channel: string;
@@ -120,6 +138,12 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   let sheet: Sheet | null = null;
   let busy = false;
   const draftTitles = new Map<string, string>();
+  // The types whose draft this surface opens by itself once written (Issue #1403): the editor began their AI 写作 here. Each
+  // remembers the draft already waiting when it began, so only the new one opens.
+  const autoOpen = new Map<string, string | null>();
+  const awaitDraft = (typeId: string): void => {
+    autoOpen.set(typeId, projection?.types.find((type) => type.typeId === typeId)?.drafted?.revisionId ?? null);
+  };
   let poll: number | null = null;
   const section = el('section', 'writing-task');
   root.append(section);
@@ -163,7 +187,11 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       : null);
     section.replaceChildren();
     section.dataset['writingState'] = page.task?.state ?? 'none';
-    const heading = el('h3', undefined, WRITING_HEADING);
+    const draftedCount = page.types.filter((type) => type.drafted !== null).length;
+    options.onState?.({ underWay: UNDER_WAY.has(page.task?.state ?? ''), drafted: draftedCount });
+    // An embedded surface with nothing under way and nothing written says nothing (Issue #1403): its sheet opens from 新建.
+    section.hidden = options.embedded === true && page.task === null && draftedCount === 0 && sheet === null;
+    const heading = el('h3', undefined, options.embedded === true ? 'AI 写作' : WRITING_HEADING);
     heading.tabIndex = -1;
     section.append(heading);
     if (page.unavailable !== null) heading.append(' · ', el('span', 'writing-unavailable', page.unavailable));
@@ -194,9 +222,9 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         const title = el('input');
         title.setAttribute('aria-label', '草稿题目');
         title.dataset['writingField'] = `draft-title-${type.drafted.revisionId}`;
-        title.placeholder = '文档题目（可选）';
-        title.maxLength = 80;
-        title.value = draftTitles.get(type.drafted.revisionId) ?? '';
+        title.placeholder = '稿件题目（可选）';
+        title.maxLength = MAX_DOCUMENT_TITLE;
+        title.value = draftTitles.get(type.drafted.revisionId) ?? rememberedTitles.get(titleKey(page.bookId, type.typeId)) ?? '';
         title.addEventListener('input', () => draftTitles.set(type.drafted!.revisionId, title.value));
         item.append(title);
         const open = action(WRITING_ACTIONS.openDraft, 'primary', 'open-draft', () => void openDraft(type, title.value));
@@ -206,9 +234,11 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       }
       section.append(list);
     }
-    if (sheet === null) {
+    if (sheet === null && options.embedded === true) {
+      // Nothing to open here: 新建 / 导入衍生稿件 opens the sheet.
+    } else if (sheet === null) {
       const opener = action(WRITING_ACTIONS.open, 'secondary', 'new', () => {
-        sheet = { typeId: null, audience: '', channel: '', requirements: '', materialIds: [], problem: null };
+        sheet = newSheet(null);
         paint('legend');
       });
       opener.disabled = busy || page.unavailable !== null;
@@ -218,6 +248,23 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       section.append(sheetNode(page, sheet));
     }
     if (keep !== null) section.querySelector<HTMLElement>(keep)?.focus();
+    // 创建后直接打开 (Issue #1403): a draft the editor began here is made a document under its title and opened.
+    if (!busy) {
+      const ready = drafted.find((type) => autoOpen.has(type.typeId) && autoOpen.get(type.typeId) !== type.drafted.revisionId);
+      if (ready !== undefined) {
+        autoOpen.delete(ready.typeId);
+        void openDraft(ready, draftTitles.get(ready.drafted.revisionId) ?? rememberedTitles.get(titleKey(page.bookId, ready.typeId)) ?? '');
+      }
+    }
+  }
+
+  function newSheet(typeId: string | null, title?: string): Sheet {
+    const written = title !== undefined && title.trim() !== '';
+    return {
+      title: written ? title : typeId === null ? '' : options.suggestTitle?.(typeId) ?? '',
+      titleEdited: written,
+      typeId, audience: '', channel: '', requirements: '', materialIds: [], problem: null,
+    };
   }
 
   /** The sheet: types, references, the editor's words, the four rows, and 先看计划 / 快速开始 / 取消. */
@@ -225,6 +272,26 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const form = el('form', 'writing-sheet');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
+    // 稿件题目 first (Issue #1404): the name the draft is made under, offered for the type until the editor writes their own.
+    const titleWrapper = el('div', 'writing-field writing-title-field');
+    const titleId = uid('title');
+    const titleLabel = el('label', undefined, '稿件题目');
+    titleLabel.htmlFor = titleId;
+    const titleInput = el('input');
+    titleInput.type = 'text';
+    titleInput.id = titleId;
+    titleInput.dataset['documentField'] = 'title';
+    titleInput.dataset['writingField'] = 'title';
+    titleInput.maxLength = MAX_DOCUMENT_TITLE;
+    titleInput.value = state.title;
+    titleInput.disabled = busy;
+    titleInput.addEventListener('input', () => {
+      state.title = titleInput.value;
+      state.titleEdited = titleInput.value.trim() !== '';
+      state.problem = null;
+    });
+    titleWrapper.append(titleLabel, titleInput);
+    form.append(titleWrapper);
     const types = el('fieldset', 'writing-types');
     const legend = el('legend', undefined, WRITING_TYPE_LEGEND);
     legend.tabIndex = -1;
@@ -242,6 +309,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       input.disabled = busy || !type.prepare.allowed;
       input.addEventListener('change', () => {
         state.typeId = type.typeId;
+        if (!state.titleEdited) state.title = options.suggestTitle?.(type.typeId) ?? state.title;
         state.problem = null;
         paint(`input[name="writing-type"][value="${CSS.escape(type.typeId)}"]`);
       });
@@ -292,13 +360,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     };
     form.append(field('audience'), field('channel'), field('requirements'));
     const consequences = el('dl', 'writing-consequences');
-    const [read, send, notDo, cost] = WRITING_CONSEQUENCE_TERMS;
-    consequences.append(
-      el('dt', undefined, read), el('dd', undefined, page.consequences.read),
-      el('dt', undefined, send), el('dd', undefined, page.consequences.send),
-      el('dt', undefined, notDo), el('dd', undefined, page.consequences.notDo),
-      el('dt', undefined, cost), el('dd', undefined, page.consequences.cost),
-    );
+    for (const [term, text] of writingConsequenceRows(page.consequences)) consequences.append(el('dt', undefined, term), el('dd', undefined, text));
     form.append(consequences);
     if (state.problem !== null) {
       const problem = el('p', 'field-note writing-problem', state.problem);
@@ -414,6 +476,9 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       paint(`[data-writing-field="${tooLong}"]`);
       return;
     }
+    const title = state.title.trim();
+    if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
+    else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
     busy = true;
     options.setStatus(WRITING_STATUS.preparing, 'busy');
     paint(null);
@@ -445,7 +510,16 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       if (rule === null || ref === null) {
         options.setStatus(WRITING_STATUS.prepared, 'success');
         paint(null);
-        if (ref !== null) { if (preview) options.openPlan(ref); else { await startPreparedTask(api, 'writing', ref); projection = await api.inspectWritingTask(); paint(null); } }
+        if (ref !== null) {
+          if (preview) options.openPlan(ref);
+          else {
+            awaitDraft(state.typeId);
+            await startPreparedTask(api, 'writing', ref);
+            projection = await api.inspectWritingTask();
+            paint(null);
+            follow();
+          }
+        }
         return;
       }
       if (planEnvelopeDigest === null) {
@@ -472,6 +546,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     options.setStatus(writingQuickStarting(rule.name), 'busy');
     paint(null);
     let result: Awaited<ReturnType<WritingApi['quickStartWritingTask']>>;
+    const typeId = projection?.task?.typeId ?? null;
+    if (typeId !== null) awaitDraft(typeId);
     try {
       result = await api.quickStartWritingTask({ taskIntentId: ref, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
     } catch (error) {
@@ -508,6 +584,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     try {
       const created = await api.createWritingDraft({ revisionId: type.drafted.revisionId, ...(title.trim() === '' ? {} : { title }) });
       busy = false;
+      rememberedTitles.delete(titleKey(created.writing.bookId, type.typeId));
       if (destroyed) return;
       projection = created.writing;
       options.documentsChanged();
@@ -523,8 +600,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
 
   return {
     refresh,
-    open: (typeId) => {
-      sheet = { typeId, audience: '', channel: '', requirements: '', materialIds: [], problem: null };
+    open: (typeId, title) => {
+      sheet = newSheet(typeId, title);
       if (projection !== null) paint('legend');
       else refresh();
     },

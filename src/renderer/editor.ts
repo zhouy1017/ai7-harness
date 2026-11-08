@@ -9,6 +9,7 @@ import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.
 import { EDITOR_MOTION_META, editorMotionPlugin } from './editor-motion.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import { observeSourceImages, sourceBlockDom, sourceBlockView, sourceNodeKind } from './editor-source.js';
+import { DEFAULT_EDITOR_INPUT_MODE, READING_REVISION_HINT, readingRevisionBlocksInput, readingRevisionKey, type EditorInputMode } from './editor-input-mode.js';
 import {
   bufferAdmits,
   bufferReachedLimit,
@@ -85,6 +86,9 @@ export interface BoundedEditor {
    */
   selectedRange(): EditorSelectedRange;
   setOperationLocked(locked: boolean): void;
+  /** 阅读与修订 or 自由直接编辑 (Issue #1411): what a key, a paste, a cut or a drop does to the text. */
+  inputMode(): EditorInputMode;
+  setInputMode(mode: EditorInputMode): void;
   /** Editing Protection Mode as it stands, or `null` (Issue #951). */
   protection(): ProtectionView | null;
   /** 重试写入 (DUR-009): the same exact buffered edits again, at once; never a new or duplicate journal entry. */
@@ -127,6 +131,13 @@ interface MountOptions {
   onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
   /** A different window was loaded: anything anchored to the blocks that were on screen is gone. */
   onWindowLoaded?(): void;
+  /** 阅读与修订模式 (Issue #1411): the mode the text opens in; 阅读与修订 unless the caller says otherwise. */
+  initialInputMode?: EditorInputMode;
+  /**
+   * A character or Enter over selected words while the text is guarded: the selection's revision composer opens (`true`), or
+   * the editor says the guard's hint (`false`).
+   */
+  onRevisionIntent?(): boolean;
 }
 
 interface BaselineBlock {
@@ -142,6 +153,8 @@ const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 const CARET_NAVIGATION_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end']);
 /** The transaction meta of the editor's own Enter split or Backspace merge, the one structural change it admits. */
 const STRUCTURE_META = 'ai7-structure';
+/** A change the editor asked for by a command of its own (a paragraph style), which 阅读与修订模式 lets through. */
+const EXPLICIT_EDIT_META = 'ai7-explicit-edit';
 
 function graphemes(text: string): string[] {
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
@@ -472,6 +485,15 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     if (shown.journalSequence !== lastDurable.sequence) lastDurable = { sequence: shown.journalSequence, durableAt: new Date().toISOString() };
   };
 
+  let inputMode: EditorInputMode = options.initialInputMode ?? DEFAULT_EDITOR_INPUT_MODE;
+  const guarded = (): boolean => inputMode === 'reading-revision';
+  let hintAt = 0;
+  const sayGuardHint = (): void => {
+    const now = Date.now();
+    if (now - hintAt < 1_500) return;
+    hintAt = now;
+    options.onAnnouncement(READING_REVISION_HINT, 'busy');
+  };
   const isEditable = (): boolean =>
     !operationLocked && deferredNavigationContinuity === undefined &&
     ((composing || view?.composing) || (!interrupted && (protection === undefined ? !retryRequired : protection.readOnly === null)));
@@ -529,6 +551,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   const candidateIsBounded = (transaction: Transaction): boolean => {
     if (!transaction.docChanged) return true;
+    // 阅读与修订模式 (Issue #1411): whatever reached the text past the key guard — an input method's words, a drag — is refused,
+    // and the view draws the durable text again.
+    if (guarded() && transaction.getMeta(EXPLICIT_EDIT_META) !== true) {
+      queueMicrotask(sayGuardHint);
+      return false;
+    }
     if (transaction.getMeta(STRUCTURE_META) === true) return isEditable();
     const candidate = transaction.doc;
     if (structures.length > 0 ? !pendingStructureAdmits(transaction) : candidate.childCount !== baselines.size) return false;
@@ -574,6 +602,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     baselineText: (blockId) => baselines.get(blockId)?.text,
     active: () => activeMark,
     linked: () => linkedMark,
+    locked: () => windowProjection.aiLockedBlockIds,
     generation: () => baselines,
   });
   const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
@@ -589,6 +618,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     view.setProps({ editable: isEditable });
     view.dom.setAttribute('aria-readonly', isEditable() ? 'false' : 'true');
     view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
+    view.dom.dataset['inputMode'] = inputMode;
     // Whether an input method's composition is open in the text: a key command waits on it (#579).
     view.dom.dataset['composing'] = composing ? 'true' : 'false';
     if (deferredNavigationContinuity) view.dom.setAttribute('tabindex', '0');
@@ -668,9 +698,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     const run = (): void => {
       pendingRestore = undefined;
       if (destroyed) return;
-      const scrollId = selectionRestored ? continuity?.scrollAnchor.blockId : focusBlockId;
+      // Paging keeps the paragraph being read where it stood on screen even while the caret waits off-window
+      // (Issue #1413 cluster 2): the next window overlaps this one by half, so the reading continues without a jump.
+      const keepsAnchor = continuity !== undefined && (selectionRestored || deferMissing)
+        && view.dom.querySelector(`[data-block-id="${continuity.scrollAnchor.blockId}"]`) !== null;
+      const scrollId = keepsAnchor ? continuity?.scrollAnchor.blockId : focusBlockId;
       const target = scrollId ? view.dom.querySelector<HTMLElement>(`[data-block-id="${scrollId}"]`) : undefined;
-      if (target && continuity && selectionRestored) {
+      if (target && continuity && keepsAnchor) {
         const containerTop = options.scrollContainer.getBoundingClientRect().top;
         options.scrollContainer.scrollTop += target.getBoundingClientRect().top - containerTop - continuity.scrollAnchor.offset;
       } else if (target) {
@@ -1049,6 +1083,17 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
             ? event.metaKey && !event.ctrlKey
             : event.ctrlKey && !event.metaKey;
         const key = event.key.toLocaleLowerCase('en-US');
+        // 阅读与修订模式 (Issue #1411): a key that would write — a character, Enter, a deletion, cut or paste — never reaches the
+        // text. Over selected words a character or Enter opens the selection's revision instead.
+        if (guarded() && !currentView.composing && !event.isComposing) {
+          const intent = readingRevisionKey(event, modifier);
+          if (intent !== null) {
+            event.preventDefault();
+            if (intent === 'revise' && !currentView.state.selection.empty && options.onRevisionIntent?.() === true) return true;
+            sayGuardHint();
+            return true;
+          }
+        }
         if ((currentView.composing || event.isComposing) && (modifier || key === 'pageup' || key === 'pagedown')) {
           event.preventDefault();
           options.onAnnouncement('输入法组合尚未结束，命令已暂缓。', 'busy');
@@ -1088,6 +1133,32 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           return false;
         }
         return false;
+      },
+      // 阅读与修订模式 (Issue #1411): paste, cut, drop and any other input that writes are refused with the guard's hint; copy,
+      // selection and find are untouched.
+      beforeinput(_currentView, event) {
+        if (!guarded() || !readingRevisionBlocksInput((event as InputEvent).inputType ?? '')) return false;
+        event.preventDefault();
+        sayGuardHint();
+        return true;
+      },
+      paste(_currentView, event) {
+        if (!guarded()) return false;
+        event.preventDefault();
+        sayGuardHint();
+        return true;
+      },
+      cut(_currentView, event) {
+        if (!guarded()) return false;
+        event.preventDefault();
+        sayGuardHint();
+        return true;
+      },
+      drop(_currentView, event) {
+        if (!guarded()) return false;
+        event.preventDefault();
+        sayGuardHint();
+        return true;
       },
       mousedown(currentView, event) {
         if (!deferredNavigationContinuity) return false;
@@ -1182,7 +1253,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       const found = findBlockPosition(view.state.doc, point.blockId);
       if (!found || !['paragraph', 'heading', 'title', 'image'].includes(found.node.type.name)) return;
       view.dispatch(view.state.tr.setNodeMarkup(found.position, ai7Schema.nodes[found.node.type.name === 'image' ? 'image' : kind],
-        { ...found.node.attrs, level, sourceKind: kind }).setMeta(STRUCTURE_META, true));
+        { ...found.node.attrs, level, sourceKind: kind }).setMeta(STRUCTURE_META, true).setMeta(EXPLICIT_EDIT_META, true));
       structures.push({ kind: 'style', blockId: point.blockId, blockKind: kind, level, preText: found.node.textContent,
         windowStartBlockId: String(view.state.doc.firstChild!.attrs['blockId']), held: null });
       announceState();
@@ -1302,6 +1373,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         if (node.textContent !== baselines.get(String(node.attrs['blockId']))?.text || retryPrepared?.input.blockId === node.attrs['blockId']) affected.push(node.textContent);
       });
       return affected.join('\n\n');
+    },
+    inputMode: () => inputMode,
+    setInputMode: (mode) => {
+      if (destroyed || mode === inputMode) return;
+      inputMode = mode;
+      applyEditableState();
+      announceState();
     },
     setOperationLocked: (locked) => {
       if (locked) {
