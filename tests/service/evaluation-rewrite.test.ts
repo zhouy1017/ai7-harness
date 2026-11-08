@@ -855,3 +855,110 @@ describe('the market section and 按我的评分重写评语 over the real store
     expect(refused).toBe('SCHEMA_INVALID:分析任务账本表（修订版 62） analysis_task_intents 结构不兼容。');
   }, 300_000);
 });
+
+/**
+ * One 按我的修改重新生成 Run over the real store and execution owner whose model answers every unit with the authored
+ * observations and the synthesis with `answer` — here deliberately rewriting what the editor locked (Issue #1412).
+ */
+async function answeredRewrite(store: EditorialStore, bookId: string, recordId: string, answer: unknown): Promise<void> {
+  let contract = '';
+  let synthesisContract = '';
+  let observationSet = '';
+  const units = new Map<number, { digest: string; requestDigest: string }>();
+  const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const unit = parseEvaluationRewriteUnitMessageHeader(message);
+    if (request.stage === 'units' && unit !== null) {
+      const expected = units.get(unit.ordinal);
+      if (expected === undefined || unit.unitDigest !== expected.digest || request.contractDigest !== contract || request.requestDigest !== expected.requestDigest) return undefined;
+      return { kind: 'unit-result', text: JSON.stringify({ schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
+        unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! }), usage: { inputTokens: 100, outputTokens: 50 } };
+    }
+    const synthesis = parseEvaluationRewriteSynthesisMessageHeader(message);
+    if (request.stage === 'cross-unit-reduction' && synthesis !== null && synthesis.setDigest === observationSet && request.contractDigest === synthesisContract) {
+      return { kind: 'unit-result', text: JSON.stringify(answer), usage: { inputTokens: 2600, outputTokens: 560 } };
+    }
+    if (request.stage === 'run-report-reflection' && parseRunReportReflectionMessageHeader(message) !== null) {
+      return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+    }
+    return undefined;
+  });
+  try {
+    const prepared = prepareRewrite(store, bookId, recordId, captured.policy);
+    const manifest = prepared.coverageManifest!;
+    contract = prepared.planEnvelope!.promptContractDigest;
+    observationSet = evaluationRewriteObservationSetDigest(manifest.units.map((unit) => ({
+      unitOrdinal: unit.ordinal,
+      result: { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! },
+    })));
+    const authorized = store.authorizeEvaluationRewrite(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    synthesisContract = authorized.ledger.definition.crossUnit!.promptContractDigest;
+    for (const unit of manifest.units) units.set(unit.ordinal, { digest: unit.digest, requestDigest: authorized.ledger.definition.requestDigest(unit.ordinal, unit.digest) });
+    captured.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
+    await captured.owner.whenIdle();
+  } finally {
+    await captured.owner.dispose();
+    captured.assertMatched();
+  }
+}
+
+describe('🔒 锁定 evaluation dimensions through successive regenerations (Issue #1412)', () => {
+  it('keeps every locked 评语, 总评 and list exactly as the editor left them, in the proposal and in the adopted entry, over two rounds', async () => {
+    let bookId = '';
+    let record!: EvaluationRecordProjection;
+    await withAdjustedBook(async (book, adjusted) => { bookId = book.bookId; record = adjusted; });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    try {
+      // The editor writes their own 总评 and 文学品质 评语 and locks both; the scores stay the constraints they were.
+      const ownComment = '编辑自己的文学品质评语，锁定后不再改动。';
+      const ownVerdict = '编辑自己的总评：先补结构照应，再谈出版。';
+      const locked: EvaluationContent = {
+        ...record.content,
+        items: record.content.items.map((item) => item.itemId === 'literary-quality' ? { ...item, comment: ownComment } : item),
+        verdict: ownVerdict,
+        aiLocked: ['verdict', 'literary-quality'],
+      };
+      const saved = store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: record.entries, content: locked, finalize: false }).record!;
+      // Stored in the profile's order, items first: the canonical form a later read and digest agree on.
+      expect(saved.content.aiLocked).toEqual(['literary-quality', 'verdict']);
+      // An entry without locks keeps its exact shape: no `aiLocked` key at all.
+      expect(Object.hasOwn(record.content, 'aiLocked')).toBe(false);
+      // Round 1: the model rewrites everything it can, the locked 评语 and 总评 included.
+      await answeredRewrite(store, bookId, record.recordId, AUTHORED_REWRITE_WORDS);
+      const proposal = store.inspectEvaluation(bookId, record.recordId).rewrite.proposal!;
+      expect(proposal.items.map((item) => item.itemId)).not.toContain('literary-quality');
+      expect(proposal.verdict).toBeNull();
+      const round1 = store.decideEvaluationRewrite(bookId, proposal.revisionId, 'accept').record!;
+      expect(round1.content.items.find((item) => item.itemId === 'literary-quality')!.comment).toBe(ownComment);
+      expect(round1.content.verdict).toBe(ownVerdict);
+      expect(round1.content.aiLocked).toEqual(['literary-quality', 'verdict']);
+      expect(round1.content.items.find((item) => item.itemId === 'theme-and-context')!.comment)
+        .toBe(AUTHORED_REWRITE_WORDS.items.find((item) => item.itemId === 'theme-and-context')!.comment);
+      expect(scoresOf(round1.content)).toEqual(scoresOf(record.content));
+      // Round 2: the editor is content with 主题 and 主要优点 too, locks them, and regenerates again with a different answer.
+      const theme = round1.content.items.find((item) => item.itemId === 'theme-and-context')!.comment;
+      const strengths = round1.content.strengths;
+      const relocked = store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: round1.entries,
+        content: { ...round1.content, aiLocked: ['literary-quality', 'verdict', 'theme-and-context', 'strengths'] }, finalize: false }).record!;
+      const second = { ...AUTHORED_REWRITE_WORDS, items: AUTHORED_REWRITE_WORDS.items.map((item) => ({ ...item, comment: `第二轮：${item.comment}` })),
+        verdict: '第二轮的总评，不应被采用。', strengths: ['第二轮的优点，不应被采用。'] };
+      await answeredRewrite(store, bookId, record.recordId, second);
+      const proposal2 = store.inspectEvaluation(bookId, record.recordId).rewrite.proposal!;
+      const round2 = store.decideEvaluationRewrite(bookId, proposal2.revisionId, 'accept').record!;
+      expect(round2.content.items.find((item) => item.itemId === 'literary-quality')!.comment).toBe(ownComment);
+      expect(round2.content.items.find((item) => item.itemId === 'theme-and-context')!.comment).toBe(theme);
+      expect(round2.content.verdict).toBe(ownVerdict);
+      expect(round2.content.strengths).toEqual(strengths);
+      expect(round2.content.items.find((item) => item.itemId === 'chinese-language')!.comment).toMatch(/^第二轮：/u);
+      expect(round2.content.weaknesses).toEqual(second.weaknesses);
+      expect(scoresOf(round2.content)).toEqual(scoresOf(relocked.content));
+      // Everything locked leaves nothing to regenerate: the Task is refused before a plan is made.
+      const all = store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: round2.entries, content: { ...round2.content,
+        aiLocked: [...round2.content.items.map((item) => item.itemId), 'verdict', 'strengths', 'weaknesses'] }, finalize: false }).record!;
+      expect(all.content.aiLocked).toHaveLength(round2.content.items.length + 3);
+      expect(await refusal(() => store.createEvaluationRewritePreparationWork(bookId, record.recordId, launchPolicy))).toContain('都已锁定');
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 300_000);
+});
