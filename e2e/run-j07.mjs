@@ -96,18 +96,24 @@ const SCOPED_HELPERS = `(() => {
       return true;
     },
     firstText: () => Array.from(editor()?.querySelectorAll(':scope > p[data-block-id]') ?? []).find((node) => (node.textContent ?? '').length >= 8)?.dataset.blockId ?? null,
-    menuOn: (id, from, to) => {
+    select: (id, from, to) => {
       const root = block(id); if (!root) return false;
       editor().focus();
       const start = point(root, from); const end = point(root, to); if (!start || !end) return false;
       const range = document.createRange(); range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]);
       const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-      const rect = range.getBoundingClientRect();
+      return selection.toString().length === to - from;
+    },
+    // The right click comes once the editor has read the selection, a task after it was made, as a reader's would.
+    rightClick: () => {
+      const selection = getSelection(); if (!selection || selection.rangeCount === 0) return false;
+      const range = selection.getRangeAt(0); const rect = range.getBoundingClientRect();
       const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + 2, clientY: rect.top + 2 };
-      const target = start[0].parentElement;
+      const target = range.startContainer.parentElement;
       target.dispatchEvent(new MouseEvent('mousedown', init)); target.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 })); target.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
       return true;
     },
+    menuSays: (count) => (document.querySelector('.editorial-mark-menu-layer [data-mark-menu]')?.textContent ?? '').includes('已选 ' + count + ' 字'),
     item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
     snapshot: () => { window.__j07Scoped.before = all(); return Object.keys(window.__j07Scoped.before).length > 2; },
     onlySentenceChanged: (replacement) => {
@@ -3073,7 +3079,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.search-match-position')?.textContent.startsWith('1 /') && window.__j07Scoped.locate()`, 'scoped-sentence-found', 60_000);
     await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')==='true') nav.click(); return window.__j07Scoped.locate(); })()`, 'scoped-navigation-closed');
     // 🔒 the next paragraph from the selection menu: it is drawn locked, and the request below does not change because of it.
-    await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-menu');
+    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-select');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+    await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-lock-menu');
+    await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-lock-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-lock-item');
     await assertRenderer(renderer, `(() => { window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-lock');
     try {
@@ -3084,7 +3093,10 @@ async function main() {
       throw journeyCheckFailure('J-07', 'scoped-next-locked', { failed, cause: error });
     }
     await assertRenderer(renderer, `window.__j07Scoped.snapshot()`, 'scoped-snapshot');
-    await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-menu');
+    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-select');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+    await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-edit-menu');
+    await waitFor(renderer, `window.__j07Scoped.menuSays(window.__j07Scoped.state.to - window.__j07Scoped.state.from)`, 'scoped-edit-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false`, 'scoped-edit-item');
     await assertRenderer(renderer, `(() => { window.__j07Scoped.item('scoped-ai-edit').click(); return true; })()`, 'scoped-edit-choose');
     await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true`, 'scoped-edit-composer');
@@ -3103,7 +3115,10 @@ async function main() {
     // and unlocked from the menu and the 🔒 badge.
     await assertRenderer(renderer, `(() => { const item=Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]')).find((entry)=>entry.textContent.includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})); if(!(item instanceof HTMLElement))return false; item.click(); return true; })()`, 'scoped-derivative-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] [data-testid="manuscript-editor"] > p[data-block-id]') !== null && window.__j07Scoped.firstText() !== null`, 'scoped-derivative-ready', 120_000);
-    await assertRenderer(renderer, `window.__j07Scoped.menuOn(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-menu');
+    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-select');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+    await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-derivative-menu');
+    await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-derivative-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false && window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-derivative-entries');
     await assertRenderer(renderer, `(() => { window.__j07Scoped.derivative=window.__j07Scoped.firstText(); window.__j07Scoped.item('ai-lock-selection').click(); return true; })()`, 'scoped-derivative-lock');
     await waitFor(renderer, `window.__j07Scoped.block(window.__j07Scoped.derivative)?.dataset.aiLocked==='true'`, 'scoped-derivative-locked', 30_000);
