@@ -1002,6 +1002,8 @@ async function main() {
     requireJourney(Array.isArray(structural) && structural.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'structure-paragraphs');
     const [splitBlock, appliedBlock] = structural;
     await assertRenderer(renderer, `(async () => { window.__j05Structure = { split: window.__j05.text(${JSON.stringify(splitBlock)}), applied: window.__j05.text(${JSON.stringify(appliedBlock)}) }; const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); window.__j05Journal = (await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } })).journalSequence; return typeof window.__j05Structure.split === 'string'; })()`, 'structure-original-kept');
+    // Enter and Backspace split and merge paragraphs in 自由直接编辑 only (Issue #1411).
+    await assertRenderer(renderer, DIRECT_EDIT, 'structure-direct-edit');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(splitBlock)}, ${STRUCTURE_SPLIT_AT}, ${STRUCTURE_SPLIT_AT})`, 'structure-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
     await pressEnter(renderer);
@@ -1026,6 +1028,8 @@ async function main() {
     await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-splits-again', 15_000);
 
     at('structure-merge');
+    // Enter and Backspace split and merge paragraphs in 自由直接编辑 only (Issue #1411).
+    await assertRenderer(renderer, DIRECT_EDIT, 'merge-direct-edit');
     await assertRenderer(renderer, `window.__j05.place(window.__j05Split, 0, 0)`, 'merge-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
     await press(renderer, 'Backspace');
