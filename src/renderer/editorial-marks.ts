@@ -535,6 +535,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let activeComment: string | undefined;
   /** The card an applied revision's badge brought forward (Issue #1411), and whether it is still to be scrolled to. */
   let revealed: { readonly markId: string; readonly pending: boolean } | undefined;
+  /** The pane position a reveal scrolled the text to: this surface's own movement, which never pages the window. */
+  let revealScroll: { top: number } | undefined;
   let commentsReading = 0;
   let commentCardReads = 0;
   let commentsIdentity = '';
@@ -728,6 +730,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       revealed = { markId: revealed.markId, pending: false };
       forward.node.scrollIntoView?.({ block: 'nearest' });
       forward.node.focus({ preventScroll: true });
+    } else if (revealed?.pending === true && revealScroll === undefined) {
+      // Opening the pane narrows the text and its words may have moved out of view, where no card is laid out: they are
+      // brought to the middle of the pane once.
+      const mark = editor.currentWindow().marks.find((entry) => entry.markId === revealed!.markId);
+      const anchor = mark === undefined ? null : commentAnchor(mark);
+      if (anchor !== null) {
+        anchor.scrollIntoView?.({ block: 'center' });
+        revealScroll = { top: options.scroll.scrollTop };
+        scheduleCommentsLayout();
+      }
     }
     for (const [index, item] of placed.entries()) {
       item.node.style.top = `${item.top}px`;
@@ -1280,6 +1292,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (options.revealComments?.() !== true) { await openCard(markId); return; }
     // The pane lays the card out once it is read; the layout brings it forward then (see `layoutComments`), however long that takes.
     revealed = { markId, pending: true };
+    revealScroll = undefined;
     activateComment(markId);
     refreshComments();
   }
@@ -2794,7 +2807,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const blockId = editor.captureContinuity().head.blockId;
       if (blockId !== undefined) openScopedComposer(blockId, null);
     },
-    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
+    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top) ||
+      (revealScroll !== undefined && options.scroll.scrollTop === revealScroll.top),
     destroy: () => {
       destroyed = true;
       cardCache.clear();
