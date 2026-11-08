@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountCustomAnalysisDimensions, mountCustomAnalysisTab, ANALYSIS_TAB_SHOWN_EVENT } from '../../src/renderer/custom-analysis.js';
 import { CUSTOM_TAB_EMPTY, CUSTOM_TAB_FEEDBACK_NOTE, CUSTOM_TAB_NOT_RUN, CUSTOM_TAB_PREPARED, CUSTOM_TAB_STARTED, customRowAnchorLabel, customTabCountsLine } from '../../src/renderer/custom-analysis-labels.js';
 import { CUSTOM_DIMENSIONS_HEADING, CUSTOM_DIMENSION_FIXED_LINES, customDimensionVersionLine } from '../../src/renderer/knowledge-base-labels.js';
-import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, TaskPlanProjection } from '../../src/shared/protocol.js';
+import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, TaskPlanProjection, BaselineAnalysisWireProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -68,7 +68,7 @@ function mountTab(reading: CustomAnalysisDimensionsProjection, readiness = 'read
     inspectCustomAnalysisDimensions: vi.fn(async () => reading),
     prepareCustomAnalysis: vi.fn(async () => ({ taskIntentId: '55555555-5555-4555-8555-555555555555', dimensions: reading })),
     inspectTaskPlan: vi.fn(async () => ({ kind: 'baseline-analysis', start: { readiness, planEnvelopeDigest: 'digest', categoryDigests: [] } }) as unknown as TaskPlanProjection),
-    authorizeBaselineAnalysis: vi.fn(async () => undefined),
+    authorizeBaselineAnalysis: vi.fn(async () => undefined as unknown as BaselineAnalysisWireProjection),
   };
   const options = { bookId: bookId(), api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, openPlan: vi.fn(), jump: vi.fn() };
   mountCustomAnalysisTab(panel as unknown as HTMLElement, options);
