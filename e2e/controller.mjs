@@ -1079,6 +1079,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-05': Object.freeze([
     'comments-inline-apply',
     'editor-revision',
+    'ai-locks',
     'selected-fast-text-scope-refusal',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',

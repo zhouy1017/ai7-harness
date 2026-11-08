@@ -89,7 +89,7 @@ export function blockMarkDecorations(
       badge.className = 'ai-lock-badge';
       badge.contentEditable = 'false';
       badge.tabIndex = -1;
-      badge.textContent = '🔒';
+      badge.dataset['badge'] = '🔒';
       badge.title = `${AI_LOCK_TOOLTIP}（${AI_LOCK_BADGE_UNLOCK}）`;
       badge.setAttribute('aria-label', `${AI_LOCK_TOOLTIP}；${AI_LOCK_BADGE_UNLOCK}`);
       badge.dataset['aiLockAction'] = 'unlock';
@@ -122,7 +122,8 @@ export function blockMarkDecorations(
         badge.className = 'editorial-mark-applied-badge';
         badge.contentEditable = 'false';
         badge.tabIndex = -1;
-        badge.textContent = APPLIED_BADGE_TEXT;
+        // The words are drawn by the stylesheet, so they are never part of the paragraph's text, a copy or a search.
+        badge.dataset['badge'] = APPLIED_BADGE_TEXT;
         badge.title = appliedBadgeTitle(mark);
         badge.setAttribute('aria-label', `${APPLIED_BADGE_TEXT} · ${badge.title}`);
         badge.dataset['appliedMarkId'] = mark.markId;

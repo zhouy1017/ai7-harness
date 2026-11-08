@@ -1682,6 +1682,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror [data-block-id][data-ai-locked="true"] { border-left: 3px solid var(--boundary-strong); background: var(--surface-subdued); padding-left: 8px; }
 .ai-lock-badge { border: 0; background: transparent; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; color: var(--text-subdued); }
 .ai-lock-badge:focus-visible { outline: 2px solid var(--focus); }
+.ProseMirror .editorial-mark-applied-badge::before, .ProseMirror .ai-lock-badge::before { content: attr(data-badge); }
 .scoped-ai-edit-composer { display: grid; gap: 8px; padding: 12px; max-width: 440px; background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; box-shadow: var(--shadow); }
 .scoped-ai-edit-quote { margin: 0; padding-left: 8px; border-left: 2px solid var(--boundary); color: var(--text-subdued); white-space: pre-wrap; }
 .scoped-ai-edit-scope { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 12px; }
