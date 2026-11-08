@@ -214,7 +214,11 @@ function validEvaluationAdjustment(value: unknown): boolean {
  * store holds them to the profile, the scale and the bounds.
  */
 function validEvaluationContent(value: unknown): boolean {
-  if (!isRecord(value) || !hasExactKeys(value, ['items', 'risks', 'readiness', 'strengths', 'weaknesses', 'verdict', 'conclusion'])) return false;
+  // 🔒 锁定 (Issue #1412): `aiLocked`, present only when some part is locked, names items and 总评/主要优点/主要问题; the store
+  // holds each name to the profile.
+  if (!isRecord(value) || !hasExactKeys(value, ['items', 'risks', 'readiness', 'strengths', 'weaknesses', 'verdict', 'conclusion', ...('aiLocked' in value ? ['aiLocked'] : [])])) return false;
+  if ('aiLocked' in value && !(Array.isArray(value.aiLocked) && value.aiLocked.length >= 1 && value.aiLocked.length <= 40 &&
+    value.aiLocked.every((key) => isBoundedString(key, 64)))) return false;
   const lines = (list: unknown): boolean => Array.isArray(list) && list.length <= 64 && list.every((line) => isBoundedString(line, 2_000, true));
   return Array.isArray(value.items) && value.items.length <= 32 && value.items.every((item) => isRecord(item) &&
       hasExactKeys(item, ['itemId', 'score', 'notRated', 'comment', ...('adjustment' in item ? ['adjustment'] : [])]) && isBoundedString(item.itemId, 64) &&
