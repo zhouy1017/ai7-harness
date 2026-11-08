@@ -2550,12 +2550,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       analysisBadge.hidden = !rail.uncovered?.length;
       analysisBadge.title = '分析未覆盖处';
       updateEdgeName(analysisEntry);
-      // 批注's badge counts the marks the rail carries (Issue #1413 cluster 2); a truncated rail says 「N+」.
-      const commentsBadge = commentsEntry.querySelector<HTMLElement>('.edge-badge')!;
-      commentsBadge.dataset['count'] = `${rail.marks.length}${rail.marksTruncated ? '+' : ''}`;
-      commentsBadge.hidden = rail.marks.length === 0;
-      commentsBadge.title = '待处理的批注与修改建议';
-      updateEdgeName(commentsEntry);
     },
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });
