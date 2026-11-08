@@ -718,8 +718,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['polishSelection']['output']>(IPC_CHANNELS.polishSelection, input),
   inspectFastInteractionRequest: (input: Parameters<RendererApi['inspectFastInteractionRequest']>[0]) =>
     invoke<ServiceOperationMap['inspectFastInteractionRequest']['output']>(IPC_CHANNELS.inspectFastInteractionRequest, input),
-  inspectBookDeliveryPackage: () =>
-    invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
+  inspectBookDeliveryPackage: (input?: Parameters<RendererApi['inspectBookDeliveryPackage']>[0]) =>
+    invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage, input ?? {}),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareBookDeliveryPackage']['output']>(IPC_CHANNELS.prepareBookDeliveryPackage, input),
   reviewBookDeliveryPackageExport: (input: Parameters<RendererApi['reviewBookDeliveryPackageExport']>[0]) =>

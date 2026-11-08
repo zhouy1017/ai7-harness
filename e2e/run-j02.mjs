@@ -426,13 +426,20 @@ async function waitForExactSearchRange(renderer) {
   }
 }
 
-async function waitForChecks(renderer, expression, location, timeout = 60_000) {
+/**
+ * Wait, within one budget, until every boolean the expression answers is `true`. A key starting with `_` is an observation,
+ * never a check; with `words` 'burst', a failure's check label is `<location>-<words>` from the last observation read, the words
+ * `burstWords`' closed, content-free vocabulary (Issue #1400: the hosted J-02 failure named no unmet condition).
+ */
+async function waitForChecks(renderer, expression, location, timeout = 60_000, words = 'none') {
   const deadline = Date.now() + timeout;
   let failed = ['diagnostic-unavailable'];
+  let observed = null;
   while (Date.now() < deadline) {
     const checks = await renderer.evaluate(expression);
     if (checks && typeof checks === 'object' && !Array.isArray(checks)) {
-      const entries = Object.entries(checks);
+      const entries = Object.entries(checks).filter(([name]) => !name.startsWith('_'));
+      if (Object.hasOwn(checks, '_observed')) observed = checks._observed;
       if (entries.length > 0) {
         failed = entries.filter(([, passed]) => passed !== true).map(([name]) => name);
         if (failed.length === 0) return;
@@ -440,7 +447,63 @@ async function waitForChecks(renderer, expression, location, timeout = 60_000) {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw journeyCheckFailure('J-02', location, { failed });
+  throw journeyCheckFailure('J-02', words === 'burst' ? `${location}-${burstWords(observed)}` : location, { failed });
+}
+
+/** The paragraph's text after the burst, as a check label's word (Issue #1400). */
+function burstTextWord(text) {
+  switch (text) {
+    case 'whole': return 'whole';
+    case 'changed': return 'changed';
+    case 'absent': return 'absent';
+    default: return 'unread';
+  }
+}
+
+/** How many of the burst's 8 journal entries were written, as a check label's word: a closed set, never the number itself. */
+function burstJournalWord(delta) {
+  if (!Number.isSafeInteger(delta)) return 'unread';
+  if (delta < 0) return 'behind';
+  if (delta > 8) return 'extra';
+  switch (delta) {
+    case 0: return 'none';
+    case 1: return '1of8';
+    case 2: return '2of8';
+    case 3: return '3of8';
+    case 4: return '4of8';
+    case 5: return '5of8';
+    case 6: return '6of8';
+    case 7: return '7of8';
+    default: return 'all';
+  }
+}
+
+/** Whether a write was still at risk (`data-ai7-close-risk`), as a check label's word. */
+function burstPendingWord(risk) {
+  switch (risk) {
+    case 'false': return 'saved';
+    case 'true': return 'pending';
+    default: return 'unread';
+  }
+}
+
+/** Whether the window stayed within its block bound, as a check label's word. */
+function burstBoundedWord(bounded) {
+  switch (bounded) {
+    case true: return 'bounded';
+    case false: return 'unbounded';
+    default: return 'unread';
+  }
+}
+
+/**
+ * What the 8-key burst had reached when its one 60 s budget ran out, in a closed vocabulary (Issue #1400): the paragraph's text,
+ * how many of the 8 journal entries were written, whether a write was still pending, and the window size; `unread` when nothing
+ * was read. No text, identity or count beyond these words.
+ */
+function burstWords(observed) {
+  if (observed === null || typeof observed !== 'object') return 'unread';
+  return `${burstTextWord(observed.text)}-journal-${burstJournalWord(observed.delta)}-${burstPendingWord(observed.risk)}-${burstBoundedWord(observed.bounded)}`;
 }
 
 /**
@@ -1952,7 +2015,8 @@ async function runStructureJourney(renderer) {
   at('structure-rapid-queue');
   await placeStructureCaret(renderer, blockId, 12, 'structure-burst-caret');
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02BurstSequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Enter','Enter','Backspace','Backspace','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return !document.querySelector('#persistence-status')?.textContent.includes('上一处分段或合并'); })()`, 'structure-all-keys-accepted-before-ipc');
-  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { whole: p.text === window.__j02Structure.text, ordered: p.journal === window.__j02BurstSequence + 8, settled: p.closeRisk === 'false', bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-burst-durable', 60_000);
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const whole = p.text === window.__j02Structure.text; const bounded = p.blocks <= ${MAX_RENDERER_BLOCKS}; return { whole, ordered: p.journal === window.__j02BurstSequence + 8, settled: p.closeRisk === 'false', bounded,
+    _observed: { text: whole ? 'whole' : p.text === null ? 'absent' : 'changed', delta: typeof p.journal === 'number' && typeof window.__j02BurstSequence === 'number' ? p.journal - window.__j02BurstSequence : null, risk: p.closeRisk, bounded } }; })()`, 'structure-burst-durable', 60_000, 'burst');
 
   at('structure-queue-retry');
   requireJourney((await renderer.setJournalFault('fail-next'))?.mode === 'fail-next', 'structure-queue-fault-armed');

@@ -139,6 +139,29 @@ describe('知识库 › 范例 over the real store', () => {
     }
   }, 300_000);
 
+  it('takes in a saved version ticked into a 图书交付包 with no Delivery Record, and nothing left unticked (Issue #1405)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await designatedBook(store, '打包范例组稿', [1, 2, 3], '打包范例之书');
+      // Two documents made on 稿件 and never delivered: one ticked into the package, one left out.
+      const ticked = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      const untouched = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '内部草稿' })).document!;
+      expect(store.inspectExemplars(null).books[0]!.exemplars).toEqual([]);
+      const documents = [{ documentId: ticked.documentId, revisionId: ticked.versions[0]!.revisionId }];
+      const before = store.inspectBookDeliveryPackage(book.bookId, documents);
+      store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交营销', expectedContentDigest: before.content.digest, documents });
+      const exemplars = store.inspectExemplars(null).books[0]!.exemplars;
+      expect(exemplars.map((exemplar) => [exemplar.documentId, exemplar.title, exemplar.version, exemplar.revisionId, exemplar.deliveredTo, exemplar.eligibility]))
+        .toEqual([[ticked.documentId, '首发通稿', 1, ticked.versions[0]!.revisionId, '图书交付包 v1', 'house-only']]);
+      expect(exemplars.some((exemplar) => exemplar.documentId === untouched.documentId)).toBe(false);
+      // No Delivery Record was made for it.
+      expect(store.inspectProductionDocuments(book.bookId).types[0]!.documents.every((document) => document.deliveries.length === 0)).toBe(true);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  });
+
   it('takes in nothing a Book delivers after a 撤回 until another 发稿版本, keeps what came in before, and says so', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

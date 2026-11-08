@@ -1,6 +1,6 @@
 import type { EditorialStore } from '../../src/service/store.js';
 import {
-  EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
+  EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2,
   type EvaluationRewriteObservation,
   type EvaluationRewriteSynthesisResult,
 } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
@@ -9,9 +9,14 @@ import type { EvaluationContent, EvaluationRecordProjection } from '../../src/sh
 // 按我的评分重写评语 (Issue #429, plan slice S81b2): the steps J-11 takes before it asks AI7 to rewrite, over the real store — a
 // version begun from AI7's 初评 once the one before it is 定稿, two of AI7's scores replaced by the editor's with their reasons,
 // and saved. A rewrite's contract freezes the version's words and nothing of its identity, time or ordinal, so the version
-// reached here asks the authored fixture `sample1-evaluation-rewrite-authored` exactly the questions J-11's 第 15 版 does.
+// reached here asks the authored fixture `sample1-evaluation-report-authored` exactly the questions J-11's 第 15 版 does.
 
-export const EVALUATION_REWRITE_FIXTURE_IDENTITY = 'sample1-evaluation-rewrite-authored';
+/**
+ * The authored fixture a regeneration prepared now replays: contract `/2`, the whole report (Issue #1407). The `/1` fixture
+ * `sample1-evaluation-rewrite-authored` keeps its exact bytes and identity for the `/1` Tasks and the v29 inventory that name it.
+ */
+export const EVALUATION_REWRITE_FIXTURE_IDENTITY = 'sample1-evaluation-report-authored';
+export const EVALUATION_REWRITE_V1_FIXTURE_IDENTITY = 'sample1-evaluation-rewrite-authored';
 
 /** The editor's two departures from AI7's 初评 in J-11's 第 15 版: the item, the editor's score, and the reason ticked. */
 export const J11_REWRITE_ADJUSTMENTS: ReadonlyArray<{ itemId: string; score: number; reason: 'too-high' | 'insufficient-basis' }> = [
@@ -73,9 +78,14 @@ export const AUTHORED_REWRITE_OBSERVATIONS: Readonly<Record<number, ReadonlyArra
   ],
 };
 
-/** The rewritten words as AI7 writes them: each scored item's 评语 to the editor's score, and a 总评 that agrees with them — no number in any. */
-export const AUTHORED_REWRITE_WORDS: Omit<EvaluationRewriteSynthesisResult, 'verdict' | 'withheld'> & { readonly verdict: string } = {
-  schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
+/**
+ * The regenerated report as AI7 writes it under contract `/2` (Issue #1407): each scored item's 评语 to the editor's score, a 总评
+ * with the next step that agrees with them, and the strengths and problems — no number and no conclusion in any.
+ */
+export const AUTHORED_REWRITE_WORDS: Omit<EvaluationRewriteSynthesisResult, 'verdict' | 'withheld' | 'strengths' | 'weaknesses'> & {
+  readonly verdict: string; readonly strengths: ReadonlyArray<string>; readonly weaknesses: ReadonlyArray<string>;
+} = {
+  schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA_V2,
   items: [
     { itemId: 'literary-quality', comment: '细节与意象运用纯熟，写信又撕信、放大镜细看来信等动作写出人物心事，写景与写心相互映照；个别比喻略显俗套。' },
     { itemId: 'theme-and-context', comment: '触及学界与权力、学术与名利的关系，翁婿对话把冲突摆上台面；但比附点到即止，在所读部分展开得还不够。' },
@@ -83,5 +93,14 @@ export const AUTHORED_REWRITE_WORDS: Omit<EvaluationRewriteSynthesisResult, 'ver
     { itemId: 'chinese-language', comment: '叙述凝练、对白自然，人物各有声口；个别句子成分残缺、比喻偶落俗套，需要逐句校改。' },
     { itemId: 'readers-and-market', comment: '所读内容中没有关于目标读者与市场的依据，只能从题材推断读者面；这一项依据不足，评价从严。' },
   ],
-  verdict: '这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，文学品质与语言总体较好；结构上考古疑问集中抛出、照应尚不充分，读者与市场一项依据不足，评价从严。',
+  verdict: '这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，文学品质与语言总体较好；结构上考古疑问集中抛出、照应尚不充分，读者与市场一项依据不足，评价从严。下一步宜理顺中段考古疑问的照应，逐句校改残句，并补充目标读者与市场资料。',
+  strengths: [
+    '以写信又撕信、放大镜细看来信等动作写出人物心事，细节与意象运用纯熟。',
+    '甲骨文来信设下的核心悬念清楚，开篇伏笔与第一章收束相互呼应。',
+  ],
+  weaknesses: [
+    '考古疑问在中段集中抛出，后文照应尚不充分，线索有失衡之虞。',
+    '个别句子成分残缺、比喻偶落俗套，需要逐句校改。',
+    '书稿中没有目标读者与市场的依据，这一项还需补充资料。',
+  ],
 };

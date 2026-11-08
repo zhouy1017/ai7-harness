@@ -37,6 +37,7 @@ import {
   MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS,
   MAX_PRODUCTION_DOCUMENT_RECIPIENT_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
+  MAX_BOOK_DELIVERY_PACKAGE_DOCUMENT_CHOICES,
   MAX_BOOK_AUTHORS,
   MAX_BOOK_EDITORS,
   MAX_BOOK_PERSON_NAME_CHARACTERS,
@@ -292,6 +293,19 @@ function validMarkKind(value: unknown): boolean {
 
 function validHighlightColor(value: unknown): boolean {
   return value === null || value === 1 || value === 2 || value === 3;
+}
+
+/** 图书交付包's ticked documents (Issue #1405): absent, or distinct documents each at one revision, within the bound. */
+function validPackageDocumentChoices(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_BOOK_DELIVERY_PACKAGE_DOCUMENT_CHOICES) return false;
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry) || Object.keys(entry).length !== 2 || !validUuid(entry['documentId']) || !validUuid(entry['revisionId'])) return false;
+    if (seen.has(entry['documentId'])) return false;
+    seen.add(entry['documentId']);
+  }
+  return true;
 }
 
 function validUuid(value: unknown): value is string {
@@ -2878,15 +2892,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 图书交付包 (Issue #416, S67a): the route's Book, and for 准备 the purpose within its bound and the content's digest.
+    // Since Issue #1405 both may name the derivative documents ticked for it, each at one saved version.
     case 'inspectBookDeliveryPackage': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['documents'], tentativeId);
+      if (!validUuid(input.bookId) || !validPackageDocumentChoices(input.documents)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareBookDeliveryPackage': {
-      const input = requireInput(value.input, ['bookId', 'purpose', 'expectedContentDigest'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'purpose', 'expectedContentDigest'], ['documents'], tentativeId);
       if (!validUuid(input.bookId) || !validPublicationText(input.purpose, MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS) ||
-          !isBoundedString(input.expectedContentDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedContentDigest)) {
+          !isBoundedString(input.expectedContentDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedContentDigest) ||
+          !validPackageDocumentChoices(input.documents)) {
         throw new ProtocolError(tentativeId);
       }
       break;

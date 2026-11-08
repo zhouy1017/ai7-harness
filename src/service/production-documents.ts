@@ -485,7 +485,11 @@ export class ProductionDocuments {
           notForThisBook,
           multiple: matching.length > 1,
           // 交付后有修改 read as the document's own card reads it (DELIV-004): one check, in one place.
-          document: { documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries, title: row.title },
+          document: {
+            documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries, title: row.title,
+            // Every saved version (Issue #1405): what the package may hold without a Delivery Record.
+            versions: this.versionsOf(row).map((version) => ({ ...version, versionLabel: productionDocumentVersionLabel(version.version) })),
+          },
         };
       });
     });

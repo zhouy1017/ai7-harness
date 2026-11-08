@@ -41,7 +41,7 @@ export const DOCUMENT_ACTION_LABELS = {
   notForThisBook: '本书不做',
   restore: '恢复',
   saveVersion: '保存为版本',
-  back: '返回交付物',
+  back: '返回稿件',
   deliver: '交付…',
   redeliver: '再交付…',
   confirmDeliver: '交付',
@@ -143,10 +143,10 @@ export const DOCUMENT_STATUS_LINES = {
   deliverFailed: '无法记录这次交付。',
   // A recovery restore of a document (Issue #543 follow-up): its text is the chosen one, which no version holds yet.
   recovered: '文档已恢复为所选的文字，尚未保存为版本。',
-  recoveredNotOpened: '文档已恢复为所选的文字，但没能打开；已回到交付物，可以从这里再打开它。',
-  recoveredNothingOpened: '文档已恢复为所选的文字，但文档和交付物都没能打开；可以再打开交付物。',
-  // The retry of 打开交付物 after both failed (Issue #582): the restore still stands, and the line says so.
-  recoveredRetryFailed: '文档已恢复为所选的文字，但交付物还是没能打开：',
+  recoveredNotOpened: '文档已恢复为所选的文字，但没能打开；已回到稿件，可以从本书稿件里再打开它。',
+  recoveredNothingOpened: '文档已恢复为所选的文字，但文档和稿件都没能打开；可以再打开稿件。',
+  // The retry of 打开稿件 after both failed (Issue #582): the restore still stands, and the line says so.
+  recoveredRetryFailed: '文档已恢复为所选的文字，但稿件还是没能打开：',
 } as const;
 
 /**
@@ -192,6 +192,9 @@ export const DOCUMENT_SURFACE_LABEL = '生产文档';
 export const DOCUMENT_CURRENT_VERSION = '当前版本';
 export const DOCUMENT_LENS_LABEL = '工作流程';
 export const DOCUMENT_VERSIONS_HEADING = '版本与交付';
+/** Ordinary mode's lens (Issue #1405): the document's own saved versions, nothing of 交付. */
+export const DOCUMENT_VERSIONS_LIGHT_LABEL = '版本';
+export const DOCUMENT_VERSIONS_LIGHT_HEADING = '已保存的版本';
 export const DOCUMENT_VERSIONS_TRUNCATED = '更早的版本保留在文档的历史中。';
 /** The version the working text stands on. */
 export const DOCUMENT_VERSION_CURRENT_MARK = '当前';

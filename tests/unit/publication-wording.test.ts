@@ -292,6 +292,12 @@ describe('the words of 发稿', () => {
       })),
       versionsTruncated: true,
       changedSinceLatest: true,
+      // Issue #1405: each derivative document the package can hold, with its saved versions as far as they are offered.
+      documents: Array.from({ length: 5 }, () => ({
+        documentId: identity, typeId: 'press-release', typeLabel: wide(40), title: wide(80),
+        versions: Array.from({ length: 20 }, (_, index) => ({ revisionId: identity, label: `版本 ${index + 1}`, savedAt: '2026-09-24T00:00:00.000Z' })),
+        selectedRevisionId: identity,
+      })),
     };
     const response = { id: identity, ok: true, op: 'prepareBookDeliveryPackage', result: { bookId: identity, outcome: 'prepared', version: 21, package: answer } };
     expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);

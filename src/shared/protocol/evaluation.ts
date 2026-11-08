@@ -322,6 +322,12 @@ export interface EvaluationRewriteWordsProjection {
   verdict: string | null;
   /** What was written but is not offered — a 评语 (`itemId`) or the 总评 (`null`) that stated a score or a conclusion — and why. */
   withheld: ReadonlyArray<{ itemId: string | null; reason: string }>;
+  /**
+   * The regenerated strengths and problems of a whole-report regeneration (contract `/2`, Issue #1407), or `null` when none was
+   * offered; absent from a rewrite under contract `/1`, which wrote 评语 and 总评 only.
+   */
+  strengths?: ReadonlyArray<string> | null;
+  weaknesses?: ReadonlyArray<string> | null;
 }
 
 /** The evaluation rewrite kind's own component of a Result Set Revision. */
@@ -701,6 +707,11 @@ export interface EvaluationWorkspaceProjection {
         readonly kind: 'first' | 'again';
         readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number };
         readonly skipDamaged: null | { readonly skipped: ReadonlyArray<number>; readonly seedOrdinal: number | null };
+        /**
+         * Set while the latest version is unfinished and only AI7's newer report may begin the next (Issue #1406): why a start of
+         * the editor's own still waits. The unfinished version stays as it is.
+         */
+        readonly blankReason?: string;
       }
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
@@ -819,6 +830,9 @@ export interface EvaluationRewriteWorkspaceProjection {
     }>;
     /** The 总评 offered beside the version's own; `null` when it was set aside. */
     readonly verdict: null | { readonly before: string | null; readonly after: string };
+    /** The regenerated strengths and problems beside the version's own (Issue #1407); `null` when none is offered. */
+    readonly strengths: null | { readonly before: ReadonlyArray<string>; readonly after: ReadonlyArray<string> };
+    readonly weaknesses: null | { readonly before: ReadonlyArray<string>; readonly after: ReadonlyArray<string> };
     /** What AI7 wrote but does not offer — a 评语 or the 总评 that stated a score or a conclusion — each with why. */
     readonly withheld: ReadonlyArray<string>;
   };

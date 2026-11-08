@@ -34,7 +34,7 @@ export interface ExemplarDesignationReading {
   readonly withdrawnAt: string | null;
 }
 
-interface ExemplarDeliveryReading {
+export interface ExemplarDeliveryReading {
   readonly version: number;
   readonly revisionId: string;
   readonly revisionDigest: string;
@@ -62,6 +62,26 @@ export interface ExemplarSources {
   people(bookId: string): { readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };
   /** The Book's 审稿意见 at the version pinned against its latest designation, each with where its admission stands (Issue #429). */
   readersReports(bookId: string, designation: ExemplarDesignationReading): ReadonlyArray<ReadersReportExemplarProjection>;
+}
+
+/**
+ * A document's Delivery Records together with the saved versions the editor ticked into a frozen 图书交付包 (Issue #1405), each
+ * as one more record of that version at the package's preparation: since 稿件 no longer asks for a delivery, a version the house
+ * packaged with the Book is what comes into 范例 — under the same 发稿版本 rule and the same 仅本社 — and no Delivery Record is
+ * made for it. A document without such versions is read exactly as before.
+ */
+export function withPackagedVersions(document: ExemplarDocumentReading, packaged: ReadonlyArray<ExemplarDeliveryReading>): ExemplarDocumentReading {
+  if (packaged.length === 0) return document;
+  return {
+    ...document,
+    deliveries: (order) => {
+      const all = [...document.deliveries(order), ...packaged];
+      // 'latest': newest record first; 'version': by version, a version's records together, newest first.
+      return order === 'latest'
+        ? all.sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : a.recordedAt > b.recordedAt ? -1 : 0))
+        : all.sort((a, b) => a.version - b.version || (a.recordedAt < b.recordedAt ? 1 : a.recordedAt > b.recordedAt ? -1 : 0));
+    },
+  };
 }
 
 /** One document's exemplar: the version its latest delivery that came into 范例 named, or `null` when none came in. */
