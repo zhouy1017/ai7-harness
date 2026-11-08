@@ -1009,7 +1009,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Run never starts behind a plan the editor has not seen and no rule has spoken for.
       const quickStart = action.quickStart ?? null;
       const quickRule = quickStart !== null && quickStart.available ? quickStart.rule : null;
-      const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', 'primary', async () => {
+      const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', mode === 'sync-current' ? 'primary' : 'secondary', async () => {
         if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
         await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false }, {
           start: quick,
@@ -1023,7 +1023,6 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Only a quick start on offer joins the actions a preparation holds and gives back.
       actionButtons.push(quick);
       // The mode's start and 查看计划 stand on the card at once (Issue #1410 item 15): no button only unfolds them.
-      if (mode !== 'sync-current') quick.classList.replace('primary', 'secondary');
       const actions = element('div', 'button-row analysis-actions');
       actions.append(quick, start);
       block.append(actions);

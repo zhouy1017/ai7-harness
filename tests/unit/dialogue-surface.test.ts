@@ -26,20 +26,33 @@ function mount(next = projection()) {
   const root = surface.element as unknown as MiniElement;
   miniDocument.body.append(root);
   surface.show(next.dialogueId);
-  return { surface, root, follow };
+  return { surface, root, follow, options };
 }
 
 describe('the dialogue drawer', () => {
   it('sends a follow-up from the current conversation and prefills the extracted rewrite', async () => {
     const { root, follow, surface } = mount();
     await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
-    root.querySelector('[data-dialogue-action="convert"]')!.click();
+    root.querySelector('[data-dialogue-action="convert-edit"]')!.click();
     expect(root.querySelectorAll('textarea').find((node) => node.name === 'proposedText')!.value).toBe('改写内容');
     root.querySelector('[data-dialogue-action="convert-cancel"]')!.click();
     root.querySelector('[data-dialogue-follow-up]')!.value = '再简洁一些。';
     root.querySelector('.dialogue-follow-up')!.dispatchEvent({ type: 'submit', bubbles: true });
     await vi.waitFor(() => expect(follow).toHaveBeenCalledWith({ dialogueId: 'dialogue', attemptId: 'first', question: '再简洁一些。' }));
     expect(root.querySelector('[data-dialogue-follow-up]')!.value).toBe('');
+    surface.stop();
+  });
+
+  it('converts the extracted rewrite in one click (Issue #1410 item 10)', async () => {
+    const next = projection();
+    const { root, surface, options } = mount(next);
+    const convert = vi.fn(async () => ({ dialogue: next, markId: 'mark', completionLabel: '已转为修改建议' }));
+    Object.assign(options.api, { convertDialogueToChangeSuggestion: convert });
+    await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
+    root.querySelector('[data-dialogue-action="convert"]')!.click();
+    await vi.waitFor(() => expect(options.onConverted).toHaveBeenCalledWith(next, 'mark'));
+    expect(convert).toHaveBeenCalledWith({ dialogueId: 'dialogue', attemptId: 'first', proposedText: '改写内容', rationale: '' });
+    expect(root.querySelector('.dialogue-convert')).toBeNull();
     surface.stop();
   });
 

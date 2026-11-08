@@ -350,8 +350,7 @@ async function createBook(renderer, title, name) {
   await click(renderer, '新建图书', `${name}-open`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
   await fill(renderer, '#empty-book-title', title, `${name}-title`);
-  await click(renderer, '复核创建', `${name}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
+  // 新建图书 creates the Book in one step (Issue #1410 item 20).
   await click(renderer, '新建图书', `${name}-commit`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]') && document.querySelector(${JSON.stringify(peopleSection)})`, `${name}-overview`);
   const bookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId ?? null`);

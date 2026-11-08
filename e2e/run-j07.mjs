@@ -1286,8 +1286,8 @@ async function main() {
     await openManuscript(renderer, 'before-milestone');
 
     at('milestone-needs-a-purpose');
-    // 标签 / 用途 / 说明 · 可选: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
-    // purpose with its reason beside it (V2-UX-MILE-003); 自行输入 asks for the editor's own words.
+    // 标签 / 用途 / 说明 · 可选: 阶段留档 is chosen to begin with and an empty label saves under a dated default
+    // (Issue #1410 item 21), so 保存里程碑版本 is ready at once; 自行输入 asks for the editor's own words.
     await openMilestoneForm(renderer, 'first');
     await assertRenderer(renderer, `(() => {
       const section = document.querySelector('details.milestone-section');
@@ -1298,11 +1298,11 @@ async function main() {
         section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。' &&
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
-        radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
-        save instanceof HTMLButtonElement && save.disabled;
-    })()`, 'milestone-form-starts-unselected');
+        radios.filter((radio) => radio.checked).map((radio) => radio.value).join() === 'stage-archive' && custom instanceof HTMLInputElement && custom.hidden &&
+        (document.querySelector('#milestone-label')?.placeholder ?? '').startsWith('阶段留档 · ') &&
+        save instanceof HTMLButtonElement && !save.disabled;
+    })()`, 'milestone-form-starts-with-defaults');
     await fill(renderer, '#milestone-label', FIRST.label, 'first-label');
-    await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? ''); return save?.disabled === true && (reason?.textContent ?? '').includes('选择用途'); })()`, 'milestone-save-waits-for-a-purpose');
     await choosePurpose(renderer, 'custom', 'first-purpose-custom');
     await assertRenderer(renderer, `(() => { const custom = document.querySelector('#milestone-purpose-custom'); const save = window.__j07.milestoneSave(); return custom instanceof HTMLInputElement && !custom.hidden && save?.disabled === true; })()`, 'milestone-custom-asks-for-words');
     await choosePurpose(renderer, FIRST.purpose, 'first-purpose');
@@ -1312,7 +1312,7 @@ async function main() {
     await fill(renderer, '#milestone-note', FIRST.note, 'first-note');
     // Nothing changed since the import, so the milestone designates r1 as it stands.
     await saveMilestone(renderer, FIRST, 'r1', 'first');
-    await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('details.milestone-section input[name="milestone-purpose"]')); return document.querySelector('#milestone-label')?.value === '' && document.querySelector('#milestone-note')?.value === '' && radios.every((radio) => !radio.checked) && window.__j07.milestoneSave()?.disabled === true; })()`, 'milestone-form-starts-again-unselected');
+    await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('details.milestone-section input[name="milestone-purpose"]')); return document.querySelector('#milestone-label')?.value === '' && document.querySelector('#milestone-note')?.value === '' && radios.filter((radio) => radio.checked).map((radio) => radio.value).join() === 'stage-archive' && window.__j07.milestoneSave()?.disabled === false; })()`, 'milestone-form-starts-again-with-defaults');
 
     at('milestone-changed-since');
     // One acknowledged edit: the manuscript is newer than 一审稿 (V2-UX-MILE-007).
