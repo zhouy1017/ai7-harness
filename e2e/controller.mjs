@@ -1461,6 +1461,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-11': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
+    'evaluation-ai-lock',
     'controller-loopback-sentinel',
     'controller-imports',
     'renderer-api-boundary',
