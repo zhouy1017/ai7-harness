@@ -1588,7 +1588,10 @@ async function main() {
     // 撤销登记 is one click (Issue #1410 item 24); what revoking keeps is said in the status line with the result.
     await clickSelector(renderer, '[data-background-action="revoke"]', 'background-revoke');
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
-    await assertRenderer(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已撤销后台处理登记：AI7 不再为这本书开始新的后台分析')`, 'background-revoke-consequences');
+    // The result is announced where every success is (the polite toast; #persistence-status shows only busy and error lines).
+    const revokeAnnounced = await renderer.evaluate(`({ toast: document.querySelector('[data-toast]')?.textContent ?? null, tone: document.querySelector('[data-toast]')?.dataset.tone ?? null, hidden: document.querySelector('[data-toast]')?.hidden ?? null, status: document.querySelector('#persistence-status')?.textContent ?? null })`);
+    requireJourney(revokeAnnounced?.toast === '已撤销后台处理登记：AI7 不再为这本书开始新的后台分析；已经开始的运行照常进行，可以在它的计划里暂停或取消；已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写' &&
+      revokeAnnounced.tone === 'success' && revokeAnnounced.hidden === false, 'background-revoke-consequences', revokeAnnounced);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&
       revokedBlock.startedLines.length === 1 && JSON.stringify(revokedBlock.actions) === JSON.stringify([['enroll-open', '登记后台处理…', 'enabled']]),
