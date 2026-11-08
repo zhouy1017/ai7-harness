@@ -480,7 +480,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       more.open = moreBooksOpen;
       more.addEventListener('toggle', () => { moreBooksOpen = more.open; });
       const summary = el('summary', 'sidebar-link sidebar-more-books-summary');
-      summary.append(el('span', 'nav-label', SHELL_LABELS.moreBooks(restPinned.length + restRecent.length)));
+      summary.append(svgIcon('i-library'), el('span', 'nav-label', SHELL_LABELS.moreBooks(restPinned.length + restRecent.length)));
       summary.title = SHELL_LABELS.moreBooksHint(shortcutHint('book.switch'));
       more.append(summary, ...[list(SHELL_LABELS.pinnedHeading, restPinned, 'pinned'), list(SHELL_LABELS.recentHeading, restRecent, 'recent')].filter((node): node is HTMLElement => node !== null));
       blocks.push(more);

@@ -156,9 +156,7 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-book .sidebar-current-book { color: var(--text); font-size: .9rem; letter-spacing: 0; }
 .sidebar-more-books > summary { list-style: none; color: var(--text-subdued); font-size: .82rem; font-weight: 600; }
 .sidebar-more-books > summary::-webkit-details-marker { display: none; }
-.sidebar-more-books > summary::before { content: '▸'; flex: 0 0 18px; text-align: center; }
-.sidebar-more-books[open] > summary::before { content: '▾'; }
-:root[data-sidebar="icons"] .sidebar-more-books { display: none; }
+.sidebar-more-books[open] > summary { color: var(--text); }
 .sidebar-books, .sidebar-book { display: grid; flex: 0 0 auto; gap: .2rem; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-books > div { max-height: clamp(80px, calc(100dvh - 720px), 260px); overflow: auto; scrollbar-width: thin; }
 .sidebar-book[hidden] { display: none; }

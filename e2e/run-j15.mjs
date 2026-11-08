@@ -887,9 +887,10 @@ async function main() {
       await readLibrary(renderer, (page) => page.preview === null && page.cards.length === Math.min(index + 2, 20), 'library-page-arrival');
     }
     for (let repeat = 0; repeat < 2; repeat += 1) {
-      await clickSelector(renderer, '[data-library-action="more"]', 'library-page-next');
+      // The pager is released once the page's own read settles after the arrivals.
+      await waitFor(renderer, `(() => { const more = document.querySelector('[data-library-action="more"]'); if (!(more instanceof HTMLButtonElement) || more.disabled) return false; more.click(); return true; })()`, 'library-page-next');
       await readLibrary(renderer, (page) => page.cards.length === 1 && page.cards[0].id === materialId && page.focus?.tag === 'H3', 'library-page-oldest');
-      await clickSelector(renderer, '[data-library-action="first"]', 'library-page-first');
+      await waitFor(renderer, `(() => { const first = document.querySelector('[data-library-action="first"]'); if (!(first instanceof HTMLButtonElement) || first.disabled) return false; first.click(); return true; })()`, 'library-page-first');
       await readLibrary(renderer, (page) => page.cards.length === 20 && page.focus?.tag === 'H3', 'library-page-newest');
     }
 
