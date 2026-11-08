@@ -267,6 +267,8 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
       weaknesses: ['残句'],
       verdict: '旧的总评。',
       conclusions: ['推荐出版', '修改后再议', '暂缓', '不推荐'],
+      // Contract `/2` (Issue #1407): AI7's original report and the editor's other report fields go with it.
+      report: { ai7: { strengths: [], weaknesses: [], nextStep: null, suggestedConclusion: null, market: null }, risks: [], readiness: ['补材料'], conclusion: null },
     });
     expect(() => evaluationRewriteContractInput({ ...version, initial: null })).toThrow();
   });
@@ -291,4 +293,45 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
 it('retains complete comments from a truncated synthesis without guessing a verdict', () => {
   const parsed = parseEvaluationRewriteSynthesis('说明```JSON\n{"items":[' + JSON.stringify({ itemId: 'literary-quality', comment: '保留。' }) + ',{"comment":', INPUT);
   expect(parsed).toMatchObject({ ok: true, result: { items: [{ itemId: 'literary-quality', comment: '保留。' }], verdict: null } });
+});
+
+describe('contract /2: the whole report regenerated from the editor\'s edits (Issue #1407)', () => {
+  const REPORT = {
+    ai7: { strengths: ['开篇悬念'], weaknesses: ['中段拖沓'], nextStep: '压缩中段。', suggestedConclusion: '修改后再议',
+      market: { readers: ['文史读者'], sellingPoints: ['学术悬疑'], channels: ['读书会'] } },
+    risks: [{ label: '事实与来源', level: '低', statement: '已核对。' }],
+    readiness: ['补材料'],
+    conclusion: '修改后再议',
+  };
+  const WHOLE = evaluationRewriteContract({ ...INPUT, report: REPORT });
+  const whole = (overrides: Record<string, unknown> = {}): string => JSON.stringify({ ...JSON.parse(synthesis()), schema: 'ai7.evaluation-rewrite.synthesis-result/2',
+    strengths: ['细节生动。'], weaknesses: ['结构有待加强。'], ...overrides });
+
+  it('shows the model AI7\'s whole original report beside the editor\'s edited report, and is a contract of its own', () => {
+    expect([WHOLE.schema, WHOLE.synthesisResultSchema]).toEqual(['ai7.evaluation-rewrite.prompt-contract/2', 'ai7.evaluation-rewrite.synthesis-result/2']);
+    for (const line of ['- 主要优点：悬念', '- 风险项「事实与来源」：低风险；说明：已核对。', '- 距离可出版还差：补材料', '- 编辑选定的结论：修改后再议',
+      '- 原报告的主要问题：中段拖沓', '- 原报告的下一步建议：压缩中段。', '- 原报告建议的结论：修改后再议', '- 原报告的目标读者：文史读者']) {
+      expect(WHOLE.systemPrompt).toContain(line);
+    }
+    expect(WHOLE.synthesisInstruction).toContain('schema（固定为 "ai7.evaluation-rewrite.synthesis-result/2"）、items、verdict、strengths、weaknesses。');
+    expect(WHOLE.synthesisInstruction).toContain('不改编辑选定的结论');
+    // A `/1` input keeps its own prompt and digest: old Tasks and recordings read as they were.
+    expect(CONTRACT.schema).toBe('ai7.evaluation-rewrite.prompt-contract/1');
+    expect(CONTRACT.systemPrompt).not.toContain('原报告');
+    expect(evaluationRewriteContractDigest(WHOLE)).not.toBe(evaluationRewriteContractDigest(CONTRACT));
+  });
+
+  it('admits the regenerated strengths and problems, never a line that states a score or a conclusion', () => {
+    const parsed = parseEvaluationRewriteSynthesis(whole({ weaknesses: ['结构有待加强。', '这一项只值 8 分。', '建议修改后再议。'] }), WHOLE.input);
+    expect(parsed.ok && parsed.result).toMatchObject({ strengths: ['细节生动。'], weaknesses: ['结构有待加强。'], verdict: '总体较好，结构有待加强。' });
+    expect(parsed.ok && parsed.result.withheld.filter((entry) => entry.itemId === null).length).toBe(2);
+    // No usable line leaves the editor's own list; a `/1` answer under a `/1` contract carries no lines at all.
+    const none = parseEvaluationRewriteSynthesis(whole({ strengths: [], weaknesses: 'x' }), WHOLE.input);
+    expect(none.ok && [none.result.strengths, none.result.weaknesses]).toEqual([null, null]);
+    const old = parseEvaluationRewriteSynthesis(synthesis(), CONTRACT.input);
+    expect(old.ok && 'strengths' in old.result).toBe(false);
+    const content = { items: [], risks: [], readiness: [], strengths: ['旧优点'], weaknesses: ['旧问题'], verdict: null, conclusion: 'revise' } as unknown as EvaluationContent;
+    expect(contentWithRewrite(content, { items: [], verdict: '新总评。', strengths: ['新优点'], weaknesses: null }))
+      .toMatchObject({ strengths: ['新优点'], weaknesses: ['旧问题'], verdict: '新总评。', conclusion: 'revise' });
+  });
 });

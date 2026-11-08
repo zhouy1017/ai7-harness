@@ -27,7 +27,7 @@ import {
   type EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
 import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibratedScore, calibrationOffset } from '../shared/evaluation-calibration.js';
-import { boundedEvidenceSet, contentWithRewrite, type RewritableEvaluation } from './evaluation-rewrites.js';
+import { boundedEvidenceSet, contentWithRewrite, type EvaluationRewriteWords, type RewritableEvaluation } from './evaluation-rewrites.js';
 import { disclosedNote } from './evaluation/unverified-disclosure.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
@@ -1807,7 +1807,7 @@ export class EvaluationRecords {
    * `不评`, adjustment, risk and the conclusion are the entry's own. Returns the new entry's ordinal.
    */
   applyRewrite(bookId: string, recordId: string, read: { entryOrdinal: number; entrySha256: string },
-    words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string | null }, from: EvaluationRewriteProvenance): number {
+    words: EvaluationRewriteWords, from: EvaluationRewriteProvenance): number {
     const { record, chain, version } = this.#rewritableRead(bookId, recordId);
     requireEvaluation(version.state !== 'finalized', 'EVALUATION_FINALIZED', `第 ${version.ordinal} 版已经定稿，不能再改；要改就重新评估。`);
     requireEvaluation(version.entryOrdinal === read.entryOrdinal && version.entrySha256 === read.entrySha256, 'EVALUATION_REWRITE_STALE',

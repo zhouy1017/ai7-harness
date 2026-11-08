@@ -290,8 +290,10 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationRewriteTaskLine({ taskIntentId: 't', recordId: 'r', recordOrdinal: 15, entryOrdinal: 2, state: 'settled', label: '已完成' }))
       .toBe('按我的修改重新生成 · 第 15 版 · 已完成');
     const reading = { unitsTotal: 8, unitsRead: 8 };
-    expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, reading, items: [], verdict: { before: null, after: '新。' }, withheld: [] }))
-      .toBe('AI7 按你第 2 次保存的修改重新生成了评语与总评，等你决定：采用后才记入这一版，分数不变。');
+    expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, reading, items: [], verdict: { before: null, after: '新。' }, strengths: null, weaknesses: null, withheld: [] }))
+      .toBe('AI7 按你第 2 次保存的修改重新生成了评语与总评，等你决定：采用后才记入这一版，分数与结论不变。');
+    expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, reading, items: [], verdict: null, strengths: { before: [], after: ['新优点。'] }, weaknesses: null, withheld: [] }))
+      .toBe('AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。');
     // How much of the Book the rewrite read is said whenever it shows, and plainly when some ranges were not read.
     expect(evaluationRewriteReadingLine(reading)).toBe('AI7 这次重写读了全部 8 个阅读范围。');
     expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重写只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重写的评语。');

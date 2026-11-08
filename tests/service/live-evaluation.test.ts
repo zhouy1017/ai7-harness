@@ -18,6 +18,8 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { AUTHORED_REWRITE_WORDS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
+import { evaluationRewriteContract, evaluationRewriteContractDigest } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
+import { evaluationRewriteContractInput, type RewritableEvaluation } from '../../src/service/evaluation-rewrites.js';
 import { ruleFor, withRuleFor, withoutRuleFor, withSeriesKnowledgeFor } from '../support/policy-rules.js';
 import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.js';
 import { AUTHORED_SECTIONS, finalizeAsJ11 } from '../support/readers-report.js';
@@ -196,7 +198,7 @@ beforeEach(async () => {
   authored = {
     initial: await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored'),
     readers: await loadModelFixture(FIXTURES_ROOT, 'sample1-readers-report-authored'),
-    rewrite: await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-rewrite-authored'),
+    rewrite: await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-report-authored'),
   };
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -408,7 +410,13 @@ describe('evaluation on the Go execution path (#429)', () => {
     const adjusted = beginRewriteAsJ11(store, bookId);
     await rewrite(selected, adjusted.recordId);
     const rewritten = store.inspectEvaluationRewrite(bookId)!;
-    expect(rewritten.planEnvelope!.promptContractDigest).toBe('87f0f8fc3c809b23acde2323017c7543c364dfb976d7907669db6074c686b0e6');
+    // The recording answered contract `/1` (评语与总评 only). The version's words built as a `/1` input still make exactly the recorded
+    // contract, so the recording stays readable evidence of `/1`; a Task prepared now freezes contract `/2` (Issue #1407), which
+    // no live recording answers — its recorded `/1` answers replay here only as old-shape answers, offering no strengths or problems.
+    const { report: _report, ...v1Input } = evaluationRewriteContractInput({ ...adjusted, bookId, entryOrdinal: adjusted.entries, entrySha256: 'x' } as unknown as RewritableEvaluation);
+    expect(evaluationRewriteContractDigest(evaluationRewriteContract(v1Input))).toBe('87f0f8fc3c809b23acde2323017c7543c364dfb976d7907669db6074c686b0e6');
+    expect(rewritten.planEnvelope!.promptContractDigest).not.toBe('87f0f8fc3c809b23acde2323017c7543c364dfb976d7907669db6074c686b0e6');
+    expect(rewritten.resultSetRevision!.rewrite.words).toMatchObject({ strengths: null, weaknesses: null });
     expect(rewritten.resultSetRevision!.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
     expect(rewritten.resultSetRevision!.rewrite.synthesis.state).toBe('closed');
     const shown = store.inspectEvaluation(bookId, adjusted.recordId);

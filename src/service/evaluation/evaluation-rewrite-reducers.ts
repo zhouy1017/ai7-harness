@@ -119,6 +119,8 @@ export function reduceEvaluationRewrite(input: EvaluationRewriteReductionInput):
         items: synthesis.items.map((item) => ({ itemId: item.itemId, comment: item.comment })),
         verdict: synthesis.verdict,
         withheld: synthesis.withheld.map((entry) => ({ itemId: entry.itemId, reason: entry.reason })),
+        // Contract `/2` (Issue #1407): the regenerated strengths and problems; a `/1` result carries neither.
+        ...(synthesis.strengths === undefined ? {} : { strengths: synthesis.strengths ?? null, weaknesses: synthesis.weaknesses ?? null }),
       },
       synthesis: synthesisState,
     },

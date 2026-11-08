@@ -500,7 +500,7 @@ export const EVALUATION_REWRITE_STATUS = {
   unsaved: '先保存修改，再按你的修改重新生成：重新生成只读已保存的内容。',
   unsavedAccept: '这一版有未保存的修改：先保存或放弃这些修改，再采用新版报告。',
   accepting: '正在采用新版报告…',
-  accepted: '已采用新版报告：评语与总评已更新，各项分数没有改动。',
+  accepted: '已采用新版报告：各项分数与结论没有改动。',
   discarding: '正在放弃重写的评语…',
   discarded: '已放弃这一次重写，评语保持原样。',
   decideFailed: '无法处理重写的评语。',
@@ -518,7 +518,8 @@ export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWor
 
 /** The proposal waiting for the editor: which save it was written from. */
 export function evaluationRewriteProposalLine(proposal: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>): string {
-  return `AI7 按你第 ${proposal.entryOrdinal} 次保存的修改重新生成了评语与总评，等你决定：采用后才记入这一版，分数不变。`;
+  const lines = proposal.strengths !== null || proposal.weaknesses !== null;
+  return `AI7 按你第 ${proposal.entryOrdinal} 次保存的修改重新生成了${lines ? '评估报告（评语、总评、优点与问题）' : '评语与总评'}，等你决定：采用后才记入这一版，分数与结论不变。`;
 }
 
 /**

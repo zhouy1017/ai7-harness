@@ -547,7 +547,9 @@ describe('联网后开始任务 of AI7 初评, 审稿意见 and 按我的评分�
       const plan = await planOf(store, bookId, 'evaluation-rewrite', taskIntentId, 'online');
       expect(plan.state.key).toBe('plan-moved');
       expect(plan.planMovedReason).toBe('需要重新确认计划：这一版的评分已经变化，这次授权不再对应当前的情况。');
-      // Prepared again at the scores as they are now, it waits and starts.
+      // Saved back to the words the fixture answers (a regeneration reads the whole report, readiness included; Issue #1407),
+      // then prepared again at the version as it is now, it waits and starts.
+      store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: record.entries + 1, finalize: false, content: record.content });
       await waitThenStart(session, bookId, 'evaluation-rewrite', prepare(record.recordId));
     });
   }, 300_000);

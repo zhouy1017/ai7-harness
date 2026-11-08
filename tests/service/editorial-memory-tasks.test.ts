@@ -43,7 +43,7 @@ it('uses one frozen memory envelope through writing, evaluation, report, rewrite
   const contracts = [
     { header: '评估', schema: 'ai7.evaluation', fixture: await loadModelFixture(fixtureRoot, 'sample1-evaluation-authored') },
     { header: '审稿意见', schema: 'ai7.readers-report', fixture: await loadModelFixture(fixtureRoot, 'sample1-readers-report-authored') },
-    { header: '评语重写', schema: 'ai7.evaluation-rewrite', fixture: await loadModelFixture(fixtureRoot, 'sample1-evaluation-rewrite-authored') },
+    { header: '评语重写', schema: 'ai7.evaluation-rewrite', fixture: await loadModelFixture(fixtureRoot, 'sample1-evaluation-report-authored') },
   ];
   const seen = new Set<string>();
   let activeKind = '';

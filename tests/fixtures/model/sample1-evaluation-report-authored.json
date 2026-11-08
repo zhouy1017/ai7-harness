@@ -1,0 +1,131 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-evaluation-report-authored",
+  "description": "评估报告重新生成契约 v2（评语重写契约 /2）的人工撰写夹具：回答 J-11 第 15 版评估（从 AI7 初评开始，结构、叙事逻辑与连贯调为 13 分、打分偏高，读者与市场潜力调为 10 分、依据不足，保存一次）按编辑的修改重新生成评估报告时发出的八个单元请求与一次全书综合。每条依据都引用 sample1（ADR 0043 收录的 Public SampleBook）的初评与审稿意见夹具已经引用过的内容块，说明它如何印证编辑所给的分数；「读者与市场潜力」在书稿中没有依据。全书综合依据这一版修改后的报告、AI7 原报告与这些依据，为五个已打分的评分项各重写一段评语，写出含下一步建议的总评以及新版主要优点与主要问题，不写任何分数或结论。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。契约 /1 的前身夹具 sample1-evaluation-rewrite-authored 保持原字节，不被本夹具替代。本夹具叠加在 sample1-readers-report-authored 之上：同一次启动既能运行基线分析、AI7 初评与审稿意见，也能重新生成评估报告；各自的请求摘要互不相同，叠加不改变任何条目的键。",
+  "basedOn": "sample1-readers-report-authored",
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "e929fe991c1722ac347881bb5d085500fe5fdad619fc13e55d185e382d9ce670",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":1,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"对仗的题辞与写信又撕信的细节以动作写心事，支持较高的文学品质评价。\",\"blockOrdinals\":[5,6,8,14]},{\"itemId\":\"structure-and-coherence\",\"note\":\"开篇以写不成的信引出悬念，伏笔清楚，这是结构上的长处。\",\"blockOrdinals\":[13,14]},{\"itemId\":\"chinese-language\",\"note\":\"叙述语言凝练，长句中夹用俗语。\",\"blockOrdinals\":[10]}]}",
+        "usage": {
+          "inputTokens": 1940,
+          "outputTokens": 210
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "35d7412774cd0530e392138bca2febb5261aa6d7564e001310525df019b86c2b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":2,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"甲骨文来信构成核心悬念，后文必须承接它，结构的成败系于此。\",\"blockOrdinals\":[6,7]},{\"itemId\":\"chinese-language\",\"note\":\"个别比喻略显俗套，语言分不宜再高。\",\"blockOrdinals\":[11]}]}",
+        "usage": {
+          "inputTokens": 1980,
+          "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "cc060b3d5d73d5ec959e0a987ffbdb83a3cef6119abff1c00c42fe6aae36ccc2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":3,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"春景与梦境交织，写景与写心相互映照。\",\"blockOrdinals\":[2,3]}]}",
+        "usage": {
+          "inputTokens": 2020,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "7538060bdc09ee0359c264654fbf354cf3f273d76bf2d3432361e81a671cc81f",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":4,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"第一章在揭示来信内容处收束，回应开篇。\",\"blockOrdinals\":[6,7,8]}]}",
+        "usage": {
+          "inputTokens": 2060,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "5c1aaea84db5b0adcd0059c009ea9b730a84300350ed37ca66d674712fd012ec",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":5,\"observations\":[{\"itemId\":\"chinese-language\",\"note\":\"个别句子成分残缺，介词之后缺少宾语。\",\"blockOrdinals\":[6]}]}",
+        "usage": {
+          "inputTokens": 2100,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "2b4fe8104e4e9e64dfbf6fe593ec9afac17951e8adb1b91a7f9a1fb21c0df70f",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":6,\"observations\":[{\"itemId\":\"theme-and-context\",\"note\":\"新省长与楚庄王的比附点到即止，学人与权力的关系还可以展开。\",\"blockOrdinals\":[3,4]}]}",
+        "usage": {
+          "inputTokens": 2140,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "c2ea15594fd4e6bad9352e7a5a16ec7054970fa8fcadbf8c3efc41fc43da61db",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":7,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"考古疑问在这里集中抛出，后文若不逐一照应，读者容易失去线索。\",\"blockOrdinals\":[17]},{\"itemId\":\"theme-and-context\",\"note\":\"翁婿对话把学术与名利的冲突摆上台面。\",\"blockOrdinals\":[16,17]}]}",
+        "usage": {
+          "inputTokens": 2180,
+          "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "6cc2a89675f91f22c7430f14f55209c2314f3971a8bd04717f3c4f758e79ca3c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":8,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"以放大镜细看来信收束本章，与章首撕信遥相呼应。\",\"blockOrdinals\":[6]}]}",
+        "usage": {
+          "inputTokens": 2220,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "6ac1d4d11f3f321b5632ad74ab00503e6fdaee16922d95d20084779f1a63924e",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.evaluation-rewrite.synthesis-result/2\",\"items\":[{\"itemId\":\"literary-quality\",\"comment\":\"细节与意象运用纯熟，写信又撕信、放大镜细看来信等动作写出人物心事，写景与写心相互映照；个别比喻略显俗套。\"},{\"itemId\":\"theme-and-context\",\"comment\":\"触及学界与权力、学术与名利的关系，翁婿对话把冲突摆上台面；但比附点到即止，在所读部分展开得还不够。\"},{\"itemId\":\"structure-and-coherence\",\"comment\":\"以甲骨文来信设置核心悬念，开篇的伏笔与第一章的收束都清楚；但考古疑问在中段集中抛出，后文照应尚不充分，线索有失衡之虞，结构还不够稳。\"},{\"itemId\":\"chinese-language\",\"comment\":\"叙述凝练、对白自然，人物各有声口；个别句子成分残缺、比喻偶落俗套，需要逐句校改。\"},{\"itemId\":\"readers-and-market\",\"comment\":\"所读内容中没有关于目标读者与市场的依据，只能从题材推断读者面；这一项依据不足，评价从严。\"}],\"verdict\":\"这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，文学品质与语言总体较好；结构上考古疑问集中抛出、照应尚不充分，读者与市场一项依据不足，评价从严。下一步宜理顺中段考古疑问的照应，逐句校改残句，并补充目标读者与市场资料。\",\"strengths\":[\"以写信又撕信、放大镜细看来信等动作写出人物心事，细节与意象运用纯熟。\",\"甲骨文来信设下的核心悬念清楚，开篇伏笔与第一章收束相互呼应。\"],\"weaknesses\":[\"考古疑问在中段集中抛出，后文照应尚不充分，线索有失衡之虞。\",\"个别句子成分残缺、比喻偶落俗套，需要逐句校改。\",\"书稿中没有目标读者与市场的依据，这一项还需补充资料。\"]}",
+        "usage": {
+          "inputTokens": 2600,
+          "outputTokens": 560
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "b736c7bfa66ffbb38ef2fbad586c5b8e71372483174a3bb0416b93b66f238c15",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次重写评语可以维持当前的单元预算不变，本次没有任何阅读范围因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"没有找到依据的评分项，重写时只按编辑的分数与调分原因措辞。\",\"basis\":\"账目按评分项分别计数了依据。\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
+        }
+      }
+    }
+  ]
+}
