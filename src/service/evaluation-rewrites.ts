@@ -128,6 +128,13 @@ type SqlRow = Record<string, SQLOutputValue>;
 const TASK_SCHEMA = 'ai7.evaluation-rewrite-task/1';
 const DECISION_SCHEMA = 'ai7.evaluation-rewrite-decision/1';
 const CORRUPT = '评语重写记录已损坏。';
+/** The words one rewrite offers the version: 评语 and 总评, and under contract `/2` the strengths and problems (Issue #1407). */
+export interface EvaluationRewriteWords {
+  readonly items: ReadonlyArray<{ itemId: string; comment: string }>;
+  readonly verdict: string | null;
+  readonly strengths?: ReadonlyArray<string> | null;
+  readonly weaknesses?: ReadonlyArray<string> | null;
+}
 /** Why a regeneration waits on the report as AI7 wrote it (Issue #1407): it follows the editor's saved changes. */
 export const EVALUATION_REWRITE_NEEDS_EDIT = '先修改并保存评分、评语、优缺点或总评：重新生成会按你保存的修改重出报告。';
 const corrupt = (): EvaluationRewriteError => new EvaluationRewriteError('EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
@@ -211,14 +218,35 @@ export function evaluationRewriteContractInput(version: RewritableEvaluation): E
     weaknesses: [...version.content.weaknesses],
     verdict: version.content.verdict,
     conclusions: version.profile.conclusions.map((entry) => entry.label),
+    // Contract `/2` (Issue #1407): AI7's whole original report and the editor's other report fields.
+    report: {
+      ai7: {
+        strengths: [...initial.strengths],
+        weaknesses: [...initial.weaknesses],
+        nextStep: initial.nextStep,
+        suggestedConclusion: initial.suggestedConclusion === null ? null
+          : version.profile.conclusions.find((entry) => entry.conclusion === initial.suggestedConclusion)?.label ?? null,
+        market: initial.market === null ? null
+          : { readers: [...initial.market.readers], sellingPoints: [...initial.market.sellingPoints], channels: [...initial.market.channels] },
+      },
+      risks: version.profile.risks.map((risk, index) => {
+        const own = version.content.risks[index];
+        return { label: risk.label, level: own?.level === undefined || own.level === null ? null : RISK_LEVEL_WORDS[own.level], statement: own?.statement ?? null };
+      }),
+      readiness: [...version.content.readiness],
+      conclusion: version.content.conclusion === null ? null
+        : version.profile.conclusions.find((entry) => entry.conclusion === version.content.conclusion)?.label ?? null,
+    },
   };
 }
+
+const RISK_LEVEL_WORDS = { low: '低', medium: '中', high: '高' } as const;
 
 /**
  * The version's content with a rewrite taken: each scored item's 评语 and the 总评 replaced by AI7's words where it offered them, and nothing else
  * touched — every score, `不评`, adjustment, risk, line and the conclusion exactly as the entry holds them.
  */
-export function contentWithRewrite(content: EvaluationContent, words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string | null }): EvaluationContent {
+export function contentWithRewrite(content: EvaluationContent, words: EvaluationRewriteWords): EvaluationContent {
   return {
     ...content,
     items: content.items.map((item) => {
@@ -227,6 +255,9 @@ export function contentWithRewrite(content: EvaluationContent, words: { items: R
     }),
     // A 总评 set aside (it stated a score or a conclusion) leaves the version's own.
     verdict: words.verdict ?? content.verdict,
+    // A whole-report regeneration's strengths and problems (Issue #1407); one not offered leaves the version's own.
+    strengths: words.strengths ?? content.strengths,
+    weaknesses: words.weaknesses ?? content.weaknesses,
   };
 }
 
@@ -796,6 +827,8 @@ export function evaluationRewriteWorkspace(host: EvaluationRewriteStoreHost, boo
           // Each beside the version's own, with at most a frame's share of its notes and how many in all (Issue #689).
           items: rewriteProposalItems(words.items, newest.observations, version.content, newest.unverified),
           verdict: words.verdict === null ? null : { before: version.content.verdict, after: words.verdict },
+          strengths: words.strengths === undefined || words.strengths === null ? null : { before: [...version.content.strengths], after: [...words.strengths] },
+          weaknesses: words.weaknesses === undefined || words.weaknesses === null ? null : { before: [...version.content.weaknesses], after: [...words.weaknesses] },
           withheld: words.withheld.map((entry) => entry.reason),
         };
       }
@@ -855,8 +888,10 @@ export function decideEvaluationRewrite(host: EvaluationRewriteStoreHost, bookId
     requireStore(words !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写没有写出评语，不能采用。');
     requireStore(newestEvaluationRewrite(host, bookId, recordId)?.revision.revisionId === revisionId, 'EVALUATION_REWRITE_SUPERSEDED',
       '这一版评估后来又重写过：请看最新的重写。');
-    requireStore(words.items.length > 0 || words.verdict !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写写出的评语都没有采用的条件，只能放弃。');
-    const entryOrdinal = host.evaluations.applyRewrite(bookId, recordId, { entryOrdinal: found.task.entryOrdinal, entrySha256: found.task.entrySha256 }, words,
+    requireStore(words.items.length > 0 || words.verdict !== null || (words.strengths ?? null) !== null || (words.weaknesses ?? null) !== null,
+      'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写写出的评语都没有采用的条件，只能放弃。');
+    const entryOrdinal = host.evaluations.applyRewrite(bookId, recordId, { entryOrdinal: found.task.entryOrdinal, entrySha256: found.task.entrySha256 },
+      { items: words.items, verdict: words.verdict, strengths: words.strengths ?? null, weaknesses: words.weaknesses ?? null },
       { taskIntentId: revision.taskIntentId, analysisRevisionId: revisionId });
     host.evaluationRewrites.recordDecision({ analysisRevisionId: revisionId, bookId, recordId, taskIntentId: revision.taskIntentId, decision: 'accepted', entryOrdinal });
   }));

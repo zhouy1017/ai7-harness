@@ -59,6 +59,9 @@ export const EVALUATION_REWRITE_REDUCER_DIGEST = sha256Hex(canonicalJson(EVALUAT
 const STAGES = ['unit-validation', 'cross-unit-reduction', 'book-synthesis'] as const;
 const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行评语重写契约 v1，记下能说明编辑所给分数的依据', '全书综合：按编辑的评分重写各项评语与总评', '形成结果集修订版'] as const;
 const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算重读计划', '逐单元执行评语重写契约 v1，记下能说明编辑所给分数的依据', '全书综合：按编辑的评分重写各项评语与总评', '追加结果集修订版'] as const;
+/** Contract `/2`'s steps (Issue #1407): the whole report regenerated from the editor's edits; a `/1` Task keeps its own. */
+const REPORT_EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行评估报告重新生成契约 v2，记下能说明编辑所给分数与修改的依据', '全书综合：按编辑修改后的报告重新生成评语、总评、优点与问题', '形成结果集修订版'] as const;
+const REPORT_UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算重读计划', '逐单元执行评估报告重新生成契约 v2，记下能说明编辑所给分数与修改的依据', '全书综合：按编辑修改后的报告重新生成评语、总评、优点与问题', '追加结果集修订版'] as const;
 const NO_SAMPLE = '评语重写没有保证抽样阶段：重写的评语由编辑决定是否采用。' as const;
 const SYNTHESIS_LABEL = '全书综合' as const;
 
@@ -81,11 +84,11 @@ const MODES: ReadonlyArray<AnalysisModeDefinition> = EVALUATION_REWRITE_TASK_MOD
   recompute: 'everything',
 }));
 
-export function evaluationRewriteSchemaDigest(promptContractDigest: string): string {
+export function evaluationRewriteSchemaDigest(promptContractDigest: string, synthesisResultSchema: string = EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA): string {
   return sha256Hex(canonicalJson({
     contractVersion: EVALUATION_REWRITE_CONTRACT_VERSION,
     unitResultSchema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
-    synthesisResultSchema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
+    synthesisResultSchema,
     promptContractDigest,
   }));
 }
@@ -98,6 +101,7 @@ export function evaluationRewriteKindDefinition(input: EvaluationRewriteContract
   const contract = evaluationRewriteContract(input);
   const promptContractDigest = evaluationRewriteContractDigest(contract);
   const itemIds = evaluationRewriteScoredItems(contract.input).map((item) => item.itemId);
+  const whole = contract.input.report !== undefined;
   return {
     kind: EVALUATION_REWRITE_KIND,
     livePromptContractDigest: () => evaluationRewriteContractDigest(contract),
@@ -114,14 +118,14 @@ export function evaluationRewriteKindDefinition(input: EvaluationRewriteContract
     unitResultSchema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
     revisionSchema: EVALUATION_REWRITE_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: EVALUATION_REWRITE_SUCCESSOR_REVISION_SCHEMA,
-    schemaDigest: evaluationRewriteSchemaDigest(promptContractDigest),
+    schemaDigest: evaluationRewriteSchemaDigest(promptContractDigest, contract.synthesisResultSchema),
     reducerDigest: EVALUATION_REWRITE_REDUCER_DIGEST,
     reducerStages: STAGES,
-    executionSteps: EXECUTION_STEPS,
-    updateExecutionSteps: UPDATE_EXECUTION_STEPS,
+    executionSteps: whole ? REPORT_EXECUTION_STEPS : EXECUTION_STEPS,
+    updateExecutionSteps: whole ? REPORT_UPDATE_EXECUTION_STEPS : UPDATE_EXECUTION_STEPS,
     crossUnit: {
       promptContractDigest,
-      resultSchema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
+      resultSchema: contract.synthesisResultSchema,
       step: {
         requiredForCompletion: true,
         label: SYNTHESIS_LABEL,

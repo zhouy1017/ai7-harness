@@ -748,6 +748,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         pair(label, item.before, item.after, item.itemId, item.evidence, item.evidenceCount);
       }
       if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, [], 0);
+      // The regenerated strengths and problems beside the version's own (Issue #1407), one line each as the form holds them.
+      const lines = (label: string, key: string, change: NonNullable<typeof proposal>['strengths']): void => {
+        if (change === null) return;
+        pair(label, change.before.length === 0 ? null : change.before.join('；'), change.after.join('；'), null, [], 0);
+        list.lastElementChild?.setAttribute('data-rewrite-list', key);
+      };
+      lines(EVALUATION_STRENGTHS, 'strengths', proposal.strengths);
+      lines(EVALUATION_WEAKNESSES, 'weaknesses', proposal.weaknesses);
       card.append(list);
       // What AI7 wrote but does not offer, and why: a 评语 or the 总评 that stated a score or a conclusion.
       if (proposal.withheld.length > 0 || !proposal.current) {
@@ -758,7 +766,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       const actions = el('div', 'button-row evaluation-rewrite-actions');
       const accept = action(EVALUATION_REWRITE_ACTIONS.accept, 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
-      accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null);
+      accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null && proposal.strengths === null && proposal.weaknesses === null);
       const discard = action(EVALUATION_REWRITE_ACTIONS.discard, 'secondary', 'rewrite-discard', () => void decideRewrite(proposal.revisionId, 'discard'));
       discard.disabled = busy;
       actions.append(accept, discard);

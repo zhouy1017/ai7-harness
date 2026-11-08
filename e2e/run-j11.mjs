@@ -71,7 +71,7 @@ const THIRD = Object.freeze({ title: '评估旅程丙' });
  * market section — of exact `sample1` (S81b1), and in turn over the base fixture that answers every unit, the reduction and the
  * sample of the baseline analysis (Issue #94).
  */
-const FIXTURE_IDENTITY = 'sample1-evaluation-rewrite-authored';
+const FIXTURE_IDENTITY = 'sample1-evaluation-report-authored';
 /** The market section as the authored 初评 writes it (Issue #429, S81b2; EVAL-009). */
 const MARKET_LISTS = [
   ['readers', '目标读者 AI7 · 据书稿题材推断', ['对考古、青铜器与古文字题材有兴趣的成年读者。', '关注学界人情、学术与名利之争的知识分子读者。']],
@@ -96,7 +96,10 @@ const REWRITTEN_COMMENTS = [
   '叙述凝练、对白自然，人物各有声口；个别句子成分残缺、比喻偶落俗套，需要逐句校改。',
   '所读内容中没有关于目标读者与市场的依据，只能从题材推断读者面；这一项依据不足，评价从严。',
 ];
-const REWRITTEN_VERDICT = '这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，文学品质与语言总体较好；结构上考古疑问集中抛出、照应尚不充分，读者与市场一项依据不足，评价从严。';
+const REWRITTEN_VERDICT = '这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，文学品质与语言总体较好；结构上考古疑问集中抛出、照应尚不充分，读者与市场一项依据不足，评价从严。下一步宜理顺中段考古疑问的照应，逐句校改残句，并补充目标读者与市场资料。';
+/** The regenerated report's strengths and problems for 第 15 版 under contract `/2` (Issue #1407), as the authored fixture writes them. */
+const REWRITTEN_STRENGTHS = ['以写信又撕信、放大镜细看来信等动作写出人物心事，细节与意象运用纯熟。', '甲骨文来信设下的核心悬念清楚，开篇伏笔与第一章收束相互呼应。'];
+const REWRITTEN_WEAKNESSES = ['考古疑问在中段集中抛出，后文照应尚不充分，线索有失衡之虞。', '个别句子成分残缺、比喻偶落俗套，需要逐句校改。', '书稿中没有目标读者与市场的依据，这一项还需补充资料。'];
 /** What a 审稿意见 says when the house holds no 审稿意见 among its 范例 (the Owner's answer of 2026-10-07). */
 const NO_EXEMPLAR = '本社暂无审稿意见范例，本次不参考范例';
 /** The Journey's own edit of the draft, and the file its DOCX is written to (Issue #429, S81c). */
@@ -497,6 +500,8 @@ const READ_EVALUATION = `(() => {
       // Each item's 评语 and the 总评 as the form holds them (Issue #429, S81b2).
       comments: Array.from(record.querySelectorAll('.evaluation-item [data-evaluation-field="comment"]'), (control) => control.value),
       verdict: record.querySelector('.evaluation-lists [data-evaluation-field="verdict"]')?.value ?? null,
+      strengths: (record.querySelector('.evaluation-lists [data-evaluation-field="strengths"]')?.value ?? '').split(String.fromCharCode(10)).filter((line) => line.length > 0),
+      weaknesses: (record.querySelector('.evaluation-lists [data-evaluation-field="weaknesses"]')?.value ?? '').split(String.fromCharCode(10)).filter((line) => line.length > 0),
     },
     // The market section of the version on show (Issue #429, S81b2; EVAL-009, EVAL-010).
     market: (() => {
@@ -533,6 +538,7 @@ const READ_EVALUATION = `(() => {
           evidence: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd'), (value) => value.querySelectorAll('.evaluation-rewrite-evidence li').length),
           pairs: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd'), (value) => [value.dataset.itemId ?? null,
             value.querySelector('.evaluation-rewrite-before')?.textContent ?? null, value.querySelector('.evaluation-rewrite-after')?.textContent ?? null]),
+          lists: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd[data-rewrite-list]'), (value) => value.dataset.rewriteList),
           actions: Array.from(card.querySelectorAll('.evaluation-rewrite-actions button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         },
         decided: section.querySelector('.evaluation-rewrite-decided')?.textContent ?? null,
@@ -2184,10 +2190,11 @@ async function main() {
     requireJourney(endedRewrite.rewrite.state === 'settled' && endedRewrite.view === 'record', 'evaluation-rewrite-settled', endedRewrite.rewrite);
     const rewritePlan = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => window.ai7.inspectTaskPlan({ kind: 'evaluation-rewrite', ref: page.rewrite.task.taskIntentId }))
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.steps.map((step) => step.label),
-        plan.notDo.editorial.includes('不改分数：只重写评语与总评，每一项的分数照你保存的'), plan.notDo.editorial.includes('不自动写入评估：重写的评语要你采用后才记入这一版')]))`);
+        plan.notDo.editorial.includes('不改分数：每一项的分数照你保存的'), plan.notDo.editorial.includes('不自动写入评估：新版报告要你采用后才记入这一版'),
+        plan.notDo.editorial.includes('不改你选定的结论，不改风险项')]))`);
     requireJourney(rewritePlan === JSON.stringify([
-      '按你在第 15 版评估（第 2 次保存）中的评分重写各项评语与总评，分数不变；重写后由你决定采用还是放弃',
-      ['逐章读取，记下能说明你所给分数的依据', '按你的评分重写评语'], true, true,
+      '按你在第 15 版评估（第 2 次保存）中的修改重新生成评估报告（各项评语、总评、优点与问题），分数与结论不变；生成后由你决定采用还是放弃',
+      ['逐章读取，记下能说明你所给分数与修改的依据', '按你的修改重新生成评估报告'], true, true, true,
     ]), 'evaluation-rewrite-plan-words', rewritePlan);
     // Its Task stays one click away in the drawer, settled, and no button there carries 授权.
     await clickSelector(renderer, '[data-evaluation-action="open-rewrite-task"]', 'evaluation-rewrite-open-task');
@@ -2196,17 +2203,20 @@ async function main() {
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'evaluation-rewrite-drawer-closed');
 
     at('evaluation-rewrite-proposal');
-    // AI7's words wait beside the version's own, item by item and the 总评; nothing is written into the version yet.
+    // The regenerated report waits beside the version's own (Issue #1407): every 评语, the 总评 with its next step, and the
+    // strengths and problems; nothing is written into the version yet.
     const waiting = await readEvaluation(renderer, (page) => page.rewrite?.proposal !== null && page.rewrite?.proposal !== undefined, 'evaluation-rewrite-proposal-read');
     requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 版本 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
-      waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的修改重新生成了评语与总评，等你决定：采用后才记入这一版，分数不变。' &&
+      waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。' &&
       // How much it read, and each 评语's notes beside it (EVAL-006); nothing set aside.
       waiting.rewrite.proposal.reading === 'AI7 这次重写读了全部 8 个阅读范围。' && waiting.rewrite.proposal.withheld.length === 0 &&
-      JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0]) &&
+      JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0, 0, 0]) &&
       JSON.stringify(waiting.rewrite.proposal.pairs) === JSON.stringify([
         ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重写：${REWRITTEN_COMMENTS[index]}`]),
         [null, '现在：（还没有写）', `重写：${REWRITTEN_VERDICT}`],
-      ]) &&
+        [null, `现在：${waiting.record.strengths.join('；')}`, `重写：${REWRITTEN_STRENGTHS.join('；')}`],
+        [null, `现在：${waiting.record.weaknesses.join('；')}`, `重写：${REWRITTEN_WEAKNESSES.join('；')}`],
+      ]) && JSON.stringify(waiting.rewrite.proposal.lists) === JSON.stringify(['strengths', 'weaknesses']) && waiting.record.strengths.length > 0 &&
       JSON.stringify(waiting.rewrite.proposal.actions) === JSON.stringify([['rewrite-accept', '采用新版报告', false], ['rewrite-discard', '放弃', false]]) &&
       waiting.record.entries === '2' && JSON.stringify(waiting.record.comments) === JSON.stringify(AI7_COMMENTS.map(([, comment]) => comment)),
     'evaluation-rewrite-proposal-words', waiting.rewrite);
@@ -2215,15 +2225,19 @@ async function main() {
     // 采用新版报告: a new entry of 第 15 版 with AI7's regenerated words, every score and reason as the editor left them — the new
     // version of the report on show, in ordinary mode.
     await clickSelector(renderer, '[data-evaluation-action="rewrite-accept"]', 'evaluation-rewrite-accept-click');
-    await waitFor(renderer, `${notice} === '已采用新版报告：评语与总评已更新，各项分数没有改动。'`, 'evaluation-rewrite-accepted-status');
+    await waitFor(renderer, `${notice} === '已采用新版报告：各项分数与结论没有改动。'`, 'evaluation-rewrite-accepted-status');
     const accepted = await readEvaluation(renderer, (page) => page.record?.entries === '3', 'evaluation-rewrite-accepted');
     requireJourney(JSON.stringify(accepted.record.comments) === JSON.stringify(REWRITTEN_COMMENTS) && accepted.record.verdict === REWRITTEN_VERDICT &&
+      JSON.stringify(accepted.record.strengths) === JSON.stringify(REWRITTEN_STRENGTHS) && JSON.stringify(accepted.record.weaknesses) === JSON.stringify(REWRITTEN_WEAKNESSES) &&
+      // The market section and the evidence come from the 初评 the version began from, untouched by the new version.
+      JSON.stringify(accepted.market.lists) === JSON.stringify(MARKET_LISTS) && JSON.stringify(accepted.record.ai7Evidence) === JSON.stringify(waiting.record.ai7Evidence) &&
+      JSON.stringify(accepted.record.conclusions) === JSON.stringify(waiting.record.conclusions) &&
       JSON.stringify(accepted.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']) &&
       JSON.stringify(accepted.record.ai7Items.map(([, , , ticked]) => ticked)) === JSON.stringify([[], [], ['too-high'], [], ['insufficient-basis']]) &&
       accepted.record.heading === '版本 · 编辑评分中' && accepted.record.report === true && accepted.rewrite.proposal === null &&
       accepted.rewrite.decided === '上次重写已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
-    const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null]))`);
-    requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted']), 'evaluation-rewrite-accepted-service', acceptedService);
+    const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
+    requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);
     await evaluationMode(true, 'evaluation-rewrite-developer');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
