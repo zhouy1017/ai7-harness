@@ -2114,13 +2114,13 @@ async function main() {
     // 打开草稿: the draft on the manuscript surface, named by its type and 版本 1, its five sections under its title, with the
     // 工作流程 column beside it as every document has.
     await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="create-draft"]', 'readers-report-create-draft');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="readers-report-author"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'readers-report-draft-surface', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="readers-report-author"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'readers-report-draft-surface', 120_000);
     const draftBlocks = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? ''))`);
     const draftTexts = JSON.parse(draftBlocks);
     requireJourney(draftTexts[0] === '《评估旅程丙》审稿意见 · 给作者的修改意见' &&
       JSON.stringify(draftTexts.filter((text) => READERS_REPORT_HEADINGS.includes(text))) === JSON.stringify(READERS_REPORT_HEADINGS) &&
       draftTexts.length > READERS_REPORT_HEADINGS.length + 5, 'readers-report-draft-sections', draftTexts.length);
-    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens') instanceof HTMLElement`, 'readers-report-draft-lens');
+    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] aside.document-lens') instanceof HTMLElement`, 'readers-report-draft-lens');
 
     at('readers-report-version');
     // An edit in the draft's own journal, then 保存为版本: 版本 2.
@@ -2128,8 +2128,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'readers-report-edit-save-ready');
     await click(renderer, '保存', 'readers-report-edit-save');
     await waitFor(renderer, `${notice}.includes('已写入修订日志')`, 'readers-report-edit-durable');
-    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'readers-report-save-version');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${notice} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
+    await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="saveVersion"]', 'readers-report-save-version');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${notice} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
 
     at('readers-report-docx');
     // Back in 评估 the draft names 版本 2, and 导出… writes it as DOCX through the Save dialog: the card's review, the place it
