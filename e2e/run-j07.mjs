@@ -1198,12 +1198,10 @@ async function main() {
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
-        Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) => {
-          const create = card.querySelector('[data-document-action="create"]');
-          const reason = document.getElementById(create?.getAttribute('aria-describedby') ?? '');
-          return card.dataset.documentState === 'none' && create instanceof HTMLButtonElement && create.disabled &&
-            reason?.textContent === '暂无来源材料：可在这里导入文件，或新建空白文档。';
-        });
+        // New documents are made on 稿件 (Issue #1403): a technical card offers no way of making one, only 本书不做.
+        Array.from(window.__j07.documents().querySelectorAll('li.production-document-card')).every((card) =>
+          card.dataset.documentState === 'none' && card.querySelector('[data-document-action="create"], [data-document-action="blank"], [data-document-action="import"]') === null &&
+          card.querySelector('[data-document-action="notForThisBook"]') instanceof HTMLButtonElement);
     })()`, 'designate-unavailable-before-a-milestone');
     // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false'`, 'package-before-milestone');
@@ -1826,7 +1824,7 @@ async function main() {
     // Its workflow at a glance (WORK-005): the summary, the first 下一项 and a chip per phase in its state.
     // The card reads 下一项需要处理 and the seven phases before 交付状态 (§9 总览页, DELIV-001; Issue #626).
     await assertRenderer(renderer, `(() => { const workflow = window.__j07.card('news-release').querySelector('.document-workflow-card'); const delivery = window.__j07.card('news-release').querySelector('.document-delivery-line'); return workflow !== null && delivery !== null && (workflow.compareDocumentPosition(delivery) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 && workflow?.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理' && workflow.querySelector('.document-workflow-next-line')?.textContent === '下一项需要处理：起草 · 已重新打开' && JSON.stringify(Array.from(workflow.querySelectorAll('li.phase-chip'), (chip) => chip.dataset.phaseId + ':' + chip.dataset.phaseState)) === JSON.stringify(['intake:not-started', 'source-development:skipped', 'drafting:reopened', 'review-verification:not-started', 'finalization:not-started', 'delivery:not-started', 'maintenance:not-started']); })()`, 'document-card-workflow');
-    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && card.querySelector('.document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create')?.disabled === false; })()`, 'document-card-names-the-version');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('news-release'); return card.dataset.documentVersion === '2' && card.dataset.documentChanged === 'false' && card.querySelector('.document-card-line')?.textContent === ${JSON.stringify(`版本 2 · 由「${DRAFT_FILE}」创建`)} && card.querySelector('.document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)} && window.__j07.cardAction('news-release', 'open')?.textContent === '打开' && window.__j07.cardAction('news-release', 'create') === null; })()`, 'document-card-names-the-version');
 
     at('document-not-for-this-book');
     // 本书不做 is one record, and 恢复 another; focus stays with the card's own next action.
@@ -2037,7 +2035,8 @@ async function main() {
     })()`, 'package-conditions-name-what-is-missing');
     await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); input.value='未创建附属文档也可打包'; input.dispatchEvent(new Event('input',{bubbles:true})); const enabled=!window.__j07.pkg().querySelector('[data-package-action=prepare]').disabled; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return enabled; })()`, 'package-optional-documents-do-not-block');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
-    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'create')`, 'package-route-focuses-the-card');
+    // A type with no document yet: the technical card's own next action is 本书不做 (new documents are made on 稿件, Issue #1403).
+    await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
 
     at('package-not-for-this-book');
     // The four other types 本书不做 on their own cards: every condition holds, 准备 waits only for a purpose, and the
