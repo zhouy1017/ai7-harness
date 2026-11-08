@@ -304,6 +304,8 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
         if (!radio.checked) return;
         state.mode = mode;
         state.problem = null;
+        // Issue #1410 item 23: 从来源材料创建 begins with the Book's first source chosen; another stays one click away.
+        if (mode === 'source' && state.sourceVersionId === null) state.sourceVersionId = next.sources[0]?.sourceVersionId ?? null;
         paintPanel(mode === 'source' ? 'source' : null);
       });
       label.append(radio, el('span', undefined, words));

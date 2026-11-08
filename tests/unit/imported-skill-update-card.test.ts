@@ -6,7 +6,7 @@ import type {
 } from '../../src/shared/protocol.js';
 import { mountImportedSkills } from '../../src/renderer/imported-skills.js';
 import {
-  IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS, importedSkillHistoryLine,
+  IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_UPDATE_ACCEPT_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS, importedSkillHistoryLine,
 } from '../../src/renderer/imported-skill-labels.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -131,24 +131,14 @@ describe('the foreign Skill card: checking an update from a file (REUSE-032)', (
     } satisfies ImportedSkillAcquisitionProjection,
   });
 
-  it('discloses the package against the Skill before keeping, and keeps it only on the editor\'s act', async () => {
+  it('keeps a newer package as an inert candidate as soon as the file is chosen (Issue #1410 item 27)', async () => {
     const read = disclosure('newer');
     const check = vi.fn(async (input: { skillId: string; kind?: string; keep?: string }) => 'keep' in input ? { ...read, candidate: candidate('clean') } : read);
     await mount({}, { checkImportedSkillUpdate: check });
     expect(button('check-update')?.textContent).toBe(IMPORTED_SKILL_UPDATE_CHECK_LABEL);
     expect(text('[data-skill-updates]')).toContain('不联网，不读取任何图书内容，不运行任何内容');
     await click('check-update');
-    expect(check).toHaveBeenCalledWith({ skillId: SKILL, kind: 'zip' });
-    const panel = text('[data-skill-update-check]');
-    expect(panel).toContain('尚未保留');
-    expect(panel).toContain('这是一个新的版本');
-    expect(panel).toContain('内容 SHA-256 ' + '7'.repeat(64));
-    expect(panel).toContain('转换报告');
-    expect(panel).toContain('声明文件：未提供');
-    expect(panel).toContain('保留：SKILL.md');
-    expect(panel).toContain('不支持：无');
-    expect(check).toHaveBeenCalledTimes(1);
-    await click('keep-update');
+    expect(check).toHaveBeenNthCalledWith(1, { skillId: SKILL, kind: 'zip' });
     expect(check).toHaveBeenLastCalledWith({ skillId: SKILL, keep: read.acquisition.acquisitionId });
     expect(root.querySelector('[data-skill-update-check]')).toBeNull();
     expect(root.querySelector('[data-skill-candidate]')?.dataset['skillDisposition']).toBe('clean');
@@ -188,7 +178,7 @@ describe('the foreign Skill card: a candidate and its adoption (REUSE-033)', () 
     expect(adopt).toHaveBeenCalledWith({ candidateId: CANDIDATE, reviewDigest: '8'.repeat(64), acceptItems: [], upstreamPaths: [] });
   });
 
-  it('lists each file with its change and waits for the editor to confirm a candidate that is not clean before 采纳', async () => {
+  it('lists each file with its change and says what 采纳 accepts on a candidate that is not clean, with no box to tick first', async () => {
     const risky = candidate('authority-change');
     const adopt = vi.fn(async () => ({ ...risky, status: 'adopted' as const, adoptedBy: 'editor' as const, adoptedRevisionId: randomUUID() }));
     await mount({ candidates: [summary(risky)] }, { inspectImportedSkillUpdate: async () => risky, adoptImportedSkillUpdate: adopt });
@@ -197,10 +187,8 @@ describe('the foreign Skill card: a candidate and its adoption (REUSE-033)', () 
     expect(text('[data-skill-candidate]')).toContain('新增资源类别：scripts/');
     expect(text('[data-skill-candidate]')).toContain('校验结果：通过');
     expect(root.querySelectorAll('[data-skill-file]').map((item) => [item.dataset['skillFile'], item.dataset['skillFileChange']])).toEqual([['SKILL.md', 'upstream'], ['resources/note.md', 'unchanged']]);
-    expect(button('adopt')?.disabled).toBe(true);
-    root.querySelector('[data-skill-field="accept"]')!.checked = true;
-    root.querySelector('[data-skill-field="accept"]')!.dispatchEvent({ type: 'change', bubbles: true });
-    await flush();
+    expect(root.querySelector('[data-skill-field="accept"]')).toBeNull();
+    expect(text('[data-skill-candidate]')).toContain(IMPORTED_SKILL_UPDATE_ACCEPT_LABEL);
     expect(button('adopt')?.disabled).toBe(false);
     await click('adopt');
     expect(adopt).toHaveBeenCalledWith({ candidateId: CANDIDATE, reviewDigest: '8'.repeat(64), acceptItems: ['新增资源类别：scripts/'], upstreamPaths: [] });
@@ -217,13 +205,10 @@ describe('the foreign Skill card: a candidate and its adoption (REUSE-033)', () 
       box.checked = !box.checked;
       box.dispatchEvent({ type: 'change', bubbles: true });
     };
-    tick('accept');
-    await flush();
     await click('adopt');
     expect(adopt).toHaveBeenLastCalledWith(expect.objectContaining({ acceptItems: ['文件冲突：SKILL.md'], upstreamPaths: [] }));
     await click('open-candidate');
     tick('upstream');
-    tick('accept');
     await flush();
     await click('adopt');
     expect(adopt).toHaveBeenLastCalledWith(expect.objectContaining({ acceptItems: ['文件冲突：SKILL.md'], upstreamPaths: ['SKILL.md'] }));
@@ -245,18 +230,16 @@ describe('the foreign Skill card: a candidate and its adoption (REUSE-033)', () 
 });
 
 describe('the foreign Skill card: the Artifact Update Rule (REUSE-034)', () => {
-  it('waits for the confirmation line before creating the rule, and revokes it with 撤销', async () => {
+  it('states the confirmation line beside 创建 and creates the rule in one click, and revokes it with 撤销', async () => {
     const create = vi.fn(async () => rule(true));
     const revoke = vi.fn(async () => rule(false));
     await mount({ rule: rule(false) }, { createImportedSkillUpdateRule: create, revokeImportedSkillUpdateRule: revoke });
     expect(root.querySelector('[data-skill-rule]')?.dataset['skillRule']).toBe('inactive');
     expect(button('rule-create')?.textContent).toBe(IMPORTED_SKILL_RULE_CREATE_LABEL);
-    expect(button('rule-create')?.disabled).toBe(true);
+    expect(button('rule-create')?.disabled).toBe(false);
+    expect(root.querySelector('[data-skill-field="rule-confirm"]')).toBeNull();
     expect(text('[data-skill-rule]')).toContain(`我确认：${CONFIRMATION}`);
     expect(text('[data-skill-rule]')).toContain('不会安装或启用任何东西');
-    root.querySelector('[data-skill-field="rule-confirm"]')!.checked = true;
-    root.querySelector('[data-skill-field="rule-confirm"]')!.dispatchEvent({ type: 'change', bubbles: true });
-    await flush();
     await click('rule-create');
     expect(create).toHaveBeenCalledWith({ skillId: SKILL, confirmation: CONFIRMATION });
     await mount({ rule: rule(true) }, { createImportedSkillUpdateRule: create, revokeImportedSkillUpdateRule: revoke });

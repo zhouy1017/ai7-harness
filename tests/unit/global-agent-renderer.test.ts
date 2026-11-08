@@ -87,8 +87,11 @@ it('keeps preview optional and contains IDs, hashes and raw tool arguments in cl
   expect(find('.global-agent-preview').hidden).toBe(false);
   expect(find('.global-agent-preview').textContent).toContain('OpenCode Go · DeepSeek V4.1 Flash');
   submit('直接发送'); await settle();
-  const visible = (node: MiniElement): string => node.tagName === 'DETAILS' ? node.children[0]?.textContent ?? '' : node.children.length ? node.children.map(visible).join(' ') : node.textContent;
+  // The memory list sits in the 引用范围 pill (#1413): opened, it reads; closed technical details still show only their summary.
+  for (const pill of root.querySelectorAll('.global-agent-pill')) pill.setAttribute('open', '');
+  const visible = (node: MiniElement): string => node.tagName === 'DETAILS' && !node.hasAttribute('open') ? node.children[0]?.textContent ?? '' : node.children.length ? node.children.map(visible).join(' ') : node.textContent;
   const text = visible(root as unknown as MiniElement);
+  expect(root.querySelectorAll('.global-agent-pill').map((pill) => pill.dataset['globalAgentPill'])).toEqual(['scope', 'governance', 'directives']);
   expect(text).toContain('文字与用法');
   expect(text).not.toContain(ITEM); expect(text).not.toContain(PIN.revisionId); expect(text).not.toContain('internal-attempt-id');
   expect(root.querySelectorAll('.global-agent-technical').every((details) => !details.hasAttribute('open'))).toBe(true);

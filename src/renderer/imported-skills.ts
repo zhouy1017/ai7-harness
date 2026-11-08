@@ -35,8 +35,6 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   let updateCheck: ImportedSkillUpdateCheckProjection | null = null;
   let candidate: ImportedSkillUpdateCandidateProjection | null = null;
   let upstream = new Set<string>();
-  let accepted = false;
-  let ruleConfirmed = false;
   let busy = false;
   let books: BookSummaryProjection[] = [];
   let booksAfter: BookSummaryCursor | null = null;
@@ -67,20 +65,45 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     await inspect(revision.revisionId);
     return '外部 Skill 记录已更新';
   }
+  /**
+   * 导入 Skill… in one step (Issue #1410 item 27): the package chosen in the system's own dialog is kept, validated by the service
+   * and — when validation passes — installed, with the Books offered for enabling. A package that cannot be kept, or that the
+   * service's validation restricts or rejects, stops where it is with its reasons; nothing in it ever runs.
+   */
   async function disclose(kind: 'zip' | 'directory'): Promise<string | null> {
     const read = await api.importSkillPackage({ kind });
     if (read === null || !root.isConnected) return null;
-    acquisition = read.acquisition;
-    return '已读取所选 Skill，尚未保留';
+    if (read.acquisition.keptRevisionId !== null) { acquisition = null; await inspect(read.acquisition.keptRevisionId); return '这些内容已经保留过；没有新增记录。'; }
+    if (!read.acquisition.keepable) { acquisition = read.acquisition; return '所选内容不能作为 Skill 保留。'; }
+    const kept = await api.importSkillPackage({ keep: read.acquisition.acquisitionId });
+    acquisition = null;
+    if (kept?.revision == null || !root.isConnected) return null;
+    let revision = await api.validateImportedSkill({ revisionId: kept.revision.revisionId });
+    if (revision.state === 'validated') revision = await api.installImportedSkill({ revisionId: revision.revisionId, previewDigest: revision.previewDigest });
+    await inspect(revision.revisionId);
+    if (revision.state !== 'installed-disabled') return '已保留 Skill；验证没有通过，见下方原因。';
+    await readBooks();
+    return '已导入并安装 Skill，可以选择图书启用；仍不运行任何内容。';
   }
   async function readBooks(more = false): Promise<void> {
     const page = await api.listBooks({ after: more ? booksAfter : null });
     books = more ? [...books, ...page.items] : [...page.items]; booksAfter = page.nextCursor;
+    const enabled = projection.revision?.enabledBooks ?? [];
+    if (selectedBook === '' || enabled.includes(selectedBook)) selectedBook = books.find((book) => !enabled.includes(book.bookId))?.bookId ?? '';
   }
   async function openCandidate(candidateId: string): Promise<null> {
     candidate = await api.inspectImportedSkillUpdate({ candidateId });
-    upstream = new Set(); accepted = false;
+    upstream = new Set();
     return null;
+  }
+  /** Keep a newer update the moment it is read (Issue #1410 item 27): it stays an inert candidate until adopted. */
+  async function keepUpdate(read: ImportedSkillUpdateCheckProjection): Promise<string> {
+    const kept = await api.checkImportedSkillUpdate({ skillId: read.skillId, keep: read.acquisition.acquisitionId });
+    updateCheck = null;
+    if (kept?.candidate == null || !root.isConnected) return IMPORTED_SKILL_UPDATE_STATUS.discarded;
+    candidate = kept.candidate; upstream = new Set();
+    await inspect(kept.candidate.adoptedRevisionId ?? projection.revision?.revisionId ?? null);
+    return kept.candidate.status === 'adopted' ? IMPORTED_SKILL_UPDATE_STATUS.keptAdopted : IMPORTED_SKILL_UPDATE_STATUS.keptOpen;
   }
   /** REUSE-021 for an update: the same disclosure as an import, against the Skill it would update, before anything is kept. */
   function updateCheckPanel(read: ImportedSkillUpdateCheckProjection): HTMLElement {
@@ -97,14 +120,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     if (projection.rule?.active) panel.append(el('p', importedSkillRuleActiveLine(projection.rule.since)));
     for (const problem of disclosed.problems) panel.append(el('p', problem));
     for (const line of importedSkillCeilingLines(disclosed.ceiling)) panel.append(el('p', line));
-    const keep = button(IMPORTED_SKILL_UPDATE_ACTIONS.keep, 'keep-update', async () => {
-      const kept = await api.checkImportedSkillUpdate({ skillId: read.skillId, keep: disclosed.acquisitionId });
-      updateCheck = null;
-      if (kept?.candidate == null || !root.isConnected) return null;
-      candidate = kept.candidate; upstream = new Set(); accepted = false;
-      await inspect(kept.candidate.adoptedRevisionId ?? projection.revision?.revisionId ?? null);
-      return kept.candidate.status === 'adopted' ? IMPORTED_SKILL_UPDATE_STATUS.keptAdopted : IMPORTED_SKILL_UPDATE_STATUS.keptOpen;
-    });
+    const keep = button(IMPORTED_SKILL_UPDATE_ACTIONS.keep, 'keep-update', () => keepUpdate(read));
     keep.disabled ||= read.relation !== 'newer' || !disclosed.keepable;
     panel.append(keep, button(IMPORTED_SKILL_UPDATE_ACTIONS.discard, 'discard-update', async () => { updateCheck = null; return IMPORTED_SKILL_UPDATE_STATUS.discarded; }));
     return panel;
@@ -141,21 +157,16 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     if (read.conflicts.length > 0) panel.append(el('p', IMPORTED_SKILL_UPDATE_CONFLICT_NOTE));
     panel.append(el('p', importedSkillUpdateStatusLine(read)), el('p', IMPORTED_SKILL_UPDATE_NOT_ENABLED));
     if (read.status === 'open' && !read.stale) {
-      let confirm: HTMLInputElement | null = null;
-      if (read.acceptItems.length > 0) {
-        const label = el('label'); confirm = el('input'); confirm.type = 'checkbox'; confirm.dataset['skillField'] = 'accept'; confirm.checked = accepted; confirm.disabled = busy;
-        confirm.addEventListener('change', () => { accepted = confirm!.checked; render(); });
-        label.append(confirm, ` ${IMPORTED_SKILL_UPDATE_ACCEPT_LABEL}`); panel.append(label);
-      }
+      // The items above are what 采用 accepts (Issue #1410 item 27): said beside it, never a box to tick first.
+      if (read.acceptItems.length > 0) panel.append(el('p', IMPORTED_SKILL_UPDATE_ACCEPT_LABEL));
       const adopt = button(IMPORTED_SKILL_UPDATE_ACTIONS.adopt, 'adopt', async () => {
         const next = await api.adoptImportedSkillUpdate({
           candidateId: read.candidateId, reviewDigest: read.reviewDigest, acceptItems: read.acceptItems, upstreamPaths: read.conflicts.filter((path) => upstream.has(path)),
         });
-        candidate = next; upstream = new Set(); accepted = false;
+        candidate = next; upstream = new Set();
         if (next.adoptedRevisionId !== null) await inspect(next.adoptedRevisionId);
         return IMPORTED_SKILL_UPDATE_STATUS.adopted;
       });
-      adopt.disabled ||= read.acceptItems.length > 0 && !accepted;
       panel.append(adopt, button(IMPORTED_SKILL_UPDATE_ACTIONS.dismiss, 'dismiss', async () => { candidate = await api.dismissImportedSkillUpdate({ candidateId: read.candidateId }); await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.dismissed; }));
     }
     panel.append(button(IMPORTED_SKILL_UPDATE_ACTIONS.close, 'close-candidate', async () => { candidate = null; return null; }));
@@ -173,14 +184,12 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
       return section;
     }
     section.append(el('p', IMPORTED_SKILL_RULE_INACTIVE));
-    const label = el('label'); const box = el('input'); box.type = 'checkbox'; box.dataset['skillField'] = 'rule-confirm'; box.checked = ruleConfirmed; box.disabled = busy;
-    box.addEventListener('change', () => { ruleConfirmed = box.checked; render(); });
-    label.append(box, importedSkillRuleConfirmLine(rule.confirmation)); section.append(label);
+    // What the rule does is said beside 创建 (Issue #1410 item 27); creating it is the confirmation.
+    section.append(el('p', importedSkillRuleConfirmLine(rule.confirmation)));
     const create = button(IMPORTED_SKILL_RULE_CREATE_LABEL, 'rule-create', async () => {
       await api.createImportedSkillUpdateRule({ skillId: revision.skillId, confirmation: rule.confirmation });
-      ruleConfirmed = false; await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.ruleCreated;
+      await inspect(revision.revisionId); return IMPORTED_SKILL_UPDATE_STATUS.ruleCreated;
     });
-    create.disabled ||= !ruleConfirmed;
     section.append(create);
     return section;
   }
@@ -297,12 +306,14 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
       button(IMPORTED_SKILL_UPDATE_CHECK_LABEL, 'check-update', async () => {
         const read = await api.checkImportedSkillUpdate({ skillId: revision.skillId, kind: 'zip' });
         if (read === null || !root.isConnected) return null;
+        if (read.relation === 'newer' && read.acquisition.keepable) return keepUpdate(read);
         updateCheck = read;
         return IMPORTED_SKILL_UPDATE_STATUS.disclosed;
       }),
       button(IMPORTED_SKILL_UPDATE_CHECK_DIRECTORY_LABEL, 'check-update-directory', async () => {
         const read = await api.checkImportedSkillUpdate({ skillId: revision.skillId, kind: 'directory' });
         if (read === null || !root.isConnected) return null;
+        if (read.relation === 'newer' && read.acquisition.keepable) return keepUpdate(read);
         updateCheck = read;
         return IMPORTED_SKILL_UPDATE_STATUS.disclosed;
       }));

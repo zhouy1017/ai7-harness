@@ -1,4 +1,4 @@
-import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard } from './editorial-mark-card.js';
+import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard } from './editorial-mark-card.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
@@ -61,7 +61,6 @@ import {
   SAFE_MERGE_LINE,
   markDriftNote,
   markTimeLabel,
-  reverseApplyNote,
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
@@ -1658,22 +1657,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         if (form) {
           yours.append(buildForm(form(reopen)));
         } else if (exact) {
-          // 撤销本次修改 (Issue #1411): one click writes the original back as a reversal Effect; the prepared reversal stays in 更多.
+          // 撤销本次修改 (Issue #1411): one click writes the original back as a reversal Effect (Issue #1410 item 7: no prepared second step).
           disposition.append(cardAction('reverse-revision', REVERSE_REVISION_LABEL, 'secondary', () => void writeManuscript(card.markId,
             (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), REVERSE_REVISION_DONE)));
-          more.append(cardAction('prepare-reverse', '准备撤销本次应用', 'secondary', () => void api.prepareReverseApply({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, markId: card.markId }).then((preparation) => { if (!preparation.ready) { options.setStatus(preparation.reason, 'error'); return; } showCard(card, (cancel) => ({
-            id: 'reverse-apply',
-            title: '撤销本次应用',
-            quote: null,
-            fields: [],
-            submitLabel: '确认撤销本次应用',
-            note: `${reverseApplyNote(shown, suggestion.currentText)} ${preparation.reason}${technicalLayerVisible ? ` 当前修订 ${preparation.revisionId} · 修订日志序号 ${preparation.journalSequence}。` : ''}范围：${preparation.ranges.map((range) => `第 ${range.position} 段 ${range.fromGrapheme}–${range.toGrapheme}`).join('；')}`,
-            submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
-            cancel,
-          })); }).catch((error) => options.setStatus(options.errorMessage(error, '无法准备撤销。'), 'error'))));
           yours.append(disposition);
         } else {
-          more.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'));
+          // Issue #1410 item 7: the one undo is 撤销本次修改; when the applied words changed again it says why it cannot act.
+          disposition.append(disabledAction('reverse-revision', REVERSE_REVISION_LABEL, '应用后的文字又改过，不能直接撤销这次应用。'));
+          yours.append(disposition);
           yours.append(...resolveConflict());
           if (card.conflict?.state === 'resolved' && card.conflict.outcome === 'new-version') {
             const correction = el('p', 'muted', REVERSAL_CORRECTION_LINE);
@@ -1712,7 +1703,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
         );
         yours.append(disposition, ...safeMerge());
-        more.append(inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'), el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
+        more.append(inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'));
         if (form) yours.append(buildForm(form(reopen)));
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
@@ -1796,6 +1787,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     technical.append(identities);
     more.append(technicalDisclosure(technical));
+    settleEditorialMarkCard({ more, actions });
 
     if (inline) return panel;
     floating?.remove();
@@ -2304,7 +2296,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: [{
         name: 'procedure',
         label: SELECTION_TASK_FIELD,
-        value: preselect !== undefined && offered.choices.some((choice) => choice.value === preselect) ? preselect : '',
+        // Issue #1410 item 17: the first offered Task is chosen to begin with, so 开始任务 acts at once.
+        value: preselect !== undefined && offered.choices.some((choice) => choice.value === preselect) ? preselect : offered.choices[0]?.value ?? '',
         required: true,
         hint: selectionTaskContextLine({
           bookTitle: start.bookTitle,
@@ -2646,7 +2639,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       items = [
         { action: 'open-card', label: '打开修改建议', run: () => void openCard(mark.markId) },
         mark.status === 'applied'
-          ? { action: 'prepare-reverse', label: '准备撤销本次应用', run: () => void openCard(mark.markId) }
+          // The menu's undo is the card's one click (Issue #1410 item 7); the service refuses it when the words changed again.
+          ? { action: 'reverse-revision', label: REVERSE_REVISION_LABEL, run: () => void writeManuscript(mark.markId,
+              (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: mark.markId, clientEffectId }), REVERSE_REVISION_DONE) }
           : mark.disposition === null && exact
             ? {
                 action: 'accept-and-apply',

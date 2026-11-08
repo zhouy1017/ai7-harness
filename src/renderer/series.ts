@@ -616,6 +616,8 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       if (!root.isConnected || chooser !== open) return;
       const added = page.candidates;
       open.candidates = added;
+      // The first Book found is chosen to begin with (Issue #1410 item 30).
+      if (open.bookId === null && added[0] !== undefined) { open.bookId = added[0].bookId; open.selected = added[0]; }
       open.later = !fresh;
       open.next = page.nextCursor;
       paint(added[0] === undefined ? '#series-add-search' : `input[name="series-add-book"][value="${added[0].bookId}"]`);
@@ -684,8 +686,9 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       preview = await api.previewSeriesMembershipChange({ seriesId: projection.seriesId, bookId, kind });
       busy = false;
       chooser = null;
-      paint('.series-preview-heading');
-      setStatus(seriesPreviewHeading(preview));
+      // 加入书系 / 移出书系 is one step (Issue #1410 item 30): the change is recorded against exactly the impact just read;
+      // the impact and the change are said together in the completion and the Series history.
+      await submit();
     } catch (error) {
       busy = false;
       preview = null;

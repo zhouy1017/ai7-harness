@@ -272,7 +272,7 @@ export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdju
 export const EVALUATION_ADJUSTMENT_NOTE = '自行输入的原因';
 export const EVALUATION_AI7_STATUS = {
   preparing: '正在准备 AI7 初评的任务计划…',
-  prepared: 'AI7 初评的任务计划已准备：在任务计划里看过再开始。',
+  prepared: 'AI7 初评的任务计划已准备。',
   cancelled: 'AI7 初评的任务计划准备已取消。',
   failed: '无法准备 AI7 初评。',
   startingFromInitial: '正在打开评估报告供修改…',
@@ -367,7 +367,7 @@ export const READERS_REPORT_LEDE =
   '根据定稿评估起草审稿意见，修改并保存后可导出，草稿不会自动发送或改变评估。';
 export const READERS_REPORT_ACTIONS = {
   prepare: '起草',
-  openPlan: '查看计划并开始',
+  openPlan: '查看计划',
   openTask: '查看任务',
   createDraft: '打开草稿',
   openDraft: '打开草稿',
@@ -375,7 +375,8 @@ export const READERS_REPORT_ACTIONS = {
 } as const;
 export const READERS_REPORT_STATUS = {
   preparing: '正在准备审稿意见的任务计划…',
-  prepared: '审稿意见的任务计划已准备：在任务计划里看过再开始。',
+  prepared: '审稿意见的任务计划已准备。',
+  started: '已开始起草审稿意见。',
   cancelled: '审稿意见的任务计划准备已取消。',
   failed: '无法准备审稿意见。',
   creating: '正在打开审稿意见草稿…',

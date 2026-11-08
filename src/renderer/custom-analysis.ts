@@ -1,5 +1,6 @@
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { technicalWords, identityWords } from './technical-layer.js';
+import { oneActionStart, startPreparedTask } from './one-action-start.js';
 import type {
   BaselineAnalysisUpdateRequest,
   CustomAnalysisDimensionProjection,
@@ -12,6 +13,7 @@ import {
   CUSTOM_TAB_FEEDBACK_NOTE,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
+  CUSTOM_TAB_STARTED,
   CUSTOM_TAB_PREPARING,
   CUSTOM_TAB_READING,
   CUSTOM_TAB_RUN,
@@ -68,7 +70,7 @@ function actionButton(label: string, tone: 'primary' | 'secondary' | 'quiet', ac
 
 export interface MountCustomAnalysisTabOptions {
   readonly bookId: string;
-  readonly api: Pick<RendererApi, 'inspectCustomAnalysisDimensions' | 'prepareCustomAnalysis'>;
+  readonly api: Pick<RendererApi, 'inspectCustomAnalysisDimensions' | 'prepareCustomAnalysis'> & Partial<Pick<RendererApi, 'inspectTaskPlan' | 'authorizeBaselineAnalysis'>>;
   setStatus: Status;
   errorMessage(error: unknown, fallback: string): string;
   /** The prepared Task's plan in the Task Drawer: ②A's ordinary Plan → Run Authorization path. */
@@ -110,8 +112,17 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       const prepared = await api.prepareCustomAnalysis({ dimensionId: dimension.dimensionId, update: updateFor(dimension) });
       readings.set(bookId, { projection: prepared.dimensions, at: Date.now() });
       if (panel.isConnected) render(prepared.dimensions);
-      options.openPlan(prepared.taskIntentId);
-      options.setStatus(CUSTOM_TAB_PREPARED, 'success');
+      // 运行 runs (Issue #1410 item 13): the prepared plan is started at once unless its route waits for a decision, which the
+      // Task Drawer then asks for; 查看计划 stays beside a run.
+      const plan = api.inspectTaskPlan === undefined ? null : await api.inspectTaskPlan({ kind: 'baseline-analysis', ref: prepared.taskIntentId });
+      if (plan === null || oneActionStart(plan).kind === 'preview') {
+        options.openPlan(prepared.taskIntentId);
+        options.setStatus(CUSTOM_TAB_PREPARED, 'success');
+      } else {
+        await startPreparedTask(api, 'baseline-analysis', prepared.taskIntentId);
+        options.setStatus(CUSTOM_TAB_STARTED, 'success');
+        if (panel.isConnected) void load();
+      }
     } catch (error) {
       options.setStatus(options.errorMessage(error, '无法准备自定义分析的任务计划。'), 'error');
     } finally {
@@ -329,9 +340,18 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     node.addEventListener('submit', (event) => {
       event.preventDefault();
       const titleText = title.value.trim();
-      void act('正在保存自定义分析维度…', () => api.saveCustomAnalysisDimension({
-        dimensionId: dimension?.dimensionId ?? null, title: titleText, questionTemplate: template.value.trim(),
-      }), () => customDimensionSavedLine(titleText));
+      // 保存并启用 is one step (Issue #1410 item 14): the saved version is validated and enabled at once; a refused validation
+      // leaves it 待验证 with the service's reason, and its 启用 stays beside it.
+      void act('正在保存并启用自定义分析维度…', async () => {
+        const saved = await api.saveCustomAnalysisDimension({
+          dimensionId: dimension?.dimensionId ?? null, title: titleText, questionTemplate: template.value.trim(),
+        });
+        const owner = saved.dimensions.find((entry) => dimension === null
+          ? entry.versions[0]?.title === titleText && entry.versions[0]?.state === 'pending-validation'
+          : entry.dimensionId === dimension.dimensionId);
+        const fresh = owner?.versions[0];
+        return fresh?.state === 'pending-validation' ? api.enableCustomAnalysisDimension({ versionId: fresh.versionId }) : saved;
+      }, () => customDimensionSavedLine(titleText));
     });
     node.append(titleLabel, templateLabel, actions);
     return node;

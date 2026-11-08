@@ -489,8 +489,6 @@ async function createEmptyBook(renderer, title) {
   await click(renderer, '新建图书', 'empty-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-form');
   await fill(renderer, '#empty-book-title', title, 'empty-title');
-  await click(renderer, '复核创建', 'empty-review');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-review-ready');
   await click(renderer, '新建图书', 'empty-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-created', 120_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
@@ -1288,7 +1286,7 @@ async function main() {
         historicalRoute.revisionId === revisionOne,
       'historical-exact-route-owned',
     );
-    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.textContent.includes('不提供写入'); })()`, 'immutable-readonly-reconstruction');
+    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.querySelector('.lede')?.textContent.endsWith(' · 只读') === true; })()`, 'immutable-readonly-reconstruction');
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && document.querySelector('[data-return-to-current-revision]')!==null`, 'j14-zoom-200-reflow');
@@ -1547,7 +1545,8 @@ async function main() {
     await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
-    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); if(!(reuse instanceof HTMLInputElement))return false; reuse.click(); return reuse.checked; })()`, 'preflight-reuse-source');
+    // Issue #1410 item 32B: the same-Book match is chosen to begin with.
+    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
@@ -1701,7 +1700,7 @@ async function main() {
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
       return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
-        anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
+        anchorSection.querySelector('.button-row button')?.textContent==='继续编辑稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
         readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
@@ -2216,19 +2215,11 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'database-export-open-settings-hub');
     await click(primary, '数据与存储', 'database-export-open');
     await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
+    // Issue #1410 item 2: the destination chosen in the save dialog is written at once; there is no 按上述方式导出 step. The
+    // Books the export holds are this library's, read from the service before the write.
+    const booksShown = await primary.evaluate(`window.ai7.listBooks({ after: null }).then((page) => page.nextCursor === null ? page.items.length : null)`);
+    requireJourney(Number.isSafeInteger(booksShown) && booksShown >= 1, 'database-export-books-known', booksShown);
     await click(primary, '导出数据库…', 'database-export-choose');
-    await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.preparationId !== undefined`, 'database-export-prepared');
-    const preparedRows = await primary.evaluate(`Array.from(document.querySelectorAll('.database-export-prepared dt')).map((term) => [term.textContent, term.nextElementSibling?.textContent ?? null])`);
-    const booksShown = Number(/^(\d+) 本图书/u.exec(Array.isArray(preparedRows) ? preparedRows.find((row) => row[0] === '内容')?.[1] ?? '' : '')?.[1]);
-    requireJourney(
-      Array.isArray(preparedRows) && preparedRows.length === 5 &&
-        JSON.stringify(preparedRows.map((row) => row[0])) === JSON.stringify(['文件', '位置', '方式', '内容', '版本']) &&
-        preparedRows[0][1].startsWith('「AI7 数据库.ai7db」 · ') && preparedRows[1][1] === databaseExportPath && preparedRows[2][1] === '新建文件' &&
-        Number.isSafeInteger(booksShown) && booksShown >= 1 && /^数据版本 1 · 软件 \d+\.\d+\.\d+/u.test(preparedRows[4][1]),
-      'database-export-prepared-words',
-      preparedRows,
-    );
-    await click(primary, '按上述方式导出', 'database-export-approve');
     await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
     // The outcome line is drawn with the outcome; 导出记录 and its count follow one read later, and only then are the export's
     // controls released and focus moved to 导出数据库…. On a slow runner the one-shot check landed between the two (#656), and a

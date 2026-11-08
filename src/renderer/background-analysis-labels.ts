@@ -10,9 +10,9 @@ export const BACKGROUND_HEADING = '后台处理登记';
 /** The kind the block reads and enrolls (Issue #1089): the selected policy's enrollable kinds, others shown disabled with why. */
 export const BACKGROUND_KIND_LABEL = '后台处理种类';
 export const BACKGROUND_ENROLL_OPEN = '登记后台处理…';
-export const BACKGROUND_REVOKE_OPEN = '撤销登记…';
 export const BACKGROUND_DISCLOSURE_HEADING = '登记后台处理';
-export const BACKGROUND_REVOKE_HEADING = '撤销后台处理登记';
+/** The token ceiling an enrollment form starts with (Issue #1410 item 24); the editor may write another. */
+export const BACKGROUND_CEILING_DEFAULT = '100000';
 export const BACKGROUND_SCOPE_LABEL = '范围';
 export const BACKGROUND_WHAT_LABEL = '分析';
 export const BACKGROUND_WHEN_LABEL = '何时开始';

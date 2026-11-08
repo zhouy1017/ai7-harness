@@ -1673,9 +1673,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'series-empty',
     'series-create',
     'series-open',
-    'membership-add-preview',
+    'membership-add',
     'membership-added',
-    'membership-stale-preview',
+    'membership-changed-elsewhere',
     'library-by-series',
     'book-series-records',
     'membership-remove',
@@ -1709,7 +1709,6 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // stopping the Run with its two ways on, the plan leaving the item out, the marker on the earlier result, 停止此排除
     // restoring later reads only, and 取消任务.
     'exclusion-held-run',
-    'exclusion-preview',
     'exclusion-recorded',
     'exclusion-held-run-stopped',
     'series-exclusion-payload-refused',

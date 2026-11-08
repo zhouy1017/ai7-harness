@@ -321,10 +321,10 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         paint(`[data-guideline-document="${documentId}"] [data-guideline-action="import"]`);
         return;
       }
-      preview = read;
+      // The file chosen in the system's own dialog is the import (Issue #1410 item 25): the service checks it, and it is
+      // recorded as the next version at once; a refusal says why and records nothing.
       busy = false;
-      setStatus(guidelinePreviewHeading(read));
-      paint(`[data-guideline-document="${documentId}"] .guideline-preview h4`);
+      await commit(read);
     } catch (error) {
       busy = false;
       const message = errorMessage(error, GUIDELINE_STATUS.failed);

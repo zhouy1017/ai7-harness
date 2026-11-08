@@ -47,6 +47,7 @@ import {
   PACKAGE_PREPARE,
   PACKAGE_PREVIEW_HEADING,
   PACKAGE_PURPOSE_LABEL,
+  PACKAGE_PURPOSE_DEFAULT,
   PACKAGE_PURPOSE_NEEDED,
   PACKAGE_STATUS_LINES,
   PACKAGE_VERSIONS_HEADING,
@@ -291,7 +292,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const heading = el('h3', undefined, PACKAGE_HEADING);
     heading.id = uid('heading');
     view.setAttribute('aria-labelledby', heading.id);
-    view.append(heading, el('p', 'field-note package-statement', next.statement));
+    view.append(heading);
+    // What a package is and is not is the technical layer's alone (Issue #1413 cluster 4).
+    if (technicalLayerVisible) view.append(el('p', 'field-note package-statement', next.statement));
     // A document's row is the earlier 交付 ledger's reading: once documents are ticked, or outside the technical layer, 随书稿件 says it.
     const conditions = choices === null && technicalLayerVisible ? next.conditions : next.conditions.filter((condition) => condition.key !== 'document');
     view.append(renderConditions(conditions), renderDocumentChoices(next), renderPreview(next), renderPrepare(next));
@@ -397,8 +400,13 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   /** Why `准备图书交付包` is unavailable, first the conditions and then the purpose. */
   function blocker(next: BookDeliveryPackageProjection): string | null {
     if (!next.ready) return packageNotReadyLine(next.unmet);
-    if (publicationText(purpose, MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS) === null) return PACKAGE_PURPOSE_NEEDED;
+    if (publicationText(purposeOrDefault(), MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS) === null) return PACKAGE_PURPOSE_NEEDED;
     return null;
+  }
+
+  /** An empty purpose is the routine one (Issue #1410 item 1): the editor writes one only when it says something more. */
+  function purposeOrDefault(): string {
+    return purpose.trim().length === 0 ? PACKAGE_PURPOSE_DEFAULT : purpose;
   }
 
   function renderPrepare(next: BookDeliveryPackageProjection): HTMLElement {
@@ -414,7 +422,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     input.dataset['packageField'] = 'purpose';
     input.value = purpose;
     input.disabled = busy();
-    input.placeholder = '例如：交出版社存档';
+    input.placeholder = `${PACKAGE_PURPOSE_DEFAULT}（可改写）`;
     label.append(el('span', undefined, PACKAGE_PURPOSE_LABEL), input);
     form.append(label);
     const prepare = el('button', 'primary', PACKAGE_PREPARE);
@@ -559,7 +567,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     }
     panel.append(routes);
     const shown = current.result ?? current.prepared;
-    if (current.review !== null) panel.append(el('p', 'export-local-line', current.route === 'archive'
+    if (current.review !== null && technicalLayerVisible) panel.append(el('p', 'export-local-line', current.route === 'archive'
       ? '压缩包汇集全部内容，不发稿、交付、更改记录或发送文件。' : current.review.statement));
     panel.append(renderExportOptions(current));
     if (current.review !== null) {
@@ -699,9 +707,18 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     return item;
   }
 
-  /** `按上述方式导出` is never preselected and waits for the folder, with its reason in words (EXP-010). */
+  /**
+   * Choosing the place writes the files (Issue #1410 item 1); `按上述方式导出` is shown only to try again after a write that
+   * was refused, with the place still bound.
+   */
   function renderExportActions(current: ExportState, inFlight: boolean): HTMLElement {
     const row = el('div', 'button-row export-actions');
+    const cancel = exportButton('cancel', 'quiet', () => closeExport(true));
+    cancel.disabled = inFlight && current.phase !== 'writing';
+    if (current.prepared === null) {
+      row.append(cancel);
+      return row;
+    }
     const approve = exportButton('approve', 'primary', () => void approveExport());
     const reason = el('span', 'export-approve-reason', current.prepared === null ? PACKAGE_EXPORT_APPROVE_REASON : '');
     reason.id = uid('export-approve-reason');
@@ -713,8 +730,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     reasonLabel.hidden = reason.hidden;
     reasonLabel.append(reason.hidden ? '' : ' · ', reason);
     approve.append(reasonLabel);
-    const cancel = exportButton('cancel', 'quiet', () => closeExport(true));
-    cancel.disabled = inFlight && current.phase !== 'writing';
     row.append(approve, cancel);
     return row;
   }
@@ -792,6 +807,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
           return;
         }
         current.review = next;
+        // Every listed file is selected to begin with (Issue #1410 item 1); the editor unticks what stays behind.
+        if (current.route === 'folder' && current.selected.size === 0) for (const file of next.files) current.selected.add(file.key);
         draw(focus);
         options.setStatus(PACKAGE_EXPORT_STATUS_LINES.reviewed, 'success');
       },
@@ -839,8 +856,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       if (chosen.export.packageVersionId !== current.packageVersionId) throw new Error(PACKAGE_EXPORT_STATUS_LINES.chooseFailed);
       current.prepared = chosen.export;
       current.phase = 'prepared';
-      draw('export-approve');
-      options.setStatus(PACKAGE_EXPORT_STATUS_LINES.prepared, 'success');
+      // The place chosen in the system's own dialog is the approval (Issue #1410 item 1): the files are written now.
+      await approveExport();
     } catch (error) {
       if (destroyed || exporting !== current || request !== exportTicket) return;
       current.phase = current.prepared === null ? 'ready' : 'prepared';
@@ -930,7 +947,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     draw('keep');
     options.setStatus(PACKAGE_STATUS_LINES.preparing, 'busy');
     try {
-      const result = await api.prepareBookDeliveryPackage({ purpose, expectedContentDigest: next.content.digest,
+      const result = await api.prepareBookDeliveryPackage({ purpose: purposeOrDefault(), expectedContentDigest: next.content.digest,
         ...(choices === null ? {} : { documents: chosenDocuments() }) });
       if (destroyed) return;
       if (result.bookId !== bookId || result.package.bookId !== bookId) throw new Error(PACKAGE_STATUS_LINES.prepareFailed);

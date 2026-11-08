@@ -43,6 +43,11 @@ export function editorialPreferenceEditor(options: {
   categories: readonly { categoryId: string; label: string }[];
   books: readonly { bookId: string; title: string }[];
   existing?: import('../shared/protocol.js').GlobalMemoryItem;
+  /**
+   * The Book a new rule starts on (Issue #1410 item 28): the Book the editor is working on, when it is one of `books`. Without
+   * one the rule starts on 全社; no Book is ever guessed.
+   */
+  defaultBookId?: string | null;
   save(input: import('../shared/protocol.js').RecordLearningSupervisionInput): void;
 }): HTMLElement {
   const form = el('form', 'preference-editor');
@@ -61,6 +66,8 @@ export function editorialPreferenceEditor(options: {
   if (options.existing) {
     category.value = options.existing.categoryId; category.disabled = true;
     scope.value = options.existing.bookId ?? ''; scope.disabled = true; text.value = options.existing.text;
+  } else if (options.defaultBookId != null && options.books.some((book) => book.bookId === options.defaultBookId)) {
+    scope.value = options.defaultBookId;
   }
   const save = el('button', 'button primary', options.existing ? '保存偏好' : '新增并启用偏好'); save.type = 'submit';
   form.append(category, scope, text, save);
@@ -307,7 +314,10 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     } else {
       const view = action(LEARNING_OPEN, 'quiet', 'open', () => {
         if (busy) return;
-        open = { bookId: book.bookId, materialKey: material.materialKey, draft: { choice: null, note: '' } };
+        // An undecided material opens on its recommendation (Issue #1410 item 31): the Book's own, or excluded for a Word change
+        // pair. One already decided opens with nothing chosen anew.
+        const recommended = material.kind === 'word-tracked-edit' ? 'excluded' : 'book';
+        open = { bookId: book.bookId, materialKey: material.materialKey, draft: { choice: material.decision == null ? recommended : null, note: '' } };
         refusal = null;
         paint(`${materialSelector(material.materialKey)} .learning-card h4`);
       });

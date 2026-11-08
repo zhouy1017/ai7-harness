@@ -44,6 +44,10 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
   let page = await api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
   let global = await api.inspectGlobalAgent();
   let house = technicalLayerVisible ? null : await api.inspectHouseReviewPreference();
+  // The Book a new rule starts on (Issue #1410 item 28): the Book being worked on, else the only Book there is; otherwise 全社.
+  const workingBookId = await (api.getBookWorkbenchRoute?.() ?? Promise.resolve(null)).then((route) => route?.bookId ?? null, () => null);
+  const defaultBookId = (): string | null => global.books.some((book) => book.bookId === workingBookId) ? workingBookId
+    : global.books.length === 1 ? global.books[0]!.bookId : null;
   let signalOffset = 0; let itemOffset = 0; let exclusionOffset = 0;
   let busy = false; let refreshFailed = false;
   const selected = new Map<string, EditorialLearningProjection['signals'][number]>();
@@ -80,7 +84,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       await api.recordLearningSupervision(input);
       return api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     });
-    section.append(editorialPreferenceEditor({ categories: global.categories, books: global.books, save: savePreference }));
+    section.append(editorialPreferenceEditor({ categories: global.categories, books: global.books, defaultBookId: defaultBookId(), save: savePreference }));
     if (!technicalLayerVisible && global !== null) {
       section.classList.add('review-preferences-ordinary');
       section.append(el('p', REVIEW_PREFERENCES_NOTE));
@@ -238,8 +242,11 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     const batch = el('form', ''); batch.className = 'memory-candidate-form'; batch.dataset['memoryCandidateForm'] = '';
     const title = el('input', ''); title.name = 'candidate-title'; title.maxLength = 160; title.required = true;
     const titleLabel = el('label', '候选记忆内容'); titleLabel.append(title);
-    const scope = el('select', '');
-    for (const [value, label] of [['house', '本社'], ['book', '所选来源的图书']]) { const option = el('option', label!); option.value = value!; scope.append(option); }
+    // The sources' own Book is the scope to begin with (Issue #1410 item 28); sources from more than one Book are refused under
+    // it with the reason, and 本社 takes them.
+    const scope = el('select', ''); scope.name = 'candidate-scope';
+    for (const [value, label] of [['book', '所选来源的图书（推荐）'], ['house', '本社']]) { const option = el('option', label!); option.value = value!; scope.append(option); }
+    scope.value = 'book';
     const scopeLabel = el('label', '适用范围'); scopeLabel.append(scope);
     const confidence = el('input', ''); confidence.type = 'number'; confidence.min = '0'; confidence.max = '100'; confidence.value = '50'; confidence.required = true;
     const confidenceLabel = el('label', '编辑信心（0–100）'); confidenceLabel.append(confidence);
@@ -249,7 +256,11 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       event.preventDefault(); if (!batch.reportValidity()) return;
       const sources = [...selected.values()]; const first = sources[0];
       if (first?.memoryCandidate == null || sources.length > 10 || sources.some((signal) => signal.memoryCandidate?.editorialDimension !== first.memoryCandidate!.editorialDimension ||
-        scope.value === 'book' && signal.source.bookId !== first.source.bookId)) { status.textContent = '请选择 1–10 条同一审阅类别、符合适用范围的来源。'; return; }
+        scope.value === 'book' && signal.source.bookId !== first.source.bookId)) {
+        status.textContent = scope.value === 'book' && sources.some((signal) => signal.source.bookId !== first?.source.bookId)
+          ? '所选来源来自不止一本书：请只选同一本书的来源，或把适用范围改为本社。' : '请选择 1–10 条同一审阅类别、符合适用范围的来源。';
+        return;
+      }
       run(() => api.createEditorialMemory({ schema: 'ai7.global-editorial-memory/2', actionId: crypto.randomUUID(), signalIds: sources.map((signal) => signal.signalId),
         applicability: scope.value === 'book' ? { kind: 'book', bookId: first.source.bookId } : { kind: 'house' },
         title: title.value, editorialDimension: first.memoryCandidate!.editorialDimension, confidence: Number(confidence.value) / 100 }));

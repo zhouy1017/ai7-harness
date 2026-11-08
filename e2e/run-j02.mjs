@@ -878,7 +878,7 @@ async function waitForImportCommitted(renderer, dataRoot) {
   const acknowledged = await watchImportStep(
     renderer,
     dataRoot,
-    `(() => { if (document.querySelector('#screen')?.dataset.screen !== 'imported') return 'refused'; const open = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '打开稿件'); return document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && open instanceof HTMLButtonElement && !open.disabled ? 'done' : 'waiting'; })()`,
+    `(() => { if (document.querySelector('#screen')?.dataset.screen !== 'imported') return 'refused'; const open = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '继续编辑稿件'); return document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && open instanceof HTMLButtonElement && !open.disabled ? 'done' : 'waiting'; })()`,
   );
   if (acknowledged.outcome === 'done') return;
   if (acknowledged.outcome === 'refused') requireJourney(false, 'completion-acknowledged-before-open-refused');
@@ -1007,9 +1007,9 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.getAttribute('aria-valuemax') === '1000000' && ${MANUSCRIPT_RAIL_POSITION} === 0 && !document.querySelector('.editor-meta')?.textContent.includes('%')`, 'whole-manuscript-position');
-  // Synchronized delta with Issue #414: the purpose is an unselected card set — the four frozen purposes and
-  // 自行输入, whose own field keeps the service's 120-unit bound and shows only once 自行输入 is chosen.
-  await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('.milestone-section input[type="radio"][name="milestone-purpose"]')); const custom = document.querySelector('#milestone-purpose-custom'); return document.querySelector('#milestone-label')?.maxLength === 80 && radios.map((radio) => radio.value).join(',') === 'stage-archive,review-candidate,delivery-candidate,other,custom' && radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.maxLength === 120 && custom.hidden && document.querySelector('#milestone-note')?.maxLength === 500; })()`, 'milestone-ui-service-bounds');
+  // Issue #1410 item 21: the purpose cards — the four frozen purposes and 自行输入, whose own field keeps the service's
+  // 120-unit bound and shows only once 自行输入 is chosen — begin at 阶段留档, and an empty 标签 offers its generated name.
+  await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('.milestone-section input[type="radio"][name="milestone-purpose"]')); const custom = document.querySelector('#milestone-purpose-custom'); const label = document.querySelector('#milestone-label'); return label?.maxLength === 80 && label.value === '' && label.placeholder.startsWith('阶段留档 · ') && radios.map((radio) => radio.value).join(',') === 'stage-archive,review-candidate,delivery-candidate,other,custom' && radios.filter((radio) => radio.checked).map((radio) => radio.value).join(',') === 'stage-archive' && custom instanceof HTMLInputElement && custom.maxLength === 120 && custom.hidden && document.querySelector('#milestone-note')?.maxLength === 500; })()`, 'milestone-ui-service-bounds');
   await renderer.evaluate(`globalThis.__ai7FirstBlock = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
 
   const positionJump = manuscriptRailJump(String(INTERIOR_POSITION_RAIL / 1_000_000));

@@ -113,7 +113,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
 const windowOf = (bookId: string): ManuscriptWindowProjection => ({
   bookId, manuscriptId: `${bookId}-manuscript`, branchId: 'branch-main', revisionId: 'rev-2', revisionLabel: 'r2',
   journalSequence: 4, workingDigest: 'a'.repeat(64), deliverable: 'manuscript', recoveredStateReview: null,
-  position: { label: '第 3 段', proportion: 0.25, structureLabel: '第一章' },
+  position: { label: '第 3 段', proportion: 0.25, structureLabel: '第一章', totalCharacters: 12_345 },
   previousCursor: null, nextCursor: null, marks: [], marksTruncated: false,
   blocks: [{ blockId: 'blk_3', kind: 'paragraph', text: '合成段落。', position: 3, digest: 'b'.repeat(64) }],
 }) as unknown as ManuscriptWindowProjection;

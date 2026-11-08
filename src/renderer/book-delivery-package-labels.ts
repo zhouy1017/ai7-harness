@@ -21,7 +21,9 @@ export const PACKAGE_LIMITATIONS_TRUNCATED = '更早的审阅也各有说明，�
 export const PACKAGE_PURPOSE_LABEL = '交付包用途';
 export const PACKAGE_PURPOSE_HINT = '写明为什么准备这一版，例如「交出版社存档」。';
 export const PACKAGE_PREPARE = '准备图书交付包';
-export const PACKAGE_PURPOSE_NEEDED = '先写明交付包用途。';
+export const PACKAGE_PURPOSE_NEEDED = '交付包用途过长。';
+/** The purpose recorded when the editor writes none (Issue #1410 item 1). */
+export const PACKAGE_PURPOSE_DEFAULT = '常规交付打包';
 export const PACKAGE_VERSIONS_HEADING = '已准备的版本';
 export const PACKAGE_VERSIONS_TRUNCATED = '更早的版本保留在记录中。';
 export const PACKAGE_CURRENT_MARK = '当前';
@@ -135,7 +137,7 @@ export const PACKAGE_EXPORT_STATUS_LINES = {
   reviewFailed: '无法准备图书交付包的导出。',
   choosing: '正在打开系统的文件夹对话框…',
   cancelled: '已取消选择位置，没有写入任何文件。',
-  prepared: '已准备好导出文件，等待你确认。',
+  prepared: '已准备好导出文件，正在写入。',
   chooseFailed: '未能准备导出文件。',
   writing: '正在写入所选文件夹…',
   approveFailed: '未能导出图书交付包。',

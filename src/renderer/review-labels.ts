@@ -87,13 +87,15 @@ export const REVIEW_ACTION_LABELS = {
   'convert-to-suggestion': '转为修改建议',
   'convert-confirm': '转为修改建议',
   'convert-cancel': '取消',
-  ignore: '忽略并说明',
+  'ignore-now': '忽略',
+  ignore: '忽略并备注…',
   'ignore-confirm': '确认忽略',
   'ignore-cancel': '取消',
   'batch-prepare': '接受并应用全部',
   'batch-confirm': '确认应用',
   'batch-cancel': '取消',
   'batch-reprepare': '重新准备应用',
+  'batch-undo': '撤销本批应用',
   'more-findings': '显示更多发现',
   'generate-report': '生成报告',
   export: '导出',
@@ -590,6 +592,14 @@ export const REVIEW_SCOPE_CANCEL_NOTE = '取消后这次审阅不再继续，也
 
 export function reviewBatchReadyLine(count: number): string {
   return `将把 ${count} 条修改建议写入稿件；请核对后确认应用。`;
+}
+
+/** The reason 忽略 records when the editor writes none (Issue #1410 item 6). */
+export const REVIEW_IGNORE_DEFAULT_REASON = '编辑决定忽略';
+export const REVIEW_BATCH_UNDO_FAILED = '未能撤销本批应用。';
+/** 撤销本批应用's outcome: all reversed, or how far it came before one could not be. */
+export function reviewBatchUndoneLine(undone: number, total: number): string {
+  return undone === total ? `已撤销本批应用的 ${total} 条修改建议，原文已写回稿件。` : `已撤销 ${undone} 条；其余 ${total - undone} 条的文字已经变过，不能直接撤销，可在稿件中逐条处理。`;
 }
 
 export function reviewBatchAppliedLine(count: number, recovered: boolean): string {

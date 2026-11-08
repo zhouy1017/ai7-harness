@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -191,8 +191,6 @@ async function createEmptyBook(renderer, title) {
   await click(renderer, '新建图书', 'empty-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-form');
   await fill(renderer, '#empty-book-title', title, 'empty-title');
-  await click(renderer, '复核创建', 'empty-review');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-review-ready');
   await click(renderer, '新建图书', 'empty-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-created', 120_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
@@ -253,7 +251,8 @@ async function readKnowledge(renderer, predicate, name) {
 // 知识库 › 资料库 (Issue #427, plan slice S79c): the admitted Public SampleBook `sample1`, collected by the editor as a reference
 // book, handed to 放入资料… through the picker control of the relaunched window.
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
-const LIBRARY_TITLE = '样书一';
+// Issue #1410 item 29: a file goes into 资料库 under its own suggested title, as 资料 when no kind is suggested.
+const LIBRARY_TITLE = 'sample1';
 const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 /** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
 const READ_LIBRARY = `(() => {
@@ -555,15 +554,9 @@ async function main() {
 
     at('knowledge-guideline-import');
     await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
-    // 导入新版本… on 文字规范条款: the picker's file is read as the next version would read it — five clauses, how they differ —
-    // and 确认导入 records 第 2 版, issued by the house; version 1 stays listed beneath it.
+    // 导入新版本… on 文字规范条款 (Issue #1410 item 25): the file picked in the system dialog is imported at once as 第 2 版,
+    // issued by the house; version 1 stays listed beneath it.
     await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='导入新版本…')return false; start.click(); return true; })()`, 'knowledge-import-start');
-    const previewed = await readKnowledge(renderer, (page) => page.cards[0]?.preview !== null, 'knowledge-import-preview');
-    requireJourney(previewed.cards[0].preview === '将导入为《文字规范条款》第 2 版' &&
-      previewed.cards[0].changes === `${HOUSE_GUIDELINE_NAME} · 5 条 · 与第 1 版相比：改动 4 条，新增 1 条，删去 0 条` && previewed.cards[0].previewClauses === 5 &&
-      previewed.cards[0].pill === '第 1 版 · AI7 内置默认', 'knowledge-import-preview-words', previewed.cards[0]);
-    await waitFor(renderer, `document.activeElement === document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .guideline-preview h4')`, 'knowledge-import-preview-focused', 10_000);
-    await assertRenderer(renderer, `(() => { const confirm=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="confirm"]'); if(!(confirm instanceof HTMLButtonElement)||confirm.disabled)return false; confirm.click(); return true; })()`, 'knowledge-import-confirm');
     const importedPage = await readKnowledge(renderer, (page) => page.cards[0]?.pill === '第 2 版 · 本社', 'knowledge-imported');
     requireJourney(importedPage.cards[0].preview === null && importedPage.cards[0].clauses.length === 5 && importedPage.cards[0].versions.length === 2 &&
       importedPage.cards[0].versions[0].startsWith('第 2 版 · 本社 · 导入于 ') && importedPage.cards[0].versions[0].endsWith(` · ${HOUSE_GUIDELINE_NAME} · 5 条 · 还没有审阅用过`) &&
@@ -617,7 +610,7 @@ async function main() {
 
     at('knowledge-guideline-import');
     await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
-    // Real picker/service/UI pages: later clauses remain reachable in preview and after import; history reaches version 1.
+    // Real picker/service/UI pages: later clauses remain reachable after import; history reaches version 1.
     const cardSelector = '[data-guideline-document="ai7-builtin/typos-and-usage"]';
     const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
       const button=document.querySelector(${JSON.stringify(`${cardSelector} ${selector}`)});
@@ -638,15 +631,8 @@ async function main() {
         await click(renderer, '审阅规范文件', 'knowledge-page-open-category');
         await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
       }
+      // The picked file imports at once (Issue #1410 item 25); the clause paging is proven on the imported version below.
       await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})?.dataset.guidelinePreview==='${version}'`, 'knowledge-page-preview');
-      if (version === 8) {
-        await activateGuideline('.guideline-preview [data-guideline-action="clauses-next"]', 'knowledge-preview-next');
-        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===1 && area.querySelector('li')?.value===9 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-last-focus');
-        await activateGuideline('.guideline-preview [data-guideline-action="clauses-previous"]', 'knowledge-preview-previous');
-        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===8 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-first-focus');
-      }
-      await activateGuideline('[data-guideline-action="confirm"]', 'knowledge-page-import-confirm');
       await waitFor(renderer, `document.querySelector(${JSON.stringify(cardSelector)})?.dataset.guidelineVersion==='${version}' && !document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})`, 'knowledge-page-imported');
     }
     await assertRenderer(renderer, `(() => { const card=document.querySelector(${JSON.stringify(cardSelector)}); card.querySelector('.guideline-clauses').open=true; card.querySelector('.guideline-versions').open=true; return card.querySelectorAll('.guideline-version-list li').length===5; })()`, 'knowledge-pages-open');
@@ -752,20 +738,9 @@ async function main() {
     const sample1Digest = createHash('sha256').update(sample1).digest('hex');
     const libraryObjects = resolve(dataRoot, 'library-objects');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-add');
-    const libraryPreview = await readLibrary(renderer, (page) => page.preview !== null, 'library-preview');
-    requireJourney(libraryPreview.preview.heading === '放入资料库：sample1.docx' &&
-      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原文件保持不变` && libraryPreview.preview.title === 'sample1' &&
-      JSON.stringify(libraryPreview.preview.kinds) === JSON.stringify([['book', false], ['paper', false], ['document', false], ['web', false]]) &&
-      libraryPreview.preview.confirmDisabled === true, 'library-preview-words', libraryPreview.preview);
-    await waitFor(renderer, `document.activeElement === document.querySelector('.library-preview h3')`, 'library-preview-focused', 10_000);
-    requireJourney(await lstat(libraryObjects).then(() => false, () => true), 'library-preview-keeps-nothing');
-    await fill(renderer, '.library-preview [data-library-field="title"]', LIBRARY_TITLE, 'library-title');
-    await clickSelector(renderer, '.library-preview [data-library-choice="book"]', 'library-kind-book');
-    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'library-confirm-enabled', 10_000);
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-confirm');
     const libraryAdded = await readLibrary(renderer, (page) => page.preview === null && page.cards.length === 1, 'library-added');
     const [libraryCard] = libraryAdded.cards;
-    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '图书' && libraryCard.attribution === 'house' && libraryCard.eligibility === 'house' && libraryCard.reference === 'available' && libraryCard.decisions === '2', 'library-added-card', libraryCard);
+    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '资料' && libraryCard.attribution === 'house' && libraryCard.eligibility === 'house' && libraryCard.reference === 'available' && libraryCard.decisions === '2', 'library-added-card', libraryCard);
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」；已允许任务参考。`)}`, 'library-added-status', 10_000);
     // The original is kept byte for byte under its digest in the Agent Data Root, and the service reads it as the page does.
     const libraryKept = await readFile(resolve(libraryObjects, 'sha256', sample1Digest.slice(0, 2), `${sample1Digest}.docx`));
@@ -828,7 +803,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
     const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('.global-attention-object-name')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
-    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 图书「${LIBRARY_TITLE}」` &&
+    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 资料「${LIBRARY_TITLE}」` &&
       indexListed.next === '查看索引', 'library-index-attention-words', indexListed);
     await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
     await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
@@ -909,16 +884,13 @@ async function main() {
       await click(renderer, '资料库', 'library-page-tab');
       await readLibrary(renderer, (page) => page.state === 'ready', 'library-page-loaded');
       await clickSelector(renderer, '[data-library-action="add"]', 'library-page-add');
-      await readLibrary(renderer, (page) => page.preview !== null, 'library-page-preview');
-      await fill(renderer, '[data-library-field="title"]', `分页资料${index}`, 'library-page-title');
-      await clickSelector(renderer, '[data-library-choice="document"]', 'library-page-kind');
-      await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-page-confirm');
       await readLibrary(renderer, (page) => page.preview === null && page.cards.length === Math.min(index + 2, 20), 'library-page-arrival');
     }
     for (let repeat = 0; repeat < 2; repeat += 1) {
-      await clickSelector(renderer, '[data-library-action="more"]', 'library-page-next');
+      // The pager is released once the page's own read settles after the arrivals.
+      await waitFor(renderer, `(() => { const more = document.querySelector('[data-library-action="more"]'); if (!(more instanceof HTMLButtonElement) || more.disabled) return false; more.click(); return true; })()`, 'library-page-next');
       await readLibrary(renderer, (page) => page.cards.length === 1 && page.cards[0].id === materialId && page.focus?.tag === 'H3', 'library-page-oldest');
-      await clickSelector(renderer, '[data-library-action="first"]', 'library-page-first');
+      await waitFor(renderer, `(() => { const first = document.querySelector('[data-library-action="first"]'); if (!(first instanceof HTMLButtonElement) || first.disabled) return false; first.click(); return true; })()`, 'library-page-first');
       await readLibrary(renderer, (page) => page.cards.length === 20 && page.focus?.tag === 'H3', 'library-page-newest');
     }
 
@@ -949,11 +921,7 @@ async function main() {
     await click(renderer, '资料库', 'library-epub-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-epub-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-epub-add');
-    await readLibrary(renderer, (page) => page.preview?.heading === '放入资料库：library-reference-book.epub', 'library-epub-preview');
-    await fill(renderer, '[data-library-field="title"]', '合成电子书', 'library-epub-title');
-    await clickSelector(renderer, '[data-library-choice="book"]', 'library-epub-kind');
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-epub-confirm');
-    const epubIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成电子书' && page.cards[0].index === 'complete', 'library-epub-indexed');
+    const epubIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === 'library-reference-book' && page.cards[0].index === 'complete', 'library-epub-indexed');
     const epubLayers = new Map(epubIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(epubLayers.get('metadata')?.[1] === '中文 · 3 段 · 1 个标题 · 文件自带标题「合成电子书」' &&
       JSON.stringify(epubLayers.get('text')) === JSON.stringify(['complete', '已提取 30 字']) &&
@@ -981,11 +949,7 @@ async function main() {
     await click(renderer, '资料库', 'library-pdf-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-pdf-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-pdf-add');
-    await readLibrary(renderer, (page) => page.preview?.heading === '放入资料库：library-reference.pdf', 'library-pdf-preview');
-    await fill(renderer, '[data-library-field="title"]', '合成 PDF', 'library-pdf-title');
-    await clickSelector(renderer, '[data-library-choice="document"]', 'library-pdf-kind');
-    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-pdf-confirm');
-    const pdfIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成 PDF' && page.cards[0].index === 'complete', 'library-pdf-indexed');
+    const pdfIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === 'library-reference' && page.cards[0].index === 'complete', 'library-pdf-indexed');
     const pdfLayers = new Map(pdfIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(pdfLayers.get('metadata')?.[1] === '中文 · 3 段 · 0 个标题 · 文件自带标题「合成 PDF」' && pdfLayers.get('text')?.[0] === 'complete' &&
       JSON.stringify(pdfLayers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
@@ -1096,19 +1060,12 @@ async function main() {
 
     at('skill-update-seed');
     await relaunchWith(resolve(SKILLS, 'plain'), 'skill-update-seed');
+    // Issue #1410 item 27: the picked package is kept, validated and installed in one step, with the Books offered.
     await clickSelector(renderer, '[data-skill-action="import"]', 'skill-seed-pick');
-    await waitFor(renderer, `document.querySelector('[data-skill-acquisition]')?.textContent.includes('尚未保留')`, 'skill-seed-disclosed');
-    await clickSelector(renderer, '[data-skill-action="keep"]', 'skill-seed-keep');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-seed-kept');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled' && document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-seed-installed');
     const skillId = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillOwner`);
     const firstRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
     requireJourney(/^[0-9a-f-]{36}$/u.test(skillId ?? '') && /^[0-9a-f-]{36}$/u.test(firstRevision ?? ''), 'skill-seed-identities', { skillId, firstRevision });
-    await clickSelector(renderer, '[data-skill-action="validate"]', 'skill-seed-validate');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-seed-validated');
-    await clickSelector(renderer, '[data-skill-action="install"]', 'skill-seed-install');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled'`, 'skill-seed-installed');
-    await clickSelector(renderer, '[data-skill-action="books"]', 'skill-seed-books');
-    await waitFor(renderer, `document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-seed-book-options');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-skill-field="book"]'); select.value=select.options[1].value; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value!==''; })()`, 'skill-seed-book-chosen');
     await clickSelector(renderer, '[data-skill-action="enable"]', 'skill-seed-enable');
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='enabled'`, 'skill-seed-enabled');
@@ -1118,17 +1075,9 @@ async function main() {
     await clickSelector(renderer, '[data-skill-action="inspect"]', 'skill-check-open-card');
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillCurrent==='true' && document.querySelector('[data-skill-action="check-update"]')`, 'skill-check-card');
     await clickSelector(renderer, '[data-skill-action="check-update"]', 'skill-check-pick');
-    // The package is disclosed against the Skill it would update, with nothing kept yet.
-    await waitFor(renderer, `document.querySelector('[data-skill-update-check]')?.textContent.includes('尚未保留')`, 'skill-check-disclosed');
-    await assertRenderer(renderer, `(async () => {
-      const panel=document.querySelector('[data-skill-update-check]'); const text=panel?.textContent??'';
-      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(firstRevision)},before:null});
-      return text.includes('synthetic-style-review') && text.includes('1.1.0') && text.includes('这是一个新的版本') && /SHA-256 [0-9a-f]{64}/.test(text) && text.includes('Run 可读范围：无') &&
-        read.candidates.length===0 && read.history.length===1 && !document.querySelector('[data-skill-candidate]');
-    })()`, 'skill-check-disclosed-nothing-kept');
+    // A newer update is kept the moment it is read (Issue #1410 item 27): one inert candidate, nothing else changed.
 
     at('skill-update-candidate-inert');
-    await clickSelector(renderer, '[data-skill-action="keep-update"]', 'skill-check-keep');
     await waitFor(renderer, `document.querySelector('[data-skill-candidate]')?.dataset.skillDisposition==='clean' && document.querySelector('[data-skill-candidate]')?.dataset.skillCandidateStatus==='open'`, 'skill-check-candidate');
     // One inert candidate: the three-way summary and its per-file list; the revision, its state and its enablement are as they were.
     await assertRenderer(renderer, `(async () => {
@@ -1160,8 +1109,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-adopted-validated');
 
     at('skill-update-rule-create');
-    await clickSelector(renderer, '[data-skill-field="rule-confirm"]', 'skill-rule-confirm');
-    await waitFor(renderer, `document.querySelector('[data-skill-action="rule-create"]')?.disabled===false`, 'skill-rule-confirmed');
+    // Creating the rule is its confirmation (Issue #1410 item 27); what it does is said beside 创建.
+    await waitFor(renderer, `document.querySelector('[data-skill-action="rule-create"]')?.disabled===false && !document.querySelector('[data-skill-field="rule-confirm"]')`, 'skill-rule-ready');
     await clickSelector(renderer, '[data-skill-action="rule-create"]', 'skill-rule-create');
     await waitFor(renderer, `document.querySelector('[data-skill-rule]')?.dataset.skillRule==='active'`, 'skill-rule-active');
     await assertRenderer(renderer, `(async () => {
@@ -1174,8 +1123,6 @@ async function main() {
     await clickSelector(renderer, '[data-skill-action="inspect"]', 'skill-rule-open-card');
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillDetail===${JSON.stringify(secondRevision)} && document.querySelector('[data-skill-rule]')?.dataset.skillRule==='active'`, 'skill-rule-survived-restart');
     await clickSelector(renderer, '[data-skill-action="check-update"]', 'skill-rule-pick');
-    await waitFor(renderer, `document.querySelector('[data-skill-update-check]')?.textContent.includes('尚未保留')`, 'skill-rule-disclosed');
-    await clickSelector(renderer, '[data-skill-action="keep-update"]', 'skill-rule-keep');
     await waitFor(renderer, `document.querySelector('[data-skill-candidate]')?.dataset.skillCandidateStatus==='adopted' && document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-rule-adopted');
     const thirdRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
     requireJourney(/^[0-9a-f-]{36}$/u.test(thirdRevision ?? '') && thirdRevision !== secondRevision && thirdRevision !== firstRevision, 'skill-rule-new-revision', { thirdRevision });
@@ -1220,7 +1167,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-lineage-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');
-    await assertRenderer(renderer, `(() => {const mode=document.querySelector('[data-word-import-mode="accepted-baseline"]');if(!(mode instanceof HTMLInputElement)||mode.disabled)return false;mode.click();const confirm=document.querySelector('[data-word-accepted-baseline-confirmation]');if(!(confirm instanceof HTMLInputElement)||confirm.checked)return false;confirm.click();return document.querySelector('[data-word-learn-from-edits]')?.checked===true;})()`, 'word-lineage-explicit-accepted-choice');
+    await assertRenderer(renderer, `(() => {const mode=document.querySelector('[data-word-import-mode="accepted-baseline"]');if(!(mode instanceof HTMLInputElement)||mode.disabled)return false;mode.click();/* Issue #1410 item 32A: choosing 定稿基线 is its confirmation. */return mode.checked&&!document.querySelector('[data-word-accepted-baseline-confirmation]')&&document.querySelector('[data-word-learn-from-edits]')?.checked===true;})()`, 'word-lineage-explicit-accepted-choice');
     await click(renderer, '查看导入详情', 'word-lineage-prepare');
     await waitFor(renderer, `document.querySelector('[data-word-reviewed-mode="accepted-baseline"][data-word-reviewed-learning="true"]')`, 'word-lineage-reviewed');
     await click(renderer, '新建图书并导入稿件', 'word-lineage-commit');

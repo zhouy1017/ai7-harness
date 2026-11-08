@@ -783,8 +783,9 @@ async function prepareSourceImportReview(renderer, expectation) {
     await waitFor(renderer, `document.querySelector('[data-source-version-reuse-choices]')`, 'source-reuse-required');
     await assertRenderer(
       renderer,
-      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse && !reuse.checked && !document.querySelector('[data-prepare-source-import-review]'); })()`,
-      'source-reuse-unselected',
+      // Issue #1410 item 32B: the same-Book match is chosen to begin with.
+      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`,
+      'source-reuse-preselected',
     );
     await assertRenderer(
       renderer,
@@ -953,8 +954,9 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector('[data-reimport-lineage-choices]') && document.querySelector('[data-reimport-source-version-choices]')`, `${scenario}-choices`);
   await assertRenderer(
     renderer,
-    `!document.querySelector('input[name="reimport-lineage"]:checked') && !document.querySelector('input[name="reimport-source-version"]:checked') && !document.querySelector('[data-prepare-manuscript-reimport]')`,
-    `${scenario}-choices-unselected`,
+    // Issue #1410 item 32B: a lineage and a source result are chosen to begin with, so the prepare action shows at once.
+    `document.querySelector('input[name="reimport-lineage"]:checked') !== null && document.querySelector('input[name="reimport-source-version"]:checked') !== null && document.querySelector('[data-prepare-manuscript-reimport]') !== null`,
+    `${scenario}-choices-preselected`,
   );
   const lineageSelector = lineageStatus === 'verified'
     ? `[data-reimport-lineage="verified-source-version"][data-source-version-id=${JSON.stringify(lineageSourceVersionId)}]`
@@ -970,7 +972,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector(${JSON.stringify(sourceSelector)})`, `${scenario}-source-choice`);
   await assertRenderer(
     renderer,
-    `(() => { const source = document.querySelector(${JSON.stringify(sourceSelector)}); if (!source || source.checked) return false; source.click(); return true; })()`,
+    `(() => { const source = document.querySelector(${JSON.stringify(sourceSelector)}); if (!source) return false; if (!source.checked) source.click(); return source.checked; })()`,
     `${scenario}-source-select`,
   );
   const stagedSourceIdentity = await renderer.evaluate(`(() => ({
@@ -1015,7 +1017,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-mappings`);
   await assertRenderer(
     renderer,
-    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const text = review?.textContent ?? ''; const changedMappings = review?.querySelectorAll('article.reimport-group[data-reimport-group-verb=""]').length ?? 0; const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const exactSource = review?.querySelector('[data-reimport-source-sha256]'); const lineageExact = ${lineageStatus === 'verified' ? `values['来源关系版本 ID'] === ${JSON.stringify(lineageSourceVersionId)} && /^[0-9a-f-]{36}$/i.test(values['来源关系修订版 ID'] ?? '')` : `values['来源关系版本 ID'] === undefined && values['来源关系修订版 ID'] === undefined`}; return review?.dataset.reimportLineageStatus === ${JSON.stringify(lineageStatus)} && review.dataset.reimportComparisonKind === ${JSON.stringify(lineageStatus === 'verified' ? 'three-way' : 'two-way')} && /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && lineageExact && exactSource?.dataset.reimportSourceSha256 === ${JSON.stringify(stagedSourceIdentity.sha256)} && exactSource.dataset.reimportSourceBytes === ${JSON.stringify(stagedSourceIdentity.bytes)} && text.includes(${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')}) && text.includes(${JSON.stringify(dirtyCheckpoint ? '已将当前编辑保存为修订版' : '当前稿件已保存')}) && !text.includes('明确不会发生') && !text.includes('不授予或执行模型提供方传输') && !text.includes('不导出、不发送、不交付、不发布') && ${changed ? 'changedMappings > 0 && review.dataset.reimportCommitReady === "false"' : `changedMappings === 0 && review.dataset.reimportCommitReady === "${degraded ? 'false' : 'true'}" && text.includes("未发现稿件变化")`} && ${degraded ? "Boolean(review.querySelector('[data-accept-reimport-degradation]')) && text.includes('必须明确接受完整降级集合')" : "!review.querySelector('[data-accept-reimport-degradation]')"}; })()`,
+    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const text = review?.textContent ?? ''; const changedMappings = review?.querySelectorAll('article.reimport-group[data-reimport-group-verb=""]').length ?? 0; const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const exactSource = review?.querySelector('[data-reimport-source-sha256]'); const lineageExact = ${lineageStatus === 'verified' ? `values['来源关系版本 ID'] === ${JSON.stringify(lineageSourceVersionId)} && /^[0-9a-f-]{36}$/i.test(values['来源关系修订版 ID'] ?? '')` : `values['来源关系版本 ID'] === undefined && values['来源关系修订版 ID'] === undefined`}; return review?.dataset.reimportLineageStatus === ${JSON.stringify(lineageStatus)} && review.dataset.reimportComparisonKind === ${JSON.stringify(lineageStatus === 'verified' ? 'three-way' : 'two-way')} && /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && lineageExact && exactSource?.dataset.reimportSourceSha256 === ${JSON.stringify(stagedSourceIdentity.sha256)} && exactSource.dataset.reimportSourceBytes === ${JSON.stringify(stagedSourceIdentity.bytes)} && text.includes(${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')}) && text.includes(${JSON.stringify(dirtyCheckpoint ? '已将当前编辑保存为修订版' : '当前稿件已保存')}) && !text.includes('明确不会发生') && !text.includes('不授予或执行模型提供方传输') && !text.includes('不导出、不发送、不交付、不发布') && ${changed ? 'changedMappings > 0 && review.dataset.reimportCommitReady === "false"' : `changedMappings === 0 && review.dataset.reimportCommitReady === "${degraded ? 'false' : 'true'}" && text.includes("未发现稿件变化")`} && ${degraded ? "Boolean(review.querySelector('[data-accept-reimport-degradation]')) && text.includes('提交本次重新导入即接受上面列出的全部降级')" : "!review.querySelector('[data-accept-reimport-degradation]')"}; })()`,
     `${scenario}-review-contract`,
   );
   at('review');
@@ -1162,7 +1164,8 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
     const degradationRequired = await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`);
     if (degradationRequired) {
       const acceptingVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
-      await clickExactButton(renderer, '明确接受完整降级集合', `${scenario}-accept-degradation`);
+      // Issue #1410 item 32C: accepting the listed degradations commits too once the review is ready; here rows still wait.
+      await assertRenderer(renderer, `(() => { const accept = document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'); if (!(accept instanceof HTMLButtonElement)) return false; accept.click(); return true; })()`, `${scenario}-accept-degradation`);
       await waitFor(
         renderer,
         `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(acceptingVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`,
@@ -1656,7 +1659,7 @@ async function runJourney(
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
-      `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限') && document.querySelector('[data-screen="review"] h3')?.textContent.endsWith('（不同作品）'); })()`,
+      `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && (document.documentElement.dataset.technicalLayerVisible === 'true') === summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限') && document.querySelector('[data-screen="review"] h3')?.textContent.endsWith('（不同作品）'); })()`,
       'review-binds-identity-finding-and-distinct-work',
     );
   }
@@ -1682,7 +1685,7 @@ async function runJourney(
     if (hasIdentityFinding) {
       await assertRenderer(
         renderer,
-        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限'); })()`,
+        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && (document.documentElement.dataset.technicalLayerVisible === 'true') === summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限'); })()`,
         'restored-review-retains-identity-findings',
       );
     }
@@ -1739,7 +1742,7 @@ async function runJourney(
       'import-completion',
     ),
   );
-  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='打开稿件' && !document.querySelector('.book-overview .success-note') && document.querySelectorAll('.import-steps [data-import-step]').length===4`, 'overview-anchor-first');
+  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='继续编辑稿件' && !document.querySelector('.book-overview .success-note') && document.querySelectorAll('.import-steps [data-import-step]').length===4`, 'overview-anchor-first');
   if (holdCompletionPaint) {
     await duringCompletion(
       'held-before-paint',
@@ -1869,8 +1872,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     await clickExactButton(renderer, '新建图书', 'word-empty-book-open');
     await waitFor(renderer, `document.querySelector('#empty-book-title')`, 'word-empty-book-form');
     await assertRenderer(renderer, `(() => { const title = document.querySelector('#empty-book-title'); title.value = 'Word 首稿图书'; title.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'word-empty-book-title');
-    await clickExactButton(renderer, '复核创建', 'word-empty-book-review');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'word-empty-book-reviewed');
+    // Issue #1410 item 20: 新建图书 on the form prepares and commits in one click.
     await clickExactButton(renderer, '新建图书', 'word-empty-book-commit');
     await waitFor(renderer, `document.querySelector('.book-overview[data-manuscript-state="empty"]')`, 'word-empty-book-created');
     await clickExactButton(renderer, '导入首份稿件', 'word-empty-book-stage');
@@ -1887,10 +1889,10 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const suggestions = controls.querySelector('[data-word-import-mode="suggestions"]');
     const accepted = controls.querySelector('[data-word-import-mode="accepted-baseline"]');
-    const confirmation = controls.querySelector('[data-word-accepted-baseline-confirmation]');
+    const note = controls.querySelector('[data-word-accepted-baseline-note]');
     const learning = controls.querySelector('[data-word-learn-from-edits]');
     const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)});
-    return suggestions.checked && !accepted.checked && !accepted.disabled && !confirmation.checked && learning.checked &&
+    return suggestions.checked && !accepted.checked && !accepted.disabled && note instanceof HTMLElement && note.hidden && learning.checked &&
       prepare.disabled === ${Boolean(allInserted)} && !document.querySelector('[data-word-reviewed-mode]');
   })()`, 'word-preview-never-selects-accepted-baseline');
   // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
@@ -1905,9 +1907,8 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
       controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
   })()`, 'word-preview-label-and-reading-reason');
   if (mode === 'accepted-baseline') {
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !confirmation.checked && !confirmation.disabled && prepare.disabled; })()`, 'word-accepted-needs-separate-confirmation');
-    await assertRenderer(renderer, `document.querySelector('[data-word-reading-availability]').textContent === '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'`, 'word-accepted-confirmation-notice');
-    await assertRenderer(renderer, `(() => { const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); confirmation.click(); return confirmation.checked; })()`, 'word-accepted-confirmed');
+    // Issue #1410 item 32A: choosing 直接并入正文 · 定稿基线 is the confirmation; its note shows and prepare is available.
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const note = document.querySelector('[data-word-accepted-baseline-note]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !document.querySelector('[data-word-accepted-baseline-confirmation]') && note instanceof HTMLElement && !note.hidden && prepare instanceof HTMLButtonElement && !prepare.disabled; })()`, 'word-accepted-baseline-chosen');
   }
   if (!learnFromEdits) await assertRenderer(renderer, `(() => { const learning = document.querySelector('[data-word-learn-from-edits]'); learning.click(); return !learning.checked; })()`, 'word-learning-opt-out');
   await clickExactButton(renderer, prepareLabel, 'word-actual-prepare');
@@ -1994,7 +1995,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'help-library-return');
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
-  await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');
+  await clickExactButton(renderer, '新建图书', 'empty-book-missing-title');
   await assertRenderer(
     renderer,
     `(() => { const title = document.querySelector('#empty-book-title'); const error = document.querySelector('#empty-book-title-error'); const number = document.querySelector('#empty-book-number'); return title?.getAttribute('aria-invalid') === 'true' && title.getAttribute('aria-describedby') === error?.id && error?.textContent.includes('请输入书名') && document.activeElement === title && title.value === '' && number?.value === ''; })()`,
@@ -2005,7 +2006,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = ${JSON.stringify(title)}; title.dispatchEvent(new Event('input')); number.value = 'BAD' + String.fromCharCode(1); number.dispatchEvent(new Event('input')); return true; })()`,
     'empty-book-invalid-number-values',
   );
-  await clickExactButton(renderer, '复核创建', 'empty-book-invalid-number');
+  await clickExactButton(renderer, '新建图书', 'empty-book-invalid-number');
   await assertRenderer(
     renderer,
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); const error = document.querySelector('#empty-book-number-error'); return number?.getAttribute('aria-invalid') === 'true' && number.getAttribute('aria-describedby') === error?.id && error?.textContent.includes('内部编号') && document.activeElement === number && title?.value === ${JSON.stringify(title)} && number.value.length === 4; })()`,
@@ -2016,13 +2017,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const number = document.querySelector('#empty-book-number'); if (!number) return false; number.value = ${JSON.stringify(internalNumber)}; number.dispatchEvent(new Event('input')); return !number.hasAttribute('aria-invalid'); })()`,
     'empty-book-form-values',
   );
-  await clickExactButton(renderer, '复核创建', 'empty-book-review-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-book-review');
-  await assertRenderer(
-    renderer,
-    `(() => { const screen = document.querySelector('[data-screen="book-create-review"]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && screen.textContent.includes('拟用稳定标识') && !screen.querySelector('.dimension-list') && screen.textContent.includes('不创建稿件、来源、修订版、工作流实例或导入记录'); })()`,
-    'empty-book-review-contract',
-  );
+  // Issue #1410 item 20: no review page between the form and the new Book's 工作概览.
   await clickExactButton(renderer, '新建图书', 'empty-book-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-book-overview');
   await assertRenderer(
@@ -2069,7 +2064,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = '另一本书'; title.dispatchEvent(new Event('input')); number.value = ${JSON.stringify(internalNumber)}; number.dispatchEvent(new Event('input')); return true; })()`,
     'duplicate-number-values',
   );
-  await clickExactButton(renderer, '复核创建', 'duplicate-number-review');
+  await clickExactButton(renderer, '新建图书', 'duplicate-number-review');
   await waitFor(
     renderer,
     `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); const error = document.querySelector('#empty-book-number-error'); return number?.getAttribute('aria-invalid') === 'true' && number.getAttribute('aria-describedby') === error?.id && error?.textContent.includes('内部编号') && document.activeElement === number && title?.value === '另一本书' && number.value === ${JSON.stringify(internalNumber)}; })()`,
@@ -2876,7 +2871,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-review-action="new-review"]')`, 'import-selection-review-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click(); return true; })()`, 'import-selection-sheet-open');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'import-selection-sheet-ready');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const local=()=>sheet.querySelector('input[value="local-text-check"]'); local().click(); const numerals=sheet.querySelector('[data-local-check-numerals]'); numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); sheet.querySelector('[data-local-check-confirmation]').click(); numerals.value='off'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(!sheet.querySelector('[data-local-check-confirmation]').disabled)return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); local().click(); local().click(); const kept=sheet.querySelector('[data-local-check-confirmation]').checked&&sheet.querySelector('[data-local-check-numerals]').value==='editor-convention'; sheet.querySelector('[data-review-action="close-sheet"]').click(); return kept; })()`, 'import-local-selection-round-trip');
+    // Issue #1410 item 16: choosing a 数字依据 is the confirmation; its note shows only while numerals are on.
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const local=()=>sheet.querySelector('input[value="local-text-check"]'); const note=()=>sheet.querySelector('p[data-local-check-numerals-note]'); local().click(); const numerals=sheet.querySelector('[data-local-check-numerals]'); if(sheet.querySelector('[data-local-check-confirmation]'))return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(!(note() instanceof HTMLElement)||note().hidden)return false; numerals.value='off'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(note() instanceof HTMLElement&&!note().hidden)return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); local().click(); local().click(); const kept=sheet.querySelector('[data-local-check-numerals]').value==='editor-convention'&&note() instanceof HTMLElement&&!note().hidden; sheet.querySelector('[data-review-action="close-sheet"]').click(); return kept; })()`, 'import-local-selection-round-trip');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'populated-book-to-overview-before-source');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
     const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
@@ -3394,8 +3390,6 @@ async function main() {
       `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = '来源材料现有空图书'; title.dispatchEvent(new Event('input')); number.value = 'SRC-EMPTY-39'; number.dispatchEvent(new Event('input')); return true; })()`,
       'source-empty-book-fields',
     );
-    await clickExactButton(renderer, '复核创建', 'source-empty-book-review');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'source-empty-book-review-screen');
     await clickExactButton(renderer, '新建图书', 'source-empty-book-commit');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'source-empty-book-overview');
     const sourceEmptyBookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
@@ -3714,7 +3708,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-required-restored');
     await assertRenderer(renderer, `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceSha256 === ${JSON.stringify(composedDegradedSha256)} && review.querySelector('[data-reimport-source-sha256]').dataset.reimportSourceBytes === ${JSON.stringify(String(composedDegradedInfo.size))}; })()`, 'reimport-degraded-restart-exact-authorities');
     const degradationVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
-    await clickExactButton(renderer, '明确接受完整降级集合', 'reimport-degraded-accept');
+    await assertRenderer(renderer, `(() => { const accept = document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'); if (!(accept instanceof HTMLButtonElement)) return false; accept.click(); return true; })()`, 'reimport-degraded-accept');
     await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(degradationVersion)} && document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合')`, 'reimport-degraded-accept-persisted');
     await closeProduct();
     renderer = await launchProduct({ dataRoot: reimportDegradedRoot, launchScenario: 'reimport-degraded-restart-accepted' });

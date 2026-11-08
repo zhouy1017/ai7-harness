@@ -15,6 +15,7 @@ export const CUSTOM_TAB_READING = '正在读取自定义分析维度…';
 export const CUSTOM_TAB_FEEDBACK_NOTE = '自定义维度的回答暂不提供分析反馈。';
 export const CUSTOM_TAB_PREPARING = '正在为自定义分析准备任务计划…';
 export const CUSTOM_TAB_PREPARED = '自定义分析的任务计划已准备：在右侧的任务计划里看过之后再开始任务。';
+export const CUSTOM_TAB_STARTED = '已开始运行自定义分析。';
 
 export function customTabVersionLine(version: number, revisionLabel: string, ordinal: number): string {
   return `第 ${ordinal} 份结果${technicalWords(` · 按维度第 ${version} 版 · 读的是 ${revisionLabel}`)}`;

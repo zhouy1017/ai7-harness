@@ -251,7 +251,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       buttons.push(actionButton('continue', can.continue, can.continue, () => void act('continue')));
       buttons.push(actionButton('regenerate', can.regenerate, !can.continue, () => void act('regenerate')));
       const incomplete = latest.state !== 'completed';
-      buttons.push(actionButton('convert', can.convert, false, () => openConvert(), incomplete ? DIALOGUE_CONVERT_INCOMPLETE : undefined));
+      // 转为修改建议 converts the answer's own replacement words in one step (Issue #1410 item 10); 编辑后… opens the form first.
+      buttons.push(actionButton('convert', can.convert && !converting, false, () => quickConvert(), incomplete ? DIALOGUE_CONVERT_INCOMPLETE : undefined));
+      buttons.push(actionButton('convert-edit', can.convert && !converting, false, () => openConvert(), incomplete ? DIALOGUE_CONVERT_INCOMPLETE : undefined));
     }
     actions.replaceChildren(...buttons);
     paintPromote(latest);
@@ -384,7 +386,37 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     }
   }
 
-  /** 转为修改建议 (DIALOG-016): the selected words, what they would become and why — a 修改建议 the editor still decides. */
+  /** The latest answer's replacement words, as 转为修改建议 proposes them. */
+  function replacementOf(latest: DialogueAttemptProjection): string {
+    const answer = latest.fragments.map((fragment) => fragment.text + (fragment.breakAfter ? '\n' : '')).join('');
+    return [...dialogueReplacementText(answer)].slice(0, MAX_DIALOGUE_PROPOSAL_CHARACTERS).join('');
+  }
+
+  /** One-step 转为修改建议: the answer's replacement words become the 修改建议 at once; an answer with none opens the form. */
+  function quickConvert(): void {
+    if (dialogue === null || converting) return;
+    const target = dialogue;
+    const latest = target.attempts.at(-1);
+    if (latest === undefined || !target.actions.convert) return;
+    const proposedText = replacementOf(latest);
+    if (proposedText.trim().length === 0) { openConvert(); return; }
+    converting = true;
+    paintActions();
+    options.setStatus(DIALOGUE_STATUS.converting, 'busy');
+    void api.convertDialogueToChangeSuggestion({ dialogueId: target.dialogueId, attemptId: latest.attemptId, proposedText, rationale: '' }).then((result) => {
+      converting = false;
+      options.setStatus(result.completionLabel, 'success');
+      if (dialogueId === result.dialogue.dialogueId) paint(result.dialogue);
+      else paintActions();
+      options.onConverted(result.dialogue, result.markId);
+    }, (error: unknown) => {
+      converting = false;
+      paintActions();
+      options.setStatus(options.errorMessage(error, DIALOGUE_STATUS.convertFailed), 'error');
+    });
+  }
+
+  /** 编辑后转为修改建议… (DIALOG-016): the selected words, what they would become and why — a 修改建议 the editor still decides. */
   function openConvert(): void {
     if (dialogue === null || converting) return;
     const target = dialogue;
@@ -412,8 +444,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       return area;
     };
     form.append(title, original);
-    const answer = latest.fragments.map((fragment) => fragment.text + (fragment.breakAfter ? '\n' : '')).join('');
-    const proposed = field(DIALOGUE_CONVERT_PROPOSED, [...dialogueReplacementText(answer)].slice(0, MAX_DIALOGUE_PROPOSAL_CHARACTERS).join(''), 'proposedText');
+    const proposed = field(DIALOGUE_CONVERT_PROPOSED, replacementOf(latest), 'proposedText');
     proposed.required = true;
     // 理由 starts empty: what is written there is kept with the 修改建议, so the question is never copied into it unasked.
     const rationale = field(DIALOGUE_CONVERT_RATIONALE, '', 'rationale');

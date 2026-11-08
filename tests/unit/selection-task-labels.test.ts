@@ -81,7 +81,7 @@ describe('the words of 就这段发起任务…', () => {
     expect(SELECTION_TASK_MENU_LABEL).toBe('就这段发起任务…');
     expect(SELECTION_TASK_TITLE).toBe('就这段发起任务');
     expect(SELECTION_TASK_FIELD).toBe('工序');
-    expect(SELECTION_TASK_PREPARE).toBe('发起任务');
+    expect(SELECTION_TASK_PREPARE).toBe('开始任务');
     expect(SELECTION_TASK_NOTE).toBe('任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。');
     expect(selectionTaskContextLine({ bookTitle: '合成书名', revisionLabel: 'r3', journalSequence: 12, graphemes: 10, position: 7 }))
       .toBe('《合成书名》 · 修订版 r3 · 修订日志序号 12 · 已选 10 字 · 第 7 段');
@@ -117,7 +117,7 @@ describe('the words of 就这段发起任务…', () => {
     expect(SELECTION_TASK_STATUS).toEqual({
       reading: '正在读取可以就这段发起的工序…',
       unreadable: '无法读取可以就这段发起的工序。',
-      choose: '选择工序后即可发起任务。',
+      choose: '已选好第一项工序，可直接开始任务，也可改选。',
       pickFirst: '请先选择一项工序。',
       gone: '所选文字所在的段落已不在当前稿件中；请重新选择。',
       preparing: '正在为任务保存修订版…',
