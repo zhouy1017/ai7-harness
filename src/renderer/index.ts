@@ -2060,7 +2060,7 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   content.append(
     element('p', 'section-label', '仅查看 · 永久只读'),
     element('h2', undefined, projection.title),
-    element('p', 'lede', `${technicalWords(projection.revisionLabel, '修订版')} · 此窗口不装载编辑器，也不提供任何写入操作。`),
+    element('p', 'lede', `${technicalWords(projection.revisionLabel, '修订版')} · 只读`),
   );
   const blocks = element('article', 'recovery-readonly-blocks');
   blocks.setAttribute('aria-label', '恢复证据只读内容窗口');
@@ -2094,7 +2094,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   content.dataset['blockCount'] = String(projection.blocks.length);
   content.append(
     element('h2', undefined, `稿件修订版${technicalWords(` ${projection.revisionLabel}`)}`),
-    element('p', 'lede', `${projection.position.label}。此窗口不装载编辑器，也不提供写入、修订日志、替换、撤销/重做或里程碑操作。`),
+    element('p', 'lede', `${projection.position.label} · 只读`),
   );
   const identity = element('section', 'source-card');
   const values = element('dl');
@@ -2700,7 +2700,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   content.dataset['bookId'] = bookId;
   content.append(
     element('h2', undefined, '分析'),
-    element('p', 'lede', '基线分析是其他任务的底稿：全书梗概、人物与名称、事件、关系、设定和各章。它只读稿件，不改稿件。'),
+    element('p', 'lede', '基线分析是其他任务的底稿：全书梗概、人物与名称、事件、关系、设定和各章。'),
   );
   const host = element('div');
   host.dataset['analysisBookId'] = bookId;
@@ -4370,7 +4370,7 @@ function renderLanding(
   copy.append(
     element('p', 'section-label', SHELL_LABELS.library),
     element('h2', undefined, SHELL_LABELS.libraryTitle),
-    element('p', 'lede', '可以先创建空图书，也可以从本地 DOCX 开始一次导入。两项操作彼此独立。'),
+    element('p', 'lede', '新建一本空图书，或从本地 DOCX 导入稿件。'),
   );
   const createBook = button('新建图书', 'secondary', renderBookCreationForm);
   const importButton = button('导入稿件', 'primary', async () => {

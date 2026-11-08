@@ -154,7 +154,7 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
 export const SETTINGS_HUB_WORDS = Object.freeze({
   section: '设置',
   title: '设置',
-  lede: '本机怎样连接模型服务、怎样保存数据、怎样显示。打开一项设置不会更改任何记录。',
+  lede: '本机怎样连接模型服务、怎样保存数据、怎样显示。',
   comingSoon: '即将提供',
   opened: '设置已打开',
 });
