@@ -339,8 +339,30 @@ describe('写作任务 over the real store on exact sample1', () => {
         drafted: null,
         prepare: { allowed: true },
       });
-      // Opening the same result is idempotent; another task may draft a peer document.
-      expect(store.createWritingDraft(bookId, drafted!.revisionId).document.documentId).toBe(document.documentId);
+      // Opening the same result again is idempotent and never rewrites the document (ADR 0096 §4.5): the editor edits its first
+      // paragraph and 🔒 locks it, and the second 打开草稿 returns the same document with the edited words, the journal position
+      // and the lock as they were. A new draft is always a new document; iterating on this one goes through the scoped-edit and
+      // Apply guards. Another task may draft a peer document.
+      const first = window.blocks[0]!;
+      const firstGraphemes = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(first.text)).length;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: document.documentId, branchId: document.branchId, baseRevisionId: window.revisionId,
+        blockId: first.blockId, windowStartBlockId: first.blockId, baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: firstGraphemes, toGrapheme: firstGraphemes, insertText: '（编辑补记）',
+      });
+      const lockTarget = { manuscriptId: document.documentId, branchId: document.branchId };
+      store.setAiEditLocks({ ...lockTarget, targets: [{ kind: 'block', blockId: first.blockId }], locked: true, expectedLocksDigest: store.inspectAiEditLocks(lockTarget).digest });
+      const edited = store.getManuscriptWindow(document.documentId, document.branchId, null);
+      const locks = store.inspectAiEditLocks(lockTarget);
+      expect(edited.blocks[0]!.text).toBe(`${first.text}（编辑补记）`);
+      const reopened = store.createWritingDraft(bookId, drafted!.revisionId).document;
+      expect(reopened.documentId).toBe(document.documentId);
+      expect(reopened.versions.map((version) => version.label)).toEqual(['版本 1']);
+      const after = store.getManuscriptWindow(document.documentId, document.branchId, null);
+      expect(after.journalSequence).toBe(edited.journalSequence);
+      expect(after.blocks.map((block) => [block.blockId, block.text])).toEqual(edited.blocks.map((block) => [block.blockId, block.text]));
+      expect(store.inspectAiEditLocks(lockTarget)).toEqual(locks);
+      expect(locks.blockIds).toEqual([first.blockId]);
       // 交付物's card names it as drafted.
       const card = store.inspectProductionDocuments(bookId).types.find((type) => type.typeId === 'promotion-article')!;
       expect(card.document).toMatchObject({ documentId: document.documentId, origin: { drafted: true } });

@@ -22,7 +22,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // Issue #413 (plan slice S64, E6) extends it with ④ 导出 · DOCX: the input also carries a header, a styled run
 // in a paragraph no stage edits, and one comment and one tracked replacement by the file's author; the editor
 // adds one 备注. 导出… of the current revision saves the unsaved edits as a revision, reviews its fidelity, takes
-// the destination from the Save dialog's launch control, and 按上述方式导出 writes the file, whose receipt 交付物
+// the destination from the Save dialog's launch control, which writes the file at once (Issue #1410); its receipt 交付物
 // lists and a restart keeps. The runner reads the written file itself — the comment and the tracked change by
 // their author, the header byte for byte, the untouched paragraph's bold run, and no 备注. Cancelling after the
 // destination was chosen writes nothing, and the card is reached by keyboard, reflows at 200% and keeps its

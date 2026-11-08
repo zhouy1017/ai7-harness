@@ -564,7 +564,7 @@ Text mode may expand from discovery into replacement without changing its manusc
    └─ 原子稿件替换
 ```
 
-The Replacement Preview is a substantive review surface rather than a generic confirmation modal. It keeps query, replacement, scope, rules, exact revision, count, and match inclusion visible. The final service command applies the Frozen Match Set all-or-none and returns a persistence-backed completion summary. It never turns search tolerance into replacement authority and never calls the result a Manuscript Checkpoint.
+Replacement is one click from the 替换 mode: `替换当前处` writes one applied editor revision, and `全部替换（N 处）` has the service prepare the Replacement Preview and freeze the match set internally, then write one applied, individually reversible editor revision per occurrence all-or-none and return a persistence-backed completion summary; developer mode shows the preview afterwards as 替换详情 (ADR 0096 §4.4). It never turns search tolerance into replacement authority and never calls the result a Manuscript Checkpoint.
 
 ## Manuscript selection anchoring
 

@@ -3196,7 +3196,7 @@ async function main() {
     at('review-report-export');
     // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
     // its parts, all kept, with no mark to include — and the Markdown 备用格式 chosen reviews again, its table 降级导出.
-    // This launch's Save-dialog answer is the destination; 按上述方式导出 writes the file. The runner reads it back:
+    // This launch's Save-dialog answer is the destination, and choosing it writes the file (Issue #1410). The runner reads it back:
     // the Book's title, the Run and version it reports, the 概览表 as a table with a row per category the page lists,
     // and the four parts in order.
     const reportCard = `document.querySelector('section.review-report .review-report-export-slot > section.manuscript-export')`;

@@ -311,6 +311,13 @@ describe('the milestone form', () => {
   });
 });
 
+describe('the 交付物 lede (Issue #1410 item 22)', () => {
+  it('says the newest milestone and the routine scope and basis are already chosen, and asks for nothing to be written', () => {
+    expect(DELIVERABLES_LEDE).toBe('默认选中最新的里程碑版本，发稿范围和依据已按常规填好，可按需改写后设为发稿版本；之后稿件再有修改，这里会提示。');
+    expect(DELIVERABLES_LEDE).not.toMatch(/写明|明确选定/u);
+  });
+});
+
 describe('what 交付物 never says', () => {
   it('words no Publication Version as published, sent, delivered or received (V2-UX-PUB-009)', () => {
     const said = [

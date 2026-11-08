@@ -1,27 +1,30 @@
-# AI7 development plan — Wave 24b · 0.6.1 Beta candidate
+# AI7 development plan — #1400 · 0.6.2 Beta candidate
 
-This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `bb71eeb2d77c143a33e8330ee0ceb550027405bc` (0.6.0 Beta); Wave 24b is implemented on `codex/integration-24b`, with all child slices present at pre-closure tip `46f32420ecb54fae895768a69eed2166139d122d`. Closure targets 0.6.1 Beta under [#1373](https://github.com/zhouy1017/ai7-harness/issues/1373); dev delivery and human acceptance remain pending. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
+This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `b3fe090d3ba41a841bd0b1485bb5d4835018d25c` (0.6.1 Beta, Wave 24b). The next wave, [#1400](https://github.com/zhouy1017/ai7-harness/issues/1400), is implemented on `codex/integration-1400` and targets 0.6.2 Beta; dev delivery and human acceptance remain pending. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
 
 The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) (procedures as the central object, the execution governor and idle lane, DSH as the complex-task harness, review contract v2 with evidence on cards, one production policy with a runtime model table, the learning agent's reason asks) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (structural editing, structure recognition, import fidelity, less ceremony). They build on [ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md); F-05 and F-06 keep their design and their core priority. The plan was revised through [#1065](https://github.com/zhouy1017/ai7-harness/issues/1065). The Owner's 2026-10-24 platform decision is [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): Windows is the only delivery platform, and every macOS gate and target is deferred indefinitely (revised through [#1098](https://github.com/zhouy1017/ai7-harness/issues/1098)). The programme is versioned under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md): one `x.y.z` in `package.json` names the software in releases and in this plan — Wave 21 → 0.2.0, Wave 22 → 0.3.0, its follow-up integration Wave 22b → 0.4.0 (the Owner's 2026-10-31 maintenance sub-wave carrying the policy successor and the admitted channels), Wave 23 → 0.5.0 — and the former "v3.2" planning name is retired (revised through [#1100](https://github.com/zhouy1017/ai7-harness/issues/1100)).
 
-## Current Wave 24b → 0.6.1 closure
+## Current #1400 → 0.6.2
 
-The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279), [main Issue #1373](https://github.com/zhouy1017/ai7-harness/issues/1373) and delegated closure dispatch authorize 0.6.1 Beta after both pre-closure full validations passed. All 13 child Issues were implemented in three serially integrated batches:
+The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [main Issue #1400](https://github.com/zhouy1017/ai7-harness/issues/1400) turn the 0.6.1 human-test findings into #1401–#1414, delivered in serial batches on `codex/integration-1400` from `dev@b3fe090d`:
 
-| Batch | Implemented outcomes | Pre-closure cumulative tip |
+| Batch | Outcomes | Integration commit |
 | --- | --- | --- |
-| 1 | #1370 ordinary-mode search/proxy; #1371 v34/set-v25 native-search admission; #1372 catalogue refresh/favourites/filter/manual IDs; #1374 retained editor choices; #1378 multiple titled Production Documents and same-page creation/import (schema 109) | `cbb8e696` |
-| 2 | #1375 polling state/focus/input survival; #1383 Book-wide findings and C1/C2 cleanup; #1377 review-preference/feedback views; #1379 concise mark cards with author provenance; #1381 typed/title-first exemplars | `b5019b37` |
-| 3 | #1380 anchored manuscript comments pane; #1376 + #1382 shared floating controls and Help inside Settings | `46f32420` |
-
-The closure slice `codex/1373-061-closure` starts from exact `46f32420ecb54fae895768a69eed2166139d122d` and targets `codex/integration-24b`. It raises `package.json` 0.6.0 → 0.6.1 and service protocol 197 → 198 once, using existing version/compatibility checks. Schema 109, Data Version 1, policy v34/set v25 and native-search shipped-false/unmeasured status remain unchanged. It introduces no new feature, migration, policy or hosted gate.
+| 1 | #1401 first factual ranges (schema 110); #1402 model authors with recorded effort; #1408 shared editorial memory (policy v35 / set v26) | `0105217d` (PR #1417) |
+| 2 | #1403–#1405 derivative documents on 稿件, rename, ordinary-mode removal of phases/delivery/maintenance forms; #1406–#1407 report-first evaluation and edit/regenerate (protocol 199) | `aaae0d16` (PR #1418) |
+| 3 | #1409 navigation/find/replace; #1411 阅读与修订 and editor revisions; #1412 scoped AI edits and locks (schema 111, protocol 200) | `b1024da9` (PR #1421) |
+| 4 | #1410 one-step workflows; #1413 workbench UX | `1aaf79ba` (PR #1422, incorporating PR #1423) |
+| 5 | #1414 ADR/UI/E2E documentation alignment and the last ordinary-mode not-do residues ([ADR 0096 §4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#4-finish-removing-editor-facing-ceremony-owner-1400--1414)) | draft PR #1424 to `codex/integration-1400` |
 
 Remaining delivery order:
 
-1. Validate the frozen closure head: host doctor/bootstrap, check/docs/version, unit, affected compatibility service tests and build; Commander assigns a background guest for Electron Journeys and existing hosted gate validation. Pre-closure results at `46f32420` remain evidence only for that head.
-2. Commander integrates the closure into `codex/integration-24b`, then opens/validates the final wave-to-`dev` PR and records the actual merge identity and closure evidence. Coding Workers do not mark Ready, merge or close Issues under this dispatch.
-3. After dev merge, Commander refreshes `C:\Users\Chooo\Playground\AI7-human-test` from the main checkout with `pwsh tools/human-test-build.ps1`, then records the built dev commit and verifies preservation of Books, model channels, favourites and proxy configuration without reading secrets or manuscript payloads. The closure slice does not touch that fixed package/data. [Source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966) owns the refresh instructions.
-4. Owner human testing follows in the fixed folder, including ordinary-mode reachability, round-trip selections, polling survival, multi-document delivery, comments and review preferences. Native-search live measurement and packaged direct/proxy/discovery acceptance remain pending; no provider call is part of CI or the closure slice. `1.0.0`, release/tag and `main` require separate Owner authorization.
+1. Commander integrates Batch 5, raises `package.json` 0.6.1 → 0.6.2 with its version-ledger row, and validates the final candidate with the full background-guest ladder and the existing hosted Full Gate.
+2. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes the implemented Issues, then refreshes `C:UsersChoooPlaygroundAI7-human-test` with `pwsh tools/human-test-build.ps1` and records the built commit and preservation check ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
+3. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
+
+## Delivered Wave 24b (0.6.1 Beta)
+
+Wave 24b (#1373: #1370–#1372, #1374–#1383) is delivered as `dev@b3fe090d` through [PR #1398](https://github.com/zhouy1017/ai7-harness/pull/1398): schema 109, protocol 198, policy v34 / set v25.
 
 ## Delivered Wave 23 intent (0.5.0 Beta)
 

@@ -104,6 +104,10 @@ _Avoid_: inbox record, approval request, copied task state
 The normal work-surface state in which the Manuscript remains dominant, the sidebar may be visible or collapsed, the contextual supporting surface is closed by default, and task entry remains compact.
 _Avoid_: document-only application, chat mode, workflow phase
 
+**Reading and Revision Mode** (`阅读与修订模式`):
+The default input state of the manuscript and every derivative document, in which typing, deletion, paste, cut, drop and IME commits never reach the text while selection, copy, find, navigation and marks work; the editor's changes are made through `修改此处` as Editor Revisions, and `自由直接编辑` is the explicit switch to direct typing ([ADR 0096 §4.3](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
+_Avoid_: read-only state, Protective Read-only State, locked manuscript, track-changes mode
+
 **Contextual Collaboration Mode** (`上下文协作模式`):
 The work-surface state in which a supporting side surface exposes Task, Evidence, Proposal, or Workflow context while the Manuscript and its exact relevant selection remain visible.
 _Avoid_: split authority, chat workspace, side-by-side proposal comparison
@@ -157,7 +161,7 @@ A search result whose bound Manuscript Revision or exact range no longer matches
 _Avoid_: approximate match, current result, failed search
 
 **Replacement Preview** (`替换预览`):
-The revision-bound review of search text, replacement text, scope, matching rules, total count, representative context, and included/excluded matches before a selected or whole-manuscript replacement may commit.
+The revision-bound statement of search text, replacement text, scope, matching rules, total count, representative context, and included/excluded matches that the service prepares inside a one-click `全部替换`; it is not an editor step, and developer mode shows it afterwards as 替换详情 ([ADR 0096 §4.4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#44-find-and-replace-without-a-frozen-set-ceremony)).
 _Avoid_: replacement completed, search results alone, confirmation dialog
 
 **Frozen Match Set** (`冻结匹配集合`):
@@ -165,7 +169,7 @@ The exact revision- and range-bound set of displayed matches selected for one re
 _Avoid_: current query, live results, approximate matches
 
 **Atomic Manuscript Replacement** (`原子稿件替换`):
-One service-executed manuscript edit that revalidates a Frozen Match Set and writes every selected replacement or none, recording success as one durable undoable Edit Journal transaction rather than a Manuscript Checkpoint.
+One service-executed manuscript transaction that revalidates a Frozen Match Set and writes every selected replacement or none, each occurrence as its own applied, individually reversible Editor Revision, rather than a Manuscript Checkpoint ([ADR 0096 §4.4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#44-find-and-replace-without-a-frozen-set-ceremony)).
 _Avoid_: best-effort replace all, partial apply, checkpoint
 
 **Live Manuscript Selection** (`当前稿件选择`):
@@ -225,7 +229,7 @@ The non-authoritative proposed Book identity and initialization defaults used fo
 _Avoid_: Book, silently committed empty Book, Manuscript Import Record, Source Acquisition Record, partial import
 
 **Review Before Book Creation** (`新建图书前确认`):
-The consequence-first creation surface showing exact Book identity/defaults and named non-effects before either an intentional empty Book is created alone or a source-bound zero-Manuscript Book and its first Source Version are created atomically. The source-bound variant additionally shows exact retained content, provenance and Source Acquisition Record; neither variant silently inherits manuscript-import objects.
+The consequence-first creation surface showing exact Book identity/defaults before a source-bound zero-Manuscript Book and its first Source Version are created atomically; standalone `新建图书` has no such page and creates the intentional empty Book in one step, and named non-effects show in developer mode only ([ADR 0096 §4.1–4.2](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action)). The source-bound variant additionally shows exact retained content, provenance and Source Acquisition Record; neither variant silently inherits manuscript-import objects.
 _Avoid_: Review Before Import, Review Before Source Retention for an existing Book, Book completion, optimistic creation
 
 **Book Title Suggestion** (`建议书名`):
@@ -465,8 +469,8 @@ Exact completed-versus-total progress shown only when the work units are semanti
 _Avoid_: estimated spinner percentage, model confidence, workflow completion
 
 **Decision Layer** (`决策层`):
-The part of an editor-facing surface that states what the surface is about, what an action will read, produce, and not do, what it costs, and the one safe next action, in the product's editorial Chinese and local time; it carries every authority-bearing fact at full rank and never a bare digest, identifier, or machine instant (ADR 0071).
-_Avoid_: summary that hides the ceiling or the non-effects, developer debug view, English identifier heading
+The part of an editor-facing surface that states what the surface is about, what an action will read and produce, what it costs, and the one safe next action, in the product's editorial Chinese and local time; it carries every authority-bearing fact at full rank and never a bare digest, identifier, machine instant or ordinary-mode not-do list (ADR 0071, [ADR 0096 §4.2](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#42-ordinary-mode-carries-no-not-do-lists)).
+_Avoid_: summary that hides the ceiling or a real blocker, disclaimer list, developer debug view, English identifier heading
 
 **Technical Identity Layer** (`技术标识层`):
 The disclosure-closed part of the same surface that carries the exact digests, record identifiers, references, schema and version identifiers, and ISO instants of the record — reachable, copyable, and unabridged one deliberate step away, and changing no state when opened (ADR 0071).
@@ -661,7 +665,7 @@ The object-centered UI projection of one Learning Lineage in both directions, tr
 _Avoid_: technical event log, model transcript, evidence-source lineage, default full graph
 
 **Learning Remediation Impact Preview** (`学习补救影响预览`):
-The pre-action comparison of how excluding or stopping future use of exact learning material affects future retrieval/influence, currently running Tasks, activated or candidate memory, and immutable completed history before a remediation decision is recorded.
+The comparison of how excluding or stopping future use of exact learning material affects future retrieval/influence, currently running Tasks, activated or candidate memory, and immutable completed history, computed when the one-step remediation decision is recorded and kept with it ([ADR 0096 §4.1](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action)).
 _Avoid_: deletion confirmation, effect receipt, promise to rewrite past output, policy editor
 
 **Historically Affected Result Marker** (`历史受影响结果标记`):
@@ -797,7 +801,7 @@ The Series-owned workspace for inspecting exact member Books, Series Knowledge C
 _Avoid_: Book library grouping, Run Source Scope, Learning Eligibility Scope, shared manuscript browser
 
 **Series Membership Impact Preview** (`书系成员变更影响预览`):
-The pre-command comparison that names the Book/Series and separately explains effects on future Task selection, frozen authorized/running Runs, governed Series Knowledge/learning records and immutable history.
+The comparison that names the Book/Series and separately explains effects on future Task selection, frozen authorized/running Runs, governed Series Knowledge/learning records and immutable history, computed at the one-click `加入书系` or `移出书系` and kept with its change record ([ADR 0096 §4.1](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action)).
 _Avoid_: Plan Preview, Learning Remediation Impact Preview, deletion confirmation, generic approval
 
 **Series Membership Change Record** (`书系成员变更记录`):
@@ -805,11 +809,11 @@ The durable append-only record of one exact Book being added to or removed from 
 _Avoid_: Run Authorization, source-scope grant, Learning Eligibility Decision, manuscript mutation
 
 **Series Knowledge Promotion Review** (`书系知识纳入审阅`):
-The consequence-first review of one editor-authored or provenance-bound Series Knowledge Candidate, naming the exact Series, proposed new or exact existing Series Knowledge Item, content, provenance, conflicts, current/superseded revision and future reuse scope. A disclosed conflict offers unselected `编辑候选项`, `保留已披露冲突`, and `取消`; only after explicit disposition may the exact `纳入书系知识` action create the item with its first Series Knowledge Revision or append a revision and Series Knowledge Promotion Decision.
+The consequence-first review of one editor-authored or provenance-bound Series Knowledge Candidate, naming the exact Series, proposed new or exact existing Series Knowledge Item, content, provenance, conflicts, current/superseded revision and future reuse scope, opening with the first item class and use chosen. A disclosed conflict offers unselected `编辑候选项`, `保留已披露冲突`, and `取消`; only after explicit disposition may the exact `纳入书系知识` action create the item with its first Series Knowledge Revision or append a revision and Series Knowledge Promotion Decision.
 _Avoid_: Learning Eligibility review, Proposal acceptance, factual verification, automatic memory activation
 
 **Series Retrieval Exclusion Impact Preview** (`书系检索排除影响预览`):
-The pre-command comparison for adding, superseding or ending one Series Retrieval Exclusion, separating later retrieval, queued/authorized/active Runs, immutable completed history and unaffected Book/source authority while naming the immediate current-read consequence.
+The comparison for adding, superseding or ending one Series Retrieval Exclusion, separating later retrieval, queued/authorized/active Runs, immutable completed history and unaffected Book/source authority while naming the immediate current-read consequence; it is computed at the one-click command and kept with the exclusion revision ([ADR 0096 §4.1](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action)).
 _Avoid_: Series Membership Impact Preview, Learning Remediation Impact Preview, deletion confirmation, Plan Revision
 
 **Apply Preparation** (`稿件应用准备`):
@@ -1104,8 +1108,12 @@ The presentation family of objects attached to exact manuscript text — Change 
 _Avoid_: generic comment, decoration, a Task, ambient AI activity
 
 **Change Suggestion** (`修改建议`):
-The editor-facing form of a canonical [Proposal Change Item](../domain/editorial/CONTEXT.md#correction-proposal): exact text to be replaced, previewed in place as `预览 · 未应用` and decided on its Mark Card with `接受并应用`, `拒绝`, or `修改后接受`; `提案` stays the record term (ADR 0076).
-_Avoid_: applied change, silent rewrite, editor typing, 批注
+The editor-facing form of a canonical [Proposal Change Item](../domain/editorial/CONTEXT.md#correction-proposal): exact text to be replaced, previewed in place as `预览 · 未应用` and decided on its Mark Card with `接受并应用`, `拒绝`, or `修改后接受`; `提案` stays the record term (ADR 0076). An Editor Revision is a Change Suggestion created and applied in one action.
+_Avoid_: silent rewrite, untracked editor typing, 批注
+
+**Applied Revision Marker** (`✎ 已改`):
+The tint, left revision line and clickable badge that mark the exact words of an applied Change Suggestion — the editor's, AI7's or an imported one — and open its card with the before and after text and its one-click reversal; the badge is presentation, never manuscript text ([ADR 0096 §4.3](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
+_Avoid_: Word tracked change, pending suggestion preview, highlight
 
 **Annotation** (`批注`):
 The presentation of a canonical Annotation: an exportable comment on exact text from the editor, from AI7 with its originating Task, review category or analysis, or from an imported file's author (ADR 0076).

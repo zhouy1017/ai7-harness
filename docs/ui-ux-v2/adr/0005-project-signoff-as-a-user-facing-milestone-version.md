@@ -1,10 +1,11 @@
 ---
 status: accepted
+amended-by: root ADR 0096 §4.1 (2026-11, Owner #1400 / #1414) — default purpose and generated label, one-click save
 ---
 
 # Project internal Signoff as a user-facing labeled Milestone Version
 
-The target People's Literature Publishing House workflow exposes no Signoff/`签发` step. Editors use `保存为里程碑版本`, provide a label and stated next-use purpose, and receive one immutable exact Deliverable/Manuscript version. For manuscript working state this first creates a Manuscript Checkpoint and Revision when needed. The same user interaction records milestone metadata and a separate internal Signoff Record asserting readiness only for the stated next use. Ordinary UI presents only milestone language. Later edits never inherit the designation, and milestones grant no Delivery, export, factual, or Public Release authority.
+The target People's Literature Publishing House workflow exposes no Signoff/`签发` step. Editors use `保存为里程碑版本` and receive one immutable exact Deliverable/Manuscript version. The sheet opens with the purpose 阶段留档 chosen and an empty label saves as 「阶段留档 · 日期 时间」, so one click saves; the editor may change the label, choose 送审候选, 交付候选, 其他 or their own words, and add a note ([root ADR 0096 §4.1](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action)). For manuscript working state this first creates a Manuscript Checkpoint and Revision when needed. The same user interaction records milestone metadata and a separate internal Signoff Record asserting readiness only for the stated next use. Ordinary UI presents only milestone language. Later edits never inherit the designation, and milestones grant no Delivery, export, factual, or Public Release authority.
 
 ## Considered options
 
@@ -15,4 +16,4 @@ The target People's Literature Publishing House workflow exposes no Signoff/`签
 
 ## Consequences
 
-Editors receive familiar version-history behavior and never learn Signoff jargon, while the domain retains exact checkpoint, milestone metadata, and internal Signoff identities. Implementation must support one atomic user interaction producing separate records, multiple immutable milestones, explicit label/purpose, post-milestone working changes, and Delivery selection of a fixed milestone. Other future Workflow Profiles may project Signoff differently, but the target-house profile has no separate signing screen.
+Editors receive familiar version-history behavior and never learn Signoff jargon, while the domain retains exact checkpoint, milestone metadata, and internal Signoff identities. Implementation must support one atomic user interaction producing separate records, multiple immutable milestones, a recorded label and purpose (defaulted, editable), post-milestone working changes, and Delivery selection of a fixed milestone. Other future Workflow Profiles may project Signoff differently, but the target-house profile has no separate signing screen.

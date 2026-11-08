@@ -375,6 +375,18 @@ _Avoid_: Harness Session, project copy
 The durable ordered record of continuous changes to one Manuscript Branch since its base revision, used to reconstruct working state without making every saved edit a Manuscript Revision.
 _Avoid_: Manuscript history, Operation journal
 
+**Editor Revision**:
+An editor's own change to manuscript text recorded as a Proposal Change Item and applied in the same action, so it keeps an Apply Effect, a card and its own reversal; it is how changes are made in Reading and Revision Mode and how each occurrence of a replacement is written. Typing under free direct editing stays an ordinary Edit Journal edit ([ADR 0096 §4.3–4.4](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
+_Avoid_: AI suggestion, Word tracked change, direct edit, Manuscript Checkpoint
+
+**AI Edit Lock**:
+A branch-scoped, append-only restriction naming one Manuscript Block, or a whole section from a heading to the next heading of its level or above, that no AI7 change may modify; the editor's own edits are not restricted, and an evaluation version may likewise lock individual items and parts against regeneration ([ADR 0096 §4.5](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#45-scoped-ai-edits-and-locks)).
+_Avoid_: Protective Read-only State, permission, Series Retrieval Exclusion, finalized text
+
+**Scoped AI Edit**:
+An AI7 edit whose targets are frozen exact ranges — the selected words, or the unlocked blocks of a document or section — against an exact base and AI Edit Lock set, so that only those targets can change, each as its own applied Change Suggestion, and any drift applies nothing ([ADR 0096 §4.5](../../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#45-scoped-ai-edits-and-locks)).
+_Avoid_: whole-document rewrite, writing task, free generation, polish of the window
+
 **Manuscript Checkpoint**:
 The validated transition that commits complete journal-reconstructed working state as a new Manuscript Revision. It may deterministically mark dependent analysis units and reducers stale or invalidated, but it dispatches no model work by itself. A checkpoint used to materialize journal-newer task input carries the exact purpose value `Task Input / 任务输入`; the purpose does not create another checkpoint type, Milestone Version, or Signoff.
 _Avoid_: Edit Journal entry, Run Continuation Checkpoint, Recovery Snapshot
