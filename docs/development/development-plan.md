@@ -14,11 +14,11 @@ The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [m
 | 2 | #1403–#1405 derivative documents on 稿件, rename, ordinary-mode removal of phases/delivery/maintenance forms; #1406–#1407 report-first evaluation and edit/regenerate (protocol 199) | `aaae0d16` (PR #1418) |
 | 3 | #1409 navigation/find/replace; #1411 阅读与修订 and editor revisions; #1412 scoped AI edits and locks (schema 111, protocol 200) | `b1024da9` (PR #1421) |
 | 4 | #1410 one-step workflows; #1413 workbench UX | `1aaf79ba` (PR #1422, incorporating PR #1423) |
-| 5 | #1414 ADR/UI/E2E documentation alignment ([ADR 0096 §4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#4-finish-removing-editor-facing-ceremony-owner-1400--1414)) | draft PR #1424 to `codex/integration-1400` |
+| 5 | #1414 ADR/UI/E2E documentation alignment and the last ordinary-mode not-do residues ([ADR 0096 §4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#4-finish-removing-editor-facing-ceremony-owner-1400--1414)) | draft PR #1424 to `codex/integration-1400` |
 
 Remaining delivery order:
 
-1. Commander integrates Batch 5, decides the ordinary-mode `不会` residues PROGRESS records, raises `package.json` 0.6.1 → 0.6.2 with its version-ledger row, and validates the final candidate with the full background-guest ladder and the existing hosted Full Gate.
+1. Commander integrates Batch 5, raises `package.json` 0.6.1 → 0.6.2 with its version-ledger row, and validates the final candidate with the full background-guest ladder and the existing hosted Full Gate.
 2. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes the implemented Issues, then refreshes `C:UsersChoooPlaygroundAI7-human-test` with `pwsh tools/human-test-build.ps1` and records the built commit and preservation check ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
 3. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
 

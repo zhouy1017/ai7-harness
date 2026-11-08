@@ -138,14 +138,17 @@ export function groupedCount(value: number): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
 }
 
-// ---- 精简 (PLAN-010): one card, five rows, and the way to the whole plan -----------------------------------
+// ---- 精简 (PLAN-010): one card, four rows (five on the technical layer), and the way to the whole plan ----------
 
 export const TASK_PLAN_COMPACT_TERMS = ['处理', '发送', '会得到', '不会', '中途'] as const;
 export const TASK_PLAN_FULL_LINK = '完整计划（6 段）';
 /** The usage figure is a ceiling the Run cannot pass, never a forecast of what it will use. */
 export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
-/** The five rows of 精简, each one line built from the projection's own sentences. */
+/**
+ * The rows of 精简, each one line built from the projection's own sentences. 不会 is the technical layer's alone
+ * (ADR 0096 §4.2, Issue #1413 cluster 4): ordinary mode reads 处理 · 发送 · 会得到 · 中途.
+ */
 export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<readonly [string, string]> {
   plan = taskPlanWording(plan);
   const references = plan.listPages?.['scope.reference']?.total ?? plan.scope.reference.length;
@@ -169,7 +172,7 @@ export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<rea
     ['处理', references === 0 ? '只处理任务卡所列范围，不参考其他材料。' : `处理任务卡所列范围，参考 ${references} 项材料。`],
     ['发送', `${sends ? '发往模型，' : '不发送，'}${usage}。`],
     ['会得到', `${TASK_BAR_OUTCOMES[plan.kind]}。`],
-    ['不会', `不${nonEffects}。`],
+    ...(technicalLayerVisible ? [['不会', `不${nonEffects}。`] as const] : []),
     ['中途', plan.kind === 'fixed-task' ? '只记录本次授权，无需中途参与。' : plan.participation.during === '预计无需中途参与' ? '预计无需参与，可随时暂停或取消。' : '需你决定时先询问，可随时暂停或取消。'],
   ];
 }

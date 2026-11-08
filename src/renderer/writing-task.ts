@@ -13,7 +13,6 @@ import { taskPlanQuickStartFellBack } from './task-drawer-labels.js';
 import { acknowledgeTaskMaterialRemovals, reconcileTaskMaterialSelection, similarMaterialsField } from './task-material-selection.js';
 import {
   WRITING_ACTIONS,
-  WRITING_CONSEQUENCE_TERMS,
   WRITING_EXEMPLAR_PICK_TYPE,
   WRITING_FIELD_HINTS,
   WRITING_FIELD_LABELS,
@@ -25,6 +24,7 @@ import {
   WRITING_REFERENCE_TERMS,
   WRITING_STATUS,
   WRITING_TYPE_LEGEND,
+  writingConsequenceRows,
   writingDraftedLine,
   writingFieldTooLong,
   writingMaterialLabel,
@@ -360,13 +360,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     };
     form.append(field('audience'), field('channel'), field('requirements'));
     const consequences = el('dl', 'writing-consequences');
-    const [read, send, notDo, cost] = WRITING_CONSEQUENCE_TERMS;
-    consequences.append(
-      el('dt', undefined, read), el('dd', undefined, page.consequences.read),
-      el('dt', undefined, send), el('dd', undefined, page.consequences.send),
-      el('dt', undefined, notDo), el('dd', undefined, page.consequences.notDo),
-      el('dt', undefined, cost), el('dd', undefined, page.consequences.cost),
-    );
+    for (const [term, text] of writingConsequenceRows(page.consequences)) consequences.append(el('dt', undefined, term), el('dd', undefined, text));
     form.append(consequences);
     if (state.problem !== null) {
       const problem = el('p', 'field-note writing-problem', state.problem);

@@ -22,7 +22,7 @@ Issues #1401–#1413 changed what the runners drive, under [ADR 0096 §4](../adr
 | J-15 | Guideline import on file choice; imported-Skill keep/validate/install/select chain with its restricted/rejected refusals; library additions under their own names (#1410). |
 | J-16 | Agent workspace `提交并在稿件中查看` opens the marks; shared editorial memory in Book dialogue and Global Agent; Global Agent conversation-first with pills (#1408, #1410, #1413). |
 
-Not exercised by a Journey (unit-tested on the real surfaces): rewrite autosave refusal, review batch undo failure and one-click `忽略` ([PR #1423](https://github.com/zhouy1017/ai7-harness/pull/1423)). Two ordinary-mode `不会` rows remain in code — the Task Drawer's compact plan and the writing-task sheet — and are recorded as gaps in [PROGRESS](../../PROGRESS.md); no Journey asserts them absent.
+Not exercised by a Journey (unit-tested on the real surfaces): rewrite autosave refusal, review batch undo failure and one-click `忽略` ([PR #1423](https://github.com/zhouy1017/ai7-harness/pull/1423)). Batch 5 (#1414) also removes the last ordinary-mode `不会` rows — the Task Drawer's 精简 plan now reads four rows and the writing-task sheet three, each adding `不会` / `不会做` on the technical layer only — proven in both modes by `tests/unit/task-drawer-labels.test.ts` and `tests/unit/writing-contract.test.ts`; J-03 and J-04 keep reading the five compact rows on the technical layer they run with, and J-07's writing sheet keeps its four technical-layer rows. `tests/service/writing-tasks.test.ts` proves that opening the same writing result again returns the existing document with its edited words, journal position and 🔒 lock unchanged.
 
 ## Wave 24 / 24b synchronized deltas (#1313 / #1303 / #1373)
 

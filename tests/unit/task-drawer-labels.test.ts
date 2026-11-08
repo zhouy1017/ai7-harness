@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
@@ -280,7 +280,24 @@ describe('the goal block (D5)', () => {
 });
 
 describe('精简 and 完整 (D6)', () => {
-  it('reads 精简 as the five LAYER-002 rows and the way to the whole plan', () => {
+  // The suite's setup shows the technical layer; each test here says which layer it reads and leaves it shown.
+  beforeEach(() => setTechnicalLayerVisible(true));
+  afterEach(() => setTechnicalLayerVisible(true));
+
+  it('reads 精简 in ordinary mode as four rows with no 不会 (ADR 0096 §4.2), keeping what it reads, sends and costs', () => {
+    setTechnicalLayerVisible(false);
+    expect(taskPlanCompactRows(plan())).toEqual([
+      ['处理', '只处理任务卡所列范围，不参考其他材料。'],
+      ['发送', '不发送，无模型用量。'],
+      ['会得到', '一份基线分析。'],
+      ['中途', '预计无需参与，可随时暂停或取消。'],
+    ]);
+    const sending = plan({ service: { ...plan().service, send: '范围内正文发往已选模型', usage: '达到 80,000 tokens 后不再发送新的请求（8 个阅读范围）' } });
+    expect(Object.fromEntries(taskPlanCompactRows(sending))['发送']).toBe('发往模型，达到 80,000 tokens 后不再发送。');
+    expect(taskPlanCompactRows(sending).some(([term]) => term === '不会')).toBe(false);
+  });
+
+  it('reads 精简 on the technical layer as the five rows and the way to the whole plan', () => {
     expect(TASK_PLAN_COMPACT_TERMS).toEqual(['处理', '发送', '会得到', '不会', '中途']);
     expect(TASK_PLAN_FULL_LINK).toBe('完整计划（6 段）');
     expect(taskPlanCompactRows(plan())).toEqual([
@@ -325,6 +342,9 @@ describe('精简 and 完整 (D6)', () => {
       const candidate = plan({ ...live, kind, service: { ...live.service, send: '范围内正文发往已选模型' } });
       const compact = taskPlanCompactRows(candidate);
       expect(compact).toHaveLength(5);
+      setTechnicalLayerVisible(false);
+      expect(taskPlanCompactRows(candidate)).toHaveLength(4);
+      setTechnicalLayerVisible(true);
       for (const [, sentence] of compact) {
         expect([...sentence].length).toBeLessThanOrEqual(36);
         expect(sentence.match(/[。！？]/gu)).toHaveLength(1);

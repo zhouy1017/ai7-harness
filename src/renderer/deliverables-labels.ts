@@ -26,7 +26,8 @@ import {
 export const DELIVERABLES_SECTION_LABEL = '工作 · 交付物';
 /** The editor toolbar's entry in IA-006's 工作 group, after 审阅, and the heading of 工作概览's one line. */
 export const DELIVERABLES_ENTRY_LABEL = '交付物';
-export const DELIVERABLES_LEDE = '从稿件的里程碑版本中明确选定一版，写明发稿范围和依据，设为发稿版本；之后稿件再有修改，这里会提示。';
+/** Issue #1410 item 22: the newest milestone is chosen and 发稿范围 / 依据 are written in, so the editor only changes what differs. */
+export const DELIVERABLES_LEDE = '默认选中最新的里程碑版本，发稿范围和依据已按常规填好，可按需改写后设为发稿版本；之后稿件再有修改，这里会提示。';
 /** The one block S65 reaches: the manuscript's 发稿 (editor-surfaces §9's first row). */
 export const DELIVERABLES_PUBLICATION_HEADING = '发稿 · 稿件';
 export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
