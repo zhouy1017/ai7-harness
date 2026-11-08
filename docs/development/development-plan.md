@@ -18,7 +18,7 @@ The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [m
 
 Remaining delivery order:
 
-1. The closure candidate `codex/1400-beta-closure` raises `package.json` 0.6.1 → 0.6.2 with its version-ledger row; its final head runs the full background-guest ladder, then the Commander dispatches the existing hosted Full Gate.
+1. The closure candidate `codex/1400-beta-closure` ([PR #1425](https://github.com/zhouy1017/ai7-harness/pull/1425)) raises `package.json` 0.6.1 → 0.6.2 with its version-ledger row; its final head runs the full background-guest ladder, then the Commander dispatches the existing hosted Full Gate.
 2. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes the implemented Issues, then refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1` and records the built commit and preservation check ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
 3. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
 
