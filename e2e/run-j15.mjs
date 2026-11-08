@@ -553,15 +553,9 @@ async function main() {
 
     at('knowledge-guideline-import');
     await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
-    // 导入新版本… on 文字规范条款: the picker's file is read as the next version would read it — five clauses, how they differ —
-    // and 确认导入 records 第 2 版, issued by the house; version 1 stays listed beneath it.
+    // 导入新版本… on 文字规范条款 (Issue #1410 item 25): the file picked in the system dialog is imported at once as 第 2 版,
+    // issued by the house; version 1 stays listed beneath it.
     await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='导入新版本…')return false; start.click(); return true; })()`, 'knowledge-import-start');
-    const previewed = await readKnowledge(renderer, (page) => page.cards[0]?.preview !== null, 'knowledge-import-preview');
-    requireJourney(previewed.cards[0].preview === '将导入为《文字规范条款》第 2 版' &&
-      previewed.cards[0].changes === `${HOUSE_GUIDELINE_NAME} · 5 条 · 与第 1 版相比：改动 4 条，新增 1 条，删去 0 条` && previewed.cards[0].previewClauses === 5 &&
-      previewed.cards[0].pill === '第 1 版 · AI7 内置默认', 'knowledge-import-preview-words', previewed.cards[0]);
-    await waitFor(renderer, `document.activeElement === document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .guideline-preview h4')`, 'knowledge-import-preview-focused', 10_000);
-    await assertRenderer(renderer, `(() => { const confirm=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="confirm"]'); if(!(confirm instanceof HTMLButtonElement)||confirm.disabled)return false; confirm.click(); return true; })()`, 'knowledge-import-confirm');
     const importedPage = await readKnowledge(renderer, (page) => page.cards[0]?.pill === '第 2 版 · 本社', 'knowledge-imported');
     requireJourney(importedPage.cards[0].preview === null && importedPage.cards[0].clauses.length === 5 && importedPage.cards[0].versions.length === 2 &&
       importedPage.cards[0].versions[0].startsWith('第 2 版 · 本社 · 导入于 ') && importedPage.cards[0].versions[0].endsWith(` · ${HOUSE_GUIDELINE_NAME} · 5 条 · 还没有审阅用过`) &&
@@ -615,7 +609,7 @@ async function main() {
 
     at('knowledge-guideline-import');
     await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
-    // Real picker/service/UI pages: later clauses remain reachable in preview and after import; history reaches version 1.
+    // Real picker/service/UI pages: later clauses remain reachable after import; history reaches version 1.
     const cardSelector = '[data-guideline-document="ai7-builtin/typos-and-usage"]';
     const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
       const button=document.querySelector(${JSON.stringify(`${cardSelector} ${selector}`)});
@@ -636,15 +630,8 @@ async function main() {
         await click(renderer, '审阅规范文件', 'knowledge-page-open-category');
         await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
       }
+      // The picked file imports at once (Issue #1410 item 25); the clause paging is proven on the imported version below.
       await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})?.dataset.guidelinePreview==='${version}'`, 'knowledge-page-preview');
-      if (version === 8) {
-        await activateGuideline('.guideline-preview [data-guideline-action="clauses-next"]', 'knowledge-preview-next');
-        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===1 && area.querySelector('li')?.value===9 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-last-focus');
-        await activateGuideline('.guideline-preview [data-guideline-action="clauses-previous"]', 'knowledge-preview-previous');
-        await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)}); return area?.querySelectorAll('li').length===8 && document.activeElement===area.querySelector('h4'); })()`, 'knowledge-preview-first-focus');
-      }
-      await activateGuideline('[data-guideline-action="confirm"]', 'knowledge-page-import-confirm');
       await waitFor(renderer, `document.querySelector(${JSON.stringify(cardSelector)})?.dataset.guidelineVersion==='${version}' && !document.querySelector(${JSON.stringify(`${cardSelector} .guideline-preview`)})`, 'knowledge-page-imported');
     }
     await assertRenderer(renderer, `(() => { const card=document.querySelector(${JSON.stringify(cardSelector)}); card.querySelector('.guideline-clauses').open=true; card.querySelector('.guideline-versions').open=true; return card.querySelectorAll('.guideline-version-list li').length===5; })()`, 'knowledge-pages-open');
@@ -1094,19 +1081,12 @@ async function main() {
 
     at('skill-update-seed');
     await relaunchWith(resolve(SKILLS, 'plain'), 'skill-update-seed');
+    // Issue #1410 item 27: the picked package is kept, validated and installed in one step, with the Books offered.
     await clickSelector(renderer, '[data-skill-action="import"]', 'skill-seed-pick');
-    await waitFor(renderer, `document.querySelector('[data-skill-acquisition]')?.textContent.includes('尚未保留')`, 'skill-seed-disclosed');
-    await clickSelector(renderer, '[data-skill-action="keep"]', 'skill-seed-keep');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-seed-kept');
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled' && document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-seed-installed');
     const skillId = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillOwner`);
     const firstRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
     requireJourney(/^[0-9a-f-]{36}$/u.test(skillId ?? '') && /^[0-9a-f-]{36}$/u.test(firstRevision ?? ''), 'skill-seed-identities', { skillId, firstRevision });
-    await clickSelector(renderer, '[data-skill-action="validate"]', 'skill-seed-validate');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-seed-validated');
-    await clickSelector(renderer, '[data-skill-action="install"]', 'skill-seed-install');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled'`, 'skill-seed-installed');
-    await clickSelector(renderer, '[data-skill-action="books"]', 'skill-seed-books');
-    await waitFor(renderer, `document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-seed-book-options');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-skill-field="book"]'); select.value=select.options[1].value; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value!==''; })()`, 'skill-seed-book-chosen');
     await clickSelector(renderer, '[data-skill-action="enable"]', 'skill-seed-enable');
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='enabled'`, 'skill-seed-enabled');
@@ -1116,17 +1096,9 @@ async function main() {
     await clickSelector(renderer, '[data-skill-action="inspect"]', 'skill-check-open-card');
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillCurrent==='true' && document.querySelector('[data-skill-action="check-update"]')`, 'skill-check-card');
     await clickSelector(renderer, '[data-skill-action="check-update"]', 'skill-check-pick');
-    // The package is disclosed against the Skill it would update, with nothing kept yet.
-    await waitFor(renderer, `document.querySelector('[data-skill-update-check]')?.textContent.includes('尚未保留')`, 'skill-check-disclosed');
-    await assertRenderer(renderer, `(async () => {
-      const panel=document.querySelector('[data-skill-update-check]'); const text=panel?.textContent??'';
-      const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(firstRevision)},before:null});
-      return text.includes('synthetic-style-review') && text.includes('1.1.0') && text.includes('这是一个新的版本') && /SHA-256 [0-9a-f]{64}/.test(text) && text.includes('Run 可读范围：无') &&
-        read.candidates.length===0 && read.history.length===1 && !document.querySelector('[data-skill-candidate]');
-    })()`, 'skill-check-disclosed-nothing-kept');
+    // A newer update is kept the moment it is read (Issue #1410 item 27): one inert candidate, nothing else changed.
 
     at('skill-update-candidate-inert');
-    await clickSelector(renderer, '[data-skill-action="keep-update"]', 'skill-check-keep');
     await waitFor(renderer, `document.querySelector('[data-skill-candidate]')?.dataset.skillDisposition==='clean' && document.querySelector('[data-skill-candidate]')?.dataset.skillCandidateStatus==='open'`, 'skill-check-candidate');
     // One inert candidate: the three-way summary and its per-file list; the revision, its state and its enablement are as they were.
     await assertRenderer(renderer, `(async () => {
@@ -1158,8 +1130,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-adopted-validated');
 
     at('skill-update-rule-create');
-    await clickSelector(renderer, '[data-skill-field="rule-confirm"]', 'skill-rule-confirm');
-    await waitFor(renderer, `document.querySelector('[data-skill-action="rule-create"]')?.disabled===false`, 'skill-rule-confirmed');
+    // Creating the rule is its confirmation (Issue #1410 item 27); what it does is said beside 创建.
+    await waitFor(renderer, `document.querySelector('[data-skill-action="rule-create"]')?.disabled===false && !document.querySelector('[data-skill-field="rule-confirm"]')`, 'skill-rule-ready');
     await clickSelector(renderer, '[data-skill-action="rule-create"]', 'skill-rule-create');
     await waitFor(renderer, `document.querySelector('[data-skill-rule]')?.dataset.skillRule==='active'`, 'skill-rule-active');
     await assertRenderer(renderer, `(async () => {
@@ -1172,8 +1144,6 @@ async function main() {
     await clickSelector(renderer, '[data-skill-action="inspect"]', 'skill-rule-open-card');
     await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillDetail===${JSON.stringify(secondRevision)} && document.querySelector('[data-skill-rule]')?.dataset.skillRule==='active'`, 'skill-rule-survived-restart');
     await clickSelector(renderer, '[data-skill-action="check-update"]', 'skill-rule-pick');
-    await waitFor(renderer, `document.querySelector('[data-skill-update-check]')?.textContent.includes('尚未保留')`, 'skill-rule-disclosed');
-    await clickSelector(renderer, '[data-skill-action="keep-update"]', 'skill-rule-keep');
     await waitFor(renderer, `document.querySelector('[data-skill-candidate]')?.dataset.skillCandidateStatus==='adopted' && document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation'`, 'skill-rule-adopted');
     const thirdRevision = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
     requireJourney(/^[0-9a-f-]{36}$/u.test(thirdRevision ?? '') && thirdRevision !== secondRevision && thirdRevision !== firstRevision, 'skill-rule-new-revision', { thirdRevision });

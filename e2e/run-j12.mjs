@@ -1545,7 +1545,8 @@ async function main() {
     await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
-    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); if(!(reuse instanceof HTMLInputElement))return false; reuse.click(); return reuse.checked; })()`, 'preflight-reuse-source');
+    // Issue #1410 item 32B: the same-Book match is chosen to begin with.
+    await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`, 'preflight-reuse-source');
     await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
@@ -2215,18 +2216,7 @@ async function main() {
     await click(primary, '数据与存储', 'database-export-open');
     await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
     await click(primary, '导出数据库…', 'database-export-choose');
-    await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.preparationId !== undefined`, 'database-export-prepared');
-    const preparedRows = await primary.evaluate(`Array.from(document.querySelectorAll('.database-export-prepared dt')).map((term) => [term.textContent, term.nextElementSibling?.textContent ?? null])`);
-    const booksShown = Number(/^(\d+) 本图书/u.exec(Array.isArray(preparedRows) ? preparedRows.find((row) => row[0] === '内容')?.[1] ?? '' : '')?.[1]);
-    requireJourney(
-      Array.isArray(preparedRows) && preparedRows.length === 5 &&
-        JSON.stringify(preparedRows.map((row) => row[0])) === JSON.stringify(['文件', '位置', '方式', '内容', '版本']) &&
-        preparedRows[0][1].startsWith('「AI7 数据库.ai7db」 · ') && preparedRows[1][1] === databaseExportPath && preparedRows[2][1] === '新建文件' &&
-        Number.isSafeInteger(booksShown) && booksShown >= 1 && /^数据版本 1 · 软件 \d+\.\d+\.\d+/u.test(preparedRows[4][1]),
-      'database-export-prepared-words',
-      preparedRows,
-    );
-    await click(primary, '按上述方式导出', 'database-export-approve');
+    // Issue #1410 item 2: the destination chosen in the save dialog is written at once; there is no 按上述方式导出 step.
     await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
     // The outcome line is drawn with the outcome; 导出记录 and its count follow one read later, and only then are the export's
     // controls released and focus moved to 导出数据库…. On a slow runner the one-shot check landed between the two (#656), and a

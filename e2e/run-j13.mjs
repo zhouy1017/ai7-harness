@@ -45,8 +45,6 @@ const SERIES = '星河三部曲';
 const NOTE = '同一个宇宙里的三部长篇。';
 const SERIES_LEDE = '书系归集相关图书，供以后任务明确选择范围；加入书系不会让一本书读到另一本书的原文，也不会自动授权任务。';
 const SCOPE_NOTE = '成员只表示以后的任务可以明确选用这个书系的范围；这里不汇总、也不打开成员图书的原文。';
-const STALE = '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。';
-const GROUPS = [['future-tasks', '未来任务'], ['runs', '已授权或正在运行'], ['knowledge-learning', '书系知识与学习'], ['history', '历史记录']];
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const MEMBER = '星河之三';
 const PLACE = '海边小城';
@@ -909,31 +907,19 @@ async function main() {
     requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE.replace(/。$/u, '') && page.membersEmpty === '书系里还没有图书。' &&
       page.members.length === 0 && page.addOpen === true && page.historyEmpty === '还没有成员变更。' && page.history.length === 0 && page.preview === null, 'series-page-words', page);
 
-    at('membership-add-preview');
-    // 加入书系…: every Book offered and none chosen; 查看影响 shows the exact Book and Series, then the four groups in their
-    // order, what changes and what stays, and exactly `加入书系` to commit. Nothing is recorded by looking.
+    at('membership-add');
+    // 加入书系… (Issue #1410 item 30): every Book offered with the first chosen to begin with; 加入书系 reads the impact and records
+    // the change against it in one click, its four groups kept on the record.
     await clickSelector(renderer, '[data-series-action="add-open"]', 'add-open');
-    const chooser = await readSeries(renderer, (read) => read.chooser !== null && read.focus === 'series-add-book', 'add-chooser');
-    requireJourney(JSON.stringify(chooser.chooser) === JSON.stringify([[outside, false, `《${OUTSIDE}》`], [first, false, `《${FIRST}》`], [second, false, `《${SECOND}》`]]) &&
-      chooser.lookDisabled === true && chooser.addOpen === false, 'add-chooser-words', chooser);
+    const chooser = await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 3 && read.focus === 'series-add-book', 'add-chooser');
+    requireJourney(JSON.stringify(chooser.chooser) === JSON.stringify([[outside, true, `《${OUTSIDE}》`], [first, false, `《${FIRST}》`], [second, false, `《${SECOND}》`]]) &&
+      chooser.lookDisabled === false && chooser.addOpen === false, 'add-chooser-words', chooser);
     await clickSelector(renderer, `input[name="series-add-book"][value="${first}"]`, 'add-choose-first');
-    await clickSelector(renderer, '[data-series-action="preview"]', 'add-preview');
-    const preview = await readSeries(renderer, (read) => read.preview?.heading !== null && read.preview?.heading !== undefined && read.focus === 'preview-heading', 'add-preview-shown');
-    requireJourney(preview.chooser === null && preview.preview.kind === 'add' && preview.preview.bookId === first && preview.preview.heading === '加入书系的影响' &&
-      preview.preview.identity === `图书《${FIRST}》 · 书系「${SERIES}」` &&
-      JSON.stringify(preview.preview.groups.map(([key, title]) => [key, title])) === JSON.stringify(GROUPS) &&
-      JSON.stringify(preview.preview.groups[0][2]) === JSON.stringify([`以后新建任务时，可以明确选用书系「${SERIES}」的范围，其中会包括《${FIRST}》。`]) &&
-      preview.preview.groups[1][2].length === 0 && preview.preview.groups[1][3][0] === `现在没有使用书系「${SERIES}」范围、已授权或正在运行的任务。` &&
-      preview.preview.groups[2][2].length === 0 && preview.preview.groups[2][3][0] === `《${FIRST}》还没有学习材料。` &&
-      JSON.stringify(preview.preview.groups[3][2]) === JSON.stringify(['追加一条书系成员变更记录，书系和图书两边都能查看。']) &&
-      JSON.stringify(preview.preview.actions) === JSON.stringify([['commit', '加入书系'], ['preview-cancel', '取消']]), 'add-preview-words', preview);
-    const nothingYet = await renderer.evaluate(`window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} }).then((answer) => [answer.members.length, answer.history.length])`);
-    requireJourney(JSON.stringify(nothingYet) === JSON.stringify([0, 0]), 'add-preview-recorded-nothing', nothingYet);
+    await clickSelector(renderer, '[data-series-action="preview"]', 'add-commit');
 
     at('membership-added');
-    // 加入书系: the member row with its people, when it joined and 尚未审阅, focus on its 移出书系…, and one record that keeps
-    // the four groups it showed; the service and the Book's own side agree.
-    await clickSelector(renderer, '[data-series-action="commit"]', 'add-commit');
+    // The member row with its people, when it joined and 尚未审阅, focus on its 移出书系…, and one record that keeps the four
+    // groups of its impact; the service and the Book's own side agree.
     await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${FIRST}》`)}`, 'added-status');
     const added = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'added');
     requireJourney(added.memberPills[0] === 2 &&
@@ -945,16 +931,13 @@ async function main() {
         side.memberships.map((membership) => membership.seriesId), side.history.length])`);
     requireJourney(JSON.stringify(addedService) === JSON.stringify([[first], [['add', first, false, true, 4]], [seriesId], 1]), 'added-service', addedService);
 
-    at('membership-stale-preview');
-    // The same membership changes elsewhere while the editor reads a preview — 星河之二 added and removed again. The preview's
-    // 加入书系 is refused and withdrawn, 重新查看影响 reads it again, and only then does 加入书系 go through.
-    await clickSelector(renderer, '[data-series-action="add-open"]', 'stale-add-open');
+    at('membership-changed-elsewhere');
+    // The same membership changes elsewhere while the chooser is open — 星河之二 added and removed again. 加入书系 reads the impact
+    // as it stands at the click, so it records against the current Series.
+    await clickSelector(renderer, '[data-series-action="add-open"]', 'elsewhere-add-open');
     // The chooser reads its Books when it opens (Issue #63 review): wait for them, not only for the chooser.
-    const remaining = await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 2, 'stale-chooser');
-    requireJourney(JSON.stringify(remaining.chooser) === JSON.stringify([[outside, false, `《${OUTSIDE}》`], [second, false, `《${SECOND}》`]]), 'stale-chooser-words', remaining);
-    await clickSelector(renderer, `input[name="series-add-book"][value="${second}"]`, 'stale-choose-second');
-    await clickSelector(renderer, '[data-series-action="preview"]', 'stale-preview');
-    await readSeries(renderer, (read) => read.preview?.bookId === second && read.preview.heading !== null, 'stale-preview-shown');
+    const remaining = await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 2, 'elsewhere-chooser');
+    requireJourney(JSON.stringify(remaining.chooser) === JSON.stringify([[outside, true, `《${OUTSIDE}》`], [second, false, `《${SECOND}》`]]), 'elsewhere-chooser-words', remaining);
     const elsewhere = await renderer.evaluate(`(async () => {
       const seriesId = ${JSON.stringify(seriesId)};
       const bookId = ${JSON.stringify(second)};
@@ -965,23 +948,15 @@ async function main() {
       // A change answers with its record alone (Issue #63 review): the Series is read again for its records.
       return (await window.ai7.inspectSeries({ seriesId })).history.length;
     })()`);
-    requireJourney(elsewhere === 3, 'stale-elsewhere', elsewhere);
-    await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit');
-    const stale = await readSeries(renderer, (read) => read.refusal !== null, 'stale-refused');
-    requireJourney(stale.refusal === STALE && stale.focus === 'refresh' && stale.preview?.heading === null && stale.preview.groups.length === 0 &&
-      JSON.stringify(stale.preview.actions) === JSON.stringify([['refresh', '重新查看影响'], ['preview-cancel', '取消']]) &&
-      JSON.stringify(stale.members.map(([id]) => id)) === JSON.stringify([first]) && stale.history.length === 3, 'stale-refused-words', stale);
-    await clickSelector(renderer, '[data-series-action="refresh"]', 'stale-refresh');
-    const refreshed = await readSeries(renderer, (read) => read.preview?.heading === '加入书系的影响' && read.refusal === null, 'stale-refreshed');
-    requireJourney(refreshed.preview.bookId === second && refreshed.focus === 'preview-heading' &&
-      JSON.stringify(refreshed.preview.actions) === JSON.stringify([['commit', '加入书系'], ['preview-cancel', '取消']]), 'stale-refreshed-words', refreshed);
-    await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit-again');
-    await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${SECOND}》`)}`, 'stale-added-status');
-    const both = await readSeries(renderer, (read) => read.members.length === 2 && read.preview === null, 'stale-added');
+    requireJourney(elsewhere === 3, 'elsewhere-changes', elsewhere);
+    await clickSelector(renderer, `input[name="series-add-book"][value="${second}"]`, 'elsewhere-choose-second');
+    await clickSelector(renderer, '[data-series-action="preview"]', 'elsewhere-add-commit');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${SECOND}》`)}`, 'elsewhere-added-status');
+    const both = await readSeries(renderer, (read) => read.members.length === 2 && read.preview === null, 'elsewhere-added');
     // Members newest joined first (Issue #63 review): the Book just added heads the table.
     requireJourney(JSON.stringify(both.members.map(([id]) => id)) === JSON.stringify([second, first]) &&
       JSON.stringify(both.history.map(([kind, bookId]) => [kind, bookId])) === JSON.stringify([['add', second], ['remove', second], ['add', second], ['add', first]]),
-    'stale-added-words', both);
+    'elsewhere-added-words', both);
 
     at('library-by-series');
     // 书库 finds the Books now in the Series by its name, and not the Book outside it.
@@ -1011,16 +986,9 @@ async function main() {
     await backToLibrary(renderer, 'outside-side');
 
     at('membership-remove');
-    // 移出书系… from the member's row: its own preview, prospective, then exactly `移出书系`; focus returns to 加入书系….
+    // 移出书系 from the member's row is one click (Issue #1410 item 30); focus returns to 加入书系….
     await openSeries(renderer, seriesId, 'remove-series');
-    await clickSelector(renderer, `.series-member-card[data-book-id="${first}"] [data-series-action="remove-open"]`, 'remove-open');
-    const leave = await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.focus === 'preview-heading', 'remove-preview');
-    requireJourney(leave.preview.heading === '移出书系的影响' && leave.preview.identity === `图书《${FIRST}》 · 书系「${SERIES}」` &&
-      JSON.stringify(leave.preview.groups.map(([key, title]) => [key, title])) === JSON.stringify(GROUPS) &&
-      JSON.stringify(leave.preview.groups[0][2]) === JSON.stringify([`以后新建任务时，书系「${SERIES}」的范围不再包括《${FIRST}》。`]) &&
-      leave.preview.groups[1][3].includes('已经冻结的任务范围不会因移出而改变，任务也不会被取消。') &&
-      JSON.stringify(leave.preview.actions) === JSON.stringify([['commit', '移出书系'], ['preview-cancel', '取消']]), 'remove-preview-words', leave);
-    await clickSelector(renderer, '[data-series-action="commit"]', 'remove-commit');
+    await clickSelector(renderer, `.series-member-card[data-book-id="${first}"] [data-series-action="remove-open"]`, 'remove-commit');
     await waitFor(renderer, `${notice} === ${JSON.stringify(`已移出书系「${SERIES}」：《${FIRST}》`)}`, 'removed-status');
     const removed = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'removed');
     requireJourney(removed.members[0][0] === second && removed.focus === 'add-open' && removed.history.length === 5 &&
@@ -1046,49 +1014,45 @@ async function main() {
     await backToLibrary(renderer, 'restart-first');
 
     at('j14-series-keyboard');
-    // Without a pointer: Enter on 加入书系… opens the chooser at its first Book, an arrow chooses the next, Tab reaches 查看影响,
-    // Enter shows the preview with focus on its heading, and Escape closes it — and the chooser — with focus back on the opener
-    // and nothing recorded.
+    // Without a pointer: Enter on 加入书系… opens the chooser at its first Book, chosen; an arrow chooses the next, Tab reaches
+    // 加入书系, and Escape closes the chooser with focus back on the opener and nothing recorded.
     await openSeries(renderer, seriesId, 'keyboard-series');
     await assertRenderer(renderer, `(() => { const open=document.querySelector('[data-series-action="add-open"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.focus(); return document.activeElement===open; })()`, 'keyboard-opener');
     await press(renderer, 'Enter');
-    const keyboardChooser = await readSeries(renderer, (read) => read.chooser !== null && read.focus === 'series-add-book', 'keyboard-chooser');
-    requireJourney(JSON.stringify(keyboardChooser.chooser.map(([id, checked]) => [id, checked])) === JSON.stringify([[outside, false], [first, false]]), 'keyboard-chooser-words', keyboardChooser);
+    const keyboardChooser = await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 2 && read.focus === 'series-add-book', 'keyboard-chooser');
+    requireJourney(JSON.stringify(keyboardChooser.chooser.map(([id, checked]) => [id, checked])) === JSON.stringify([[outside, true], [first, false]]), 'keyboard-chooser-words', keyboardChooser);
     await press(renderer, 'Escape');
     await readSeries(renderer, (read) => read.chooser === null && read.focus === 'add-open', 'keyboard-chooser-escaped');
     await press(renderer, 'Enter');
-    await readSeries(renderer, (read) => read.chooser !== null && read.focus === 'series-add-book', 'keyboard-chooser-again');
+    await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 2 && read.focus === 'series-add-book', 'keyboard-chooser-again');
     await press(renderer, 'ArrowDown');
     await readSeries(renderer, (read) => JSON.stringify(read.chooser?.map(([id, checked]) => [id, checked])) === JSON.stringify([[outside, false], [first, true]]) && read.lookDisabled === false, 'keyboard-arrow-chooses');
     await press(renderer, 'Tab');
-    await waitFor(renderer, `document.activeElement?.dataset.seriesAction === 'preview' && document.activeElement.matches(':focus-visible')`, 'keyboard-preview-reached', 10_000);
-    await press(renderer, 'Enter');
-    await readSeries(renderer, (read) => read.preview?.bookId === first && read.focus === 'preview-heading', 'keyboard-preview-shown');
+    await waitFor(renderer, `document.activeElement?.dataset.seriesAction === 'preview' && document.activeElement.matches(':focus-visible')`, 'keyboard-add-reached', 10_000);
     await press(renderer, 'Escape');
-    const escaped = await readSeries(renderer, (read) => read.preview === null && read.chooser === null && read.focus === 'add-open', 'keyboard-preview-escaped');
+    const escaped = await readSeries(renderer, (read) => read.chooser === null && read.focus === 'add-open', 'keyboard-chooser-closed');
     requireJourney(escaped.history.length === 5 && escaped.members.length === 1, 'keyboard-recorded-nothing', escaped);
 
     at('j14-series-reflow-forced-colors');
-    // At 200% the member table stacks and the preview's groups wrap within the width; under forced colours the preview keeps
-    // its border.
-    await clickSelector(renderer, `.series-member-card[data-book-id="${second}"] [data-series-action="remove-open"]`, 'reflow-preview-open');
-    await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.preview.heading !== null, 'reflow-preview');
+    // At 200% the member table stacks and the chooser wraps within the width; under forced colours the chooser keeps its border.
+    await clickSelector(renderer, '[data-series-action="add-open"]', 'reflow-chooser-open');
+    await readSeries(renderer, (read) => read.chooser !== null && read.chooser.length === 2, 'reflow-chooser');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-preview'), document.querySelector('.series-member-list'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && document.querySelector('li.series-member-card')!==null && document.querySelector('.series-page table')===null; })()`, 'series-reflow', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-add-chooser'), document.querySelector('.series-member-list'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && document.querySelector('li.series-member-card')!==null && document.querySelector('.series-page table')===null; })()`, 'series-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(renderer, `(() => {
       if (!matchMedia('(forced-colors: active)').matches) return false;
-      const preview = document.querySelector('.series-preview');
-      return preview instanceof HTMLElement && getComputedStyle(preview).borderTopStyle === 'solid';
+      const chooser = document.querySelector('.series-add-chooser');
+      return chooser instanceof HTMLElement && getComputedStyle(chooser).borderTopStyle === 'solid';
     })()`, 'series-forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
-    await clickSelector(renderer, '[data-series-action="preview-cancel"]', 'reflow-cancel');
-    const cancelled = await readSeries(renderer, (read) => read.preview === null && read.focus === 'remove-open', 'reflow-cancelled');
+    await clickSelector(renderer, '[data-series-action="add-cancel"]', 'reflow-cancel');
+    const cancelled = await readSeries(renderer, (read) => read.chooser === null && read.focus === 'add-open', 'reflow-cancelled');
     requireJourney(cancelled.members.length === 1 && cancelled.history.length === 5, 'reflow-recorded-nothing', cancelled);
 
     at('knowledge-member-book');
@@ -1101,9 +1065,7 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="add-open"]', 'knowledge-add-open');
     await readSeries(renderer, (read) => read.chooser?.some(([id]) => id === member), 'knowledge-add-chooser');
     await clickSelector(renderer, `input[name="series-add-book"][value="${member}"]`, 'knowledge-add-choose');
-    await clickSelector(renderer, '[data-series-action="preview"]', 'knowledge-add-preview');
-    await readSeries(renderer, (read) => read.preview?.bookId === member && read.preview.heading !== null, 'knowledge-add-preview-shown');
-    await clickSelector(renderer, '[data-series-action="commit"]', 'knowledge-add-commit');
+    await clickSelector(renderer, '[data-series-action="preview"]', 'knowledge-add-commit');
     await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${MEMBER}》`)}`, 'knowledge-added');
     const noKnowledge = await readKnowledge(renderer, () => true, 'knowledge-empty');
     requireJourney(noKnowledge.note === KNOWLEDGE_NOTE && noKnowledge.itemsEmpty === '还没有书系知识。' && noKnowledge.candidatesEmpty === '没有待审阅的候选项。' &&
@@ -1146,7 +1108,8 @@ async function main() {
       waiting.candidates[0][3] === `来自《${MEMBER}》r1 的原文：「${quote}」` && waiting.candidates[0][4] === false, 'knowledge-candidate-words', waiting);
     await clickSelector(renderer, '[data-knowledge-action="propose-open"]', 'knowledge-propose-open');
     const proposeForm = await readKnowledge(renderer, (read) => read.form !== null && read.focus === 'knowledge-target', 'knowledge-propose-form');
-    requireJourney(JSON.stringify(proposeForm.form.targets) === JSON.stringify([['new', false, '新条目']]) && proposeForm.form.subject === false, 'knowledge-propose-form-words', proposeForm);
+    // Issue #1410 item 30: a new item of the first class is chosen to begin with.
+    requireJourney(JSON.stringify(proposeForm.form.targets) === JSON.stringify([['new', true, '新条目']]) && proposeForm.form.subject === true, 'knowledge-propose-form-words', proposeForm);
     await clickSelector(renderer, 'form.knowledge-form-propose input[name="knowledge-target"][value="new"]', 'knowledge-propose-new');
     await readKnowledge(renderer, (read) => read.form?.subject === true, 'knowledge-propose-new-fields');
     await fill(renderer, '#knowledge-subject-propose', '海边 小城', 'knowledge-propose-subject');
@@ -1161,14 +1124,15 @@ async function main() {
 
     at('knowledge-review-conflict');
     // 书系知识纳入审阅 names the exact Series and item, discloses the other candidate, offers the three choices and the two uses
-    // none chosen, and keeps 纳入书系知识 unavailable, saying why, until the conflict is kept explicitly.
+    // with the first chosen, and keeps 纳入书系知识 unavailable, saying why, until the conflict is kept explicitly.
     await clickSelector(renderer, `[data-candidate-id="${fromManuscript}"] [data-knowledge-action="review"]`, 'knowledge-review-open');
     const review = await readKnowledge(renderer, (read) => read.review?.identity !== null && read.review?.identity !== undefined && read.focus === 'review-heading', 'knowledge-review');
     requireJourney(review.review.identity === `书系「${SERIES}」 · 新条目「${PLACE}」（地点）` && review.review.provenance === `来自《${MEMBER}》r1 的原文：「${quote}」` &&
       review.review.superseded === null && review.review.conflictLabel === '存在书系知识冲突 · 需要处理' &&
       JSON.stringify(review.review.conflicts) === JSON.stringify([['competing-candidate', '另一个候选项也在提议「海边 小城」（第 1 版）。']]) &&
       JSON.stringify(review.review.dispositions) === JSON.stringify([['edit', '编辑候选项', null], ['preserve', '保留已披露冲突', 'false'], ['review-cancel', '取消', null]]) &&
-      JSON.stringify(review.review.reuse) === JSON.stringify([['series-tasks', false], ['consistency-review', false]]) &&
+      // Issue #1410 item 30: the first offered use is chosen to begin with.
+      JSON.stringify(review.review.reuse) === JSON.stringify([['series-tasks', true], ['consistency-review', false]]) &&
       JSON.stringify(review.review.promote) === JSON.stringify(['纳入书系知识', true]) && review.review.waits === '先处理已披露的冲突：编辑候选项，或选择保留已披露冲突。',
     'knowledge-review-words', review);
     await clickSelector(renderer, 'input[name="knowledge-reuse"][value="consistency-review"]', 'knowledge-reuse');
@@ -1379,39 +1343,17 @@ async function main() {
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'exclusion-drawer-closed');
     await leaveMemberReview();
 
-    at('exclusion-preview');
-    // 添加检索排除…: the item, a reason, and 书系检索排除影响预览 — exact target, scope, effective time, how far it reaches, reason
-    // and actor, then four groups naming the Run reading now and the result that used the item. Nothing is recorded yet.
+    at('exclusion-recorded');
+    // 添加检索排除… (Issue #1410 item 30) opens at its first kind with the first target not yet excluded chosen; 添加检索排除 reads
+    // the impact and records against it in one click — in force at once, listed with its reason, and the member can no longer
+    // choose 书系一致性: the plan it would make leaves the item out, and with it everything there was to read.
     await openSeries(renderer, seriesId, 'exclusion-series');
     await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='0'`, 'exclusion-section');
     await clickSelector(renderer, '[data-exclusion-action="add-open"]', 'exclusion-add-open');
-    await clickSelector(renderer, 'input[name="series-exclusion-kind"][value="knowledge-item"]', 'exclusion-kind');
-    await waitFor(renderer, `document.querySelector('input[name="series-exclusion-target"][value=${JSON.stringify(itemId)}]') instanceof HTMLInputElement`, 'exclusion-targets');
+    await waitFor(renderer, `document.querySelector('input[name="series-exclusion-kind"][value="knowledge-item"]')?.checked === true && document.querySelector('input[name="series-exclusion-target"]:checked') !== null`, 'exclusion-first-target-chosen');
     await clickSelector(renderer, `input[name="series-exclusion-target"][value=${JSON.stringify(itemId)}]`, 'exclusion-target');
     await fill(renderer, '#series-exclusion-reason', EXCLUSION_REASON, 'exclusion-reason');
-    await clickSelector(renderer, '[data-exclusion-action="preview"]', 'exclusion-preview-open');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='add' && document.activeElement === document.querySelector('.series-exclusion-preview-heading')`, 'exclusion-previewed');
-    const exclusionPreview = await renderer.evaluate(`(() => { const box=document.querySelector('.series-exclusion-preview'); return {
-      rows: Array.from(box.querySelectorAll('.series-exclusion-preview-identity dt'), (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
-      groups: Array.from(box.querySelectorAll(':scope > .series-impact-group'), (group) => [group.dataset.impactGroup, group.querySelector('h5')?.textContent ?? null,
-        Array.from(group.querySelectorAll('.series-impact-changes li'), (line) => line.textContent)]),
-      commit: box.querySelector('[data-exclusion-action="commit"]')?.textContent ?? null,
-    }; })()`);
-    requireJourney(JSON.stringify(exclusionPreview?.rows) === JSON.stringify([
-      ['对象', ITEM_LABEL], ['范围', `只限书系「${SERIES}」的书系检索`], ['生效时间', '记录后立即生效'], ['持续范围', '这个条目现在和以后的修订版都一并排除。'],
-      ['理由', EXCLUSION_REASON], ['操作人', '本机编辑'],
-    ]), 'exclusion-preview-rows', exclusionPreview?.rows);
-    requireJourney(JSON.stringify(exclusionPreview?.groups.map((group) => [group[0], group[1]])) === JSON.stringify([
-      ['future-reads', '今后的检索'], ['runs', '已排队、已授权或正在运行的任务'], ['history', '已完成的历史'], ['unaffected', '不受影响的授权'],
-    ]) && exclusionPreview.groups[1][2][0] === `1 个已授权或正在运行的任务会在下一次读取前停下，显示「书系检索范围已变化 · 需要重新确认计划」：《${MEMBER}》第 2 次审阅。` &&
-      exclusionPreview.groups[2][2][0] === `1 个已完成的结果用过这些材料，会标上「${MARKER}」：《${MEMBER}》第 1 次审阅。` && exclusionPreview.commit === '添加检索排除',
-    'exclusion-preview-groups', exclusionPreview?.groups);
-    requireJourney((await renderer.evaluate(`window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} })`))?.exclusions.effective.length === 0, 'exclusion-preview-records-nothing');
-
-    at('exclusion-recorded');
-    // 添加检索排除: in force at once, listed with its reason, and the member can no longer choose 书系一致性 — the plan it would make
-    // leaves the item out, and with it everything there was to read.
-    await clickSelector(renderer, '[data-exclusion-action="commit"]', 'exclusion-commit');
+    await assertRenderer(renderer, `(() => { const add=document.querySelector('[data-exclusion-action="preview"]'); if(!(add instanceof HTMLButtonElement)||add.disabled||add.textContent!=='添加检索排除')return false; add.click(); return true; })()`, 'exclusion-commit');
     await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='1' && document.querySelector('li.series-exclusion')?.dataset.targetId===${JSON.stringify(itemId)}`, 'exclusion-listed');
     await assertRenderer(renderer, `(document.querySelector('li.series-exclusion .series-exclusion-reason')?.textContent ?? '') === ${JSON.stringify(`理由：${EXCLUSION_REASON}`)} && document.querySelectorAll('ol.series-exclusion-revisions > li').length === 1`, 'exclusion-listed-words');
     const excludedRow = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'exclusion-member-row');
@@ -1449,58 +1391,51 @@ async function main() {
 
     at('exclusion-marker');
     // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
-    await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
+    // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
+    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-open-first');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
     await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent?.startsWith(${JSON.stringify(`${MARKER} · `)}) === true && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
     await leaveMemberReview();
 
     at('exclusion-ended');
-    // 停止此排除 after its own preview: later reads may read the item again, the member may choose 书系一致性 again — and the Run
+    // 停止此排除: later reads may read the item again, the member may choose 书系一致性 again — and the Run
     // the exclusion stopped stays stopped, its authorization never restored.
     await openSeries(renderer, seriesId, 'exclusion-end-series');
 
     at('j14-exclusions-keyboard');
     // Without a pointer (Issue #64 review): Enter on 添加检索排除… opens the chooser at its first kind and Escape closes it back
-    // onto the opener; Enter on 停止此排除… shows the preview with focus on its heading, and Escape closes it back onto the
-    // exclusion's own 停止此排除…. Nothing is recorded.
+    // onto the opener. Nothing is recorded.
     await assertRenderer(renderer, `(() => { const open=document.querySelector('[data-exclusion-action="add-open"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.focus(); return document.activeElement===open; })()`, 'exclusion-keyboard-opener');
     await press(renderer, 'Enter');
-    await waitFor(renderer, `document.activeElement?.getAttribute('name') === 'series-exclusion-kind' && document.querySelector('.series-exclusion-chooser') !== null`, 'exclusion-keyboard-chooser', 10_000);
+    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') !== null && ['series-exclusion-kind', 'series-exclusion-target'].includes(document.activeElement?.getAttribute('name') ?? '')`, 'exclusion-keyboard-chooser', 10_000);
     await press(renderer, 'Escape');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') === null && document.activeElement?.dataset.exclusionAction === 'add-open'`, 'exclusion-keyboard-chooser-escaped', 10_000);
-    await assertRenderer(renderer, `(() => { const end=document.querySelector('li.series-exclusion [data-exclusion-action="end-open"]'); if(!(end instanceof HTMLButtonElement)||end.disabled)return false; end.focus(); return document.activeElement===end; })()`, 'exclusion-keyboard-end-focus');
-    await press(renderer, 'Enter');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.activeElement === document.querySelector('.series-exclusion-preview-heading')`, 'exclusion-keyboard-preview', 10_000);
-    await press(renderer, 'Escape');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-preview') === null && document.activeElement?.dataset.exclusionAction === 'end-open' && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-keyboard-preview-escaped', 10_000);
+    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') === null && document.activeElement?.dataset.exclusionAction === 'add-open' && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-keyboard-chooser-escaped', 10_000);
 
     at('j14-exclusions-reflow-forced-colors');
-    // At 200% the exclusion list, its preview and its records wrap within the width; under forced colours the preview keeps its
+    // At 200% the exclusion list, its chooser and its records wrap within the width; under forced colours the chooser keeps its
     // border and the exclusion its rule.
-    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-reflow-preview-open');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end'`, 'exclusion-reflow-preview');
+    await clickSelector(renderer, '[data-exclusion-action="add-open"]', 'exclusion-reflow-chooser-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') !== null`, 'exclusion-reflow-chooser');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const parts=[document.querySelector('.series-exclusion-preview'), document.querySelector('ul.series-exclusion-list'), document.querySelector('ol.series-exclusion-revisions')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2); })()`, 'exclusion-reflow-200', 10_000);
+    await waitFor(renderer, `(() => { const parts=[document.querySelector('.series-exclusion-chooser'), document.querySelector('ul.series-exclusion-list'), document.querySelector('ol.series-exclusion-revisions')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2); })()`, 'exclusion-reflow-200', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(renderer, `(() => {
       if (!matchMedia('(forced-colors: active)').matches) return false;
-      const preview = document.querySelector('.series-exclusion-preview');
+      const chooser = document.querySelector('.series-exclusion-chooser');
       const exclusion = document.querySelector('li.series-exclusion');
-      return preview instanceof HTMLElement && getComputedStyle(preview).borderTopStyle === 'solid' &&
+      return chooser instanceof HTMLElement && getComputedStyle(chooser).borderTopStyle === 'solid' &&
         exclusion instanceof HTMLElement && getComputedStyle(exclusion).borderLeftStyle === 'solid';
     })()`, 'exclusion-forced-colors');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
-    await clickSelector(renderer, '[data-exclusion-action="preview-cancel"]', 'exclusion-reflow-cancel');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-preview') === null && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-reflow-cancelled');
-    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-end-open');
-    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.querySelector('.series-exclusion-preview [data-exclusion-action="commit"]')?.textContent==='停止此排除'`, 'exclusion-end-previewed');
-    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.series-exclusion-preview [data-impact-group="runs"] .series-impact-unchanged li'), (line) => line.textContent).includes('因这条排除停下的任务不会自动恢复，旧的授权和来源范围也不会恢复；要继续，需修改计划并重新授权。')`, 'exclusion-end-preview-words');
-    await clickSelector(renderer, '.series-exclusion-preview [data-exclusion-action="commit"]', 'exclusion-end-commit');
+    await clickSelector(renderer, '[data-exclusion-action="add-cancel"]', 'exclusion-reflow-cancel');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') === null && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-reflow-cancelled');
+    // 停止此排除 is one click (Issue #1410 item 30).
+    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-end-commit');
     await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='0' && document.querySelectorAll('ol.series-exclusion-revisions > li').length === 2`, 'exclusion-ended-listed');
     const endedRow = await readSeries(renderer, (read) => (read.members.find(([id]) => id === member)?.[5] ?? '').endsWith(' · 可以审阅'), 'exclusion-member-available');
     requireJourney(endedRow.members.some(([id]) => id === member), 'exclusion-member-row-again');
@@ -2039,7 +1974,8 @@ async function main() {
     // The member's first Review Run — 书系一致性 alone, settled — saved as 《书系复核》 and enabled; its version row says what a
     // Book must have for it to run there: a Series, whose material is chosen apart at each run.
     await openBookReview(renderer, MEMBER, member, 'series-procedure-review');
-    await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'series-procedure-first-run');
+    // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
+    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'series-procedure-first-run');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelector('ol.review-runs li[data-review-run="1"]')?.getAttribute('aria-current')==='true'`, 'series-procedure-first-open', 60_000);
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'series-procedure-capture');
     const seriesCapture = await readCapture(renderer, (read) => read.steps.length === 1 && read.focused, 'series-procedure-sheet');
@@ -2247,20 +2183,12 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'skill-ready');
     await openProcedures(renderer, 'skill-import');
     await clickSelector(renderer, '[data-skill-action="import"]', 'skill-pick-synthetic');
-    // ADR 0090 §2: acquisition discloses before it keeps — identity, source revision, license, digest — and nothing is kept yet.
-    await waitFor(renderer, `document.querySelector('[data-skill-acquisition]')?.textContent.includes('尚未保留')`, 'skill-disclosed');
-    await assertRenderer(renderer, `(async () => { const panel=document.querySelector('[data-skill-acquisition]'); const text=panel?.textContent??''; const kept=await window.ai7.inspectImportedSkills({revisionId:null,before:null}); return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && /SHA-256 [0-9a-f]{64}/.test(text) && text.includes('Run 可读范围：无') && kept.skills.length===0 && !document.querySelector('[data-skill-detail]'); })()`, 'skill-disclosed-nothing-kept');
-    await clickSelector(renderer, '[data-skill-action="keep"]', 'skill-keep');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='pending-validation' && !document.querySelector('[data-skill-acquisition]')`, 'skill-acquired');
-    await assertRenderer(renderer, `(() => { const detail=document.querySelector('[data-skill-detail]'); const text=detail?.textContent??''; return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && text.includes('转换报告') && text.includes('来源快照') && text.includes('工作修订') && text.includes('Run 可读范围：无') && !detail.querySelector('[data-skill-action="install"], [data-skill-action="enable"]'); })()`, 'skill-identity-and-ceiling');
+    // Issue #1410 item 27: the package picked in the system dialog is kept, validated by the service and — validation passing —
+    // installed, with the Books offered for enabling; nothing in it runs (ADR 0090 §2's identity stays on the detail).
+    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled' && !document.querySelector('[data-skill-acquisition]') && document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-installed-not-enabled');
+    await assertRenderer(renderer, `(() => { const detail=document.querySelector('[data-skill-detail]'); const text=detail?.textContent??''; return text.includes('synthetic-style-review') && text.includes('1.0.0') && text.includes('MIT') && text.includes('转换报告') && text.includes('来源快照') && text.includes('工作修订') && text.includes('Run 可读范围：无') && !detail.querySelector('[data-skill-action="validate"], [data-skill-action="install"]'); })()`, 'skill-identity-and-ceiling');
     const importedSkillId = await renderer.evaluate(`document.querySelector('[data-skill-detail]')?.dataset.skillDetail`);
     requireJourney(UUID_PATTERN.test(importedSkillId ?? ''), 'skill-exact-revision');
-    await clickSelector(renderer, '[data-skill-action="validate"]', 'skill-validate');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='validated'`, 'skill-validated-not-installed');
-    await clickSelector(renderer, '[data-skill-action="install"]', 'skill-install');
-    await waitFor(renderer, `document.querySelector('[data-skill-detail]')?.dataset.skillState==='installed-disabled'`, 'skill-installed-not-enabled');
-    await clickSelector(renderer, '[data-skill-action="books"]', 'skill-choose-scope');
-    await waitFor(renderer, `document.querySelectorAll('[data-skill-field="book"] option').length>1`, 'skill-books');
     const enabledSkillBook = await renderer.evaluate(`(() => { const select=document.querySelector('[data-skill-field="book"]'); select.value=select.options[1].value; const value=select.value; select.dispatchEvent(new Event('change',{bubbles:true})); return value; })()`);
     requireJourney(UUID_PATTERN.test(enabledSkillBook ?? ''), 'skill-selected-book');
     await clickSelector(renderer, '[data-skill-action="enable"]', 'skill-explicit-enable');

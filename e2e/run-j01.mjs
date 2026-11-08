@@ -783,8 +783,9 @@ async function prepareSourceImportReview(renderer, expectation) {
     await waitFor(renderer, `document.querySelector('[data-source-version-reuse-choices]')`, 'source-reuse-required');
     await assertRenderer(
       renderer,
-      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse && !reuse.checked && !document.querySelector('[data-prepare-source-import-review]'); })()`,
-      'source-reuse-unselected',
+      // Issue #1410 item 32B: the same-Book match is chosen to begin with.
+      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse instanceof HTMLInputElement && reuse.checked; })()`,
+      'source-reuse-preselected',
     );
     await assertRenderer(
       renderer,
@@ -953,8 +954,9 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector('[data-reimport-lineage-choices]') && document.querySelector('[data-reimport-source-version-choices]')`, `${scenario}-choices`);
   await assertRenderer(
     renderer,
-    `!document.querySelector('input[name="reimport-lineage"]:checked') && !document.querySelector('input[name="reimport-source-version"]:checked') && !document.querySelector('[data-prepare-manuscript-reimport]')`,
-    `${scenario}-choices-unselected`,
+    // Issue #1410 item 32B: a lineage and a source result are chosen to begin with, so the prepare action shows at once.
+    `document.querySelector('input[name="reimport-lineage"]:checked') !== null && document.querySelector('input[name="reimport-source-version"]:checked') !== null && document.querySelector('[data-prepare-manuscript-reimport]') !== null`,
+    `${scenario}-choices-preselected`,
   );
   const lineageSelector = lineageStatus === 'verified'
     ? `[data-reimport-lineage="verified-source-version"][data-source-version-id=${JSON.stringify(lineageSourceVersionId)}]`
@@ -970,7 +972,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector(${JSON.stringify(sourceSelector)})`, `${scenario}-source-choice`);
   await assertRenderer(
     renderer,
-    `(() => { const source = document.querySelector(${JSON.stringify(sourceSelector)}); if (!source || source.checked) return false; source.click(); return true; })()`,
+    `(() => { const source = document.querySelector(${JSON.stringify(sourceSelector)}); if (!source) return false; if (!source.checked) source.click(); return source.checked; })()`,
     `${scenario}-source-select`,
   );
   const stagedSourceIdentity = await renderer.evaluate(`(() => ({
@@ -1886,10 +1888,10 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const suggestions = controls.querySelector('[data-word-import-mode="suggestions"]');
     const accepted = controls.querySelector('[data-word-import-mode="accepted-baseline"]');
-    const confirmation = controls.querySelector('[data-word-accepted-baseline-confirmation]');
+    const note = controls.querySelector('[data-word-accepted-baseline-note]');
     const learning = controls.querySelector('[data-word-learn-from-edits]');
     const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)});
-    return suggestions.checked && !accepted.checked && !accepted.disabled && !confirmation.checked && learning.checked &&
+    return suggestions.checked && !accepted.checked && !accepted.disabled && note instanceof HTMLElement && note.hidden && learning.checked &&
       prepare.disabled === ${Boolean(allInserted)} && !document.querySelector('[data-word-reviewed-mode]');
   })()`, 'word-preview-never-selects-accepted-baseline');
   // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
@@ -1904,9 +1906,8 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
       controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
   })()`, 'word-preview-label-and-reading-reason');
   if (mode === 'accepted-baseline') {
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !confirmation.checked && !confirmation.disabled && prepare.disabled; })()`, 'word-accepted-needs-separate-confirmation');
-    await assertRenderer(renderer, `document.querySelector('[data-word-reading-availability]').textContent === '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'`, 'word-accepted-confirmation-notice');
-    await assertRenderer(renderer, `(() => { const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); confirmation.click(); return confirmation.checked; })()`, 'word-accepted-confirmed');
+    // Issue #1410 item 32A: choosing 直接并入正文 · 定稿基线 is the confirmation; its note shows and prepare is available.
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const note = document.querySelector('[data-word-accepted-baseline-note]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !document.querySelector('[data-word-accepted-baseline-confirmation]') && note instanceof HTMLElement && !note.hidden && prepare instanceof HTMLButtonElement && !prepare.disabled; })()`, 'word-accepted-baseline-chosen');
   }
   if (!learnFromEdits) await assertRenderer(renderer, `(() => { const learning = document.querySelector('[data-word-learn-from-edits]'); learning.click(); return !learning.checked; })()`, 'word-learning-opt-out');
   await clickExactButton(renderer, prepareLabel, 'word-actual-prepare');
@@ -2869,7 +2870,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-review-action="new-review"]')`, 'import-selection-review-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click(); return true; })()`, 'import-selection-sheet-open');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'import-selection-sheet-ready');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const local=()=>sheet.querySelector('input[value="local-text-check"]'); local().click(); const numerals=sheet.querySelector('[data-local-check-numerals]'); numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); sheet.querySelector('[data-local-check-confirmation]').click(); numerals.value='off'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(!sheet.querySelector('[data-local-check-confirmation]').disabled)return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); local().click(); local().click(); const kept=sheet.querySelector('[data-local-check-confirmation]').checked&&sheet.querySelector('[data-local-check-numerals]').value==='editor-convention'; sheet.querySelector('[data-review-action="close-sheet"]').click(); return kept; })()`, 'import-local-selection-round-trip');
+    // Issue #1410 item 16: choosing a 数字依据 is the confirmation; its note shows only while numerals are on.
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const local=()=>sheet.querySelector('input[value="local-text-check"]'); const note=()=>sheet.querySelector('p[data-local-check-numerals-note]'); local().click(); const numerals=sheet.querySelector('[data-local-check-numerals]'); if(sheet.querySelector('[data-local-check-confirmation]'))return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(!(note() instanceof HTMLElement)||note().hidden)return false; numerals.value='off'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(note() instanceof HTMLElement&&!note().hidden)return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); local().click(); local().click(); const kept=sheet.querySelector('[data-local-check-numerals]').value==='editor-convention'&&note() instanceof HTMLElement&&!note().hidden; sheet.querySelector('[data-review-action="close-sheet"]').click(); return kept; })()`, 'import-local-selection-round-trip');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'populated-book-to-overview-before-source');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
     const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);

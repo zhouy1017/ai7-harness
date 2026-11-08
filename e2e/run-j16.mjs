@@ -1383,7 +1383,7 @@ async function main() {
     const stopped = await waitForDialogue(renderer, (dialogue) => dialogue.attempts[0]?.state === 'stopped', 'dialogue-stopped');
     requireJourney(stopped.attempts[0].label === '回答已停止 · 内容不完整' && stopped.attempts[0].incomplete === '你停止了回答；只保留了完整的句子。' &&
       JSON.stringify(stopped.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
-      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled']]), 'dialogue-stopped-words', stopped);
+      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled'], ['convert-edit', '编辑后转为修改建议…', 'disabled']]), 'dialogue-stopped-words', stopped);
     await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]')?.title === '内容不完整的回答不能转为修改建议。'`, 'dialogue-stopped-convert-why');
 
     at('dialogue-continue-after-mid-stream-stop');
@@ -1407,7 +1407,7 @@ async function main() {
     requireJourney(regenerated.attempts[0].state === 'stopped' && JSON.stringify(regenerated.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
       regenerated.attempts[2].kind === 'regenerate' && regenerated.attempts[2].heading === '第 3 次 · 重新回答' && regenerated.attempts[2].label === '回答完成' &&
       JSON.stringify(regenerated.attempts[2].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[2].incomplete === null &&
-      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled']]), 'dialogue-regenerated-words', regenerated);
+      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled'], ['convert-edit', '编辑后转为修改建议…', 'enabled']]), 'dialogue-regenerated-words', regenerated);
     const attempts = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.map((attempt) => [attempt.ordinal, attempt.kind, attempt.state, attempt.source]))`);
     requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'continue', 'completed', 'ledger'], [3, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
 
@@ -1505,7 +1505,8 @@ async function main() {
     at('dialogue-convert');
     // 转为修改建议 on the completed answer (DIALOG-016): a 修改建议 on the selected words, from AI7 and the dialogue Task, which
     // the editor still decides; the manuscript is exactly as it was.
-    await dialogueAction(renderer, 'convert', 'dialogue-convert-open');
+    // 编辑后转为修改建议… keeps the editable form (Issue #1410 item 10); 转为修改建议 alone converts the answer's words at once.
+    await dialogueAction(renderer, 'convert-edit', 'dialogue-convert-open');
     await waitFor(renderer, `(() => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); const rationale = form?.querySelector('textarea[name="rationale"]'); return proposed instanceof HTMLTextAreaElement && document.activeElement === proposed && proposed.value.trim().length > 0 && rationale?.value === '' && form.querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(selectedWords)}; })()`, 'dialogue-convert-form', 10_000);
     // An Escape that ends an input method's composition in the form closes neither the form nor the side slot (J-14).
     await assertRenderer(renderer, `(async () => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); if (!(proposed instanceof HTMLTextAreaElement)) return false; proposed.dispatchEvent(new CompositionEvent('compositionstart', { data: '平缓', bubbles: true })); proposed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', isComposing: true, bubbles: true, cancelable: true })); proposed.dispatchEvent(new CompositionEvent('compositionend', { data: '平缓', bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 100)); return form.isConnected && document.querySelector('#task-drawer')?.hidden === false && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue'; })()`, 'dialogue-convert-ime-escape');
@@ -2001,7 +2002,7 @@ async function main() {
     // 提交为修改建议: both proposals become 修改建议 marks through the produced-mark path — AI7's, from the round's dialogue Task — in
     // independent marks; the manuscript's words stay as they were until a decision on the existing Mark Cards.
     await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="promote"]', 'workspace-promote-click');
-    await waitFor(renderer, `document.querySelector('[data-agent-workspace-promoted]')?.dataset.agentWorkspacePromoted === '2'`, 'workspace-promoted', 60_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') !== null && document.querySelector('.editorial-mark-layer [data-mark-card]') !== null`, 'workspace-promoted', 60_000);
     const promotedState = await workspaceState();
     const newMarks = promotedState.marks.filter((markId) => !proposeBefore.marks.includes(markId));
     requireJourney(promotedState.digest === proposeBefore.digest && promotedState.text === proposeBefore.text && newMarks.length === 2, 'workspace-promote-text-unchanged', promotedState);
@@ -2017,7 +2018,8 @@ async function main() {
     // Independent paragraph edits are decided directly on their manuscript cards.
     const firstMark = promotedCards.find((card) => card.suggestion.currentText === WORKSPACE_FIRST_ANCHOR).markId;
     const secondMark = promotedCards.find((card) => card.suggestion.currentText === WORKSPACE_SECOND_ANCHOR).markId;
-    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="open-marks"]', 'workspace-open-marks');
+    // The promote already opened the manuscript at a new card; the first proposal's card is the one decided first.
+    await assertRenderer(renderer, `(() => { if (document.querySelector('.editorial-mark-layer [data-mark-card]')?.dataset.markCard === ${JSON.stringify(firstMark)}) return true; const mark = document.querySelector('[data-screen="editor"] [data-mark-id=${JSON.stringify(firstMark)}]'); if (!(mark instanceof HTMLElement)) return false; mark.click(); return true; })()`, 'workspace-first-card-open');
     await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card]')?.dataset.markCard === ${JSON.stringify(firstMark)} && document.querySelector('.editorial-mark-layer [data-mark-action="accept-and-apply"]')?.disabled === false`, 'workspace-mark-card', 60_000);
     await clickSelector(renderer, '.editorial-mark-layer [data-mark-card] [data-mark-action="accept-and-apply"]', 'workspace-mark-accept');
     await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card] [data-mark-application]') !== null`, 'workspace-mark-applied', 60_000);

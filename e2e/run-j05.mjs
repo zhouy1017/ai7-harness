@@ -972,22 +972,17 @@ async function main() {
 
     at('proposal-decision-draft-batch');
     await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); document.getElementById('windowed-' + window.__j05WorkspaceMarkId).querySelector('input').click(); root.querySelector('[data-proposal-action="batch-selection-deferred"]').click(); return true; })()`, 'proposal-preview-batch');
-    await waitFor(renderer, `document.querySelector('[data-proposal-action="batch-confirm"]')`, 'proposal-frozen-scope');
-    await assertRenderer(renderer, `document.querySelector('.proposal-controls').textContent.includes('批量草稿范围（已冻结）') && document.querySelector('.proposal-controls').textContent.includes('1 项纳入')`, 'proposal-scope-visible');
-    await click(renderer, '确认保存批量草稿', 'proposal-confirm-draft');
-    await waitFor(renderer, `document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-draft-saved');
+    // Issue #1410 item 8: the batch draft is saved at once, with 撤销上次草稿处理 beside it.
+    await waitFor(renderer, `document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('section.proposal-batch-outcome')?.textContent.includes('已保存 1 项草稿；稿件未发生变化。') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-draft-saved');
     await click(renderer, '撤销上次草稿处理', 'proposal-draft-undo');
     await waitFor(renderer, `!document.querySelector('[data-proposal-action="draft-undo"]') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-undo-saved');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-proposal-action="draft-deferred"]').click(); return true; })()`, 'proposal-save-deferred');
     await waitFor(renderer, `document.querySelector('.proposal-navigator').textContent.includes('暂不决定') && document.querySelector('.proposal-workspace').getAttribute('aria-busy') === 'false'`, 'proposal-deferred-saved');
 
     at('proposal-decision-record');
-    await click(renderer, '记录提案决定', 'proposal-record');
-    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('提案决定已记录；稿件未发生变化。')`, 'proposal-recorded-partial');
-    await click(renderer, '准备应用', 'proposal-prepare');
-    await waitFor(renderer, `document.querySelector('.proposal-controls').textContent.includes('尚未批准应用，稿件未发生变化')`, 'proposal-preparation-line');
-    await assertRenderer(renderer, `document.querySelector('[data-proposal-action="confirm"]').disabled && document.querySelector('.proposal-controls').textContent.includes('纳入 0 项')`, 'proposal-deferred-not-applied');
-    await click(renderer, '取消准备', 'proposal-cancel-preparation');
+    // One 应用已采纳修改 records the decisions and applies what was accepted; a deferred draft applies nothing.
+    await assertRenderer(renderer, `(() => { const button = document.querySelector('[data-proposal-action="apply-accepted"]'); if (!(button instanceof HTMLButtonElement) || button.disabled || button.textContent !== '应用已采纳修改') return false; button.click(); return true; })()`, 'proposal-apply-accepted');
+    await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('提案决定已记录；没有可应用的已采纳修改，稿件未发生变化。')`, 'proposal-recorded-nothing-applied');
     await click(renderer, '返回稿件', 'proposal-return');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
     await settled(renderer, 'proposal-settled');
@@ -1096,11 +1091,9 @@ async function main() {
     await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'local-authorize-exact-plan');
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
-    // Q1: batch application lists the exact suggestions and waits for the editor's confirmation.
+    // Q1 / Issue #1410 item 5: 批量采纳机械修正 applies at once, and 撤销本批应用 stands beside the result.
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
-    await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-batch-confirm-ready');
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="batch-confirm"]').click(); return true; })()`, 'local-batch-confirm');
-    await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('[data-toast]')?.textContent.includes('条修改建议写入稿件')`, 'local-batch-dom-ready');
+    await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');
     requireJourney(await renderer.evaluate(`(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`), 'local-batch-committed');
     await waitFor(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-return-to-mark');
     // The finding retains the same suggestion and Apply lineage; its reverse action restores the tester edit.
