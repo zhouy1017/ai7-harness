@@ -5498,6 +5498,65 @@ export class BoundedManuscriptStore {
   }
 
   /**
+   * 全部替换 written as per-occurrence editor revisions (Issue #1411): the frozen, fully validated matches of `previewId`, under the
+   * very baseline checks `commitReplacement` makes — frozen, every included range validated, the branch still exactly at the
+   * state the preview froze — in the order they can be written one at a time: earlier blocks first, and inside a block from its
+   * last match back, so each range still holds its own words when its turn comes. Nothing is written here; the caller writes
+   * every revision and `closeReplacementAsRevisions` in one transaction.
+   */
+  replacementRevisionPlan(previewId: string): {
+    manuscriptId: string; branchId: string; query: string; replacement: string;
+    matches: ReadonlyArray<{ blockId: string; fromGrapheme: number; toGrapheme: number }>;
+  } {
+    const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+    requireBounded(asString(preview.state) === 'frozen' && asNumber(preview.validated_ordinal) > 0, 'REPLACEMENT_NOT_READY', '替换尚未完成复核。');
+    const unvalidated = asNumber(one(this.#db.prepare(
+      'SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 1 AND ordinal > ?',
+    ).all(previewId, asNumber(preview.validated_ordinal)) as SqlRow[], 'REPLACEMENT_NOT_READY', '替换匹配缺失。').total);
+    requireBounded(unvalidated === 0, 'REPLACEMENT_NOT_READY', '替换尚未完成全部精确范围复核。');
+    const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+    this.#requireBranchEditable(binding.branchId);
+    requireBounded(
+      binding.revisionId === asString(preview.revision_id) && binding.journalSequence === asNumber(preview.journal_sequence) &&
+        binding.workingDigest === asString(preview.working_digest),
+      'REPLACEMENT_STALE',
+      '稿件已变化，替换未提交，请刷新预览。',
+    );
+    const rows = this.#db.prepare(
+      `SELECT rm.block_id, rm.from_grapheme, rm.to_grapheme
+       FROM manuscript_replacement_matches rm
+       JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = rm.block_id
+       WHERE rm.preview_id = ? AND rm.included = 1
+       ORDER BY wb.position, rm.from_grapheme DESC`,
+    ).all(binding.branchId, previewId) as SqlRow[];
+    requireBounded(rows.length === asNumber(preview.included_matches) && rows.length > 0, 'REPLACEMENT_NOT_READY', '替换匹配缺失。');
+    return {
+      manuscriptId: binding.manuscriptId, branchId: binding.branchId,
+      query: asString(preview.query), replacement: asString(preview.replacement),
+      matches: rows.map((row) => ({ blockId: asString(row.block_id), fromGrapheme: asNumber(row.from_grapheme), toGrapheme: asNumber(row.to_grapheme) })),
+    };
+  }
+
+  /** What a revision written now stands on: the branch's revision and journal position, and the block's digest. */
+  revisionPin(manuscriptId: string, branchId: string, blockId: string): { revisionId: string; journalSequence: number; workingDigest: string; blockDigest: string } {
+    const binding = this.#binding(manuscriptId, branchId);
+    const block = one(this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, blockId) as SqlRow[],
+      'BLOCK_NOT_FOUND', '内容块不存在。');
+    return { revisionId: binding.revisionId, journalSequence: binding.journalSequence, workingDigest: binding.workingDigest, blockDigest: asString(block.digest) };
+  }
+
+  /** The replacement preview whose matches were all written as revisions is committed: it cannot be committed again. */
+  closeReplacementAsRevisions(previewId: string): void {
+    requireBounded(
+      this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'")
+        .run(new Date().toISOString(), previewId).changes === 1,
+      'REPLACEMENT_STATE_CHANGED',
+      '替换预览状态已变化。',
+    );
+    this.#pruneReplacementRecords(0);
+  }
+
+  /**
    * The one write path of AI7 Apply (Issue #408; ARCHITECTURE › Proposal and Effect). Exact ranges are
    * replaced as one atomic command: every target is rechecked against the text its block holds now —
    * the range must still hold exactly the text the caller expects — and either all of them commit or

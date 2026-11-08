@@ -17,6 +17,21 @@ function graphemes(text: string): string[] {
 
 const MARK_LINE_PRIORITY: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
 
+/** The words on an applied revision's badge (Issue #1411): the editor's own and an accepted AI7 修改建议 alike. */
+export const APPLIED_BADGE_TEXT = '✎ 已改';
+
+/** What the badge says it opens; a deletion names the words it took away. */
+export function appliedBadgeTitle(mark: Pick<EditorialMarkAnchorProjection, 'deletedText'>): string {
+  const excerpt = mark.deletedText === null ? null : Array.from(mark.deletedText).slice(0, 24).join('');
+  return excerpt === null ? '已修改 · 点击查看修订卡片（修改前后对照，可撤销）'
+    : `原文：「${excerpt}${Array.from(mark.deletedText!).length > 24 ? '…' : ''}」已删去 · 点击查看修订卡片`;
+}
+
+/** An applied 修改建议 whose words still stand where it wrote them: it carries the applied tint, line and badge. */
+export function isAppliedRevision(mark: Pick<EditorialMarkAnchorProjection, 'kind' | 'status'>): boolean {
+  return mark.kind === 'change-suggestion' && mark.status === 'applied';
+}
+
 /** The mark open in its card, and the replacement its card previews in the text. */
 export interface ActiveMark {
   readonly markId: string;
@@ -66,6 +81,7 @@ export function blockMarkDecorations(
   const position = (grapheme: number): number =>
     offset + 1 + parts.slice(0, Math.min(Math.max(0, grapheme), parts.length)).join('').length;
   let line: EditorialMarkKind | undefined;
+  let revised = false;
   for (const mark of blockMarks) {
     const followed = local ? followSpanEdit(mark, local) : { ...mark, touched: false };
     const drifted = mark.anchorState === 'drifted' || followed.touched;
@@ -74,6 +90,27 @@ export function blockMarkDecorations(
     }
     const from = position(followed.fromGrapheme);
     const to = position(followed.toGrapheme);
+    // The applied revision's badge (Issue #1411), at the end of the words it wrote — or at the point a deletion left — and
+    // a button: a click opens its card in the 批注栏, as a click on its words does.
+    if (isAppliedRevision(mark) && !drifted) {
+      revised = true;
+      decorations.push(Decoration.widget(to, () => {
+        const badge = window.document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'editorial-mark-applied-badge';
+        badge.contentEditable = 'false';
+        badge.tabIndex = -1;
+        badge.textContent = APPLIED_BADGE_TEXT;
+        badge.title = appliedBadgeTitle(mark);
+        badge.setAttribute('aria-label', `${APPLIED_BADGE_TEXT} · ${badge.title}`);
+        badge.dataset['appliedMarkId'] = mark.markId;
+        badge.dataset['markSource'] = mark.sourceKind;
+        badge.addEventListener('mousedown', (event) => {
+          if (event.button === 0) event.preventDefault();
+        });
+        return badge;
+      }, { side: 2, ignoreSelection: true, key: `applied:${mark.markId}:${mark.deletedText ?? ''}:${mark.sourceKind}`, blockId }));
+    }
     const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
     const preview = (at: number): void => {
       const previewText = activeMark!.previewText!;
@@ -147,8 +184,13 @@ export function blockMarkDecorations(
     }, { blockId }));
     if (previewing) preview(to);
   }
-  if (line !== undefined) {
-    decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: 'has-editorial-mark', 'data-mark-line': line }, { blockId }));
+  if (line !== undefined || revised) {
+    // An open mark's line leads; a paragraph that holds only applied revisions shows the revision line (Issue #1411).
+    decorations.push(Decoration.node(offset, offset + node.nodeSize, {
+      class: 'has-editorial-mark',
+      'data-mark-line': line ?? 'applied',
+      ...(revised ? { 'data-mark-revised': 'true' } : {}),
+    }, { blockId }));
   }
   return decorations;
 }

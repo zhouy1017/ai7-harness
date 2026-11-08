@@ -20,7 +20,8 @@ const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> }>,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
+  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
 }));
@@ -61,10 +62,15 @@ vi.mock('../../src/renderer/position-rail.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/editorial-marks.js')>(),
-  mountEditorialMarks: () => ({
-    selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
-    ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
-  }),
+  mountEditorialMarks: () => {
+    const surface = {
+      selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
+      ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
+      quickRevise: vi.fn(() => false), revealRevision: vi.fn(async () => undefined), recordAndApplyEditorRevision: vi.fn(async () => 'mark-applied'),
+    };
+    children.marks.push(surface);
+    return surface;
+  },
 }));
 vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/reading-return.js')>(),
@@ -88,6 +94,10 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
       highlightJump: vi.fn(), highlightAppliedRange: vi.fn(),
+      inputModeValue: 'reading-revision' as 'reading-revision' | 'direct-edit',
+      inputMode() { return this.inputModeValue; },
+      setInputMode: vi.fn(function (this: { inputModeValue: string }, mode: string) { this.inputModeValue = mode; }),
+      selectedRange: vi.fn(() => ({ kind: 'none' })),
       currentBlockStyle: () => ({ kind: 'paragraph', level: null }),
       setBlockStyle: vi.fn(),
       isComposing: () => false,
@@ -179,6 +189,7 @@ beforeEach(() => {
   children.editorSurfaces.length = 0;
   children.protections.length = 0;
   children.rails.length = 0;
+  children.marks.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
@@ -366,7 +377,7 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['撤销', '重做', '重试权威刷新']);
+      .toEqual(['模式：阅读与修订（防误触）', '撤销', '重做', '重试权威刷新']);
     app.showing?.destroy();
   });
 
@@ -402,7 +413,7 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
-  it('labels capped chapter counts as partial and omits counts for chapters outside the retained rail', async () => {
+  it('counts a chapter\'s marks only where it has some, and the outline\'s own headings in its footer', async () => {
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
       const entries = ['blk_3', 'omitted'].map((blockId) => ({ blockId, kind: 'heading', level: 1, text: blockId, displayTextTruncated: false }));
@@ -413,11 +424,11 @@ describe('the Manuscript screen lifecycle', () => {
         chapters: [{ blockId: 'blk_3', title: '第一章', level: 1, proportion: .25, suggestions: 0, annotations: 1, notes: 0 }], chaptersTruncated: true,
         marks: [], marksTruncated: false, uncovered: null });
       await vi.advanceTimersByTimeAsync(0);
+      // A chapter's marks are one light count where it has some (Issue #1409); none is drawn for a chapter without.
       const rows = app.screen.querySelectorAll('.outline-list button');
-      expect(rows[0]!.querySelector('.outline-counts')?.textContent).toContain('批注 1');
-      expect(rows[1]!.querySelector('.outline-counts')).toBeNull();
-      expect(rows[1]!.querySelector('.outline-percent')).toBeNull();
-      expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('已显示 1 个章节 · 标记计数为已显示部分');
+      expect(rows[0]!.querySelector('.outline-marks')?.textContent).toBe('1 处标记');
+      expect(rows[1]!.querySelector('.outline-marks')).toBeNull();
+      expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('共 2 个章节标题');
       app.showing?.destroy();
     } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
   });

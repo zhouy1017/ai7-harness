@@ -18,11 +18,17 @@ import type {
   ManuscriptRailProjection,
   OutlineProjection,
   ReplacementPreviewProjection,
+  ReplacementCommitProjection,
   SearchResultsProjection,
   ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
-import { MAX_REPLACEMENT_EXCLUSIONS, MILESTONE_PURPOSE_KINDS, MILESTONE_PURPOSE_LABELS, type MilestonePurposeKind } from '../shared/protocol.js';
-import { SEARCH_STALE_LINE, replacementRefusal, searchQueryRefusal } from './manuscript-search-labels.js';
+import { MAX_REPLACEMENT_EXCLUSIONS, MAX_SEARCH_RESULTS, MILESTONE_PURPOSE_KINDS, MILESTONE_PURPOSE_LABELS, type MilestonePurposeKind } from '../shared/protocol.js';
+import {
+  OUTLINE_EMPTY_LINE, REPLACE_LAST_LINE, REPLACE_NOTHING_LINE, REPLACE_SAME_LINE, SEARCH_STALE_LINE, outlineNoMatchLine, replaceAllLabel,
+  replacementRefusal, searchContextParts, searchHitsTitle, searchQueryRefusal,
+} from './manuscript-search-labels.js';
+import { replacementRevisionRationale } from '../shared/editor-revision-words.js';
+import { DEFAULT_EDITOR_INPUT_MODE, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
 import { shortcutHint } from './commands.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
 import {
@@ -239,6 +245,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // overview does — a window is identified by the Book it holds, not by the surface it happens to show.
   content.dataset['bookId'] = initialWindow.bookId;
   const isDocument = productionDocument !== undefined;
+  // 显示已修改标识 (Issue #1411): a per-viewer choice, shown by default.
+  const APPLIED_MARKS_KEY = 'ai7.applied-marks';
+  let appliedMarksShown = true;
+  try { appliedMarksShown = globalThis.localStorage?.getItem(APPLIED_MARKS_KEY) !== 'hidden'; } catch { appliedMarksShown = true; }
+  content.dataset['appliedMarks'] = appliedMarksShown ? 'shown' : 'hidden';
   if (productionDocument !== undefined) {
     // A derivative document of the Book's 稿件 (Issue #1403), never one of 交付物.
     content.dataset['manuscriptKind'] = 'derivative';
@@ -423,7 +434,27 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
-  toolbarActions.append(paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  // 阅读与修订模式 (Issue #1411): the text opens guarded; this pill is the one explicit way to type straight into it.
+  const inputModeToggle = button(INPUT_MODE_LABELS[DEFAULT_EDITOR_INPUT_MODE], 'secondary', () =>
+    setInputMode(editor?.inputMode() === 'direct-edit' ? 'reading-revision' : 'direct-edit'));
+  inputModeToggle.className = `${inputModeToggle.className} editor-input-mode-toggle`;
+  inputModeToggle.dataset['editorInputModeToggle'] = 'true';
+  const paintInputMode = (mode: EditorInputMode): void => {
+    inputModeToggle.textContent = INPUT_MODE_LABELS[mode];
+    inputModeToggle.title = INPUT_MODE_TITLES[mode];
+    inputModeToggle.dataset['inputMode'] = mode;
+    inputModeToggle.setAttribute('aria-pressed', String(mode === 'direct-edit'));
+    content.dataset['inputMode'] = mode;
+  };
+  const setInputMode = (mode: EditorInputMode): void => {
+    if (editor === undefined) return;
+    editor.setInputMode(mode);
+    paintInputMode(editor.inputMode());
+    setStatus(INPUT_MODE_CHANGED[editor.inputMode()], 'success');
+    editor.focus();
+  };
+  paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
+  toolbarActions.append(inputModeToggle, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
   // 本书稿件 (Issue #1403): the manuscript and every derivative document of the Book, and 新建 / 导入衍生稿件, above the editor.
   let switcher: ManuscriptSwitcher | undefined;
@@ -437,36 +468,57 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const navigator = element('aside', 'manuscript-navigator');
   navigator.setAttribute('aria-label', '稿件导航与查找');
 
-  const outlineSection = element('section', 'navigator-section');
-  outlineSection.append(element('h3', undefined, '结构导航'));
+  // 大纲 (Issue #1409): the whole Book's headings at the panel's full height, its own filter, the chapter being read marked.
+  const outlineSection = element('section', 'navigator-section outline-section');
+  outlineSection.append(element('h3', 'navigator-heading', '结构导航'));
+  const outlineFilter = element('input', 'outline-filter-input');
+  outlineFilter.type = 'search';
+  outlineFilter.placeholder = '筛选章节标题…';
+  outlineFilter.setAttribute('aria-label', '筛选章节标题');
   const outlineList = element('div', 'outline-list');
   let railProjection: ManuscriptRailProjection | undefined;
   outlineList.setAttribute('role', 'list');
-  const previousOutline = button('上一组结构', 'quiet', () => void loadOutline(outlinePage?.previousCursor ?? null));
-  const nextOutline = button('下一组结构', 'quiet', () => void loadOutline(outlinePage?.nextCursor ?? null));
-  previousOutline.hidden = true;
-  nextOutline.hidden = true;
-  const outlinePaging = element('div', 'button-row');
-  outlinePaging.append(previousOutline, nextOutline);
-  outlineSection.append(outlineList, outlinePaging);
+  outlineList.setAttribute('aria-label', '章节');
+  const outlineEmpty = element('p', 'field-note outline-empty', OUTLINE_EMPTY_LINE);
+  outlineEmpty.hidden = true;
+  outlineSection.append(outlineFilter, outlineList, outlineEmpty);
 
+  // 查找 and 替换 (Issue #1409): the find field with its count and ↑/↓, the replacement right below it, and two one-click actions.
   const searchSection = element('section', 'navigator-section search-section');
-  searchSection.append(element('h3', undefined, '全稿查找与替换'));
-  const searchLabel = element('label', undefined, '查找文字');
-  searchLabel.htmlFor = 'manuscript-search';
+  searchSection.append(element('h3', 'navigator-heading', '全稿查找与替换'));
   const searchInput = element('input');
   searchInput.id = 'manuscript-search';
-  const replacementLabel = element('label', undefined, '替换为');
+  searchInput.type = 'search';
+  searchInput.placeholder = '查找稿件文字';
+  searchInput.setAttribute('aria-label', '查找文字');
+  const matchPosition = element('span', 'search-match-position');
+  matchPosition.setAttribute('aria-live', 'polite');
+  const previousMatch = button('↑', 'quiet', () => void stepMatch(-1));
+  previousMatch.dataset['searchAction'] = 'prev-match';
+  previousMatch.setAttribute('aria-label', '上一处匹配');
+  previousMatch.title = '上一处（Shift+Enter）';
+  const nextMatch = button('↓', 'quiet', () => void stepMatch(1));
+  nextMatch.dataset['searchAction'] = 'next-match';
+  nextMatch.setAttribute('aria-label', '下一处匹配');
+  nextMatch.title = '下一处（Enter）';
+  const findRow = element('div', 'search-find-row');
+  findRow.append(searchInput, matchPosition, previousMatch, nextMatch);
+  const replacementLabel = element('label', 'visually-hidden', '替换为');
   replacementLabel.htmlFor = 'manuscript-replacement';
   const replacementInput = element('input');
   replacementInput.id = 'manuscript-replacement';
+  replacementInput.placeholder = '替换为…';
+  const replaceRow = element('div', 'search-replace-row');
+  replaceRow.append(replacementLabel, replacementInput);
   const searchButton = button('查找全稿', 'secondary', () => void runSearch());
   const cancelJob = button('取消当前操作', 'quiet', () => void cancelActiveServiceJob());
   cancelJob.hidden = true;
-  const prepareReplacementButton = button('预览替换', 'secondary', () => void prepareReplacement());
-  prepareReplacementButton.disabled = true;
+  const replaceCurrentButton = button('替换当前处', 'secondary', () => void replaceCurrent());
+  replaceCurrentButton.dataset['replaceAction'] = 'current';
+  const replaceAllButton = button(replaceAllLabel(null), 'primary', () => void replaceAll());
+  replaceAllButton.dataset['replaceAction'] = 'all';
   const searchActions = element('div', 'button-row');
-  searchActions.append(searchButton, prepareReplacementButton, cancelJob);
+  searchActions.append(searchButton, replaceCurrentButton, replaceAllButton, cancelJob);
   const searchSummary = element('p', 'field-note', '查找范围：全稿。');
   searchSummary.setAttribute('aria-live', 'polite');
   const exclusionSummary = element(
@@ -479,8 +531,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   exclusionSummary.setAttribute('aria-live', 'polite');
   const searchResults = element('div', 'search-results');
   const resultPaging = element('div', 'button-row');
-  const previousResults = button('上一组结果', 'quiet', () => void loadSearchResults(searchPage?.previousCursor ?? null));
-  const nextResults = button('下一组结果', 'quiet', () => void loadSearchResults(searchPage?.nextCursor ?? null));
+  const previousResults = button('上一组结果', 'quiet', () => void loadSearchResults(searchPage?.previousCursor ?? null, undefined, 'previous'));
+  const nextResults = button('下一组结果', 'quiet', () => void loadSearchResults(searchPage?.nextCursor ?? null, undefined, 'next'));
   const returnFromSearch = button('返回查找前位置', 'quiet', () => void returnToSearchPosition());
   previousResults.hidden = true;
   nextResults.hidden = true;
@@ -489,10 +541,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const replacementReview = element('section', 'replacement-review');
   replacementReview.hidden = true;
   searchSection.append(
-    searchLabel,
-    searchInput,
-    replacementLabel,
-    replacementInput,
+    findRow,
+    replaceRow,
     searchActions,
     searchSummary,
     exclusionSummary,
@@ -595,13 +645,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     legend.append(item);
   }
   const navigationFooter = element('footer', 'navigation-footer', '按章节或标记回到原文。');
-  navigator.append(searchInput, navigationModes, outlineSection, searchSection, legend, navigationFooter);
-  searchLabel.hidden = true;
-  searchInput.type = 'search';
-  searchInput.placeholder = '搜索稿件';
-  searchInput.setAttribute('aria-label', '搜索稿件');
-  searchInput.addEventListener('input', () => {
-    if (navigationMode === 'outline') paintOutline();
+  navigator.append(navigationModes, outlineSection, searchSection, legend, navigationFooter);
+  outlineFilter.addEventListener('input', () => { outlineCursor = -1; paintOutline(); });
+  // Enter moves between the chapters the filter leaves (Shift+Enter back); it never starts a whole-manuscript search.
+  outlineFilter.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    void stepOutline(event.shiftKey ? -1 : 1);
   });
   let navigationMode: 'outline' | 'find' | 'replace' = 'outline';
   function showNavigationMode(mode: typeof navigationMode): void {
@@ -611,9 +661,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
     outlineSection.hidden = mode !== 'outline';
     searchSection.hidden = mode === 'outline';
-    replacementLabel.hidden = replacementInput.hidden = prepareReplacementButton.hidden = mode !== 'replace';
-    searchInput.placeholder = mode === 'outline' ? '搜索章节' : '搜索稿件';
-    if (mode === 'outline') paintOutline();
+    searchSection.dataset['mode'] = mode;
+    replaceRow.hidden = replaceCurrentButton.hidden = replaceAllButton.hidden = mode !== 'replace';
+    // 纳入替换 belongs to 替换 only: 查找 shows the matches alone.
+    for (const inclusion of searchResults.querySelectorAll<HTMLElement>('.match-inclusion')) inclusion.hidden = mode !== 'replace';
+    updateExclusionSummary();
+    if (mode === 'outline') { paintOutline(); revealCurrentChapter(); }
   }
   const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
   const exportRoot = element('aside', 'manuscript-export-slot'); content.append(exportRoot);
@@ -770,6 +823,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     navigator.hidden = !open;
     navigationEntry.setAttribute('aria-expanded', open ? 'true' : 'false');
     workspace.dataset['navigation'] = open ? 'open' : 'closed';
+    if (open && navigationMode === 'outline') { paintOutline(); revealCurrentChapter(); }
   };
   navigator.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -865,6 +919,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     openNavigation: () => setNavigationOpen(true),
     ...(isDocument ? { toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }
       : { openTasks: () => { setCommentsOpen(false); taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!commentsOpen); }, commentsOpen: () => commentsOpen }),
+    appliedMarks: {
+      shown: () => appliedMarksShown,
+      toggle: () => {
+        appliedMarksShown = !appliedMarksShown;
+        content.dataset['appliedMarks'] = appliedMarksShown ? 'shown' : 'hidden';
+        try { globalThis.localStorage?.setItem(APPLIED_MARKS_KEY, appliedMarksShown ? 'shown' : 'hidden'); } catch { /* a per-viewer convenience only */ }
+        setStatus(appliedMarksShown ? '已显示已修改标识。' : '已隐藏已修改标识；修订卡片仍在批注栏中。', 'success');
+      },
+    },
     setStatus,
     shortcutHint,
   });
@@ -961,7 +1024,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }, 250);
   };
   saveMenu?.element.addEventListener('toggle', () => { if ((saveMenu.element as HTMLDetailsElement).open) refreshMilestonePersistence(true); });
-  let outlinePage: OutlineProjection | undefined;
+  let outlineEntries: ReadonlyArray<OutlineProjection['entries'][number]> | undefined;
+  let outlineTruncated = false;
+  let outlineRead = 0;
+  /** Where Enter in the outline filter stands among the chapters it leaves; -1 before the first Enter. */
+  let outlineCursor = -1;
+  const MAX_OUTLINE_PAGES = 64;
+  /** The match 替换当前处 and ↑/↓ stand on: an index into this page of results, and where the page starts among all matches. */
+  let activeMatchIndex: number | null = null;
+  let searchPageOffset = 0;
   let searchPage: SearchResultsProjection | undefined;
   let replacementPreview: ReplacementPreviewProjection | undefined;
   let activeJob: ServiceJobProjection | undefined;
@@ -988,7 +1059,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     return !destroyed;
   };
   const updateExclusionSummary = (): void => {
-    exclusionSummary.hidden = searchPage === undefined || searchPage.totalMatches === 0;
+    exclusionSummary.hidden = navigationMode !== 'replace' || searchPage === undefined || searchPage.totalMatches === 0;
     exclusionSummary.textContent =
       `已排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处，至少保留 1 处。`;
     exclusionSummary.dataset['excludedCount'] = String(excludedMatchIds.size);
@@ -998,8 +1069,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const updateServiceControls = (): void => {
     const busy = serviceJobBusy();
     searchButton.disabled = authoritativeMutationBusy() || busy;
-    prepareReplacementButton.disabled = authoritativeMutationBusy() || busy || searchPresentationStale ||
-      searchPage === undefined || searchPage.totalMatches === 0;
+    replaceCurrentButton.disabled = replaceAllButton.disabled = authoritativeMutationBusy() || busy || editorialMarks === undefined;
+    const fresh = searchPage !== undefined && !searchPresentationStale && searchPage.query === searchInput.value.normalize('NFC');
+    replaceAllButton.textContent = replaceAllLabel(fresh && searchPage!.totalMatches > 0 ? searchPage!.totalMatches - excludedMatchIds.size : null);
+    paintMatchPosition();
     searchInput.disabled = authoritativeMutationBusy() || busy;
     replacementInput.disabled = authoritativeMutationBusy() || busy;
     cancelJob.hidden = activeJob === undefined || (activeJob.state !== 'queued' && activeJob.state !== 'running');
@@ -1035,8 +1108,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     undo.disabled = busy;
     redo.disabled = busy;
     railTrack.setAttribute('aria-disabled', String(busy));
-    previousOutline.disabled = busy;
-    nextOutline.disabled = busy;
     milestoneName.disabled = busy;
     for (const radio of purposeRadios) radio.disabled = busy;
     customPurpose.disabled = busy;
@@ -1480,38 +1551,91 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     });
   }
 
+  /** The chapter the editor is reading: the nearest outline heading at or above the caret, else the last one before the window. */
+  function currentChapterId(): string | null {
+    if (outlineEntries === undefined || outlineEntries.length === 0) return null;
+    const headings = new Set(outlineEntries.map((entry) => entry.blockId));
+    const blocks = currentWindow.blocks;
+    const anchor = editor?.captureContinuity().anchor.blockId ?? currentWindow.focusBlockId ?? blocks[0]?.blockId;
+    for (let at = Math.max(0, blocks.findIndex((block) => block.blockId === anchor)); at >= 0; at -= 1) {
+      const block = blocks[at];
+      if (block !== undefined && headings.has(block.blockId)) return block.blockId;
+    }
+    let found: string | null = null;
+    for (const entry of outlineEntries) {
+      if (entry.proportion > currentWindow.position.proportion + 1e-9) break;
+      found = entry.blockId;
+    }
+    return found;
+  }
   function paintOutline(): void {
-    if (outlinePage === undefined) return;
-    outlineList.replaceChildren();
-    const query = navigationMode === 'outline' ? searchInput.value.trim().toLocaleLowerCase() : '';
-    for (const entry of outlinePage.entries) {
+    if (outlineEntries === undefined) return;
+    const query = outlineFilter.value.trim().toLocaleLowerCase();
+    const current = currentChapterId();
+    const rows: HTMLButtonElement[] = [];
+    for (const entry of outlineEntries) {
       if (query && !entry.text.toLocaleLowerCase().includes(query)) continue;
       const chapter = railProjection?.chapters.find((candidate) => candidate.blockId === entry.blockId);
-      const label = entry.text;
+      const marks = chapter === undefined ? 0 : chapter.annotations + chapter.suggestions + chapter.notes;
+      const percent = Number.isFinite(entry.proportion) ? `${Math.round(entry.proportion * 100)}%` : '';
       const open = button('', 'quiet', () => void navigate({ kind: 'block', blockId: entry.blockId }));
-      open.append(element('span', 'outline-title', label));
-      if (chapter !== undefined) open.append(element('small', 'outline-counts', `批注 ${chapter.annotations} · 建议 ${chapter.suggestions} · 备注 ${chapter.notes}`), element('span', 'outline-percent', `${Math.round(chapter.proportion * 100)}%`));
-      open.setAttribute('title', label);
-      open.setAttribute('aria-label', chapter === undefined ? label : `${label} · 批注 ${chapter.annotations} · 建议 ${chapter.suggestions} · 备注 ${chapter.notes} · ${Math.round(chapter.proportion * 100)}%`);
+      open.className = `${open.className} outline-entry`;
+      open.dataset['outlineBlock'] = entry.blockId;
+      open.append(element('span', 'outline-title', entry.text));
+      // A chapter's marks are one light count, and only where there are some.
+      if (marks > 0) open.append(element('small', 'outline-marks', `${marks.toLocaleString('zh-CN')} 处标记`));
+      if (percent !== '') open.append(element('span', 'outline-percent', percent));
+      open.setAttribute('title', entry.text);
+      open.setAttribute('aria-label', `${entry.text}${marks > 0 ? ` · ${marks} 处标记` : ''}${percent === '' ? '' : ` · ${percent}`}`);
       open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
       open.setAttribute('role', 'listitem');
-      outlineList.append(open);
+      if (entry.blockId === current) {
+        open.setAttribute('aria-current', 'location');
+        open.className = `${open.className} is-current-chapter`;
+      }
+      rows.push(open);
     }
+    outlineList.replaceChildren(...rows);
+    outlineEmpty.hidden = rows.length > 0;
+    outlineEmpty.textContent = outlineEntries.length === 0 ? OUTLINE_EMPTY_LINE : outlineNoMatchLine(outlineFilter.value.trim());
+    if (outlineCursor >= rows.length) outlineCursor = -1;
+    if (rows[outlineCursor] !== undefined) rows[outlineCursor]!.dataset['filterCursor'] = 'true';
     paintNavigationFooter();
   }
-  function paintNavigationFooter(): void {
-    navigationFooter.textContent = railProjection === undefined ? '按章节或标记回到原文。'
-      : `${railProjection.chaptersTruncated ? '已显示' : '共'} ${railProjection.chapters.length} 个章节${railProjection.chaptersTruncated || railProjection.marksTruncated ? ' · 标记计数为已显示部分' : ''} · ${Math.round(currentWindow.position.proportion * 100)}%`;
+  function revealCurrentChapter(): void {
+    if (!navigator.hidden) outlineList.querySelector<HTMLElement>('[aria-current="location"]')?.scrollIntoView?.({ block: 'nearest' });
   }
-  async function loadOutline(cursor: string | null, propagateFailure = false): Promise<void> {
+  async function stepOutline(direction: 1 | -1): Promise<void> {
+    const rows = [...outlineList.querySelectorAll<HTMLButtonElement>('button[data-outline-block]')];
+    if (rows.length === 0) return;
+    outlineCursor = outlineCursor < 0 ? (direction === 1 ? 0 : rows.length - 1) : (outlineCursor + direction + rows.length) % rows.length;
+    for (const [index, row] of rows.entries()) row.dataset['filterCursor'] = String(index === outlineCursor);
+    const row = rows[outlineCursor]!;
+    row.scrollIntoView?.({ block: 'nearest' });
+    await navigate({ kind: 'block', blockId: row.dataset['outlineBlock']! });
+    if (!destroyed) outlineFilter.focus({ preventScroll: true });
+  }
+  function paintNavigationFooter(): void {
+    navigationFooter.textContent = outlineEntries === undefined ? '按章节或标记回到原文。'
+      : `${outlineTruncated ? '已显示' : '共'} ${outlineEntries.length.toLocaleString('zh-CN')} 个章节标题 · 当前位置 ${Math.round(currentWindow.position.proportion * 100)}%`;
+  }
+  /** The whole outline, read page after page (Issue #1409): the filter and the current chapter see every heading of the Book. */
+  async function loadOutline(propagateFailure = false): Promise<void> {
+    const request = ++outlineRead;
     try {
       const binding = editor?.currentWindow() ?? currentWindow;
-      const page = await api.getOutline({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, cursor });
-      if (destroyed) return;
-      outlinePage = page;
+      const entries: OutlineProjection['entries'][number][] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < MAX_OUTLINE_PAGES; page += 1) {
+        const read: OutlineProjection = await api.getOutline({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, cursor });
+        if (destroyed || request !== outlineRead) return;
+        entries.push(...read.entries);
+        cursor = read.nextCursor;
+        if (cursor === null) break;
+      }
+      outlineEntries = entries;
+      outlineTruncated = cursor !== null;
       paintOutline();
-      previousOutline.hidden = page.previousCursor === null;
-      nextOutline.hidden = page.nextCursor === null;
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取稿件结构。'), 'error');
       if (propagateFailure) throw error;
@@ -1626,6 +1750,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     searchPresentationStale = false;
     searchPage = undefined;
     searchReturn = undefined;
+    activeMatchIndex = null;
+    searchPageOffset = 0;
     excludedMatchIds.clear();
     updateExclusionSummary();
     clearReplacementPresentation();
@@ -1735,25 +1861,38 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (restored) setStatus(`已返回查找前的精确选择与滚动位置；${positionWords(currentWindow)}。`, 'success');
   }
 
-  async function loadSearchResults(cursor: string | null, searchId?: string): Promise<void> {
+  async function loadSearchResults(cursor: string | null, searchId?: string, direction: 'next' | 'previous' | null = null): Promise<void> {
     const id = searchId ?? searchPage?.searchId;
     if (!id) return;
+    const before = searchPage;
     const page = await api.getSearchResults({ searchId: id, cursor });
     const binding = editor?.currentWindow() ?? currentWindow;
     if (
       page.revisionId !== binding.revisionId || page.journalSequence !== binding.journalSequence ||
       page.workingDigest !== binding.workingDigest
     ) throw new Error('搜索结果已绑定到旧稿件状态，请重新查找。');
+    searchPageOffset = cursor === null || before === undefined || before.searchId !== page.searchId ? 0
+      : direction === 'next' ? searchPageOffset + before.results.length
+        : direction === 'previous' ? Math.max(0, searchPageOffset - MAX_SEARCH_RESULTS) : searchPageOffset;
+    activeMatchIndex = null;
     searchPage = page;
     searchPresentationStale = false;
     searchResults.replaceChildren();
+    delete searchResults.dataset['searchStale'];
     searchSummary.textContent = `“${page.query}” · 范围：${page.scopeLabel} · 共 ${page.totalMatches.toLocaleString('zh-CN')} 处`;
-    for (const match of page.results) {
+    for (const [index, match] of page.results.entries()) {
       const row = element('article', 'search-result');
-      const open = button('', 'quiet', () => void jumpToSearchMatch(match));
-      open.append(element('span', 'search-result-heading', match.headingLabel), ' · ', element('span', 'search-result-context', match.context));
+      row.dataset['matchId'] = match.matchId;
+      const open = button('', 'quiet', () => void activateMatch(index));
+      const context = element('span', 'search-result-context');
+      // Each occurrence of the query in the context is marked (Issue #1409).
+      for (const part of searchContextParts(match.context, page.query)) {
+        context.append(part.match ? element('mark', 'search-match-highlight', part.text) : document.createTextNode(part.text));
+      }
+      open.append(element('span', 'search-result-heading', match.headingLabel), ' · ', context);
       open.setAttribute('aria-label', `${match.headingLabel}：${match.context}`);
       const includeLabel = element('label', 'match-inclusion');
+      includeLabel.hidden = navigationMode !== 'replace';
       const include = element('input');
       include.type = 'checkbox';
       include.dataset['matchId'] = match.matchId;
@@ -1776,6 +1915,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           excludedMatchIds.add(match.matchId);
         }
         updateExclusionSummary();
+        updateServiceControls();
       });
       includeLabel.append(include, document.createTextNode(' 纳入替换'));
       row.append(open, includeLabel);
@@ -1786,6 +1926,76 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     setInclusionControlsLocked(replacementPreview !== undefined);
     updateExclusionSummary();
     updateServiceControls();
+  }
+
+  /** `m / N`, the ↑/↓ controls, the active result's frame and the 导航 badge (Issue #1409), from the results as they stand. */
+  function paintMatchPosition(): void {
+    const total = searchPage !== undefined && !searchPresentationStale ? searchPage.totalMatches : 0;
+    const ordinal = activeMatchIndex === null ? null : searchPageOffset + activeMatchIndex;
+    matchPosition.textContent = searchPage === undefined || searchPresentationStale ? '' : `${ordinal === null ? '–' : (ordinal + 1).toLocaleString('zh-CN')} / ${total.toLocaleString('zh-CN')}`;
+    previousMatch.disabled = nextMatch.disabled = authoritativeMutationBusy() || serviceJobBusy() || (searchPage !== undefined && !searchPresentationStale && total === 0);
+    for (const [index, row] of [...searchResults.querySelectorAll<HTMLElement>('.search-result')].entries()) {
+      const active = !searchPresentationStale && index === activeMatchIndex;
+      row.dataset['activeMatch'] = String(active);
+      if (active) row.setAttribute('aria-current', 'true'); else row.removeAttribute('aria-current');
+    }
+    updateNavigationBadge();
+  }
+
+  /** The 导航 badge counts the active search's hits and nothing else; no search, or a stale one, shows none. */
+  function updateNavigationBadge(): void {
+    const badge = navigationEntry.querySelector<HTMLElement>('.edge-badge');
+    if (badge === null) return;
+    const count = searchPage !== undefined && !searchPresentationStale ? searchPage.totalMatches : 0;
+    badge.dataset['count'] = String(count);
+    badge.hidden = count === 0;
+    badge.title = count === 0 ? '' : searchHitsTitle(count);
+    updateEdgeName(navigationEntry);
+  }
+
+  /** One result made the active match: the editor selects its exact range, and focus goes back to the field that asked. */
+  async function activateMatch(index: number, returnFocus: HTMLElement | null = null): Promise<void> {
+    const match = searchPage?.results[index];
+    if (match === undefined) return;
+    activeMatchIndex = index;
+    paintMatchPosition();
+    searchResults.querySelector<HTMLElement>('.search-result[data-active-match="true"]')?.scrollIntoView?.({ block: 'nearest' });
+    await jumpToSearchMatch(match);
+    if (!destroyed && returnFocus !== null) returnFocus.focus({ preventScroll: true });
+  }
+
+  /** The match `ordinal` among all of them, reading the pages before it as needed. */
+  async function activateOrdinal(ordinal: number, returnFocus: HTMLElement | null = null): Promise<void> {
+    if (searchPage === undefined) return;
+    if (ordinal < searchPageOffset) await loadSearchResults(null);
+    while (searchPage !== undefined && ordinal >= searchPageOffset + searchPage.results.length && searchPage.nextCursor !== null) {
+      await loadSearchResults(searchPage.nextCursor, undefined, 'next');
+    }
+    if (searchPage === undefined || searchPage.results.length === 0) return;
+    await activateMatch(Math.min(ordinal - searchPageOffset, searchPage.results.length - 1), returnFocus);
+  }
+
+  /**
+   * ↑ / ↓, Enter and Shift+Enter (Issue #1409): the next or previous match, across result pages and round from the last to the
+   * first. A query that changed since the results were read is searched first, and its first match taken.
+   */
+  async function stepMatch(direction: 1 | -1, returnFocus: HTMLElement | null = null): Promise<void> {
+    if (authoritativeMutationBusy() || serviceJobBusy()) return;
+    const query = searchInput.value.normalize('NFC');
+    if (searchPage === undefined || searchPresentationStale || searchPage.query !== query) {
+      await runSearch();
+      if (searchPage !== undefined && !searchPresentationStale && searchPage.totalMatches > 0) await activateMatch(0, returnFocus);
+      return;
+    }
+    const total = searchPage.totalMatches;
+    if (total === 0) return;
+    const current = activeMatchIndex === null ? (direction === 1 ? -1 : 0) : searchPageOffset + activeMatchIndex;
+    const next = (current + direction + total) % total;
+    try {
+      await activateOrdinal(next, returnFocus);
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法移动到该匹配。'), 'error');
+    }
   }
 
   async function jumpToSearchMatch(match: SearchResultsProjection['results'][number]): Promise<void> {
@@ -1815,145 +2025,138 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
     const selected = await navigate({ kind: 'block', blockId: match.blockId }, undefined, false,
       () => editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme) === true);
-    if (!selected) {
+    if (selected) editor?.highlightAppliedRange(match.blockId, match.fromGrapheme, match.toGrapheme);
+    else {
       setStatus('无法在当前稿件状态中精确定位该匹配。', 'error');
     }
   }
 
-  async function prepareReplacement(): Promise<void> {
-    if (authoritativeMutationBusy() || serviceJobBusy() || !searchPage) return;
-    const searchId = searchPage.searchId;
+  // TEMPORARY until Lane 3B's protocol 200 lands commitReplacementRevisions on RendererApi (Issue #1411); then `api` itself.
+  const replacementRevisions = (): { commitReplacementRevisions(input: { previewId: string; windowStartBlockId: string }): Promise<Omit<ReplacementCommitProjection, 'committedCount'> & { replaced: number; markIds: ReadonlyArray<string> }> } =>
+    api as unknown as ReturnType<typeof replacementRevisions>;
+
+  /** The replacement as it stands now, or why it cannot be sent. */
+  const replacementWords = (): { query: string; replacement: string } | null => {
+    const query = searchInput.value.normalize('NFC');
     const replacement = replacementInput.value.normalize('NFC');
-    const tooLong = replacementRefusal(replacement);
-    if (tooLong !== null) {
-      setStatus(tooLong, 'error');
+    const refusal = searchQueryRefusal(query) ?? replacementRefusal(replacement) ?? (replacement === query ? REPLACE_SAME_LINE : null);
+    if (refusal !== null) { setStatus(refusal, 'error'); return null; }
+    return { query, replacement };
+  };
+  const searchIsFresh = (query: string): boolean => searchPage !== undefined && !searchPresentationStale && searchPage.query === query;
+
+  /**
+   * 替换当前处 (Issue #1409, #1411): the active match becomes one revision of the editor's — `编辑替换「A」→「B」`, applied at once
+   * with its card — and the next match is taken. Before any match is active the first click takes the next one.
+   */
+  async function replaceCurrent(): Promise<void> {
+    if (authoritativeMutationBusy() || serviceJobBusy() || editorialMarks === undefined || editor === undefined) return;
+    const words = replacementWords();
+    if (words === null) return;
+    if (!searchIsFresh(words.query) || activeMatchIndex === null) { await stepMatch(1); return; }
+    const match = searchPage!.results[activeMatchIndex]!;
+    const ordinal = searchPageOffset + activeMatchIndex;
+    const range = editor.selectedRange();
+    if (range.kind !== 'range' || range.blockId !== match.blockId || range.fromGrapheme !== match.fromGrapheme || range.toGrapheme !== match.toGrapheme) {
+      await activateMatch(activeMatchIndex);
       return;
     }
+    const applied = await editorialMarks.recordAndApplyEditorRevision(range, words.replacement, replacementRevisionRationale(words.query, words.replacement));
+    if (applied === null || destroyed) return;
+    await runSearch();
+    if (searchPage === undefined || searchPresentationStale || searchPage.totalMatches === 0) {
+      setStatus(REPLACE_LAST_LINE, 'success');
+      return;
+    }
+    // The occurrence just replaced is gone from the results unless the replacement holds the query again.
+    const next = words.replacement.includes(words.query) ? ordinal + 1 : ordinal;
+    await activateOrdinal(next % searchPage.totalMatches);
+  }
+
+  /** What a technical reader may open on a replacement (ADR 0096 §3): its scope, rule, counts and representative contexts. */
+  function renderReplacementDetails(preview: ReplacementPreviewProjection): void {
+    if (!technicalLayerVisible) return;
+    const details = element('details', 'replacement-details');
+    details.append(element('summary', undefined, '替换详情'));
+    const scope = element('p', 'field-note', `范围：${preview.scopeLabel}${technicalWords(` · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)} · ${preview.matchingRule} · 纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`);
+    const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');
+    exclusions.setAttribute('aria-label', '精确排除匹配标识清单');
+    const contexts = element('ul');
+    for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
+    details.append(element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`), scope, exclusions, contexts);
+    replacementReview.replaceChildren(details);
+    replacementReview.hidden = false;
+  }
+
+  /**
+   * 全部替换（N 处） (Issue #1409, #1411): one click. The exact match set is prepared, frozen and validated against the state it was
+   * found in, exactly as before, and then every included match is written as its own applied revision with its card, in one
+   * transaction — all of them or none.
+   */
+  async function replaceAll(): Promise<void> {
+    if (authoritativeMutationBusy() || serviceJobBusy() || editor === undefined) return;
+    const words = replacementWords();
+    if (words === null) return;
+    if (!searchIsFresh(words.query)) await runSearch();
+    if (!searchIsFresh(words.query)) return;
+    const page = searchPage!;
+    if (page.totalMatches === 0) { setStatus(REPLACE_NOTHING_LINE, 'error'); return; }
     const exclusions = [...excludedMatchIds];
-    if (exclusions.length > MAX_REPLACEMENT_EXCLUSIONS || exclusions.length >= searchPage.totalMatches) {
+    if (exclusions.length > MAX_REPLACEMENT_EXCLUSIONS || exclusions.length >= page.totalMatches) {
       setStatus('替换排除清单超出上限或没有保留任何精确匹配。', 'error');
       return;
     }
-    let preparedPreviewId: string | undefined;
+    let previewId: string | undefined;
+    let committed = false;
     try {
-      const completed = await runOwnedServiceJob(async () => {
+      setStatus('正在替换…', 'busy');
+      const prepared = await runOwnedServiceJob(async () => {
         await dismissVisibleReplacementPreview();
-        const prepared = await api.prepareReplacement({
-          searchId,
-          replacement,
-          excludedMatchIds: exclusions,
-        });
-        preparedPreviewId = prepared.previewId;
-        replacementPreview = prepared;
+        const created = await api.prepareReplacement({ searchId: page.searchId, replacement: words.replacement, excludedMatchIds: exclusions });
+        previewId = created.previewId;
+        replacementPreview = created;
         setInclusionControlsLocked(true);
-        return api.startReplacementCommit({ previewId: prepared.previewId });
+        return api.startReplacementCommit({ previewId: created.previewId });
       });
-      if (completed.state === 'cancelled') {
+      if (prepared.state === 'cancelled') {
         clearReplacementPresentation();
-        setStatus('替换预览准备已取消；当前本地编辑不受影响。', 'success');
+        setStatus('替换已取消；稿件未发生替换。', 'success');
         return;
       }
-      if (completed.kind !== 'replacement' || !completed.result || !('replacement' in completed.result)) throw new Error('替换预览准备结果绑定无效。');
-      replacementPreview = completed.result;
-      renderReplacementReview(replacementPreview);
-    } catch (error) {
-      if (preparedPreviewId) {
-        try {
-          await api.dismissReplacementPreview({ previewId: preparedPreviewId });
-          if (replacementPreview?.previewId === preparedPreviewId) clearReplacementPresentation();
-        } catch {
-          if (replacementPreview?.previewId === preparedPreviewId) setInclusionControlsLocked(true);
-        }
-      }
-      setStatus(rendererErrorMessage(error, '无法准备替换预览。'), 'error');
-    }
-  }
-
-  function renderReplacementReview(preview: ReplacementPreviewProjection): void {
-    if (preview.excludedMatchIds.length > MAX_REPLACEMENT_EXCLUSIONS || preview.includedMatches < 1) {
-      throw new Error('替换预览的纳入集合超出安全范围。');
-    }
-    excludedMatchIds.clear();
-    for (const matchId of preview.excludedMatchIds) excludedMatchIds.add(matchId);
-    updateExclusionSummary();
-    setInclusionControlsLocked(true);
-    replacementReview.hidden = false;
-    const scope = element('p', 'field-note', `范围：${preview.scopeLabel}${technicalWords(` · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)} · ${preview.matchingRule} · 纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}；`);
-    scope.append(element('span', 'inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结，纳入控件保持锁定。' : '当前预览的纳入控件已锁定，取消预览后可重新选择。'));
-    replacementReview.replaceChildren(
-      element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
-      element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`), scope,
-    );
-    const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');
-    exclusions.setAttribute('aria-label', '精确排除匹配标识清单');
-    if (technicalLayerVisible) replacementReview.append(exclusions);
-    const contexts = element('ul');
-    for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
-    replacementReview.append(contexts);
-    if (preview.state === 'reviewing') {
-      const freeze = button('冻结并重新验证', 'primary', async () => {
-        try {
-          replacementPreview = await api.freezeReplacement({
-            previewId: preview.previewId,
-            excludedMatchIds: [...excludedMatchIds],
-          });
-          renderReplacementReview(replacementPreview);
-        } catch (error) {
-          setStatus(rendererErrorMessage(error, '替换集无法冻结。'), 'error');
-        }
-      });
-      freeze.dataset['replacementAction'] = 'freeze';
-      replacementReview.append(freeze);
-    } else {
-      const commit = button('原子提交替换', 'primary', () => void commitReplacement(preview.previewId));
-      commit.dataset['replacementAction'] = 'commit';
-      replacementReview.append(commit);
-    }
-    const dismiss = button('取消并关闭替换预览', 'quiet', () => void dismissReplacementFromReview(preview.previewId));
-    dismiss.dataset['replacementAction'] = 'dismiss';
-    replacementReview.append(dismiss);
-    updateServiceControls();
-  }
-
-  async function dismissReplacementFromReview(previewId: string): Promise<void> {
-    if (authoritativeMutationBusy() || serviceJobBusy() || replacementPreview?.previewId !== previewId) return;
-    try {
-      const dismissal = await api.dismissReplacementPreview({ previewId });
-      if (dismissal.state !== 'cancelled') throw new Error('替换预览取消确认无效。');
-      clearReplacementPresentation();
-      setStatus('替换预览已取消并关闭；稿件未发生替换。', 'success');
-    } catch (error) {
-      setStatus(rendererErrorMessage(error, '替换预览无法取消。'), 'error');
-    }
-  }
-
-  async function commitReplacement(previewId: string): Promise<void> {
-    try {
-      const replacement = await runAuthoritativeMutation(async () => {
-        const completed = await runOwnedServiceJob(() => api.startReplacementCommit({ previewId }));
-        if (completed.state === 'cancelled') {
-          clearReplacementPresentation();
-          throw new Error('替换提交已在写入前取消；稿件未发生替换。');
-        }
-        if (completed.kind !== 'replacement' || completed.result !== null) throw new Error('冻结匹配复核结果绑定无效。');
-        return api.commitReplacement({ previewId });
+      if (prepared.kind !== 'replacement' || !prepared.result || !('replacement' in prepared.result)) throw new Error('替换准备结果绑定无效。');
+      replacementPreview = await api.freezeReplacement({ previewId: prepared.result.previewId, excludedMatchIds: [...prepared.result.excludedMatchIds] });
+      renderReplacementDetails(replacementPreview);
+      const frozenId = replacementPreview.previewId;
+      const written = await runAuthoritativeMutation(async () => {
+        const validated = await runOwnedServiceJob(() => api.startReplacementCommit({ previewId: frozenId }));
+        if (validated.state === 'cancelled') throw new Error('替换已在写入前取消；稿件未发生替换。');
+        if (validated.kind !== 'replacement' || validated.result !== null) throw new Error('冻结匹配复核结果绑定无效。');
+        return replacementRevisions().commitReplacementRevisions({ previewId: frozenId, windowStartBlockId: editor!.currentWindow().blocks[0]!.blockId });
       }, async (result) => {
+        committed = true;
         await invalidateSearchState('稿件已替换；先前搜索结果和返回位置已失效。', result.previewId);
-        await loadOutline(null, true);
+        await loadOutline(true);
       });
-      if (!replacement) {
-        if (!authoritativeMutation) {
-          try {
-            await invalidateSearchState('替换未提交；先前预览已关闭，请重新查找后再试。');
-          } catch (error) {
-            setStatus(rendererErrorMessage(error, '无法关闭未提交的替换预览。'), 'error');
-          }
+      if (!written) {
+        if (!authoritativeMutation && !committed) {
+          try { await invalidateSearchState('替换未提交；请重新查找后再试。'); } catch (error) { setStatus(rendererErrorMessage(error, '无法关闭未提交的替换预览。'), 'error'); }
         }
         return;
       }
-      setStatus(replacement.completionLabel, 'success');
+      editorialMarks?.refreshComments();
+      updateCommentsBadge();
+      manuscriptRail?.refresh();
+      setStatus(written.completionLabel, 'success');
     } catch (error) {
-      setStatus(rendererErrorMessage(error, '替换提交未完成。'), 'error');
+      if (previewId !== undefined && !committed) {
+        try {
+          await api.dismissReplacementPreview({ previewId });
+          if (replacementPreview?.previewId === previewId) clearReplacementPresentation();
+        } catch {
+          if (replacementPreview?.previewId === previewId) setInclusionControlsLocked(true);
+        }
+      }
+      setStatus(rendererErrorMessage(error, '替换未完成。'), 'error');
     }
   }
 
@@ -1982,7 +2185,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         milestoneSection.open = false;
         resetMilestoneForm(authoritativeMutationBusy());
         await invalidateSearchIfStale('稿件修订版已变化；先前搜索结果和返回位置已失效。');
-        await loadOutline(null, true);
+        await loadOutline(true);
       });
       if (!saved) return;
       refreshMilestonePersistence(true);
@@ -2005,7 +2208,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         return action === 'undo' ? api.undoManuscript(input) : api.redoManuscript(input);
       }, async () => {
         await invalidateSearchIfStale('稿件历史状态已变化；先前搜索结果和返回位置已失效。');
-        await loadOutline(null, true);
+        await loadOutline(true);
       });
       if (!result) return;
       setStatus(result.completionLabel, 'success');
@@ -2049,11 +2252,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (!atStart && !atEnd) return;
     void navigateCursor(atStart ? 'previous' : 'next');
   });
+  // Enter / Shift+Enter step through the matches (Issue #1409); a changed query is searched first. Focus stays in the field.
   searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.isComposing && !authoritativeMutationBusy() && !serviceJobBusy()) {
-      event.preventDefault();
-      void runSearch();
-    }
+    if (event.key !== 'Enter' || event.isComposing || authoritativeMutationBusy() || serviceJobBusy()) return;
+    event.preventDefault();
+    void stepMatch(event.shiftKey ? -1 : 1, searchInput);
+  });
+  searchInput.addEventListener('input', () => updateServiceControls());
+  replacementInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing || authoritativeMutationBusy() || serviceJobBusy()) return;
+    event.preventDefault();
+    void (event.ctrlKey || event.metaKey ? replaceAll() : replaceCurrent());
   });
 
   async function refreshMarks(): Promise<boolean> {
@@ -2169,7 +2378,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
           editorialMarks?.refreshComments();
           updateCommentsBadge();
           updateWindowChrome();
-          void loadOutline(null);
+          void loadOutline();
           scheduleRailRefresh();
         }
         if (!authoritativeMutationBusy() && searchStateIsStale()) {
@@ -2180,6 +2389,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       }
     },
     onAnnouncement: setStatus,
+    // 阅读与修订模式 (Issue #1411): a key over selected words opens 修改此处.
+    onRevisionIntent: () => editorialMarks?.quickRevise() === true,
     onCommand: (command) => {
       if (command === 'search' || command === 'replace') {
         setNavigationOpen(true);
@@ -2214,12 +2425,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       showNavigationMode('find');
       searchInput.focus();
     },
-    'search.next': () => {
-      if (!nextResults.hidden) nextResults.click();
-    },
-    'search.previous': () => {
-      if (!previousResults.hidden) previousResults.click();
-    },
+    'search.next': () => stepMatch(1),
+    'search.previous': () => stepMatch(-1),
     'view.focusManuscript': () => editor?.focus(),
     // 专注模式 (Issue #951; ED-004): the same toggle as the header's 专注.
     'view.focusMode': () => focusMode.toggle(),
@@ -2244,15 +2451,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     onRead: (rail) => {
       railProjection = rail;
       paintOutline();
-      const badge = navigationEntry.querySelector<HTMLElement>('.edge-badge')!;
-      badge.dataset['count'] = String(rail.marks.length);
-      badge.hidden = rail.marks.length === 0;
-      badge.title = rail.marksTruncated ? '已显示的标记' : '稿件标记';
+      // The 导航 badge is the active search's hit count alone (Issue #1409); the marks are the 批注 entry's.
+      updateNavigationBadge();
       const analysisBadge = analysisEntry.querySelector<HTMLElement>('.edge-badge')!;
       analysisBadge.dataset['count'] = String(rail.uncovered?.length ?? 0);
       analysisBadge.hidden = !rail.uncovered?.length;
       analysisBadge.title = '分析未覆盖处';
-      updateEdgeName(navigationEntry);
       updateEdgeName(analysisEntry);
     },
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
@@ -2375,7 +2579,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         return { ...result, ...result.application.after, completionLabel: done };
       }, async () => {
         await invalidateSearchIfStale('稿件已由应用写入；先前搜索结果和返回位置已失效。');
-        await loadOutline(null, true);
+        await loadOutline(true);
       });
       if (written) {
         setStatus(done, 'success');
@@ -2388,10 +2592,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     },
     setStatus,
     errorMessage: rendererErrorMessage,
+    inputMode: () => editor?.inputMode() ?? DEFAULT_EDITOR_INPUT_MODE,
+    // ✎ 已改 (Issue #1411): the 批注栏 opens on the revision's card, unless 专注模式 keeps it closed.
+    revealComments: () => {
+      if (focusMode.active) return false;
+      if (!commentsOpen) setCommentsOpen(true);
+      return true;
+    },
   });
   showNavigationMode('outline');
   updateWindowChrome();
-  void loadOutline(null);
+  void loadOutline();
   editor.focus();
   // Arriving is itself a position worth remembering: a manuscript opened and then left by closing the
   // product never reaches an exit this surface can see, and the entry is what should answer then.

@@ -1663,11 +1663,27 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .navigator-section label { font-size: .84rem; font-weight: 700; }
 .navigator-section .button-row { margin-top: .35rem; gap: .35rem; }
 .navigator-section .button-row button { padding-inline: .55rem; }
-.outline-list { display: grid; grid-auto-rows: min-content; align-content: start; min-width: 0; max-height: 220px; overflow: auto; }
+.outline-list { display: grid; grid-auto-rows: min-content; align-content: start; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
 .outline-list .btn { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; max-width: 100%; min-height: 36px; padding: .35rem .25rem .35rem calc(.25rem + var(--outline-depth, 0) * .8rem); text-align: left; line-height: 1.5; }
-.outline-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.outline-counts { grid-column: 1; color: var(--text-subdued); font-size: .72rem; }
+.outline-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.outline-marks { grid-column: 1; justify-self: start; padding: 0 .4rem; border-radius: 999px; color: var(--text-subdued); background: var(--surface); font-size: .7rem; }
 .outline-percent { grid-column: 2; grid-row: 1 / 3; font-variant-numeric: tabular-nums; color: var(--text-subdued); font-size: .75rem; }
+/* 大纲 / 查找 / 替换 (Issue #1409): the modes on top, then one mode's own field and its list at the panel's full height. */
+.manuscript-navigator:not(.paragraph-analysis-panel) { display: flex; flex-direction: column; overflow: hidden; }
+.manuscript-navigator:not(.paragraph-analysis-panel)[hidden] { display: none; }
+.manuscript-navigator .outline-section, .manuscript-navigator .search-section { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.manuscript-navigator .navigator-section[hidden] { display: none; }
+.navigator-heading { font-size: .9rem; }
+.outline-list .outline-entry.is-current-chapter { box-shadow: inset 3px 0 0 var(--action-primary); background: var(--surface); font-weight: 700; }
+.outline-list .outline-entry[data-filter-cursor="true"] { outline: 1px solid var(--focus); outline-offset: -1px; }
+.outline-empty { margin: 0; }
+.search-find-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: .3rem; }
+.search-find-row .btn { min-width: 32px; padding-inline: .45rem; }
+.search-match-position { min-width: 3.2em; color: var(--text-subdued); font-size: .78rem; font-variant-numeric: tabular-nums; text-align: center; }
+.search-replace-row { display: grid; margin-top: -.2rem; }
+.search-replace-row[hidden] { display: none; }
+.search-match-highlight { padding: 0 1px; border-radius: 2px; color: inherit; background: var(--mark-highlight-1); }
+.search-result[data-active-match="true"] { border-color: var(--action-primary); box-shadow: 0 0 0 1px var(--action-primary); }
 .navigation-modes { margin-top: .5rem; }
 .manuscript-navigator > input[type="search"] { width: 100%; box-sizing: border-box; }
 .navigation-legend { display: flex; flex-wrap: wrap; gap: .5rem; padding-top: .75rem; font-size: .72rem; }
@@ -1677,7 +1693,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .navigation-footer { margin-top: .6rem; color: var(--text-subdued); font-size: .75rem; }
 .editor-shell .btn[hidden], .navigator-section[hidden], .local-thumb[hidden], .edge-badge[hidden] { display: none; }
 .replacement-exclusions { max-height: 8rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
-.search-results { display: grid; gap: .45rem; max-height: 260px; overflow: auto; }
+.search-results { display: grid; grid-auto-rows: min-content; align-content: start; gap: .45rem; flex: 1; min-height: 0; overflow-y: auto; }
 .search-result { padding: .45rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); }
 .search-result p { margin: 0; }
 .search-result button { width: 100%; min-height: 36px; padding: .3rem; text-align: left; overflow-wrap: anywhere; }
@@ -1734,6 +1750,19 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror .editorial-mark-personal-highlight[data-mark-color="3"] { background: var(--mark-highlight-3); }
 .ProseMirror .editorial-mark[data-mark-status="resolved"] { background: transparent; border-bottom-style: dashed; }
 .ProseMirror .editorial-mark[data-mark-status="applied"] { background: transparent; border-bottom: 1px dotted var(--mark-suggestion); }
+/* An applied revision (Issue #1411): a calm tint and a solid underline, its paragraph's revision line, and the ✎ 已改 badge. */
+.ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { background: color-mix(in srgb, var(--mark-suggestion-fill) 55%, transparent); border-bottom: 1.5px solid var(--mark-suggestion); }
+.ProseMirror [data-block-id][data-mark-revised="true"] { border-left-width: 3px; padding-left: calc(.65rem - 1px); }
+.ProseMirror [data-block-id][data-mark-line="applied"] { border-left-color: var(--mark-applied-line, var(--status-good)); }
+.ProseMirror .editorial-mark-applied-badge { display: inline-block; min-height: 0; margin: 0 .15em; padding: 0 .35em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: var(--surface); font: 600 .68em/1.45 var(--font-ui, inherit); vertical-align: .15em; cursor: pointer; user-select: none; text-indent: 0; }
+.ProseMirror .editorial-mark-applied-badge:hover, .ProseMirror .editorial-mark-applied-badge:focus-visible { color: var(--action-primary-text); background: var(--mark-suggestion); }
+.editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-applied-badge { display: none; }
+.editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { background: transparent; border-bottom-color: transparent; }
+.editor-shell[data-applied-marks="hidden"] .ProseMirror [data-block-id][data-mark-line="applied"] { border-left-color: transparent; }
+.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--mark-suggestion); outline-offset: 1px; }
+/* 阅读与修订模式 (Issue #1411): the mode pill says which mode the text is in. */
+.editor-input-mode-toggle { white-space: nowrap; }
+.editor-input-mode-toggle[data-input-mode="direct-edit"] { color: var(--status-blocked); border-color: currentColor; }
 .ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
 /* Where a mark stands on no text — the point an applied deletion left — a thin upright line in the
    mark's colour marks the place. It takes no room in the line: its margins give back the reach its
@@ -1842,7 +1871,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
   .rail-marker[data-rail-lane="2"] { left: calc(50% + 12px); }
   .rail-marker[data-rail-lane="3"] { left: calc(50% + 19px); }
   .edge-entries button { font-size: .74rem; }
-  .outline-list, .search-results { max-height: 150px; }
+  .outline-list, .search-results { min-height: 150px; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
   .native-artifact-facts, .task-authorization-facts, .analysis-facts, .review-facts, .review-consequences,
