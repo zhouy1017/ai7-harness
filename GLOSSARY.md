@@ -87,6 +87,9 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Manuscript Revision | 稿件修订版 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Branch | 稿件分支 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Edit Journal | 修订日志 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Editor Revision | 编辑修订 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| AI Edit Lock | AI 锁定 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Scoped AI Edit | 局部 AI 修改 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Checkpoint | 稿件修订检查点 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Task Input (Manuscript Checkpoint purpose) | 任务输入 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Proposal Branch | 提案分支 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |

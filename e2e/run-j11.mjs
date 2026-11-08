@@ -2129,7 +2129,7 @@ async function main() {
 
     at('readers-report-docx');
     // Back in 评估 the draft names 版本 2, and 导出… writes it as DOCX through the Save dialog: the card's review, the place it
-    // returned, and 按上述方式导出 — nothing written before that.
+    // returned, which writes it at once (Issue #1410).
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'readers-report-overview');
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'readers-report-overview-ready', 60_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'readers-report-evaluation');

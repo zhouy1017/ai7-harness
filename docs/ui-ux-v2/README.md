@@ -422,6 +422,10 @@ On 2026-09-09 the Owner closed the design session with every screen decided and 
 
 [Root ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) records the editor-side decisions of the same day: splitting, merging, inserting and deleting paragraphs and changing a heading's level are ordinary edits; footnotes become an editable note block and tables and images are shown read-only; a manuscript without heading styles receives a candidate structure the editor confirms; the default workspace profile is pinned at Book creation; a procedure starts from its sheet with one action; cards carry one decision system; identifiers stay behind 技术详情; and the context header's processing indicator reflects the real execution state.
 
+### D-094 — Finish removing ceremony; read and revise by default; lock what AI may not change
+
+[Root ADR 0096 §4](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#4-finish-removing-editor-facing-ceremony-owner-1400--1414) records the Owner's #1400 / #1414 outcome of the 0.6.1 human test: the editor's own choice is the action (the native Save choice is the export approval; Series, background, milestone, Publication Version, Book creation, review batches and learning complete in one step with defaults), a single confirmation remains only for database import/restore, storage migration/cleanup, permanent deletion and cancelling a running task, and ordinary mode shows no `不会做` lists. The manuscript and every derivative document open in 阅读与修订, with editor changes as applied revisions marked `✎ 已改`; replacement is one click per occurrence; scoped AI edits change only frozen unlocked targets under 🔒 locks. It amends root ADRs 0036–0039, 0048 and 0071 §1 and UI ADRs 0005 and 0007 in place, with the named requirements, editor-surface sections, visual direction and journeys.
+
 ## Current documents
 
 - [UI/UX context](./CONTEXT.md) — accepted package-local presentation language subordinate to root domain contexts.

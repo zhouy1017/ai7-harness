@@ -1,5 +1,6 @@
 ---
 status: accepted
+amended-by: ADR 0096 §4.1 (2026-11, Owner #1400 / #1414) — prefilled one-press enrollment and one-click revoke
 ---
 
 # Enroll and evaluate background manuscript analysis
@@ -42,4 +43,4 @@ No Enrollment, Quality Signal or metric may itself activate a Policy Document, A
 
 ## Deferred details and stop boundary
 
-Enrollment onboarding and compact UI, pause/disable mechanics, exact fields, budget defaults, scheduling, debounce/coalescing, restart continuation, failure recovery, storage, per-kind registration, progress aggregation, notifications, metric windows and retention remain implementation-facing. ADR 0094 supplies the Owner decision for its bounded automatic curation; other background Provider work beyond enrolled manuscript analysis still requires a new Owner decision.
+The editor-facing shape is settled by [ADR 0096 §4.1](0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#41-the-editors-own-choice-is-the-action): the Enrollment form states its scope, kinds and budget and opens with the first offered starting point and a 100,000-token ceiling filled in, so one `登记` records it; the ceiling stays mandatory, and `撤销登记` revokes in one click and says what is kept. No preparation, required radio choice or separate revoke preview precedes these actions. Other onboarding, pause/disable mechanics, exact fields, scheduling, debounce/coalescing, restart continuation, failure recovery, storage, per-kind registration, progress aggregation, notifications, metric windows and retention remain implementation-facing. ADR 0094 supplies the Owner decision for its bounded automatic curation; other background Provider work beyond enrolled manuscript analysis still requires a new Owner decision.

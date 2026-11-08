@@ -100,17 +100,15 @@ The overview may use visually prominent cards and quiet state summaries in the C
 | State/request | Primary surface | Result |
 | --- | --- | --- |
 | Open exact Series | `成员与共享范围` | Show member Books, Series Knowledge Items with immutable revisions, Candidates/promotion history, current Series Retrieval Exclusions and membership history |
-| Request `加入书系` | Series Membership Impact Preview | Name Book/Series and consequences for future Tasks, frozen Runs, knowledge/learning and history |
-| Commit `加入书系` against current preview | Inline exact command | Append membership and Series Membership Change Record; enable future explicit Series selection |
-| Request `移出书系` | Series Membership Impact Preview | Name future removal, unchanged frozen Runs/history and separately governed knowledge/learning records |
-| Commit `移出书系` against current preview | Inline exact command | Remove future membership-derived selection and append change record |
-| Preview or governing state drifted | Keep command unavailable | Refresh exact preview; do not apply stale membership change |
+| Choose `加入书系` (one click; first Book chosen) | Inline exact command, impact computed at the click (ADR 0096 §4.1) | Append membership and a Series Membership Change Record keeping the Series Membership Impact Preview's four groups; enable future explicit Series selection |
+| Choose `移出书系` (one click) | Inline exact command, impact computed at the click | Remove future membership-derived selection and append the change record with its impact |
+| Governing state changed since the chooser opened | Service validates against current state at the click | Record against the current state, or refuse with nothing applied |
 | Start editor-authored knowledge | `提议为书系知识` | Create a non-authoritative Series Knowledge Candidate bound to the exact Series |
 | Propose exact member-Book material | `提议为书系知识` with exact Manuscript Revision, Source Version or reviewed-evidence provenance | Create a provenance-bound candidate; source remains source of record |
 | Candidate ready | `书系知识纳入审阅` | Show item identity, content, provenance, conflicts, existing/superseded revision and future reuse scope; `纳入书系知识` remains unavailable until review and any conflict disposition are explicit |
 | Conflict disclosed | `存在书系知识冲突 · 需要处理` | Offer unselected `编辑候选项`, `保留已披露冲突`, and `取消`; preserving records the conflict and never resolves factual truth |
 | Promotion committed | `书系知识已纳入` or `书系知识已更新` | Create a stable Series Knowledge Item with its first revision or append one immutable revision to the exact item, plus a Series Knowledge Promotion Decision |
-| Request add/change/end exclusion | `书系检索排除影响预览` | Show exact target/scope/effective time and impact on future reads, current Runs, history and unaffected authority |
+| Add/change/end exclusion (one click; first kind and target chosen) | Inline exact command, impact computed at the click (ADR 0096 §4.1) | Record the revision with its 书系检索排除影响 — exact target/scope/effective time and impact on future reads, current Runs, history and unaffected authority |
 | Exclusion committed | `书系检索排除已生效` | Append exclusion revision and immediately block every later affected Series read |
 | Affected queued/authorized/active Run | `书系检索范围已变化 · 需要重新确认计划` | `修改计划并重新授权` or `取消任务`; no ordinary `续行` |
 
@@ -229,19 +227,18 @@ Search and jump opens inside the same `导航` column as the outline ([ADR 0076]
 
 | Action/state | Required interaction | Outcome |
 | --- | --- | --- |
-| `替换此处` | Revalidate exact current result immediately before edit | One normal journal-backed edit with durable undo |
-| Open selected/all replacement | Show Replacement Preview with query, replacement, scope, rules, revision, count, grouped context, and inclusion controls | No manuscript mutation |
-| Confirm preview | Freeze exact included revision/range identities as the Frozen Match Set | Staged service operation; still no mutation |
+| `替换当前处` | Revalidate exact current result immediately before edit | One applied editor revision (its own Apply Effect, `✎ 已改`, `撤销本次修改`), then the next match (ADR 0096 §4.4) |
+| `全部替换（N 处）` (one click; matches excluded beforehand stay out) | Service prepares the Replacement Preview and freezes the exact included revision/range identities as the Frozen Match Set internally | No separate editor step; developer mode shows 替换详情 afterwards |
 | Service processing | Show business-readable progress and allow cancellation before atomic commit | Editor may work elsewhere; cancellation writes nothing |
-| Revalidation detects intersecting drift or changed match-set meaning | Stop and identify why preview must refresh | No partial replacement and no skipped stale match |
-| Atomic commit succeeds | Persist every replacement as one undoable Edit Journal transaction, then show exact completion summary | Not a Manuscript Checkpoint |
-| User requests cancellation after commit | Offer normal manuscript undo/history actions | Never claim committed text was cancelled |
+| Revalidation detects intersecting drift or changed match-set meaning | Stop and say why the search must run again | No partial replacement and no skipped stale match |
+| Atomic commit succeeds | Persist one applied, individually reversible editor revision per occurrence in one all-or-none transaction, then show the exact committed count | Not a Manuscript Checkpoint |
+| User requests cancellation after commit | Offer each card's `撤销本次修改`, normal manuscript undo and history actions | Never claim committed text was cancelled |
 
 ### Replacement safeguards
 
 - Search normalization, tolerant heading lookup, fuzzy matching, or nearby text cannot add a replacement target.
-- A replacement target is eligible only when it appeared in the reviewed Frozen Match Set and still exact-resolves at commit.
-- Excluding a match is part of the frozen intent and remains visible in the preview summary.
+- A replacement target is eligible only when it is in the internally frozen match set and still exact-resolves at commit.
+- Excluding a match is part of the frozen intent and remains visible in the completion summary and 替换详情.
 - Progress before atomic commit never increments a visible `已替换` count; processed/revalidated items are not committed items.
 - The completion message appears only after journal persistence acknowledgement and reports the exact committed count and scope.
 
@@ -1369,8 +1366,8 @@ Real unresolved manual choices retain the bounded material/provenance review and
 | Open from result | Backward path headed `为什么会影响这个结果` | Trace exact memory revision, candidate, signal, eligibility and material |
 | Open from material/memory | Forward path headed `后来影响了什么` | Trace exact descendants and downstream Tasks/results |
 | Expand `审计详情` | Immutable identities, actor/time, governing-version reference and exact lineage edges | Inspect only; no Policy/Composition editing |
-| Choose `停止今后使用` | Learning Remediation Impact Preview split by future/running/memory/history | Selection only; no immediate exclusion |
-| Record exact exclusion/remediation | Per-item outcome and updated current projection | Future influence stops/re-evaluates; running Tasks pause; completed results stay immutable and marked |
+| Choose `停止今后使用` (one step, ADR 0096 §4.1) | Record the exact exclusion with its Learning Remediation Impact Preview split by future/running/memory/history | Per-item outcome and updated current projection |
+| Exclusion/remediation recorded | Per-item outcome and updated current projection | Future influence stops/re-evaluates; running Tasks pause; completed results stay immutable and marked |
 | Re-include later | New current decision/evaluation beside retained prior history | No deletion or relabeling of the earlier exclusion |
 | Start batch remediation | Explicit same-scope selected set plus counts/exclusions/impact | One submitted batch with exact per-item outcomes; no scope expansion |
 
