@@ -2082,7 +2082,8 @@ async function main() {
     at('package-conditions');
     // 图书交付包 (Issue #416, S67a; BUNDLE-001 to 005): the last block of 交付物 says what a package is and is not and
     // lists its conditions — the 发稿版本 set, with 自发稿版本后有修改 beside it; the 新闻稿 delivered; the four other
-    // types absent; these optional items are excluded and preparation waits only for a purpose. A row's route
+    // types absent; these optional items are excluded and do not hold preparation back, and an empty purpose is the routine
+    // 常规交付打包 (Issue #1410 item 1), so 准备图书交付包 is available at once. A row's route
     // takes the editor to where it is met: here, the type's own card.
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'true' && window.__j07.condition('document:news-release')?.dataset.conditionMet === 'true'`, 'package-read');
     await assertRenderer(renderer, `(() => {
@@ -2090,6 +2091,7 @@ async function main() {
       const rows = Array.from(bundle.querySelectorAll('ol.package-condition-list > li'))
         .map((row) => row.dataset.conditionId + ':' + row.dataset.conditionMet + ':' + (row.querySelector('.package-condition-detail')?.textContent ?? ''));
       const prepare = bundle.querySelector('[data-package-action="prepare"]');
+      const purpose = bundle.querySelector('[data-package-field="purpose"]');
       return bundle.querySelector('.package-statement')?.textContent === ${JSON.stringify(PACKAGE_STATEMENT)} &&
         JSON.stringify(rows) === ${JSON.stringify(JSON.stringify([
           `publication:true:发稿版本「${FIRST.label}」 · r1`,
@@ -2099,10 +2101,13 @@ async function main() {
         ]))} &&
         window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
         window.__j07.condition('document:news-release').querySelector('[data-package-route]') === null &&
-        prepare instanceof HTMLButtonElement && prepare.disabled && window.__j07.packageReason() === '先写明交付包用途。' &&
+        prepare instanceof HTMLButtonElement && !prepare.disabled && window.__j07.packageReason() === '' &&
+        purpose instanceof HTMLInputElement && purpose.value === '' && purpose.placeholder === '常规交付打包（可改写）' &&
         !/%|百分/.test(bundle.textContent ?? '');
     })()`, 'package-conditions-name-what-is-missing');
-    await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); input.value='未创建附属文档也可打包'; input.dispatchEvent(new Event('input',{bubbles:true})); const enabled=!window.__j07.pkg().querySelector('[data-package-action=prepare]').disabled; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return enabled; })()`, 'package-optional-documents-do-not-block');
+    // A purpose the editor writes still has its limit: past 80 characters 准备 is held with the reason, and clearing the field
+    // gives the routine purpose back; the four documents not yet created never hold it.
+    await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); const prepare=()=>window.__j07.pkg().querySelector('[data-package-action=prepare]'); input.value='长'.repeat(81); input.dispatchEvent(new Event('input',{bubbles:true})); const held=prepare().disabled && window.__j07.packageReason()==='交付包用途过长。'; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return held && !prepare().disabled && window.__j07.packageReason()===''; })()`, 'package-optional-documents-do-not-block');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
     // A type with no document yet: the technical card's own next action is 本书不做 (new documents are made on 稿件, Issue #1403).
     await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'notForThisBook')`, 'package-route-focuses-the-card');
