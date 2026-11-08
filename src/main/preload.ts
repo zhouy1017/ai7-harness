@@ -674,6 +674,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['startReplacementCommit']['output']>(IPC_CHANNELS.startReplacementCommit, input),
   commitReplacement: (input: ServiceOperationMap['commitReplacement']['input']) =>
     invoke<ServiceOperationMap['commitReplacement']['output']>(IPC_CHANNELS.commitReplacement, input),
+  commitReplacementRevisions: (input: ServiceOperationMap['commitReplacementRevisions']['input']) =>
+    invoke<ServiceOperationMap['commitReplacementRevisions']['output']>(IPC_CHANNELS.commitReplacementRevisions, input),
   saveMilestone: (input: ServiceOperationMap['saveMilestone']['input']) =>
     invoke<ServiceOperationMap['saveMilestone']['output']>(IPC_CHANNELS.saveMilestone, input),
   inspectDeliverables: () =>
@@ -718,6 +720,14 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['polishSelection']['output']>(IPC_CHANNELS.polishSelection, input),
   inspectFastInteractionRequest: (input: Parameters<RendererApi['inspectFastInteractionRequest']>[0]) =>
     invoke<ServiceOperationMap['inspectFastInteractionRequest']['output']>(IPC_CHANNELS.inspectFastInteractionRequest, input),
+  inspectAiEditLocks: (input: Parameters<RendererApi['inspectAiEditLocks']>[0]) =>
+    invoke<ServiceOperationMap['inspectAiEditLocks']['output']>(IPC_CHANNELS.inspectAiEditLocks, input),
+  setAiEditLocks: (input: Parameters<RendererApi['setAiEditLocks']>[0]) =>
+    invoke<ServiceOperationMap['setAiEditLocks']['output']>(IPC_CHANNELS.setAiEditLocks, input),
+  startScopedAiEdit: (input: Parameters<RendererApi['startScopedAiEdit']>[0]) =>
+    invoke<ServiceOperationMap['startScopedAiEdit']['output']>(IPC_CHANNELS.startScopedAiEdit, input),
+  inspectScopedAiEdit: (input: Parameters<RendererApi['inspectScopedAiEdit']>[0]) =>
+    invoke<ServiceOperationMap['inspectScopedAiEdit']['output']>(IPC_CHANNELS.inspectScopedAiEdit, input),
   inspectBookDeliveryPackage: (input?: Parameters<RendererApi['inspectBookDeliveryPackage']>[0]) =>
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage, input ?? {}),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>

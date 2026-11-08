@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { EVALUATION_AI_LOCK_PARTS } from '../shared/protocol/evaluation.js';
 import {
   EVALUATION_CONCLUSIONS,
   MAX_EVALUATION_COMMENT_GRAPHEMES,
@@ -415,7 +416,21 @@ export function evaluationContent(
     weaknesses: lines(input.weaknesses, '主要问题'),
     verdict: text(input.verdict, MAX_EVALUATION_VERDICT_GRAPHEMES, 'EVALUATION_VERDICT_TOO_LONG', `总评要在 ${MAX_EVALUATION_VERDICT_GRAPHEMES} 字以内。`, true, '总评'),
     conclusion: conclusion as EvaluationContent['conclusion'],
+    ...aiLockedOf(input.aiLocked, profile),
   };
+}
+
+/**
+ * The locked parts of a version (Issue #1412), in the profile's order then 总评, 主要优点, 主要问题; none locked leaves the key out,
+ * so content saved without locks keeps its canonical form and digest.
+ */
+function aiLockedOf(given: unknown, profile: Pick<Profile, 'items'>): { aiLocked?: string[] } {
+  if (given === undefined || given === null) return {};
+  const keys = [...profile.items.map((item) => item.itemId), ...EVALUATION_AI_LOCK_PARTS];
+  requireEvaluation(Array.isArray(given) && given.length <= keys.length && given.every((key) => typeof key === 'string' && keys.includes(key)) &&
+    new Set(given).size === given.length, 'EVALUATION_CONTENT_INVALID', '锁定的评估内容无效。');
+  const locked = keys.filter((key) => (given as string[]).includes(key));
+  return locked.length === 0 ? {} : { aiLocked: locked };
 }
 
 function totalOf(profile: Pick<Profile, 'items'>, content: EvaluationContent): EvaluationTotalProjection {

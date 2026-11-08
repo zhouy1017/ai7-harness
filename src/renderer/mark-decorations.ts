@@ -4,6 +4,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkKind } from '../shared/protocol.js';
 import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
+import { AI_LOCK_BADGE_UNLOCK, AI_LOCK_TOOLTIP } from './scoped-ai-edit.js';
 
 // The marks drawn over the manuscript window (Issue #1178, F-10 outcome 3): one DecorationSet kept in the plugin's state and
 // changed only where something changed — a caret move draws nothing again, a card opened or closed redraws the paragraphs of
@@ -16,6 +17,21 @@ function graphemes(text: string): string[] {
 }
 
 const MARK_LINE_PRIORITY: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
+
+/** The words on an applied revision's badge (Issue #1411): the editor's own and an accepted AI7 修改建议 alike. */
+export const APPLIED_BADGE_TEXT = '✎ 已改';
+
+/** What the badge says it opens; a deletion names the words it took away. */
+export function appliedBadgeTitle(mark: Pick<EditorialMarkAnchorProjection, 'deletedText'>): string {
+  const excerpt = mark.deletedText === null ? null : Array.from(mark.deletedText).slice(0, 24).join('');
+  return excerpt === null ? '已修改 · 点击查看修订卡片（修改前后对照，可撤销）'
+    : `原文：「${excerpt}${Array.from(mark.deletedText!).length > 24 ? '…' : ''}」已删去 · 点击查看修订卡片`;
+}
+
+/** An applied 修改建议 whose words still stand where it wrote them: it carries the applied tint, line and badge. */
+export function isAppliedRevision(mark: Pick<EditorialMarkAnchorProjection, 'kind' | 'status'>): boolean {
+  return mark.kind === 'change-suggestion' && mark.status === 'applied';
+}
 
 /** The mark open in its card, and the replacement its card previews in the text. */
 export interface ActiveMark {
@@ -30,6 +46,8 @@ export interface MarkDecorationSource {
   active(): ActiveMark | undefined;
   /** A supporting card's linked range; independent of the full card's proposed-text preview. */
   linked?(): string | undefined;
+  /** 🔒 锁定 (Issue #1412): the window's blocks the AI may not change, drawn with their badge. */
+  locked?(): ReadonlyArray<string> | undefined;
   /** The durable text as it was last read: when it is read again, every mark is drawn again. */
   generation(): unknown;
 }
@@ -58,14 +76,34 @@ export function blockMarkDecorations(
   baselineText: string | undefined,
   activeMark: ActiveMark | undefined,
   linkedMarkId?: string,
+  aiLocked = false,
 ): Decoration[] {
   const blockId = String(node.attrs['blockId']);
   const decorations: Decoration[] = [];
+  if (aiLocked) {
+    // 🔒 (Issue #1412): the block keeps its words whatever an AI edit returns; its badge unlocks it.
+    decorations.push(Decoration.node(offset, offset + node.nodeSize, { 'data-ai-locked': 'true', title: AI_LOCK_TOOLTIP }, { blockId }));
+    decorations.push(Decoration.widget(offset + 1, () => {
+      const badge = window.document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'ai-lock-badge';
+      badge.contentEditable = 'false';
+      badge.tabIndex = -1;
+      badge.dataset['badge'] = '🔒';
+      badge.title = `${AI_LOCK_TOOLTIP}（${AI_LOCK_BADGE_UNLOCK}）`;
+      badge.setAttribute('aria-label', `${AI_LOCK_TOOLTIP}；${AI_LOCK_BADGE_UNLOCK}`);
+      badge.dataset['aiLockAction'] = 'unlock';
+      badge.dataset['aiLockBlock'] = blockId;
+      badge.addEventListener('mousedown', (event) => { if (event.button === 0) event.preventDefault(); });
+      return badge;
+    }, { side: -1, ignoreSelection: true, key: `ai-lock:${blockId}`, blockId }));
+  }
   const parts = graphemes(node.textContent);
   const local = baselineText !== undefined && baselineText !== node.textContent ? deriveSpanEdit(graphemes(baselineText), parts) : null;
   const position = (grapheme: number): number =>
     offset + 1 + parts.slice(0, Math.min(Math.max(0, grapheme), parts.length)).join('').length;
   let line: EditorialMarkKind | undefined;
+  let revised = false;
   for (const mark of blockMarks) {
     const followed = local ? followSpanEdit(mark, local) : { ...mark, touched: false };
     const drifted = mark.anchorState === 'drifted' || followed.touched;
@@ -74,6 +112,28 @@ export function blockMarkDecorations(
     }
     const from = position(followed.fromGrapheme);
     const to = position(followed.toGrapheme);
+    // The applied revision's badge (Issue #1411), at the end of the words it wrote — or at the point a deletion left — and
+    // a button: a click opens its card in the 批注栏, as a click on its words does.
+    if (isAppliedRevision(mark) && !drifted) {
+      revised = true;
+      decorations.push(Decoration.widget(to, () => {
+        const badge = window.document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'editorial-mark-applied-badge';
+        badge.contentEditable = 'false';
+        badge.tabIndex = -1;
+        // The words are drawn by the stylesheet, so they are never part of the paragraph's text, a copy or a search.
+        badge.dataset['badge'] = APPLIED_BADGE_TEXT;
+        badge.title = appliedBadgeTitle(mark);
+        badge.setAttribute('aria-label', `${APPLIED_BADGE_TEXT} · ${badge.title}`);
+        badge.dataset['appliedMarkId'] = mark.markId;
+        badge.dataset['markSource'] = mark.sourceKind;
+        badge.addEventListener('mousedown', (event) => {
+          if (event.button === 0) event.preventDefault();
+        });
+        return badge;
+      }, { side: 2, ignoreSelection: true, key: `applied:${mark.markId}:${mark.deletedText ?? ''}:${mark.sourceKind}`, blockId }));
+    }
     const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
     const preview = (at: number): void => {
       const previewText = activeMark!.previewText!;
@@ -147,8 +207,13 @@ export function blockMarkDecorations(
     }, { blockId }));
     if (previewing) preview(to);
   }
-  if (line !== undefined) {
-    decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: 'has-editorial-mark', 'data-mark-line': line }, { blockId }));
+  if (line !== undefined || revised) {
+    // An open mark's line leads; a paragraph that holds only applied revisions shows the revision line (Issue #1411).
+    decorations.push(Decoration.node(offset, offset + node.nodeSize, {
+      class: 'has-editorial-mark',
+      'data-mark-line': line ?? 'applied',
+      ...(revised ? { 'data-mark-revised': 'true' } : {}),
+    }, { blockId }));
   }
   return decorations;
 }
@@ -163,17 +228,18 @@ function marksByBlock(marks: ReadonlyArray<EditorialMarkAnchorProjection>): Map<
   return byBlock;
 }
 
-/** Every mark of the window drawn over `doc`. */
+/** Every mark of the window drawn over `doc`, with its AI-locked blocks. */
 export function buildMarkDecorations(doc: ProseMirrorNode, source: MarkDecorationSource): DecorationSet {
   const marks = source.marks();
-  if (marks.length === 0) return DecorationSet.empty;
+  const locked = new Set(source.locked?.() ?? []);
+  if (marks.length === 0 && locked.size === 0) return DecorationSet.empty;
   const byBlock = marksByBlock(marks);
   const active = source.active();
   const decorations: Decoration[] = [];
   doc.forEach((node, offset) => {
     const blockId = String(node.attrs['blockId']);
     const blockMarks = byBlock.get(blockId);
-    if (blockMarks) decorations.push(...blockMarkDecorations(node, offset, blockMarks, source.baselineText(blockId), active, source.linked?.()));
+    if (blockMarks || locked.has(blockId)) decorations.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId)));
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -243,6 +309,7 @@ export function redrawBlocks(set: DecorationSet, doc: ProseMirrorNode, blocks: R
   const present = new Set<string>();
   doc.forEach((node) => present.add(String(node.attrs['blockId'])));
   const byBlock = marksByBlock(source.marks());
+  const locked = new Set(source.locked?.() ?? []);
   const active = source.active();
   const stale: Decoration[] = [];
   const fresh: Decoration[] = [];
@@ -252,7 +319,7 @@ export function redrawBlocks(set: DecorationSet, doc: ProseMirrorNode, blocks: R
     stale.push(...set.find(offset, offset + node.nodeSize, (spec: { blockId?: string }) =>
       spec.blockId === blockId || (spec.blockId !== undefined && !present.has(spec.blockId))));
     const blockMarks = byBlock.get(blockId);
-    if (blockMarks) fresh.push(...blockMarkDecorations(node, offset, blockMarks, source.baselineText(blockId), active, source.linked?.()));
+    if (blockMarks || locked.has(blockId)) fresh.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId)));
   });
   return set.remove(stale).add(doc, fresh);
 }

@@ -886,6 +886,23 @@ export interface ReplacementDismissalProjection {
   state: 'cancelled';
 }
 
+/** 全部替换 as per-occurrence revision cards (Issue #1411): the frozen preview and the window the editor issued it from. */
+export interface CommitReplacementRevisionsInput {
+  readonly previewId: string;
+  readonly windowStartBlockId: string;
+}
+
+/** What 全部替换 wrote: the manuscript state after it and one applied 修改建议 per occurrence it replaced. */
+export interface ReplacementRevisionsProjection {
+  readonly previewId: string;
+  readonly revisionId: string;
+  readonly journalSequence: number;
+  readonly workingDigest: string;
+  readonly completionLabel: string;
+  readonly replaced: number;
+  readonly markIds: ReadonlyArray<string>;
+}
+
 export interface ReplacementCommitProjection {
   previewId: string;
   branchId: string;

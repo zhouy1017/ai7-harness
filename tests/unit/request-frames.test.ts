@@ -1478,6 +1478,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 3, content, finalize: true } },
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 2, finalize: false, content: { ...content, items: [{ itemId: 'literary-quality', score: 18, notRated: null, comment: null, adjustment: { reasons: ['too-high', 'own'], note: '另有考虑' } }] } } },
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 2, finalize: false, content: { ...content, items: [{ itemId: 'literary-quality', score: 18, notRated: null, comment: null, adjustment: null }] } } },
+      // 🔒 锁定 (Issue #1412): the locked parts travel with the version, present only when some part is locked.
+      { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 4, finalize: false, content: { ...content, aiLocked: ['literary-quality', 'verdict'] } } },
     ]);
     expectRejectedInputs([
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false, content: { ...content, items: [{ itemId: 'x', score: 18, notRated: null, comment: null, adjustment: { reasons: ['too-strict'], note: null } }] } }],
@@ -1485,6 +1487,8 @@ describe('decodeRequest rejects malformed frames', () => {
       ['saveEvaluation', { bookId, recordId, expectedEntries: 0, content, finalize: false }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content, finalize: 'yes' }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, weight: 1 }, finalize: false }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, aiLocked: [] }, finalize: false }],
+      ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, aiLocked: [7] }, finalize: false }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, conclusion: 'publish' }, finalize: false }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, items: [{ itemId: 'x', score: '18', notRated: null, comment: null }] }, finalize: false }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, content: { ...content, risks: [{ riskId: 'x', level: 'severe', statement: null, reviewed: false }] }, finalize: false }],

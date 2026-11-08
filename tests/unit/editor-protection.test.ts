@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('pins protocol 199 for the Wave 24b shapes and the 交付包 derivative document selection (Issue #1405)', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(199);
+  it('pins protocol 200 for the scoped AI edit, its locks and 全部替换 as revision cards (Issue #1411, #1412)', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(200);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

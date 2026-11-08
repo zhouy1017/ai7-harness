@@ -1,3 +1,7 @@
+import { commitReplacementAsRevisions } from './replacement-revisions.js';
+import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
+import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
+import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
 import { customAnalysisModeGoal } from '../shared/protocol.js';
@@ -3250,6 +3254,8 @@ export class EditorialStore {
         new HouseReviewPreferenceLedger(authority).validate();
       }
       initializeFactualRangeTaskSchema(authority);
+      // Revision 111 (Issue #1412): the 🔒 AI edit lock ledger; `initializeTaskAuthorizationSchema` stamps the version.
+      initializeAiEditLockSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -13328,11 +13334,50 @@ export class EditorialStore {
    * connection.
    */
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection {
+    this.#refuseAiLocked(input.branchId, [input.markId]);
     return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.apply(input)));
   }
 
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): ManuscriptApplyCommandProjection {
+    this.#refuseAiLocked(input.branchId, input.markIds);
     return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.applyBatch(input)));
+  }
+
+  /** 🔒 锁定 (Issue #1412): an AI7 suggestion is never applied to a block locked now, whichever task made it. */
+  #refuseAiLocked(branchId: unknown, markIds: unknown): void {
+    if (typeof branchId !== 'string' || !Array.isArray(markIds) || !markIds.every((markId) => typeof markId === 'string')) return;
+    const refusal = this.#markCall(() => aiLockedMarkRefusal(this.#authority, branchId, markIds as string[]));
+    requireStore(refusal === null, 'AI_EDIT_LOCKED', refusal ?? '');
+  }
+
+  /**
+   * 全部替换 as per-occurrence revision cards (Issue #1411): Lane 3A's `commitReplacementAsRevisions` in
+   * `./replacement-revisions.js`, on the authority connection the marks and the Apply records write through, so every
+   * occurrence's revision is written in one transaction or none is.
+   */
+  commitReplacementRevisions(input: CommitReplacementRevisionsInput): ReplacementRevisionsProjection {
+    return this.#markCall(() => this.#boundedCall(() => commitReplacementAsRevisions({
+      db: this.#authority, manuscript: this.#boundedAuthority, marks: this.#editorialMarks, apply: this.#manuscriptApply,
+    }, input)));
+  }
+
+  /** 🔒 锁定 (Issue #1412): a manuscript branch's AI edit locks. */
+  inspectAiEditLocks(input: InspectAiEditLocksInput): AiEditLocksProjection {
+    return this.#markCall(() => inspectAiEditLocks(this.#authority, input));
+  }
+
+  /** Lock or unlock blocks or sections against the lock set the editor saw; one appended row per changed target. */
+  setAiEditLocks(input: SetAiEditLocksInput): AiEditLocksProjection {
+    return this.#markCall(() => setAiEditLocks(this.#authority, input, (work) => this.#transaction(this.#authority, work)));
+  }
+
+  /** The working blocks a scoped AI edit reads, with their locks now (Issue #1412): a read of the authority's working state. */
+  scopedEditWorkingBlocks(manuscriptId: string, branchId: string, selector: Parameters<typeof scopedEditWorkingBlocks>[2]): ReturnType<typeof scopedEditWorkingBlocks> {
+    return this.#markCall(() => {
+      requireStore(this.#authority.prepare('SELECT 1 FROM manuscript_branches WHERE manuscript_id = ? AND branch_id = ?').get(manuscriptId, branchId) !== undefined,
+        'MANUSCRIPT_NOT_FOUND', '稿件不存在。');
+      return scopedEditWorkingBlocks(this.#authority, branchId, selector);
+    });
   }
 
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): ManuscriptApplyCommandProjection {

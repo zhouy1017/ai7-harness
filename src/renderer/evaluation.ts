@@ -191,6 +191,26 @@ function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: st
   return node;
 }
 
+/** 🔒 锁定（AI 不修改）on 评估 (Issue #1412): what each lock toggle says, locked or not, and what it does. */
+export const EVALUATION_AI_LOCK_WORDS = {
+  item: '🔒 锁定本项',
+  part: '🔒 锁定本节',
+  locked: '🔒 已锁定',
+  hint: '锁定后，按我的修改重新生成时这部分保持你的原文；点击解锁。',
+  unlockedHint: '锁定后，按我的修改重新生成时这部分保持你的原文。',
+} as const;
+
+/** One lock toggle of a version: an item by its id, or 总评 / 主要优点 / 主要问题 by their key. */
+function aiLockToggle(key: string, locked: boolean, part: boolean, run: () => void): HTMLButtonElement {
+  const node = el('button', 'button quiet evaluation-ai-lock', locked ? EVALUATION_AI_LOCK_WORDS.locked : part ? EVALUATION_AI_LOCK_WORDS.part : EVALUATION_AI_LOCK_WORDS.item);
+  node.type = 'button';
+  node.dataset['evaluationAiLock'] = key;
+  node.setAttribute('aria-pressed', String(locked));
+  node.title = locked ? EVALUATION_AI_LOCK_WORDS.hint : EVALUATION_AI_LOCK_WORDS.unlockedHint;
+  node.addEventListener('click', run);
+  return node;
+}
+
 function field<T extends HTMLInputElement | HTMLTextAreaElement>(label: string, control: T): HTMLLabelElement {
   const wrapper = el('label', 'evaluation-field');
   wrapper.append(el('span', undefined, label), control);
@@ -1190,6 +1210,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     // Each scored item: 得分 out of 满分, or 不评 with its reason; its band; its 评语.
     const items = el('div', 'evaluation-items');
+    const lockedParts = new Set(record.content.aiLocked ?? []);
     record.profile.items.forEach((item, index) => {
       const content = record.content.items[index]!;
       const set = el('fieldset', 'evaluation-item');
@@ -1197,6 +1218,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const legend = el('legend', undefined, evaluationItemLegend(item));
       if (item.description) legend.append(' · ', el('span', 'evaluation-item-description', item.description));
       set.append(legend);
+      // 🔒 锁定本项 (Issue #1412): one click locks the item's 评语 against 按我的修改重新生成, saved at once.
+      if (record.state !== 'finalized') set.append(aiLockToggle(item.itemId, lockedParts.has(item.itemId), false, () => void toggleAiLock(record, item.itemId)));
       const score = el('input');
       score.type = 'number';
       score.min = '0';
@@ -1324,11 +1347,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     ] as const) {
       const control = textarea(lines.join('\n'), name, 3);
       control.disabled = readOnly;
-      lists.append(field(label, control));
+      const wrapper = field(label, control);
+      if (name !== 'readiness' && record.state !== 'finalized') wrapper.append(aiLockToggle(name, lockedParts.has(name), true, () => void toggleAiLock(record, name)));
+      lists.append(wrapper);
     }
     const verdict = textarea(record.content.verdict ?? '', 'verdict', 3);
     verdict.disabled = readOnly;
-    lists.append(field(EVALUATION_VERDICT, verdict));
+    const verdictField = field(EVALUATION_VERDICT, verdict);
+    if (record.state !== 'finalized') verdictField.append(aiLockToggle('verdict', lockedParts.has('verdict'), true, () => void toggleAiLock(record, 'verdict')));
+    lists.append(verdictField);
     node.append(lists);
     // The conclusion: none chosen until the editor chooses (EVAL-007).
     const conclusion = el('fieldset', 'evaluation-conclusion');
@@ -1440,7 +1467,23 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       weaknesses: lines('weaknesses'),
       verdict: optional(node.querySelector<HTMLTextAreaElement>('.evaluation-lists [data-evaluation-field="verdict"]')?.value),
       conclusion: conclusion === 'recommend' && recommendationBlocked(risks) ? null : conclusion,
+      // 🔒 锁定 (Issue #1412): the parts whose toggle is pressed; none leaves the key out, as an entry without locks has none.
+      ...lockedOf(node),
     };
+  };
+  const lockedOf = (node: HTMLElement): { aiLocked?: string[] } => {
+    const locked = Array.from(node.querySelectorAll<HTMLButtonElement>('[data-evaluation-ai-lock]'))
+      .filter((toggle) => toggle.getAttribute('aria-pressed') === 'true').map((toggle) => toggle.dataset['evaluationAiLock']!);
+    return locked.length === 0 ? {} : { aiLocked: locked };
+  };
+  /** One click on a lock toggle: it flips and the version is saved at once with the editor's current words (Issue #1412). */
+  const toggleAiLock = async (record: EvaluationRecordProjection, key: string): Promise<void> => {
+    if (busy) return;
+    const node = root.querySelector<HTMLElement>(`.evaluation-record[data-record-id="${record.recordId}"]`);
+    const toggle = node?.querySelector<HTMLButtonElement>(`[data-evaluation-ai-lock="${key}"]`) ?? null;
+    if (node === null || node === undefined || toggle === null) return;
+    toggle.setAttribute('aria-pressed', String(toggle.getAttribute('aria-pressed') !== 'true'));
+    await save(record, false);
   };
 
   /** The total as the editor types, and 推荐出版 open only while no 高 risk waits for a person's review. */

@@ -563,7 +563,7 @@ describe('factual claim occurrence ledger', () => {
         let migrated: EditorialStore | undefined;
         try {
           migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 110, dataVersion: 1 });
+          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 111, dataVersion: 1 });
           expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
         } finally { migrated?.close(); await migration.dispose(); }
       }

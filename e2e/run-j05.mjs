@@ -8,7 +8,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { READING_REVISION, DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 // J-05, first slice (Issue #407): Editorial Marks on the manuscript. An editor marks exact text with a
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
@@ -40,6 +40,7 @@ const APPLIED_TEXT = '〔一键应用〕';
 const LOST_ACK_TEXT = '〔确认未达〕';
 const TYPED_BEFORE = '新增';
 const TYPED_INSIDE = '改';
+const REVISED_TEXT = '〔编辑修订〕';
 // Issue #1175: where Enter splits the structure paragraph, and the words an Apply between the split and its 撤销 writes.
 const STRUCTURE_SPLIT_AT = 12;
 const STRUCTURE_APPLIED_TEXT = '〔分段后应用〕';
@@ -372,6 +373,23 @@ async function chooseMenuItem(renderer, action, name) {
  */
 async function openMarkCard(renderer, kind, blockId, name) {
   const deadline = Date.now() + 20_000;
+  // ✎ 已改 (Issue #1411): a click on applied words brings their card forward in the 批注栏, so an applied mark's floating card opens
+  // from the mark's own menu (打开修改建议), as a reader without a pointer would.
+  while (Date.now() < deadline && await renderer.evaluate(`(() => { const mark = window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0]; return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`)) {
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j05.rightClick(window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0])`, `${name}-menu`);
+    const menu = Date.now() + 1_500;
+    while (Date.now() < menu && !(await renderer.evaluate(`window.__j05.menu()?.dataset.markMenu === 'mark' && window.__j05.item('open-card')?.disabled === false`))) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    await renderer.evaluate(`window.__j05.item('open-card')?.click()`);
+    const settle = Date.now() + 1_500;
+    while (Date.now() < settle) {
+      if (await renderer.evaluate(`window.__j05.card()?.dataset.markKind === ${JSON.stringify(kind)}`)) return;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+  }
   while (Date.now() < deadline) {
     await assertRenderer(renderer, `window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)}).length > 0 && window.__j05.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 80));
@@ -525,7 +543,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { window.__j05Original = { first: window.__j05.text(${JSON.stringify(first)}), second: window.__j05.text(${JSON.stringify(second)}) }; return typeof window.__j05Original.first === 'string'; })()`, 'original-text-kept');
 
     at('selection-menu-empty');
-    // With nothing selected the 编辑标记 group is absent; clipboard shortcuts keep their own column.
+    // With nothing selected the 编辑标记 group is absent; clipboard shortcuts keep their own column, and in 阅读与修订模式 (Issue #1411)
+    // 粘贴 says why it waits for 自由直接编辑.
     await rightClickUntil(
       renderer,
       `window.__j05.place(${JSON.stringify(first)}, 0, 0)`,
@@ -533,7 +552,7 @@ async function main() {
       `window.__j05.menu()?.dataset.markMenu === 'selection' && !window.__j05.menu().querySelector('[role="group"][aria-label="编辑标记"]')`,
       'empty-menu',
     );
-    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 2 && groups[0] === '文字处理' && groups[1] === 'AI7 任务' && !window.__j05.item('add-annotation') && !window.__j05.item('add-editor-note') && !window.__j05.item('add-change-suggestion') && !window.__j05.item('add-highlight-1') && disabled('cut') && disabled('copy') && !disabled('paste') && !menu.textContent.includes('先选中一段文字') && window.__j05.item('copy')?.querySelector('.menu-shortcut')?.textContent === 'Ctrl+C'; })()`, 'empty-menu-hides-mark-group');
+    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 2 && groups[0] === '文字处理' && groups[1] === 'AI7 任务' && !window.__j05.item('add-annotation') && !window.__j05.item('add-editor-note') && !window.__j05.item('add-change-suggestion') && !window.__j05.item('add-highlight-1') && disabled('cut') && disabled('copy') && window.__j05.item('paste')?.title === '阅读与修订模式下不能剪切或粘贴到正文' && !menu.textContent.includes('先选中一段文字') && window.__j05.item('copy')?.querySelector('.menu-shortcut')?.textContent === 'Ctrl+C'; })()`, 'empty-menu-hides-mark-group');
     await press(renderer, 'Escape');
     await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus', 15_000);
 
@@ -555,15 +574,15 @@ async function main() {
     // house has none, which the group says once its read answers — 润色这段 is disabled with the service's route-aware reason
     // (Issue #842: this launch binds no model fixture), and 再选一段加入 is refused in words.
     await openSelectionMenu(renderer, first, RANGES.highlight[0], RANGES.highlight[1], 'selection-menu-open');
-    await assertRenderer(renderer, `(() => { const enabled = (action) => window.__j05.item(action)?.disabled === false; const polish = window.__j05.item('preset-polish'); const waiting = polish instanceof HTMLButtonElement && polish.disabled && polish.title === '当前运行范围未允许润色这段：这次启动没有可用的模型。' && window.__j05.item('preset-names') === null && window.__j05.item('preset-continuity') === null && enabled('ask-on-selection') && enabled('task-on-selection'); const labels = Array.from(window.__j05.menu().querySelectorAll('[role="menuitem"]')).map((item) => item.firstElementChild?.nextElementSibling?.textContent ?? item.firstElementChild?.textContent); return enabled('cut') && enabled('copy') && enabled('paste') && enabled('paste-plain-text') && enabled('add-change-suggestion') && enabled('add-annotation') && enabled('add-editor-note') && enabled('add-highlight-1') && enabled('add-highlight-3') && waiting && window.__j05.menu().textContent.includes('要再选一段加入，请在任务草稿中操作。') && !labels.includes('加入任务范围') && !labels.includes('在稿件中搜索') && document.activeElement === window.__j05.item('cut'); })()`, 'selection-menu-groups');
+    await assertRenderer(renderer, `(() => { const enabled = (action) => window.__j05.item(action)?.disabled === false; const polish = window.__j05.item('preset-polish'); const waiting = polish instanceof HTMLButtonElement && polish.disabled && polish.title === '当前运行范围未允许润色这段：这次启动没有可用的模型。' && window.__j05.item('preset-names') === null && window.__j05.item('preset-continuity') === null && enabled('ask-on-selection') && enabled('task-on-selection'); const labels = Array.from(window.__j05.menu().querySelectorAll('[role="menuitem"]')).map((item) => item.firstElementChild?.nextElementSibling?.textContent ?? item.firstElementChild?.textContent); const guarded = (action) => window.__j05.item(action)?.disabled === true && window.__j05.item(action).title === '阅读与修订模式下不能剪切或粘贴到正文'; return enabled('quick-revise') && window.__j05.item('quick-revise').dataset.markQuickRevise === 'true' && guarded('cut') && enabled('copy') && guarded('paste') && guarded('paste-plain-text') && enabled('scoped-ai-edit') && enabled('ai-lock-selection') && enabled('add-change-suggestion') && enabled('add-annotation') && enabled('add-editor-note') && enabled('add-highlight-1') && enabled('add-highlight-3') && waiting && window.__j05.menu().textContent.includes('要再选一段加入，请在任务草稿中操作。') && !labels.includes('加入任务范围') && !labels.includes('在稿件中搜索') && document.activeElement === window.__j05.item('quick-revise'); })()`, 'selection-menu-groups');
     // The house's procedures are read for each menu and the group drawn again when the answer differs from what it shows: none here.
-    await waitFor(renderer, `window.__j05.menu()?.textContent.includes('本社还没有启用的可复用工序。') && document.activeElement === window.__j05.item('cut') && window.__j05.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0`, 'selection-menu-procedures-none', 15_000);
+    await waitFor(renderer, `window.__j05.menu()?.textContent.includes('本社还没有启用的可复用工序。') && document.activeElement === window.__j05.item('quick-revise') && window.__j05.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0`, 'selection-menu-procedures-none', 15_000);
 
     at('selection-menu-keys');
     await press(renderer, 'ArrowDown');
     await assertRenderer(renderer, `document.activeElement === window.__j05.item('copy')`, 'menu-arrow-moves');
     await press(renderer, 'End');
-    await assertRenderer(renderer, `document.activeElement === window.__j05.item('ask-on-selection')`, 'menu-end-skips-disabled');
+    await assertRenderer(renderer, `document.activeElement === window.__j05.item('ai-lock-selection')`, 'menu-end-skips-disabled');
 
     at('mark-highlight');
     await chooseMenuItem(renderer, 'add-highlight-2', 'highlight-choose');
@@ -694,7 +713,7 @@ async function main() {
     await openMarkCard(renderer, 'change-suggestion', second, 'apply-card');
     await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'accept-and-apply');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(APPLIED_TEXT)} + window.__j05Original.second.slice(${RANGES.applied[1]})`, 'accept-and-apply-wrote-the-text');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(second)})[0]; return card.querySelector('[data-mark-state]').textContent === '已应用' && mark.dataset.markStatus === 'applied' && mark.dataset.markDisposition === 'accepted' && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j05.block(${JSON.stringify(second)}).dataset.markLine === undefined && window.__j05.notice().includes('已应用这条修改建议'); })()`, 'accept-and-apply-recorded-and-receipted');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(second)})[0]; return card.querySelector('[data-mark-state]').textContent === '已应用' && mark.dataset.markStatus === 'applied' && mark.dataset.markDisposition === 'accepted' && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j05.block(${JSON.stringify(second)}).dataset.markLine === 'applied' && window.__j05.block(${JSON.stringify(second)}).dataset.markRevised === 'true' && window.__j05.block(${JSON.stringify(second)}).querySelector('.editorial-mark-applied-badge') !== null && window.__j05.notice().includes('已应用这条修改建议'); })()`, 'accept-and-apply-recorded-and-receipted');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 1; window.__j05Journal = page.journalSequence; return wrote; })()`, 'accept-and-apply-wrote-once');
 
     at('apply-reverse');
@@ -709,7 +728,7 @@ async function main() {
 
     at('apply-drift-refused');
     // Text typed into the words a suggestion would replace: the suggestion says 原文已变 and cannot be applied.
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(second)}, ${RANGES.applied[0] + 2}, ${RANGES.applied[0] + 2}) && document.execCommand('insertText', false, ${JSON.stringify(TYPED_INSIDE)})`, 'type-inside-suggestion');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(second)}, ${RANGES.applied[0] + 2}, ${RANGES.applied[0] + 2}) && ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(TYPED_INSIDE)})`, 'type-inside-suggestion');
     await settled(renderer, 'drift-settled');
     await openMarkCard(renderer, 'change-suggestion', second, 'drifted-suggestion');
     await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const accept = card.querySelector('[data-mark-action="accept-and-apply"]'); return card.dataset.markAnchor === 'drifted' && accept?.disabled === true && document.getElementById(accept.getAttribute('aria-describedby'))?.textContent.includes('原文已变') && card.querySelector('[data-mark-action="accept-with-edit"]')?.disabled === true && document.querySelector('[data-mark-preview]') === null; })()`, 'drifted-suggestion-cannot-be-applied');
@@ -753,12 +772,12 @@ async function main() {
 
     at('marks-follow-edits');
     // Typing in front of four marks moves all four with their text.
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0) && document.execCommand('insertText', false, ${JSON.stringify(TYPED_BEFORE)})`, 'type-before-marks');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0) && ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(TYPED_BEFORE)})`, 'type-before-marks');
     await assertRenderer(renderer, `['personal-highlight', 'annotation', 'editor-note', 'change-suggestion'].every((kind, index) => window.__j05.markText(kind, ${JSON.stringify(first)}) === window.__j05Original.first.slice(...[${JSON.stringify(RANGES.highlight)}, ${JSON.stringify(RANGES.annotation)}, ${JSON.stringify(RANGES.note)}, ${JSON.stringify(RANGES.suggestion)}][index]))`, 'marks-follow-unflushed-typing');
     await settled(renderer, 'type-before-settled');
     await assertRenderer(renderer, `['personal-highlight', 'annotation', 'editor-note', 'change-suggestion'].every((kind, index) => window.__j05.markText(kind, ${JSON.stringify(first)}) === window.__j05Original.first.slice(...[${JSON.stringify(RANGES.highlight)}, ${JSON.stringify(RANGES.annotation)}, ${JSON.stringify(RANGES.note)}, ${JSON.stringify(RANGES.suggestion)}][index])) && Array.from(window.__j05.block(${JSON.stringify(first)}).querySelectorAll('.editorial-mark')).every((mark) => mark.dataset.markAnchor === 'exact')`, 'marks-follow-the-journal');
     // Typing inside the commented text: the comment stays where it was made and says 原文已变.
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, ${RANGES.annotation[0] + TYPED_BEFORE.length + 3}, ${RANGES.annotation[0] + TYPED_BEFORE.length + 3}) && document.execCommand('insertText', false, ${JSON.stringify(TYPED_INSIDE)})`, 'type-inside-annotation');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, ${RANGES.annotation[0] + TYPED_BEFORE.length + 3}, ${RANGES.annotation[0] + TYPED_BEFORE.length + 3}) && ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(TYPED_INSIDE)})`, 'type-inside-annotation');
     await assertRenderer(renderer, `window.__j05.mark('annotation', ${JSON.stringify(first)}).every((mark) => mark.dataset.markAnchor === 'drifted')`, 'drift-shows-before-the-journal-answers');
     await settled(renderer, 'type-inside-settled');
     await assertRenderer(renderer, `window.__j05.mark('annotation', ${JSON.stringify(first)}).every((mark) => mark.dataset.markAnchor === 'drifted') && window.__j05.mark('editor-note', ${JSON.stringify(first)}).every((mark) => mark.dataset.markAnchor === 'exact') && window.__j05.markText('editor-note', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.note[0]}, ${RANGES.note[1]})`, 'drift-is-durable-and-local');
@@ -773,6 +792,7 @@ async function main() {
     // The page holds no clipboard permission; the window that owns the editor cuts and pastes.
     await assertRenderer(renderer, `navigator.clipboard.readText().then(() => false, () => true)`, 'page-has-no-clipboard-permission');
     await assertRenderer(renderer, `(() => { window.__j05Before = window.__j05.text(${JSON.stringify(second)}); return true; })()`, 'clipboard-before');
+    await assertRenderer(renderer, DIRECT_EDIT, 'clipboard-direct-edit');
     await openSelectionMenu(renderer, second, 12, 16, 'cut-menu');
     await chooseMenuItem(renderer, 'cut', 'cut-choose');
     await waitFor(renderer, `window.__j05.text(${JSON.stringify(second)}) === window.__j05Before.slice(0, 12) + window.__j05Before.slice(16)`, 'cut-removed-the-selection');
@@ -982,6 +1002,8 @@ async function main() {
     requireJourney(Array.isArray(structural) && structural.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'structure-paragraphs');
     const [splitBlock, appliedBlock] = structural;
     await assertRenderer(renderer, `(async () => { window.__j05Structure = { split: window.__j05.text(${JSON.stringify(splitBlock)}), applied: window.__j05.text(${JSON.stringify(appliedBlock)}) }; const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); window.__j05Journal = (await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } })).journalSequence; return typeof window.__j05Structure.split === 'string'; })()`, 'structure-original-kept');
+    // Enter and Backspace split and merge paragraphs in 自由直接编辑 only (Issue #1411).
+    await assertRenderer(renderer, DIRECT_EDIT, 'structure-direct-edit');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(splitBlock)}, ${STRUCTURE_SPLIT_AT}, ${STRUCTURE_SPLIT_AT})`, 'structure-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
     await pressEnter(renderer);
@@ -1006,6 +1028,8 @@ async function main() {
     await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-splits-again', 15_000);
 
     at('structure-merge');
+    // Enter and Backspace split and merge paragraphs in 自由直接编辑 only (Issue #1411).
+    await assertRenderer(renderer, DIRECT_EDIT, 'merge-direct-edit');
     await assertRenderer(renderer, `window.__j05.place(window.__j05Split, 0, 0)`, 'merge-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
     await press(renderer, 'Backspace');
@@ -1062,7 +1086,7 @@ async function main() {
     // importAndOpen's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
     at('local-check-exact-sample1');
     await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
-    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
+    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
     await settled(renderer, 'local-edit-durable');
     await assertRenderer(renderer, `(() => { window.__j05LocalOriginal=window.__j05.text(window.__j05LocalBlock); return window.__j05LocalOriginal.startsWith('本地检查…保留原文。'); })()`, 'local-frozen-words-kept');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'local-review-entry');
@@ -1098,6 +1122,53 @@ async function main() {
     await seedCommentsPane(renderer, requireJourney, waitFor);
     await commentsGeometryAndScroll(renderer, requireJourney, waitFor);
     await commentsApplyAndReject(renderer, requireJourney, waitFor);
+
+    at('editor-revision');
+    // 阅读与修订模式 (Issue #1411): the text opens guarded — typing and pasting write nothing — and a key over selected words opens
+    // 修改此处, whose 应用修改 (Ctrl+Enter) records the editor's own revision and applies it at once. Its ✎ 已改 badge brings the card
+    // forward in the 批注栏, with the words before and after, and 撤销本次修改 writes the original back.
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') toggle.click(); return ${READING_REVISION} && toggle.textContent==='模式：阅读与修订（防误触）'; })()`, 'revision-reading-mode');
+    await assertRenderer(renderer, `(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return false; window.__j05RevBlock=block.dataset.blockId; window.__j05RevOriginal=window.__j05.text(block.dataset.blockId); return typeof window.__j05RevOriginal==='string'; })()`, 'revision-block');
+    // A key typed at the caret, a paste, and words an input path writes straight into the page: the text keeps its words and the
+    // journal takes nothing (a write the page made itself is drawn back from the durable text).
+    await assertRenderer(renderer, `(() => { window.__j05RevJournal=Number(document.querySelector('[data-editor-persistence]')?.dataset.journalSequence); return window.__j05.place(window.__j05RevBlock,4,4); })()`, 'revision-guard-caret');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'y', code: 'KeyY', text: 'y', unmodifiedText: 'y', windowsVirtualKeyCode: 89 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'y', code: 'KeyY', windowsVirtualKeyCode: 89 });
+    await assertRenderer(renderer, `(() => { const data=new DataTransfer(); data.setData('text/plain','粘贴'); document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true})); return window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal; })()`, 'revision-guard-keeps-text');
+    await assertRenderer(renderer, `(() => { document.execCommand('insertText',false,'误触'); return true; })()`, 'revision-guard-page-write');
+    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence==='confirmed' && Number(document.querySelector('[data-editor-persistence]')?.dataset.journalSequence)===window.__j05RevJournal`, 'revision-guard-draws-back', 10_000);
+    await waitFor(renderer, `window.__j05.status().includes('阅读与修订模式（防误触）')`, 'revision-guard-says-why');
+    await assertRenderer(renderer, `window.__j05.place(window.__j05RevBlock,4,8)`, 'revision-select');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'x', code: 'KeyX', text: 'x', unmodifiedText: 'x', windowsVirtualKeyCode: 88 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'x', code: 'KeyX', windowsVirtualKeyCode: 88 });
+    await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer==='quick-revise' && window.__j05.composer().querySelector('[data-mark-field="proposedText"]')?.value===window.__j05RevOriginal.slice(4,8) && window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal`, 'revision-composer-prefilled');
+    await assertRenderer(renderer, `(() => { if(!window.__j05.write('proposedText',${JSON.stringify(REVISED_TEXT)}))return false; const field=window.__j05.composer().querySelector('[data-mark-field="proposedText"]'); field.focus(); return document.activeElement===field; })()`, 'revision-write');
+    await press(renderer, 'Enter', 2);
+    await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const badge=block?.querySelector('.editorial-mark-applied-badge'); const mark=block?.querySelector('.editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="editor"]'); return window.__j05.composer()===null && window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal.slice(0,4)+${JSON.stringify(REVISED_TEXT)}+window.__j05RevOriginal.slice(8) && badge?.getAttribute('aria-label')?.startsWith('✎ 已改') && badge.textContent==='' && mark!==null && block.dataset.markRevised==='true'; })()`, 'revision-applied-with-badge');
+    await assertRenderer(renderer, `(() => { const badge=window.__j05.block(window.__j05RevBlock).querySelector('.editorial-mark-applied-badge'); window.__j05RevMark=badge.dataset.appliedMarkId; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return typeof window.__j05RevMark==='string'; })()`, 'revision-badge-click');
+    await waitFor(renderer, `(() => { const pane=document.querySelector('#manuscript-comments-pane'); const card=pane?.querySelector('[data-comment-card="'+window.__j05RevMark+'"]'); return pane?.hidden===false && card?.className.includes('editorial-mark-card-active') && card.querySelector('[data-mark-block="original"]')?.textContent.includes('修改前') && card.querySelector('[data-mark-block="proposed"]')?.textContent.includes(${JSON.stringify(REVISED_TEXT)}) && card.querySelector('[data-mark-block="rationale"]')?.textContent==='编辑修订' && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'revision-card-forward');
+    await assertRenderer(renderer, `(() => { const control=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j05RevMark+'"] [data-mark-action="reverse-revision"]'); control.click(); return true; })()`, 'revision-undo');
+    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')===null`, 'revision-undo-restores', 30_000);
+    await settled(renderer, 'revision-settled');
+
+    at('ai-locks');
+    // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
+    // offers 解锁; 就选中部分让 AI 修改… on only locked words is refused before any model is asked; the badge unlocks it again.
+    const lockBlock = await renderer.evaluate(`(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && node.dataset.blockId!==window.__j05RevBlock && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return null; window.__j05LockOriginal=window.__j05.text(block.dataset.blockId); return block.dataset.blockId; })()`);
+    requireJourney(typeof lockBlock === 'string', 'lock-block');
+    await openSelectionMenu(renderer, lockBlock, 2, 10, 'lock-menu');
+    await chooseMenuItem(renderer, 'ai-lock-selection', 'lock-choose');
+    await waitFor(renderer, `(() => { const block=window.__j05.block(${JSON.stringify(lockBlock)}); const badge=block?.querySelector('[data-ai-lock-block]'); return block?.dataset.aiLocked==='true' && badge?.getAttribute('aria-label')?.startsWith('已锁定：AI 生成或改写时此段保持原样') && badge.textContent==='' && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal && window.__j05.notice().startsWith('已锁定 1 段'); })()`, 'lock-drawn');
+    await openSelectionMenu(renderer, lockBlock, 2, 10, 'lock-menu-again');
+    await assertRenderer(renderer, `window.__j05.item('ai-unlock-selection')?.disabled===false && window.__j05.item('ai-lock-selection')===null && window.__j05.item('scoped-ai-edit')?.disabled===false`, 'lock-menu-offers-unlock');
+    await chooseMenuItem(renderer, 'scoped-ai-edit', 'scoped-edit-choose');
+    await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true && document.activeElement===document.querySelector('[data-scoped-ai-edit="instruction"]')`, 'scoped-edit-composer');
+    await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value='把这段改短一点。'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
+    await waitFor(renderer, `window.__j05.status().includes('所选的段落都已锁定，AI 不会修改它们；先解锁再试。') && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal`, 'scoped-edit-locked-refused', 30_000);
+    await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-scoped-ai-edit="cancel"]'); if(cancel instanceof HTMLButtonElement) cancel.click(); return document.querySelector('[data-scoped-ai-edit="composer"]')===null; })()`, 'scoped-edit-closed');
+    await assertRenderer(renderer, `(() => { const badge=window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'unlock-badge-click');
+    await waitFor(renderer, `window.__j05.block(${JSON.stringify(lockBlock)})?.dataset.aiLocked===undefined && !window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]') && window.__j05.notice().startsWith('已解锁 1 段')`, 'unlocked', 30_000);
+    await settled(renderer, 'locks-settled');
 
     at('completion-browser-close');
     await close();

@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 import { admittedSpanText, ADMITTED_BASELINE_DOCX, fixedArchiveTime } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
@@ -784,7 +784,14 @@ async function openMarkCard(renderer, kind, blockId, name) {
   while (Date.now() < deadline) {
     await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)}).length > 0 && window.__j11.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
+    // ✎ 已改 (Issue #1411): a click on exact applied words brings their card forward in the 批注栏; the floating card opens from
+    // the mark's own menu (打开修改建议).
+    if (await renderer.evaluate(`(() => { const mark = window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0]; return mark?.dataset.markStatus === 'applied' && mark.dataset.markAnchor === 'exact'; })()`)) {
+      await assertRenderer(renderer, `window.__j11.rightClick(window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0])`, `${name}-menu`);
+      const menu = Date.now() + 1_500;
+      while (Date.now() < menu && !(await renderer.evaluate(`window.__j11.item('open-card')?.disabled === false`))) await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      await renderer.evaluate(`window.__j11.item('open-card')?.click()`);
+    } else await assertRenderer(renderer, `window.__j11.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
     const settle = Date.now() + 1_500;
     while (Date.now() < settle) {
       if (await renderer.evaluate(`window.__j11.card()?.dataset.markKind === ${JSON.stringify(kind)}`)) return;
@@ -2124,7 +2131,7 @@ async function main() {
 
     at('readers-report-version');
     // An edit in the draft's own journal, then 保存为版本: 版本 2.
-    await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
+    await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
     await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'readers-report-edit-save-ready');
     await click(renderer, '保存', 'readers-report-edit-save');
     await waitFor(renderer, `${notice}.includes('已写入修订日志')`, 'readers-report-edit-durable');
@@ -2238,6 +2245,29 @@ async function main() {
       accepted.rewrite.decided === '上次重写已采用，分数不变。', 'evaluation-rewrite-accepted-words', accepted);
     const acceptedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.entries, page.record.content.items.map((entry) => entry.score), page.rewrite.decided?.decision ?? null, page.record.content.strengths, page.record.content.weaknesses]))`);
     requireJourney(acceptedService === JSON.stringify([3, [16.5, 15, 13, 14, 10], 'accepted', REWRITTEN_STRENGTHS, REWRITTEN_WEAKNESSES]), 'evaluation-rewrite-accepted-service', acceptedService);
+    at('evaluation-ai-lock');
+    // 🔒 锁定本项 / 锁定本节 (Issue #1412), still in ordinary mode: one click locks a dimension's 评语 and another the 总评 against
+    // the next 按我的修改重新生成, each saved at once as an entry of 第 15 版 that changes no word and no score; unlocking leaves
+    // the version's words exactly as they were. The guard that keeps locked words through a regeneration is the service's.
+    const lockToggle = (key) => `[data-screen="book-evaluation"] .evaluation-record [data-evaluation-ai-lock="${key}"]`;
+    const lockState = (key) => `document.querySelector(${JSON.stringify(lockToggle(key))})?.getAttribute('aria-pressed')`;
+    await waitFor(renderer, `${lockState('literary-quality')} === 'false' && ${lockState('verdict')} === 'false' && document.querySelector(${JSON.stringify(lockToggle('readiness'))}) === null`,
+      'evaluation-ai-lock-offered');
+    await clickSelector(renderer, lockToggle('literary-quality'), 'evaluation-ai-lock-item');
+    await readEvaluation(renderer, (page) => page.record?.entries === '4', 'evaluation-ai-lock-item-saved');
+    await waitFor(renderer, `${lockState('literary-quality')} === 'true' && document.querySelector(${JSON.stringify(lockToggle('literary-quality'))}).textContent === '🔒 已锁定'`, 'evaluation-ai-lock-item-pressed');
+    await clickSelector(renderer, lockToggle('verdict'), 'evaluation-ai-lock-verdict');
+    await readEvaluation(renderer, (page) => page.record?.entries === '5', 'evaluation-ai-lock-verdict-saved');
+    const lockedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.content.aiLocked ?? null, page.record.content.items.map((entry) => entry.score), page.record.content.verdict]))`);
+    requireJourney(lockedService === JSON.stringify([['literary-quality', 'verdict'], [16.5, 15, 13, 14, 10], REWRITTEN_VERDICT]), 'evaluation-ai-lock-service', lockedService);
+    for (const [key, entries] of [['literary-quality', '6'], ['verdict', '7']]) {
+      await clickSelector(renderer, lockToggle(key), `evaluation-ai-unlock-${key}`);
+      await readEvaluation(renderer, (page) => page.record?.entries === entries, `evaluation-ai-unlock-${key}-saved`);
+    }
+    const unlocked = await readEvaluation(renderer, (page) => page.record?.entries === '7', 'evaluation-ai-unlocked');
+    const unlockedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([Object.hasOwn(page.record.content, 'aiLocked'), page.record.content.verdict]))`);
+    requireJourney(unlockedService === JSON.stringify([false, REWRITTEN_VERDICT]) && JSON.stringify(unlocked.record.comments) === JSON.stringify(REWRITTEN_COMMENTS),
+      'evaluation-ai-unlocked-words', [unlockedService, unlocked.record.comments]);
     await evaluationMode(true, 'evaluation-rewrite-developer');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------

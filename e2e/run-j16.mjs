@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx } from './composed-docx.mjs';
-import { MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 
@@ -1253,7 +1253,7 @@ async function main() {
       if (!(block instanceof HTMLElement)) return false;
       block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-      document.execCommand('insertText', false, ${JSON.stringify(LEAVE_WORDS)});
+      ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(LEAVE_WORDS)});
       return block.textContent?.endsWith(${JSON.stringify(LEAVE_WORDS)}) === true;
     })()`, 'leave-typed');
     // At once, well inside the half second before the words would write themselves.

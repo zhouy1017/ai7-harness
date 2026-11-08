@@ -2,6 +2,7 @@ import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/g
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 import type { JournalEditInput } from './protocol/manuscript-structure.js';
 import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
+import type { AiEditLocksProjection, InspectAiEditLocksInput, InspectScopedAiEditInput, ScopedAiEditProjection, SetAiEditLocksInput, StartScopedAiEditInput } from './protocol/scoped-edit.js';
 import type { GlobalAttentionProjection } from './protocol/global-attention.js';
 import type {
   ModelServiceBindingProjection,
@@ -84,6 +85,8 @@ import type {
   SearchResultsProjection,
   ReplacementDismissalProjection,
   ReplacementCommitProjection,
+  CommitReplacementRevisionsInput,
+  ReplacementRevisionsProjection,
   SaveMilestoneInput,
   MilestoneProjection,
   HistoricalRevisionProjection,
@@ -319,7 +322,14 @@ export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
 
-export const SERVICE_PROTOCOL_VERSION = 199 as const;
+export * from './protocol/scoped-edit.js';
+
+/**
+ * Protocol 200 (Issue #1400 Batch 3): 局部 AI 修改与 🔒 锁定 (#1412) — setAiEditLocks, inspectAiEditLocks, startScopedAiEdit,
+ * inspectScopedAiEdit and the window's optional `aiLockedBlockIds`/`aiLocksDigest` — and 全部替换 as per-occurrence revision
+ * cards (#1411) — commitReplacementRevisions.
+ */
+export const SERVICE_PROTOCOL_VERSION = 200 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -778,6 +788,11 @@ export const IPC_CHANNELS = {
   inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
   polishSelection: 'ai7:j05:polish-selection',
   inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
+  inspectAiEditLocks: 'ai7:j05:inspect-ai-edit-locks',
+  setAiEditLocks: 'ai7:j05:set-ai-edit-locks',
+  startScopedAiEdit: 'ai7:j05:start-scoped-ai-edit',
+  inspectScopedAiEdit: 'ai7:j05:inspect-scoped-ai-edit',
+  commitReplacementRevisions: 'ai7:j02:commit-replacement-revisions',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
   approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
@@ -1788,6 +1803,12 @@ export interface ReimportLineageSourceVersionPageProjection {
 
 export interface ManuscriptWindowProjection {
   bookId: string;
+  /**
+   * 🔒 锁定 (Issue #1412): the blocks of this window AI7 may not change — locked one by one or inside a locked section — and
+   * the digest of the branch's lock set, which a scoped AI edit or a lock change names. Absent from a store without locks.
+   */
+  aiLockedBlockIds?: ReadonlyArray<string>;
+  aiLocksDigest?: string;
   manuscriptId: string;
   branchId: string;
   revisionId: string;
@@ -6691,6 +6712,16 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   polishSelection: { input: PolishSelectionInput & { bookId: string }; output: EditorialPolishProjection };
   /** A 润色这段 or 基于当前稿件重新生成建议 request of the Book, read again until it settles (Issue #842): a read. */
   inspectFastInteractionRequest: { input: InspectFastInteractionRequestInput & { bookId: string }; output: FastInteractionRequestProjection };
+  /** 🔒 锁定 (Issue #1412): a manuscript branch's AI edit locks, a read. */
+  inspectAiEditLocks: { input: InspectAiEditLocksInput; output: AiEditLocksProjection };
+  /** Lock or unlock blocks or sections against the lock set the editor saw (Issue #1412). */
+  setAiEditLocks: { input: SetAiEditLocksInput; output: AiEditLocksProjection };
+  /** 就选中部分让 AI 修改 (Issue #1412): checked at once, answered beside the loop, applied only inside its frozen scope. */
+  startScopedAiEdit: { input: StartScopedAiEditInput & { bookId: string }; output: ScopedAiEditProjection };
+  /** A scoped AI edit of the Book, read again until it settles (Issue #1412): a read. */
+  inspectScopedAiEdit: { input: InspectScopedAiEditInput & { bookId: string }; output: ScopedAiEditProjection };
+  /** 全部替换 as durable per-occurrence revision cards (Issue #1411): each occurrence an applied 修改建议. */
+  commitReplacementRevisions: { input: CommitReplacementRevisionsInput; output: ReplacementRevisionsProjection };
   reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
@@ -7235,6 +7266,14 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   polishSelection(input: PolishSelectionInput): Promise<EditorialPolishProjection>;
   /** A 润色这段 or 基于当前稿件重新生成建议 request of the Book this window shows, read again until it settles: a read. */
   inspectFastInteractionRequest(input: InspectFastInteractionRequestInput): Promise<FastInteractionRequestProjection>;
+  /** 🔒 锁定 (Issue #1412): the AI edit locks of a manuscript this window holds. */
+  inspectAiEditLocks(input: InspectAiEditLocksInput): Promise<AiEditLocksProjection>;
+  setAiEditLocks(input: SetAiEditLocksInput): Promise<AiEditLocksProjection>;
+  /** 就选中部分让 AI 修改 on the Book this window shows (Issue #1412). */
+  startScopedAiEdit(input: StartScopedAiEditInput): Promise<ScopedAiEditProjection>;
+  inspectScopedAiEdit(input: InspectScopedAiEditInput): Promise<ScopedAiEditProjection>;
+  /** 全部替换 with per-occurrence revision cards (Issue #1411). */
+  commitReplacementRevisions(input: CommitReplacementRevisionsInput): Promise<ReplacementRevisionsProjection>;
   /**
    * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
    * revision with unsaved edits is saved as a revision first.
