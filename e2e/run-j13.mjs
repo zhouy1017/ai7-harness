@@ -1569,7 +1569,8 @@ async function main() {
     await clickSelector(renderer, '[data-knowledge-action="review-refresh"]', 'knowledge-conflicts-review-refresh');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-review-conflicts li').length === 50 &&
       document.querySelector('[data-knowledge-action="preserve"]')?.getAttribute('aria-pressed') === 'false' &&
-      !document.querySelector('input[name="knowledge-reuse"]:checked') && document.querySelector('[data-knowledge-action="promote"]')?.disabled`, 'knowledge-conflicts-review-refresh-unchosen');
+      // The review read again starts its disposition over and offers its first use chosen (Issue #1410 item 30).
+      document.querySelector('input[name="knowledge-reuse"]:checked')?.value === 'series-tasks' && document.querySelector('[data-knowledge-action="promote"]')?.disabled`, 'knowledge-conflicts-review-refresh-unchosen');
     await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-conflicts-review-preserve-again');
     await clickSelector(renderer, 'input[name="knowledge-reuse"][value="series-tasks"]', 'knowledge-conflicts-review-reuse-again');
     await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-conflicts-review-promote');

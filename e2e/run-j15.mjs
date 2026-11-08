@@ -921,7 +921,7 @@ async function main() {
     await click(renderer, '资料库', 'library-epub-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-epub-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-epub-add');
-    const epubIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成电子书' && page.cards[0].index === 'complete', 'library-epub-indexed');
+    const epubIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === 'library-reference-book' && page.cards[0].index === 'complete', 'library-epub-indexed');
     const epubLayers = new Map(epubIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(epubLayers.get('metadata')?.[1] === '中文 · 3 段 · 1 个标题 · 文件自带标题「合成电子书」' &&
       JSON.stringify(epubLayers.get('text')) === JSON.stringify(['complete', '已提取 30 字']) &&
@@ -949,7 +949,7 @@ async function main() {
     await click(renderer, '资料库', 'library-pdf-tab');
     await readLibrary(renderer, (page) => page.state === 'ready', 'library-pdf-loaded');
     await clickSelector(renderer, '[data-library-action="add"]', 'library-pdf-add');
-    const pdfIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成 PDF' && page.cards[0].index === 'complete', 'library-pdf-indexed');
+    const pdfIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === 'library-reference' && page.cards[0].index === 'complete', 'library-pdf-indexed');
     const pdfLayers = new Map(pdfIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
     requireJourney(pdfLayers.get('metadata')?.[1] === '中文 · 3 段 · 0 个标题 · 文件自带标题「合成 PDF」' && pdfLayers.get('text')?.[0] === 'complete' &&
       JSON.stringify(pdfLayers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
