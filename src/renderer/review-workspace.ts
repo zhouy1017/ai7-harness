@@ -1061,7 +1061,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const localBoundary = run.localCheck.options.tables === undefined
         ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规'
         : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销';
-      local.append(el('p', 'field-note', `${localBoundary}；本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
+      // The boundary sentence is the technical layer's alone (Issue #1413 cluster 4); the basis used stays in ordinary mode.
+      local.append(el('p', 'field-note', `${technicalLayerVisible ? `${localBoundary}；` : ''}本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
       if (technicalLayerVisible && Object.keys(run.localCheck.counts ?? {}).length > 0) {
         const counts = el('ul');
         for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
