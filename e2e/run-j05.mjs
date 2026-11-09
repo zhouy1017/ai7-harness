@@ -579,7 +579,7 @@ async function main() {
 
     at('selection-menu-keys');
     await press(renderer, 'ArrowDown');
-    await assertRenderer(renderer, `document.activeElement === window.__j05.item('copy')`, 'menu-arrow-moves');
+    await assertRenderer(renderer, `document.activeElement === window.__j05.item('cut')`, 'menu-arrow-moves');
     await press(renderer, 'End');
     await assertRenderer(renderer, `document.activeElement === window.__j05.item('ai-lock-selection')`, 'menu-end-skips-disabled');
 
