@@ -431,7 +431,7 @@ async function assertOrdinaryModelReachability(renderer) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-model-supported-viewport');
     const geometry = await renderer.evaluate(`(async () => {
-      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','[data-favorite-model]','[data-custom-model-id]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
+      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','[data-favorite-model]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
       const controls=[];
       for (const [index,selector] of selectors.entries()) {
         const native=document.querySelector(selector);
@@ -913,7 +913,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
     await click(primary, '模型服务', 'ordinary-model-entry');
-    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
     await assertOrdinaryModelReachability(primary);
     // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
     // credential save/test success is covered by the ordinary-production renderer/service tests, never a live provider.

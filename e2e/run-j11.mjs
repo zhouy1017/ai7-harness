@@ -1946,7 +1946,7 @@ async function main() {
       return readEvaluation(renderer, (page) => page.state === 'ready', `${name}-evaluation-ready`);
     };
     const ordinaryReport = await evaluationMode(false, 'initial-evaluation-ordinary');
-    requireJourney(readReportView(ordinaryReport) && ordinaryReport.report.line === '第 1 次初评 · 读的是修订版 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
+    requireJourney(readReportView(ordinaryReport) && ordinaryReport.report.line === '第 1 次初评 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
@@ -2199,7 +2199,7 @@ async function main() {
     requireJourney(waiting.rewrite.task === '按我的修改重新生成 · 版本 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
       waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的修改重新生成了评估报告（评语、总评、优点与问题），等你决定：采用后才记入这一版，分数与结论不变。' &&
       // How much it read, and each 评语's notes beside it (EVAL-006); nothing set aside.
-      waiting.rewrite.proposal.reading === 'AI7 这次重写读了全部 8 个阅读范围。' && waiting.rewrite.proposal.withheld.length === 0 &&
+      waiting.rewrite.proposal.reading === 'AI7 这次重写读了全书。' && waiting.rewrite.proposal.withheld.length === 0 &&
       JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0, 0, 0]) &&
       JSON.stringify(waiting.rewrite.proposal.pairs) === JSON.stringify([
         ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重写：${REWRITTEN_COMMENTS[index]}`]),
