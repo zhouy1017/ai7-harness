@@ -1,4 +1,6 @@
-import type { ExportFidelityRowProjection, ManuscriptExportFormat, ReviewEvidenceSource, ReviewReportRecord } from '../shared/protocol.js';
+import { REVIEW_FINDING_SEVERITY_LABELS, type ExportFidelityRowProjection, type ManuscriptExportFormat, type ReviewEvidenceSource, type ReviewReportFindingEntry,
+  type ReviewReportRecord } from '../shared/protocol.js';
+import { resolveEditorialMarkCategory, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
 import {
   FINDING_EVIDENCE_HEADING,
   REVIEW_REPORT_HEADING,
@@ -182,83 +184,207 @@ function reportDocx(layout: ReportLayout): Uint8Array {
   return freshBodyPackage(layout.title, body.join(''));
 }
 
-// Publication report (Issue #1430). Legacy /1 records keep their original layout.
-const REPORT_BANNER_COLORS = { consistency: 'C0392B', factual: 'B9770E', language: '2E86C1', literary: '117864', style: '566573', risk: 'D35400', editor: '7030A0', other: '566573' } as const;
-const REPORT_STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+// ---- DOCX: the published 审阅报告 (Issue #1430) ------------------------------------------------------------
+//
+// A /2 record's DOCX is laid out as an editor hands a review to an author: a centred title block, 一、审阅说明,
+// 二、问题统计 (a chapter × category table with 合计), 三、建议优先处理的重点问题 and 四、逐项问题清单 — each finding a
+// banner in its category's colour above a two-column table. A /1 record keeps writing the layout it was exported in.
+
+/** Each category's banner colour: the accents `styles.css` gives the same keys of `src/shared/editorial-mark-category.ts`. */
+const PUBLISHED_CATEGORY_COLORS: Readonly<Record<EditorialMarkCategoryKey, string>> = {
+  consistency: 'C0392B', factual: 'B9770E', language: '2E86C1', literary: '117864', style: '566573', risk: 'D35400', editor: '7D3C98', other: '6B705C',
+};
+/** A4 less the published margins (1253 twips each side) is the 9400-twip text width every table spans. */
+const PUBLISHED_MARGIN_TWIPS = 1253;
+const PUBLISHED_FINDING_COLUMNS = [1950, 7450] as const;
+const OPEN_SUGGESTION = '（开放性建议，见理由）';
+
+const PUBLISHED_STYLES_XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
   '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-  '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="SimSun"/><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
-  '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
-  '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="160"/></w:pPr><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="40"/></w:rPr></w:style>' +
-  '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="280" w:after="120"/><w:pBdr><w:bottom w:val="single" w:sz="6" w:color="1F3864"/></w:pBdr><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="30"/></w:rPr></w:style>' +
-  '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="220" w:after="80"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:color w:val="2F5496"/><w:sz w:val="26"/></w:rPr></w:style>' +
-  '<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="420" w:hanging="210"/></w:pPr><w:rPr><w:sz w:val="21"/></w:rPr></w:style></w:styles>';
+  '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="SimSun" w:cs="Calibri"/><w:sz w:val="21"/><w:szCs w:val="21"/><w:lang w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault>' +
+  '<w:pPrDefault><w:pPr><w:spacing w:after="60" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+  '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>' +
+  '<w:pPr><w:spacing w:after="120"/><w:jc w:val="center"/></w:pPr><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="40"/><w:szCs w:val="40"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>' +
+  '<w:pPr><w:keepNext/><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="1F3864"/></w:pBdr><w:spacing w:before="280" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr>' +
+  '<w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>' +
+  '<w:pPr><w:keepNext/><w:spacing w:before="220" w:after="80"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:color w:val="2F5496"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
+  '<w:pPr><w:ind w:left="420" w:hanging="210"/></w:pPr><w:rPr><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr></w:style>' +
+  '</w:styles>';
 
-function reportParagraph(text: string, properties = '', runProperties = ''): string {
-  return `<w:p><w:pPr>${properties}</w:pPr>` + text.split('\n').map((line, index) =>
-    `<w:r><w:rPr>${runProperties}</w:rPr>${index > 0 ? '<w:br/>' : ''}<w:t xml:space="preserve">${escapeWordText(line)}</w:t></w:r>`).join('') + '</w:p>';
+/** One finding as the published report lays it out; a row recorded before Issue #1430 is read from its older fields. */
+interface PublishedFinding {
+  index: string;
+  categoryKey: EditorialMarkCategoryKey;
+  categoryLabel: string;
+  chapter: string;
+  paragraphOrdinal: number | null;
+  priority: 'must' | 'should' | 'consider';
+  summary: string;
+  originalText: string;
+  suggestedText: string;
+  rationale: string;
+  citations: NonNullable<ReviewReportFindingEntry['citations']>;
 }
-function reportTable(rows: ReadonlyArray<ReadonlyArray<string>>, widths: ReadonlyArray<number>, statistics = false): string {
-  const color = statistics ? 'BFBFBF' : 'D9D9D9';
-  const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map((side) => `<w:${side} w:val="single" w:sz="4" w:color="${color}"/>`).join('');
-  return `<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((a, b) => a + b, 0)}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+
+function publishedFinding(entry: ReviewReportFindingEntry, position: number): PublishedFinding {
+  const categoryLabel = entry.categoryLabel ?? entry.categoryLabels[0] ?? '其他';
+  return {
+    index: entry.index ?? String(position + 1).padStart(3, '0'),
+    categoryKey: entry.categoryKey ?? resolveEditorialMarkCategory({ sourceKind: 'ai7', sourceOrigin: 'review-category', sourceLabel: categoryLabel }).key,
+    categoryLabel,
+    chapter: entry.chapterTitle ?? (entry.chapterLabel || '全书'),
+    paragraphOrdinal: entry.paragraphOrdinal ?? null,
+    priority: entry.priority ?? (entry.severityLabel === REVIEW_FINDING_SEVERITY_LABELS.must ? 'must' : entry.severityLabel === REVIEW_FINDING_SEVERITY_LABELS.should ? 'should' : 'consider'),
+    summary: entry.summary ?? entry.reason,
+    originalText: entry.originalText ?? entry.quote,
+    // An empty replacement deletes the quoted words; no replacement at all is an open suggestion its reason explains.
+    suggestedText: entry.suggestedText === null ? OPEN_SUGGESTION : entry.suggestedText === '' ? '（删去原文）' : entry.suggestedText,
+    rationale: entry.rationale ?? entry.reason,
+    citations: entry.citations ?? entry.sources.map((source) => ({ urlOrSource: source.url ?? source.name, snippet: source.snippet, translation: source.translation, explanation: source.note })),
+  };
+}
+
+/** A paragraph of the published report: its properties, then one run per line, every run carrying `runProperties`. */
+function publishedParagraph(text: string, paragraphProperties = '', runProperties = ''): string {
+  const rPr = runProperties === '' ? '' : `<w:rPr>${runProperties}</w:rPr>`;
+  return `<w:p>${paragraphProperties === '' ? '' : `<w:pPr>${paragraphProperties}</w:pPr>`}` + text.split('\n').map((line, index) =>
+    `<w:r>${rPr}${index > 0 ? '<w:br/>' : ''}<w:t xml:space="preserve">${escapeWordText(line)}</w:t></w:r>`).join('') + '</w:p>';
+}
+
+const styled = (text: string, style: string): string => publishedParagraph(text, `<w:pStyle w:val="${style}"/>`);
+const size = (halfPoints: number): string => `<w:sz w:val="${halfPoints}"/><w:szCs w:val="${halfPoints}"/>`;
+
+interface PublishedCell { paragraphs: string; fill?: string }
+
+/** A table spanning the text width, its borders single 4-eighths of a point in `color`, its header row repeated per page. */
+function publishedTable(widths: ReadonlyArray<number>, color: string, rows: ReadonlyArray<{ cells: ReadonlyArray<PublishedCell>; header?: boolean }>): string {
+  const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map((side) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="${color}"/>`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((total, width) => total + width, 0)}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/>` +
+    '<w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>' +
     `<w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>` +
-    rows.map((row, rowIndex) => {
-      const header = statistics && rowIndex === 0;
-      const total = statistics && rowIndex === rows.length - 1;
-      return `<w:tr><w:trPr>${header ? '<w:tblHeader/>' : ''}<w:cantSplit/></w:trPr>` + row.map((text, column) => {
-        const fill = header ? 'DCE6F1' : total ? 'F2F4F8' : !statistics && column === 0 ? 'EEF2F7' : null;
-        return `<w:tc><w:tcPr><w:tcW w:w="${widths[column]}" w:type="dxa"/>${fill === null ? '' : `<w:shd w:val="clear" w:fill="${fill}"/>`}<w:vAlign w:val="top"/></w:tcPr>` +
-          reportParagraph(text, statistics && column > 0 ? '<w:jc w:val="center"/>' : '', `<w:sz w:val="20"/>${header || total || !statistics && column === 0 ? '<w:b/>' : ''}`) + '</w:tc>';
-      }).join('') + '</w:tr>';
-    }).join('') + '</w:tbl>';
+    rows.map((row) => `<w:tr><w:trPr><w:cantSplit/>${row.header === true ? '<w:tblHeader/>' : ''}</w:trPr>` + row.cells.map((cell, column) =>
+      `<w:tc><w:tcPr><w:tcW w:w="${widths[column]}" w:type="dxa"/>${cell.fill === undefined ? '' : `<w:shd w:val="clear" w:color="auto" w:fill="${cell.fill}"/>`}<w:vAlign w:val="top"/></w:tcPr>${cell.paragraphs}</w:tc>`).join('') + '</w:tr>').join('') +
+    '</w:tbl>';
 }
 
-function publicationReportDocx(input: ReportExportInput): Uint8Array {
-  const { record } = input;
-  const entries = record.findings?.entries ?? [];
-  const categories = [...new Set(entries.map((entry) => entry.categoryLabel ?? entry.categoryLabels.join('、')))];
-  const chapters = [...new Set(entries.map((entry) => (entry.chapterTitle ?? entry.chapterLabel) || '全书/跨章节'))];
-  const title = `《${input.bookTitle}》审阅报告`;
-  const date = new Date(input.generatedAt);
-  const dateLabel = Number.isNaN(date.getTime()) ? input.generatedAt : `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
-  const extent = record.manuscriptExtent;
-  const scope = extent === undefined ? '篇幅未记录' : `正文约 ${(extent.characterCount / 10000).toFixed(1)} 万字，共 ${extent.chapterCount} 章`;
-  const section = (text: string): string => wordParagraph(text, 'Heading1');
-  const body = [reportParagraph(title, '<w:pStyle w:val="Title"/><w:jc w:val="center"/>', '<w:b/><w:sz w:val="40"/><w:color w:val="1F3864"/>'),
-    reportParagraph(record.overview.rows.map((row) => row.label).join(' · '), '<w:jc w:val="center"/>', '<w:sz w:val="22"/><w:color w:val="555555"/>'),
-    reportParagraph(`审阅对象：《${input.bookTitle}》（${scope}）｜审阅日期：${dateLabel}`, '<w:jc w:val="center"/>', '<w:sz w:val="19"/><w:color w:val="777777"/>'),
-    section('一、审阅说明'),
-    wordParagraph(`本次审阅范围：${record.run.scopeLabel}；审阅对象为《${input.bookTitle}》，${scope}，稿件版本为 ${record.run.manuscript.revisionLabel}。`),
-    ...record.categorySummaries.entries.map((entry) => wordParagraph(`${entry.label}：${entry.basisStatement}`)),
-    wordParagraph('每条问题包含四项：问题简述、问题所对应的原文（与稿件逐字一致，可直接检索定位）、建议修改后的文本、修改建议的原因与理由；知识性/事实性类问题另附“引用来源”，每个来源给出原始网址或出处、相关片段及支持结论的说明。'),
-    wordParagraph('位置按“章节名｜段落 N”标注，便于在稿件中快速检索定位。'),
-    section('二、问题统计'), wordParagraph(`全稿共列出问题 ${entries.length} 条。统计按问题所在章节与类别计数（一条问题只计一次）。`),
-    reportTable([['章节', ...categories, '合计'], ...chapters.map((chapter) => {
-      const located = entries.filter((entry) => ((entry.chapterTitle ?? entry.chapterLabel) || '全书/跨章节') === chapter);
-      return [chapter, ...categories.map((category) => String(located.filter((entry) => (entry.categoryLabel ?? entry.categoryLabels.join('、')) === category).length)), String(located.length)];
-    }), ['合计', ...categories.map((category) => String(entries.filter((entry) => (entry.categoryLabel ?? entry.categoryLabels.join('、')) === category).length)), String(entries.length)]], [2600, ...categories.map(() => 1160), 1000], true),
-    reportParagraph('事实核查结论以已记录的核查结果为准；引用来源列出本次核查保留的资料。', '', '<w:sz w:val="20"/><w:color w:val="555555"/>'),
-    section('三、建议优先处理的重点问题')];
-  const priority = entries.filter((entry) => entry.priority === 'must' || entry.severityLabel === '必须处理' || (entry.chapterTitle ?? '').includes('跨章节'));
-  const highlights = priority.length > 0 ? priority : entries.slice(0, 5);
-  body.push(...(highlights.length === 0 ? [wordParagraph(REVIEW_REPORT_NO_MUST_ITEMS)] : highlights.map((entry) =>
-    wordParagraph(`• ${entry.summary ?? entry.reason}（问题 ${entry.index ?? String(entries.indexOf(entry) + 1).padStart(3, '0')}）`, 'ListParagraph'))), section('四、逐项问题清单'));
-  for (const chapter of chapters) {
-    body.push(wordParagraph(chapter, 'Heading2'));
-    for (const entry of entries.filter((candidate) => ((candidate.chapterTitle ?? candidate.chapterLabel) || '全书/跨章节') === chapter)) {
-      const index = entry.index ?? String(entries.indexOf(entry) + 1).padStart(3, '0');
-      const location = entry.paragraphOrdinal == null ? '段落位置未记录' : `段落 ${entry.paragraphOrdinal}`;
-      body.push(reportParagraph(`问题 ${index}  【${entry.categoryLabel ?? entry.categoryLabels.join('、')}】  位置：${chapter}｜${location}`,
-        '<w:keepNext/><w:shd w:val="clear" w:fill="F7F7F7"/><w:spacing w:before="180" w:after="40"/>', `<w:b/><w:sz w:val="23"/><w:color w:val="${REPORT_BANNER_COLORS[entry.categoryKey ?? 'other']}"/>`));
-      const rows = [['问题简述', entry.summary ?? entry.reason], ['问题所对应的原文', entry.originalText ?? entry.quote],
-        ['建议修改后的文本', entry.suggestedText === null ? '（开放性建议，见理由）' : entry.suggestedText || '（删去）'], ['修改建议的原因与理由', entry.rationale ?? entry.reason]];
-      if (entry.sources.length > 0) rows.push(['引用来源', entry.sources.map((source, sourceIndex) =>
-        [`来源${sourceIndex + 1}：${source.url ?? source.name}`, `相关片段：${source.snippet ?? '（未记录）'}`, ...(source.translation === null ? [] : [`译文：${source.translation}`]), `说明：${source.note}`].join('\n')).join('\n\n')]);
-      body.push(reportTable(rows, [1950, 7450]));
-    }
+/** 二、问题统计: a row per chapter in manuscript order, a column per category with findings, 合计 across and down. */
+function publishedStatistics(findings: ReadonlyArray<PublishedFinding>, chapters: ReadonlyArray<string>, categories: ReadonlyArray<string>): string {
+  const count = (chapter: string | null, category: string | null): string => String(findings.filter((finding) =>
+    (chapter === null || finding.chapter === chapter) && (category === null || finding.categoryLabel === category)).length);
+  const cell = (text: string, options: { center?: boolean; bold?: boolean; fill?: string } = {}): PublishedCell => ({
+    paragraphs: publishedParagraph(text, options.center === true ? '<w:spacing w:after="0"/><w:jc w:val="center"/>' : '<w:spacing w:after="0"/>', `${options.bold === true ? '<w:b/>' : ''}${size(20)}`),
+    ...(options.fill === undefined ? {} : { fill: options.fill }),
+  });
+  const header = { fill: 'DCE6F1', bold: true };
+  const total = { fill: 'F2F4F8', bold: true };
+  return publishedTable([2600, ...categories.map(() => 1160), 1000], 'BFBFBF', [
+    { header: true, cells: [cell('章节', header), ...categories.map((category) => cell(category, { ...header, center: true })), cell('合计', { ...header, center: true })] },
+    ...chapters.map((chapter) => ({ cells: [cell(chapter), ...categories.map((category) => cell(count(chapter, category), { center: true })), cell(count(chapter, null), { center: true, bold: true })] })),
+    { cells: [cell('合计', total), ...categories.map((category) => cell(count(null, category), { ...total, center: true })), cell(count(null, null), { ...total, center: true })] },
+  ]);
+}
+
+/** A source in the 引用来源 cell: 来源N with its address a HYPERLINK field when it is an http(s) one, then its words. */
+function publishedCitation(citation: PublishedFinding['citations'][number], position: number): string {
+  const run = size(20);
+  const label = `来源${position + 1}：`;
+  const target = linkTarget(citation.urlOrSource);
+  const source = target === null ? `<w:r><w:rPr>${run}</w:rPr><w:t xml:space="preserve">${escapeWordText(citation.urlOrSource)}</w:t></w:r>`
+    : `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> HYPERLINK "${escapeWordText(target.replace(/"/gu, '%22'))}" </w:instrText></w:r>` +
+      `<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:rPr><w:color w:val="0563C1"/>${run}<w:u w:val="single"/></w:rPr><w:t xml:space="preserve">${escapeWordText(citation.urlOrSource)}</w:t></w:r>` +
+      '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  const lines = [
+    ...(citation.snippet === null ? [] : [`相关片段：${citation.snippet}`]),
+    ...(citation.translation === undefined || citation.translation === null ? [] : [`译文：${citation.translation}`]),
+    ...(citation.explanation === undefined || citation.explanation === '' ? [] : [`说明：${citation.explanation}`]),
+  ];
+  return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:b/>${run}</w:rPr><w:t xml:space="preserve">${label}</w:t></w:r>${source}</w:p>` +
+    lines.map((line) => publishedParagraph(line, '<w:spacing w:after="0"/>', run)).join('');
+}
+
+/** 四、逐项问题清单's one finding: its banner, then its four rows — five when it lists 引用来源. */
+function publishedFindingXml(finding: PublishedFinding): string {
+  const location = finding.paragraphOrdinal === null ? finding.chapter : `${finding.chapter}｜段落 ${finding.paragraphOrdinal}`;
+  const banner = publishedParagraph(`问题 ${finding.index}  【${finding.categoryLabel}】  位置：${location}`,
+    '<w:keepNext/><w:shd w:val="clear" w:color="auto" w:fill="F7F7F7"/><w:spacing w:before="180" w:after="40"/>',
+    `<w:b/><w:color w:val="${PUBLISHED_CATEGORY_COLORS[finding.categoryKey]}"/>${size(23)}`);
+  const label = (text: string): PublishedCell => ({ fill: 'EEF2F7', paragraphs: publishedParagraph(text, '<w:spacing w:after="0"/>', `<w:b/>${size(20)}`) });
+  const content = (text: string): PublishedCell => ({ paragraphs: publishedParagraph(text, '<w:spacing w:after="0"/>', size(20)) });
+  const rows = [
+    { cells: [label('问题简述'), content(finding.summary)] },
+    { cells: [label('问题所对应的原文'), content(finding.originalText)] },
+    { cells: [label('建议修改后的文本'), content(finding.suggestedText)] },
+    { cells: [label('修改建议的原因与理由'), content(finding.rationale)] },
+    ...(finding.citations.length === 0 ? [] : [{ cells: [label('引用来源'), { paragraphs: finding.citations.map(publishedCitation).join('') }] }]),
+  ];
+  return banner + publishedTable(PUBLISHED_FINDING_COLUMNS, 'D9D9D9', rows);
+}
+
+/** 三、建议优先处理的重点问题: the 必须处理 findings, one bullet per 问题简述 naming every finding it covers. */
+function publishedPriorities(findings: ReadonlyArray<PublishedFinding>): string[] {
+  const must = findings.filter((finding) => finding.priority === 'must');
+  const chosen = must.length > 0 ? must : findings.filter((finding) => finding.priority === 'should').slice(0, 5);
+  if (chosen.length === 0) return [publishedParagraph('本次没有必须处理或建议处理的问题，可按四、逐项问题清单酌情处理。')];
+  const bullets = new Map<string, PublishedFinding[]>();
+  for (const finding of chosen) {
+    const key = `【${finding.categoryLabel}】${finding.summary}`;
+    bullets.set(key, [...(bullets.get(key) ?? []), finding]);
   }
-  if ((record.findings?.omitted ?? 0) > 0) body.push(wordParagraph(reviewReportOmittedLine(record.findings!.omitted)!));
-  return freshBodyPackage(title, body.join(''), REPORT_STYLES, 1253);
+  return [
+    ...(must.length > 0 ? [] : [publishedParagraph('本次没有必须处理的问题；以下是建议优先处理的几项。')]),
+    ...[...bullets].map(([text, members]) => styled(`• ${text}（问题 ${members.map((finding) => finding.index).join('、')}）`, 'ListParagraph')),
+  ];
+}
+
+/** The machine's local calendar date, as 审阅 shows times in local time: 「2026 年 11 月 9 日」. */
+function publishedDate(instant: string): string {
+  const date = new Date(instant);
+  return Number.isNaN(date.getTime()) ? instant : `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
+function publishedReportDocx(input: ReportExportInput): Uint8Array {
+  const { record } = input;
+  const findings = (record.findings?.entries ?? []).map(publishedFinding);
+  const chapters = [...new Set(findings.map((finding) => finding.chapter))];
+  const reviewed = record.overview.rows.map((row) => row.label);
+  // A category with findings has a column, in the order the Run reviewed them; a label only a finding knows comes last.
+  const categories = [...new Set([...reviewed, ...findings.map((finding) => finding.categoryLabel)])]
+    .filter((category) => findings.some((finding) => finding.categoryLabel === category));
+  const extent = record.manuscriptExtent;
+  const extentLabel = extent === undefined ? null : `正文约 ${Math.max(0.1, Math.round(extent.characterCount / 1000) / 10)} 万字，共 ${extent.chapterCount} 章`;
+  const title = `《${input.bookTitle}》审阅报告`;
+  const factual = findings.filter((finding) => finding.categoryKey === 'factual');
+  const center = '<w:jc w:val="center"/>';
+  const body = [
+    publishedParagraph(title, `<w:pStyle w:val="Title"/>${center}`, `<w:b/><w:color w:val="1F3864"/>${size(40)}`),
+    publishedParagraph(reviewed.join(' · '), center, `<w:color w:val="555555"/>${size(22)}`),
+    publishedParagraph(`审阅对象：《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}｜审阅日期：${publishedDate(input.generatedAt)}`,
+      `<w:spacing w:after="240"/>${center}`, `<w:color w:val="777777"/>${size(19)}`),
+    styled('一、审阅说明', 'Heading1'),
+    publishedParagraph(`本次审阅对象为《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}，稿件修订版 ${record.run.manuscript.revisionLabel}，审阅范围：${record.run.scopeLabel}。` +
+      (record.compilation === undefined ? '' : `本报告汇总本书 ${record.compilation.runCount} 次审阅的发现，同一问题只列一次。`)),
+    publishedParagraph(`审阅维度：${reviewed.join('、')}。各维度的依据如下：`),
+    ...record.categorySummaries.entries.map((entry) => styled(`• ${entry.label}：${entry.basisStatement}`, 'ListParagraph')),
+    publishedParagraph('每条问题包含四项：问题简述、问题所对应的原文（与稿件逐字一致，可直接检索定位）、建议修改后的文本、修改建议的原因与理由；知识性/事实性类问题另附“引用来源”，每个来源给出原始网址或出处、相关片段及支持结论的说明。'),
+    publishedParagraph('位置按“章节名｜段落 N”标注，便于在稿件中快速检索定位。'),
+    styled('二、问题统计', 'Heading1'),
+    publishedParagraph(`全稿共列出问题 ${findings.length} 条。统计按问题所在章节与类别计数（一条问题只计一次）。`),
+    ...(findings.length === 0 ? [] : [publishedStatistics(findings, chapters, categories)]),
+    publishedParagraph(factual.length === 0 ? '本次未列出事实与知识性问题。'
+      : `事实与知识性问题 ${factual.length} 条，其中 ${factual.filter((finding) => finding.citations.length > 0).length} 条附引用来源；核查结论写在各条“修改建议的原因与理由”开头。`,
+      '<w:spacing w:before="80"/>', `<w:color w:val="555555"/>${size(20)}`),
+    styled('三、建议优先处理的重点问题', 'Heading1'),
+    ...publishedPriorities(findings),
+    styled('四、逐项问题清单', 'Heading1'),
+    ...(findings.length === 0 ? [publishedParagraph('本次没有列出问题。')] : chapters.flatMap((chapter) => [styled(chapter, 'Heading2'),
+      ...findings.filter((finding) => finding.chapter === chapter).map(publishedFindingXml)])),
+    ...(record.findings === undefined || record.findings.omitted === 0 ? [] : [publishedParagraph(reviewReportOmittedLine(record.findings.omitted)!)]),
+  ];
+  return freshBodyPackage(title, body.join(''), PUBLISHED_STYLES_XML, PUBLISHED_MARGIN_TWIPS);
 }
 
 // ---- PDF: the page the main process prints ---------------------------------------------------------------
@@ -392,12 +518,27 @@ function reportFidelityRows(format: ManuscriptExportFormat, layout: ReportLayout
   ];
 }
 
+/** The published DOCX's four parts (Issue #1430), each written whole. */
+function publishedFidelityRows(record: ReviewReportRecord): ExportFidelityRowProjection[] {
+  const entries = record.findings?.entries ?? [];
+  const must = entries.filter((entry) => (entry.priority ?? (entry.severityLabel === REVIEW_FINDING_SEVERITY_LABELS.must ? 'must' : null)) === 'must').length;
+  const sourced = entries.filter((entry) => (entry.citations ?? entry.sources).length > 0).length;
+  return [
+    fidelityRow('report-explanation', '审阅说明', record.overview.rows.length, 'preserved', `写出审阅对象、范围与 ${record.overview.rows.length} 个审阅维度的依据。`),
+    fidelityRow('report-statistics', '问题统计', entries.length, 'preserved', `写成 Word 表格，按章节与类别计数并合计，共 ${entries.length} 条问题。`),
+    fidelityRow('report-priorities', '建议优先处理的重点问题', must, 'preserved', must === 0 ? '没有必须处理的问题，列出建议处理的几项。' : `列出 ${must} 条必须处理的问题，各注明问题编号。`),
+    fidelityRow('report-findings', '逐项问题清单', entries.length, 'preserved',
+      `按章节分组，每条写出问题简述、原文、建议修改后的文本与理由；${sourced} 条另附引用来源，来源写成 Word 超链接。` + (reviewReportOmittedLine(record.findings?.omitted ?? 0) ?? '')),
+  ];
+}
+
 /** Lay out one report version in one format, or only review it (`emit: false`). */
 export function renderReportExport(input: ReportExportInput, format: ManuscriptExportFormat, options: { emit: boolean }): ReportExportResult {
   const layout = layoutOf(input);
-  const fidelity = reportFidelityRows(format, layout);
+  const published = format === 'docx' && input.record.schema !== 'ai7.review.report/1';
+  const fidelity = published ? publishedFidelityRows(input.record) : reportFidelityRows(format, layout);
   const degraded = fidelity.some((row) => row.status === 'degraded' || row.status === 'unavailable');
   if (!options.emit) return { bytes: null, fidelity, degraded };
-  const bytes = format === 'docx' ? input.record.schema === 'ai7.review.report/1' ? reportDocx(layout) : publicationReportDocx(input) : format === 'pdf' ? reportPage(layout) : reportMarkdown(layout);
+  const bytes = format === 'docx' ? published ? publishedReportDocx(input) : reportDocx(layout) : format === 'pdf' ? reportPage(layout) : reportMarkdown(layout);
   return { bytes, fidelity, degraded };
 }

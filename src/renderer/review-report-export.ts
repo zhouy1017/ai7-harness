@@ -1,37 +1,68 @@
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type RendererApi } from '../shared/protocol.js';
 
+/**
+ * 导出审阅报告（DOCX） (Issue #1430): one click records the Book's 审阅报告, opens the system Save dialog on
+ * 「《书名》_审阅报告.docx」 and writes it through the export ledger every export uses, ending on 「审阅报告已导出至 <path>」.
+ * The dialog's Save is the editor's one decision; nothing else is asked.
+ */
 type ReportExportApi = Pick<RendererApi, 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport'>;
+type SetStatus = (message: string, tone?: 'busy' | 'success' | 'error') => void;
 
-/** Compile → native Save dialog → existing atomic export and receipt. The dialog's Save is the user's approval. */
-export async function exportReviewReportDocx(api: ReportExportApi, bookId: string,
-  setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void): Promise<void> {
-  setStatus('正在整理审阅报告…', 'busy');
+export const REVIEW_REPORT_EXPORT_WORDS = {
+  action: '导出审阅报告（DOCX）',
+  menuAction: '导出审阅报告（.docx）',
+  compiling: '正在整理审阅报告…',
+  writing: '正在导出审阅报告…',
+  cancelled: '已取消导出审阅报告。',
+  failed: '未能导出审阅报告。',
+  exported: (destination: string): string => `审阅报告已导出至 ${destination}`,
+} as const;
+
+async function exportReviewReportDocx(api: ReportExportApi, bookId: string, setStatus: SetStatus): Promise<void> {
+  setStatus(REVIEW_REPORT_EXPORT_WORDS.compiling, 'busy');
   const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
   const reviewed = await api.reviewManuscriptExport({ target: { kind: 'book-review-report' }, options, format: 'docx' });
-  if (reviewed.bookId !== bookId || reviewed.target.report === null) throw new Error('未能整理这本书的审阅报告。');
+  if (reviewed.bookId !== bookId || reviewed.target.report === null) throw new Error(REVIEW_REPORT_EXPORT_WORDS.failed);
   const chosen = await api.chooseManuscriptExportDestination({ target: { kind: 'report', reportId: reviewed.target.report.reportId },
     revisionId: reviewed.target.revisionId, options, format: 'docx', reviewDigest: reviewed.reviewDigest, suggestedFileName: reviewed.suggestedFileName });
-  if (chosen.outcome === 'cancelled') { setStatus('已取消导出审阅报告。'); return; }
-  if (chosen.preparation.bookId !== bookId) throw new Error('导出不属于这本书。');
-  setStatus('正在导出审阅报告…', 'busy');
+  if (chosen.outcome === 'cancelled') { setStatus(REVIEW_REPORT_EXPORT_WORDS.cancelled); return; }
+  if (chosen.preparation.bookId !== bookId) throw new Error(REVIEW_REPORT_EXPORT_WORDS.failed);
+  setStatus(REVIEW_REPORT_EXPORT_WORDS.writing, 'busy');
   const receipt = await api.approveManuscriptExport({ preparationId: chosen.preparation.preparationId });
-  if (receipt.bookId !== bookId || receipt.preparationId !== chosen.preparation.preparationId) throw new Error('未能确认审阅报告的导出结果。');
-  setStatus(receipt.outcome === 'created' || receipt.outcome === 'replaced' ? `审阅报告已导出至 ${receipt.destination}` : receipt.detail,
-    receipt.outcome === 'created' || receipt.outcome === 'replaced' ? 'success' : 'error');
+  if (receipt.bookId !== bookId || receipt.preparationId !== chosen.preparation.preparationId) throw new Error(REVIEW_REPORT_EXPORT_WORDS.failed);
+  if (receipt.outcome === 'created' || receipt.outcome === 'replaced') setStatus(REVIEW_REPORT_EXPORT_WORDS.exported(receipt.destination), 'success');
+  else setStatus(receipt.detail || receipt.outcomeLabel, 'error');
 }
 
-export function reviewReportExportButton(options: { api: ReportExportApi; bookId: string; enabled: boolean;
-  setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void; beforeExport?: () => Promise<boolean> }): HTMLButtonElement {
+/** The one-step button: `data-review-action="export-docx-report"`, disabled while it runs and whenever `enabled` says so. */
+export function reviewReportExportButton(options: {
+  api: ReportExportApi;
+  bookId: string;
+  enabled: () => boolean;
+  setStatus: SetStatus;
+  errorMessage: (error: unknown, fallback: string) => string;
+  /** The manuscript export bar's quiet menu entry rather than 审阅's header button. */
+  inMenu?: boolean;
+  beforeExport?: () => Promise<boolean>;
+  onStart?: () => void;
+}): HTMLButtonElement {
   const button = document.createElement('button');
-  button.type = 'button'; button.className = 'secondary'; button.textContent = '导出审阅报告（DOCX）';
-  button.dataset['reviewAction'] = 'export-docx-report'; button.disabled = !options.enabled;
+  button.type = 'button';
+  button.className = options.inMenu === true ? 'quiet' : 'secondary';
+  button.textContent = options.inMenu === true ? REVIEW_REPORT_EXPORT_WORDS.menuAction : REVIEW_REPORT_EXPORT_WORDS.action;
+  button.dataset['reviewAction'] = 'export-docx-report';
+  button.disabled = !options.enabled();
+  let busy = false;
   button.addEventListener('click', () => {
+    if (busy) return;
+    busy = true;
     button.disabled = true;
+    options.onStart?.();
     void (async () => {
-      if (options.beforeExport && !await options.beforeExport()) return;
+      if (options.beforeExport !== undefined && !await options.beforeExport()) return;
       await exportReviewReportDocx(options.api, options.bookId, options.setStatus);
-    })().catch((error: unknown) => options.setStatus(error instanceof Error ? error.message : '未能导出审阅报告。', 'error'))
-      .finally(() => { button.disabled = !options.enabled; });
+    })().catch((error: unknown) => options.setStatus(options.errorMessage(error, REVIEW_REPORT_EXPORT_WORDS.failed), 'error'))
+      .finally(() => { busy = false; button.disabled = !options.enabled(); });
   });
   return button;
 }

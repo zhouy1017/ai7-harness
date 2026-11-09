@@ -14,6 +14,7 @@ import {
 } from '../../shared/protocol.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { chapterOfPosition } from './review-scope.js';
+import { resolveEditorialMarkCategory } from '../../shared/editorial-mark-category.js';
 
 /**
  * The 审阅报告 of one Review Run (Issue #417; V2-UX-REV-009): 概览表, 必须处理的事项, 各类别摘要 and an
@@ -70,10 +71,15 @@ export interface ReviewReportFindingInput {
   readonly conclusion?: string | null;
 }
 
-/** A chapter as the report names it: by its order and its block positions, never by its heading's words. */
+/**
+ * A chapter as the report names it: by its order and its block positions; `title` is the heading the published
+ * report (Issue #1430) groups and locates findings under, and `position` the heading's block, so 「段落 N」 counts from it.
+ */
 export interface ReportChapter {
   readonly order: number;
   readonly label: string;
+  readonly title?: string;
+  readonly position?: number;
 }
 
 export interface ReviewReportInput {
@@ -84,8 +90,10 @@ export interface ReviewReportInput {
   readonly configuration: { readonly schema: string; readonly version: string; readonly digest: string };
   readonly categories: ReadonlyArray<ReviewReportCategoryInput>;
   readonly findings: ReadonlyArray<ReviewReportFindingInput>;
-  /** Local export compiles all rows; IPC projections retain their existing bound. */
+  /** A Book's report (Issue #1430): every row and every quote and source whole, since its file is written from the record. */
   readonly complete?: boolean;
+  readonly compilation?: ReviewReportRecord['compilation'];
+  readonly manuscriptExtent?: ReviewReportRecord['manuscriptExtent'];
 }
 
 /** Findings by severity and by status; every finding counts once in each. */
@@ -105,12 +113,19 @@ export function reportQuote(quote: string, limit = MAX_REPORT_QUOTE_GRAPHEMES): 
 
 /** The chapter a block position falls in, by position — 「章节 2（内容块 5–9）」 — and after every chapter, outside them or gone. */
 export function reportChapterOf(chapters: ReadonlyArray<ReviewChapterOptionProjection>, position: number | null): ReportChapter {
-  if (position === null) return { order: chapters.length + 2, label: '内容块已不在当前稿件中' };
+  if (position === null) return { order: chapters.length + 2, label: '内容块已不在当前稿件中', title: '原文已不在当前稿件中' };
   const chapter = chapterOfPosition(chapters, position);
-  if (chapter === null) return { order: chapters.length + 1, label: '章节之外' };
+  if (chapter === null) return { order: chapters.length + 1, label: '章节之外', title: chapters.length === 0 ? '全书' : '章节之外' };
   const order = chapters.indexOf(chapter) + 1;
   const blocks = chapter.position === chapter.endPosition ? `${chapter.position}` : `${chapter.position}–${chapter.endPosition}`;
-  return { order, label: chapter.title.trim() || `章节 ${order}（内容块 ${blocks}）` };
+  const label = `章节 ${order}（内容块 ${blocks}）`;
+  return { order, label, title: chapter.title.trim() || label, position: chapter.position };
+}
+
+/** 问题简述: the note's first sentence, or the note itself when it is one. */
+function reportSummary(note: string): string {
+  const sentence = /^.+?[。！？!?](?=.)/su.exec(note.trim())?.[0] ?? note.trim();
+  return sentence === '' ? '（见原文与修改建议）' : sentence;
 }
 
 const distinct = <T>(values: ReadonlyArray<T>): T[] => [...new Set(values)];
@@ -144,7 +159,7 @@ function reportFindings(input: ReviewReportInput): NonNullable<ReviewReportRecor
   const groups = new Map<string, ReviewReportFindingInput[]>();
   for (const finding of input.findings) {
     const place = finding.place;
-    const key = place === undefined ? finding.findingId : JSON.stringify([finding.categoryId, place.blockId, place.fromGrapheme, place.toGrapheme, finding.quote, finding.note, finding.replacement]);
+    const key = place === undefined ? finding.findingId : JSON.stringify([place.blockId, place.fromGrapheme, place.toGrapheme, finding.quote]);
     groups.set(key, [...(groups.get(key) ?? []), finding]);
   }
   const at = (finding: ReviewReportFindingInput): number[] =>
@@ -166,28 +181,32 @@ function reportFindings(input: ReviewReportInput): NonNullable<ReviewReportRecor
     }
     const replacements = distinct(members.flatMap((member) => member.replacement ?? []));
     const first = members[0]!;
-    const categoryLabel = labels.get(first.categoryId) ?? '其他';
-    const categoryKey = reportCategoryKey(first.categoryId);
-    const priority = SEVERITY_ORDER.find((severity) => members.some((member) => member.severity === severity))!;
+    const severity = SEVERITY_ORDER.find((candidate) => members.some((member) => member.severity === candidate))!;
     const reason = distinct(members.map((member) => member.note)).join('；');
+    // The published report's fields (Issue #1430): the first member's category names the row, as its banner colours it.
+    const categoryLabel = labels.get(first.categoryId) ?? first.categoryId;
+    const categoryKey = resolveEditorialMarkCategory({ sourceKind: 'ai7', sourceOrigin: 'review-category', sourceLabel: categoryLabel }).key;
     const conclusion = members.find((member) => member.conclusion)?.conclusion;
+    const position = first.place?.position ?? null;
+    const heading = first.chapter?.position;
     const entry: ReviewReportFindingEntry = {
       index: String(entries.length + 1).padStart(3, '0'), categoryKey, categoryLabel,
-      chapterTitle: first.chapter?.label ?? '全书/跨章节', chapterOrder: first.chapter?.order ?? 0,
-      paragraphOrdinal: first.place?.position ?? null, priority: priority === 'note' ? 'consider' : priority,
-      summary: first.note || '（见原文与修改建议）', originalText: first.quote,
+      chapterTitle: first.chapter?.title ?? first.chapter?.label ?? '全书', chapterOrder: first.chapter?.order ?? 0,
+      paragraphOrdinal: position === null ? null : heading === undefined ? position : Math.max(1, position - heading),
+      priority: severity === 'note' ? 'consider' : severity,
+      summary: reportSummary(first.note), originalText: first.quote,
       rationale: categoryKey === 'factual' && conclusion ? `【核查结论：${conclusion}】${reason}` : reason,
       citations: [...sources.values()].map((source) => ({ urlOrSource: source.url ?? source.name,
         snippet: source.snippet, translation: source.translation, explanation: source.note })),
       findingIds: members.map((member) => member.findingId),
       categoryLabels: distinct(members.map((member) => labels.get(member.categoryId) ?? member.categoryId)),
-      severityLabel: REVIEW_FINDING_SEVERITY_LABELS[SEVERITY_ORDER.find((severity) => members.some((member) => member.severity === severity))!],
+      severityLabel: REVIEW_FINDING_SEVERITY_LABELS[severity],
       statusLabel: distinct(members.map((member) => REVIEW_FINDING_STATUS_LABELS[member.status])).join('；'),
-      chapterLabel: members[0]!.chapter?.label ?? '',
-      locationLabel: members[0]!.locationLabel,
-      quote: members[0]!.quote,
+      chapterLabel: first.chapter?.label ?? '',
+      locationLabel: first.locationLabel,
+      quote: input.complete ? first.quote : reportQuote(first.quote),
       suggestedText: replacements.length === 0 ? null : replacements.join(' / '),
-      reason: distinct(members.map((member) => member.note)).join('；'),
+      reason,
       sources: [...sources.values()],
     };
     const weight = Buffer.byteLength(JSON.stringify(entry), 'utf8') + 1;
@@ -208,6 +227,8 @@ export function buildReviewReport(input: ReviewReportInput): ReviewReportRecord 
     version: input.version,
     generatedAt: input.generatedAt,
     run: input.run,
+    ...(input.manuscriptExtent === undefined ? {} : { manuscriptExtent: input.manuscriptExtent }),
+    ...(input.compilation === undefined ? {} : { compilation: input.compilation }),
     totals: reviewFindingCounts(input.findings),
     statistics: reportStatistics(input),
     findings: reportFindings(input),
@@ -273,14 +294,3 @@ export function buildReviewReport(input: ReviewReportInput): ReviewReportRecord 
   };
 }
 
-/** Report semantics use the same keys as manuscript mark categories. */
-export function reportCategoryKey(categoryId: string): NonNullable<ReviewReportFindingEntry['categoryKey']> {
-  if (/factual|knowledge/u.test(categoryId)) return 'factual';
-  if (/consistency|plot|timeline/u.test(categoryId)) return 'consistency';
-  if (/literary|expression/u.test(categoryId)) return 'literary';
-  if (/typo|usage|language|local-text/u.test(categoryId)) return 'language';
-  if (/style|format/u.test(categoryId)) return 'style';
-  if (/risk|compliance|copyright|political/u.test(categoryId)) return 'risk';
-  if (/editor/u.test(categoryId)) return 'editor';
-  return 'other';
-}

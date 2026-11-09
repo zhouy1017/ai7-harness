@@ -847,8 +847,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     node.setAttribute('aria-busy', run?.state === 'running' ? 'true' : 'false');
     const heading = el('div', 'review-workspace-heading');
-    heading.append(el('h2', undefined, REVIEW_CARD_HEADING), reviewReportExportButton({ api, bookId,
-      enabled: next.runs.some((summary) => summary.findingCounts.must + summary.findingCounts.should + summary.findingCounts.note > 0), setStatus: options.setStatus }));
+    heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
     if (run !== null && !runHasResults(run)) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     const hasReviews = next.runs.length > 0 || next.coverage.some((row) => row.lastRunOrdinal !== null);
     if (!hasReviews) {
@@ -860,6 +859,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const actions = renderNewReview(next, newReviewReasonId);
     if (!hasReviews) node.append(actions);
     else if (run === null || !runHasResults(run)) heading.append(actions);
+    // 导出审阅报告（DOCX） (Issue #1430): the Book's findings in one file, once any Run has found something.
+    const hasFindings = next.runs.some((summary) => summary.findingCounts.must + summary.findingCounts.should + summary.findingCounts.note > 0);
+    if (hasReviews) heading.append(reviewReportExportButton({ api, bookId, enabled: () => hasFindings, setStatus: options.setStatus, errorMessage: options.errorMessage }));
     if (hasReviews) {
       const changed = next.coverage.filter((row) => row.state === 'needs-review').length;
       if (changed > 0) node.append(el('p', 'attention-note review-coverage-warning', `稿件有改动，${changed} 类审阅需要复审。`));

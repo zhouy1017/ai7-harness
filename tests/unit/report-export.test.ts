@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from '../../src/service/report-export.js';
 import { localInstantLabel } from '../../src/shared/report-wording.js';
-import type { ReviewReportRecord } from '../../src/shared/protocol.js';
+import type { ReviewReportFindingEntry, ReviewReportRecord } from '../../src/shared/protocol.js';
 
 // The 审阅报告 as a file (Issue #500, plan slice S64b part 2; V2-UX-REV-009; ADR 0079 §3.4): one recorded version laid
 // out as DOCX, as the page a PDF is printed from, and in the Markdown 备用格式. The record is authored here — its
@@ -196,6 +196,92 @@ describe('the 审阅报告 as a file', () => {
       expect(digest(renderReportExport(input(), format, { emit: true }).bytes!)).toBe(digest(first));
       expect(renderReportExport(input(), format, { emit: false }).bytes).toBeNull();
     }
-    expect(REPORT_EXPORT_WRITER_IDENTITIES).toEqual({ docx: 'ai7-report-docx/1', pdf: 'ai7-report-pdf/1', markdown: 'ai7-report-markdown/1' });
+    expect(REPORT_EXPORT_WRITER_IDENTITIES).toEqual({ docx: 'ai7-report-docx/2', pdf: 'ai7-report-pdf/1', markdown: 'ai7-report-markdown/1' });
+  });
+
+  it('lays out a /2 record\'s DOCX as the published report: styles, title block, four parts, the statistics table and each finding (Issue #1430)', async () => {
+    const source = { name: '示例资料', url: 'https://example.org/a', snippet: '示例片段', translation: null, note: '支持结论', evidenceId: null };
+    const entry = (fields: Partial<ReviewReportFindingEntry>): ReviewReportFindingEntry => ({
+      findingIds: ['f'], categoryLabels: ['错别字与规范用语'], severityLabel: '建议处理', statusLabel: '待处理', chapterLabel: '章节 1（内容块 1–9）',
+      locationLabel: '内容块 3', quote: '示例引文', suggestedText: '示例改文', reason: '示例理由。', sources: [], ...fields,
+    });
+    const published = input({
+      schema: 'ai7.review.report/2',
+      manuscriptExtent: { chapterCount: 2, characterCount: 52_000 },
+      compilation: { runCount: 2 },
+      overview: { title: '概览表', rows: [
+        { categoryId: 'plot-consistency', label: '情节逻辑与前后一致', state: 'completed', stateLabel: '已完成', counts: NO_COUNTS },
+        { categoryId: 'factual-review', label: '事实核查', state: 'completed', stateLabel: '已完成', counts: NO_COUNTS },
+        { categoryId: 'typos-and-usage', label: '错别字与规范用语', state: 'completed', stateLabel: '已完成', counts: NO_COUNTS },
+      ] },
+      findings: { title: '发现详单', omitted: 0, entries: [
+        entry({ index: '001', categoryKey: 'consistency', categoryLabel: '情节逻辑与前后一致', chapterTitle: '第一章 示例', chapterOrder: 1, paragraphOrdinal: 2,
+          priority: 'must', summary: '前后矛盾。', originalText: '示例原文甲', rationale: '前后矛盾。另见后文。' }),
+        entry({ index: '002', categoryKey: 'factual', categoryLabel: '事实核查', chapterTitle: '第一章 示例', chapterOrder: 1, paragraphOrdinal: 5,
+          priority: 'should', summary: '年份待核。', originalText: '示例原文乙', rationale: '【核查结论：疑似错误】年份待核。', sources: [source],
+          citations: [{ urlOrSource: source.url, snippet: source.snippet, translation: null, explanation: source.note }] }),
+        entry({ index: '003', categoryKey: 'language', categoryLabel: '错别字与规范用语', chapterTitle: '第二章 示例', chapterOrder: 2, paragraphOrdinal: 1,
+          priority: 'consider', summary: '用字。', originalText: '示例原文丙', suggestedText: null, rationale: '用字。' }),
+      ] },
+    } as Partial<ReviewReportRecord>);
+    const result = renderReportExport(published, 'docx', { emit: true });
+    expect(result.fidelity.map((row) => `${row.key}:${row.status}:${row.count}`))
+      .toEqual(['report-explanation:preserved:3', 'report-statistics:preserved:3', 'report-priorities:preserved:1', 'report-findings:preserved:3']);
+    const parts = unzipSync(result.bytes!);
+    const styles = strFromU8(parts['word/styles.xml']!);
+    expect(styles).toContain('<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="SimSun" w:cs="Calibri"/><w:sz w:val="21"/>');
+    expect(styles).toContain('w:line="276"');
+    expect(styles).toMatch(/w:styleId="Heading1">.*<w:bottom w:val="single" w:sz="6" w:space="1" w:color="1F3864"\/>.*<w:spacing w:before="280" w:after="120"\/>.*<w:b\/><w:color w:val="1F3864"\/><w:sz w:val="30"\/>/u);
+    expect(styles).toMatch(/w:styleId="Heading2">.*<w:spacing w:before="220" w:after="80"\/>.*<w:b\/><w:color w:val="2F5496"\/><w:sz w:val="26"\/>/u);
+    expect(styles).toMatch(/w:styleId="ListParagraph">.*<w:ind w:left="420" w:hanging="210"\/>/u);
+    const documentXml = strFromU8(parts['word/document.xml']!);
+    expect(documentXml).toContain('<w:pgMar w:top="1440" w:right="1253" w:bottom="1440" w:left="1253"');
+    const paragraphs = documentXml.replace(/<w:tbl>.*?<\/w:tbl>/gsu, '').match(/<w:p>.*?<\/w:p>/gsu)!;
+    const textOf = (xml: string): string => [...xml.matchAll(/<w:t xml:space="preserve">([^<]*)<\/w:t>/gu)].map((match) => match[1]).join('');
+    expect(paragraphs.slice(0, 3).map((xml) => [textOf(xml), /<w:jc w:val="center"\/>/u.test(xml), /<w:sz w:val="(\d+)"\/>/u.exec(xml)?.[1]])).toEqual([
+      ['《示例书名》审阅报告', true, '40'], ['情节逻辑与前后一致 · 事实核查 · 错别字与规范用语', true, '22'],
+      [`审阅对象：《示例书名》（正文约 5.2 万字，共 2 章）｜审阅日期：${new Date('2026-09-23T10:00:00.000Z').getFullYear()} 年 9 月 23 日`, true, '19']]);
+    expect(paragraphs[1]).toContain('<w:color w:val="555555"/>');
+    expect(paragraphs[2]).toContain('<w:color w:val="777777"/>');
+    expect(paragraphs.map(textOf)).toContain('• 【情节逻辑与前后一致】前后矛盾。（问题 001）');
+    const banners = paragraphs.filter((xml) => xml.includes('<w:shd w:val="clear" w:color="auto" w:fill="F7F7F7"/>'));
+    expect(banners.map((xml) => [textOf(xml), /<w:color w:val="([0-9A-F]{6})"\/>/u.exec(xml)?.[1]])).toEqual([
+      ['问题 001  【情节逻辑与前后一致】  位置：第一章 示例｜段落 2', 'C0392B'],
+      ['问题 002  【事实核查】  位置：第一章 示例｜段落 5', 'B9770E'],
+      ['问题 003  【错别字与规范用语】  位置：第二章 示例｜段落 1', '2E86C1'],
+    ]);
+    expect(banners.every((xml) => xml.includes('<w:keepNext/>') && xml.includes('<w:spacing w:before="180" w:after="40"/>') && xml.includes('<w:sz w:val="23"/>'))).toBe(true);
+
+    const tables = documentXml.match(/<w:tbl>.*?<\/w:tbl>/gsu)!;
+    expect(tables).toHaveLength(4);
+    const rows = (table: string): string[][] => table.match(/<w:tr>.*?<\/w:tr>/gsu)!.map((row) => row.match(/<w:tc>.*?<\/w:tc>/gsu)!.map(textOf));
+    expect(tables[0]).toContain('<w:top w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>');
+    expect(rows(tables[0]!)).toEqual([['章节', '情节逻辑与前后一致', '事实核查', '错别字与规范用语', '合计'],
+      ['第一章 示例', '1', '1', '0', '2'], ['第二章 示例', '0', '0', '1', '1'], ['合计', '1', '1', '1', '3']]);
+    const statisticsRows = tables[0]!.match(/<w:tr>.*?<\/w:tr>/gsu)!;
+    expect(statisticsRows[0]).toContain('<w:tblHeader/>');
+    expect(statisticsRows[0]!.match(/w:fill="DCE6F1"/gu)).toHaveLength(5);
+    expect(statisticsRows[0]).toMatch(/<w:tcW w:w="2600" w:type="dxa"\/>.*<w:tcW w:w="1160" w:type="dxa"\/>.*<w:tcW w:w="1000" w:type="dxa"\/>/u);
+    expect(statisticsRows[3]!.match(/w:fill="F2F4F8"/gu)).toHaveLength(5);
+    const labels = ['问题简述', '问题所对应的原文', '建议修改后的文本', '修改建议的原因与理由'];
+    expect(rows(tables[1]!)).toEqual([[labels[0], '前后矛盾。'], [labels[1], '示例原文甲'], [labels[2], '示例改文'], [labels[3], '前后矛盾。另见后文。']]);
+    expect(rows(tables[2]!).map((row) => row[0])).toEqual([...labels, '引用来源']);
+    expect(rows(tables[2]!)[3]![1]).toBe('【核查结论：疑似错误】年份待核。');
+    expect(rows(tables[2]!)[4]![1]).toBe('来源1：https://example.org/a相关片段：示例片段说明：支持结论');
+    expect(tables[2]).toContain('HYPERLINK "https://example.org/a"');
+    expect(rows(tables[3]!)[2]).toEqual([labels[2], '（开放性建议，见理由）']);
+    for (const table of tables.slice(1)) {
+      expect(table).toContain('<w:tblW w:w="9400" w:type="dxa"/>');
+      expect(table).toContain('<w:top w:val="single" w:sz="4" w:space="0" w:color="D9D9D9"/>');
+      expect(table.match(/<w:tcW w:w="1950" w:type="dxa"\/><w:shd w:val="clear" w:color="auto" w:fill="EEF2F7"\/>/gu)).toHaveLength(table.match(/<w:tr>/gu)!.length);
+    }
+
+    // The product's own reader opens it: the title, the four parts as Heading 1 and each chapter as Heading 2.
+    const path = join(sandbox, 'published.docx');
+    await writeFile(path, result.bytes!);
+    const blocks: ParsedDocxBlock[] = [];
+    await parseDocx(path, 'published.docx', (block) => blocks.push(block));
+    expect(blocks.filter((block) => block.kind === 'heading').map((block) => `${block.level}:${block.text}`)).toEqual([
+      '1:一、审阅说明', '1:二、问题统计', '1:三、建议优先处理的重点问题', '1:四、逐项问题清单', '2:第一章 示例', '2:第二章 示例']);
   });
 });

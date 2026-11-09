@@ -692,15 +692,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
     setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });
   const exportMenu = manuscriptExport.menu(() => isDocument ? { kind: 'document', documentId: currentWindow.manuscriptId, revisionId: currentWindow.revisionId } : { kind: 'current' }, null);
+  // 导出审阅报告（.docx） beside the manuscript's formats (Issue #1430), offered once the Book's review has findings.
   if (!isDocument) {
-    const reportButton = reviewReportExportButton({ api, bookId: initialWindow.bookId, enabled: true, setStatus, beforeExport: () => settleLocalEdit() });
-    reportButton.disabled = true;
-    const refreshReportExport = (): void => { void api.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => {
-      reportButton.disabled = !workspace.runs.some((run) => run.findingCounts.must + run.findingCounts.should + run.findingCounts.note > 0);
-    }).catch(() => { reportButton.disabled = true; }); };
-    exportMenu.querySelector('.export-menu-body')?.append(reportButton);
-    exportMenu.addEventListener('toggle', () => { if (exportMenu instanceof HTMLDetailsElement && exportMenu.open) refreshReportExport(); });
-    refreshReportExport();
+    let hasFindings = false;
+    const reportButton = reviewReportExportButton({ api, bookId: initialWindow.bookId, enabled: () => hasFindings, setStatus, errorMessage: rendererErrorMessage,
+      inMenu: true, beforeExport: () => settleLocalEdit(), onStart: () => { if (exportMenu instanceof HTMLDetailsElement) exportMenu.open = false; } });
+    exportMenu.querySelector('.export-menu-options')?.before(reportButton);
+    exportMenu.addEventListener('toggle', () => {
+      if (!(exportMenu instanceof HTMLDetailsElement) || !exportMenu.open) return;
+      void api.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => {
+        hasFindings = workspace.runs.some((run) => run.findingCounts.must + run.findingCounts.should + run.findingCounts.note > 0);
+        reportButton.disabled = !hasFindings;
+      }).catch(() => { hasFindings = false; reportButton.disabled = true; });
+    });
   }
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';

@@ -400,7 +400,11 @@ export const REPORT_FORMAT_LINES: Readonly<Record<ManuscriptExportFormat, string
   markdown: 'Markdown 是备用格式：只写出文字、标题层级与表格；审阅报告的这一版本身不会因为导出而改变。',
 };
 /** How a report is written, in the editor's words: from its recorded version, with nothing restored from any file. */
-export function reportRestorationLine(version: number): string {
+export function reportRestorationLine(version: number, published: null | { readonly runCount: number | null } = null): string {
+  // The published DOCX (Issue #1430) lays the record out in its own four parts; a Book's report says what it gathers.
+  if (published !== null) {
+    return `${published.runCount === null ? `审阅报告按第 ${version} 版的记录写出` : `审阅报告汇总本书 ${published.runCount} 次审阅的发现写出`}：审阅说明、问题统计、建议优先处理的重点问题与逐项问题清单。`;
+  }
   return `审阅报告按第 ${version} 版的记录写出：概览表、必须处理的事项、各类别摘要与附录，与审阅中显示的一致。`;
 }
 /** A PDF whose page was not printed yet cannot be approved: nothing is written, and the editor approves again. */
@@ -639,6 +643,12 @@ export function suggestedExportFileName(bookTitle: string, versionLabel: string,
   const stem = `${bookTitle} · ${versionLabel}`.normalize('NFC').replace(INVALID_FILE_NAME_CHARACTERS, '_').replace(/\s+/gu, ' ').trim();
   const bounded = Array.from(stem).slice(0, 120).join('').replace(/[. ]+$/u, '');
   return `${bounded.length > 0 ? bounded : '稿件'}${FORMAT_EXTENSIONS[format]}`;
+}
+
+/** A Book's 审阅报告 (Issue #1430) is offered as 「《书名》_审阅报告.docx」. */
+export function bookReviewReportFileName(bookTitle: string, format: ManuscriptExportFormat): string {
+  const title = Array.from(bookTitle.normalize('NFC').replace(INVALID_FILE_NAME_CHARACTERS, '_').replace(/\s+/gu, ' ').trim()).slice(0, 100).join('');
+  return `《${title}》_审阅报告${FORMAT_EXTENSIONS[format]}`;
 }
 
 function isInsideOrEqual(parent: string, candidate: string): boolean {
@@ -1444,6 +1454,11 @@ export class ManuscriptExportStore {
 
   // ---- resolving ------------------------------------------------------------------------------------
 
+  /** The policy refusal before anything else, for a caller that records a report to export first (Issue #1430). */
+  requireAvailable(available: boolean): void {
+    this.#requireAvailable(available);
+  }
+
   #requireAvailable(available: boolean): void {
     requireExport(available, 'EXPORT_POLICY_UNAVAILABLE', '对外导出策略未通过本次启动的校验，导出不可用。');
   }
@@ -1993,7 +2008,8 @@ export class ManuscriptExportStore {
     const restorationLine = target.manifest !== null
       ? PACKAGE_MEMBER_LINES[target.manifest.member].restoration
       : report !== null
-      ? reportRestorationLine(report.version)
+      ? reportRestorationLine(report.version, format === 'docx' && report.record.schema !== 'ai7.review.report/1'
+        ? { runCount: report.record.compilation?.runCount ?? null } : null)
       : format !== 'docx'
         ? EXPORT_TEXT_RESTORATION_LINES[format]
         : plan.kind === 'manuscript' && plan.wordBinding !== null
@@ -2019,8 +2035,7 @@ export class ManuscriptExportStore {
       ...exportRetentionDisclosure(fidelity),
       suggestedFileName: target.manifest !== null
         ? target.manifest.member === 'manifest' ? PACKAGE_MANIFEST_FILE_NAME : suggestedExportFileName(target.bookTitle, target.manifest.fileLabel, format)
-        : report?.record.manuscriptExtent !== undefined && format === 'docx'
-          ? `《${Array.from(target.bookTitle.replace(INVALID_FILE_NAME_CHARACTERS, '_')).slice(0, 100).join('')}》_审阅报告.docx`
+        : report?.record.compilation !== undefined ? bookReviewReportFileName(target.bookTitle, format)
           : suggestedExportFileName(
         target.bookTitle,
         report !== null ? reportExportLabel(report.runLabel, report.version)

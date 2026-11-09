@@ -52,13 +52,16 @@ export function reviewRunEvidence(reader: ReviewEvidenceReader, bookId: string, 
   return evidence;
 }
 
-/** The latest recorded conclusion, including findings which have no attached source. */
+/** Each factual finding's latest 核查结论 in one Run (Issue #1430), sourced or not; a result still 待核查 states none. */
 export function reviewRunConclusions(reader: ReviewEvidenceReader, bookId: string, reviewRunId: string): ReadonlyMap<string, string> {
   const conclusions = new Map<string, string>();
   let after: number | null = null;
   do {
     const page = reader.inspectFactualVerification({ bookId, reviewRunId, after, chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null });
-    for (const result of page.results) conclusions.set(result.reviewFindingId, result.states.factualVerification);
+    for (const result of page.results) {
+      if (result.states.factualVerification === '待核查') conclusions.delete(result.reviewFindingId);
+      else conclusions.set(result.reviewFindingId, result.states.factualVerification);
+    }
     after = page.nextCursor;
   } while (after !== null);
   return conclusions;

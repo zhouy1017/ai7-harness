@@ -5203,7 +5203,9 @@ export type ExportFidelityKey =
   | 'report-overview'
   | 'report-must-items'
   | 'report-summaries' | 'report-statistics' | 'report-findings'
-  | 'report-appendix';
+  | 'report-appendix'
+  // The published DOCX's 审阅说明 and 重点问题 (Issue #1430).
+  | 'report-explanation' | 'report-priorities';
 
 /** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */
 export type ExportFidelityStatus = 'preserved' | 'degraded' | 'unavailable' | 'excluded';
