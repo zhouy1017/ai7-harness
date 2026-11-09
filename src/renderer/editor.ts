@@ -9,7 +9,7 @@ import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.
 import { EDITOR_MOTION_META, editorMotionPlugin } from './editor-motion.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import { observeSourceImages, sourceBlockDom, sourceBlockView, sourceNodeKind } from './editor-source.js';
-import { DEFAULT_EDITOR_INPUT_MODE, READING_REVISION_HINT, readingRevisionBlocksInput, readingRevisionKey, type EditorInputMode } from './editor-input-mode.js';
+import { DEFAULT_EDITOR_INPUT_MODE, getAutoApplyEditorRevisions, type EditorInputMode } from './editor-input-mode.js';
 import {
   bufferAdmits,
   bufferReachedLimit,
@@ -87,7 +87,7 @@ export interface BoundedEditor {
    */
   selectedRange(): EditorSelectedRange;
   setOperationLocked(locked: boolean): void;
-  /** 阅读与修订 or 自由直接编辑 (Issue #1411): what a key, a paste, a cut or a drop does to the text. */
+  /** Both modes accept input; revision mode records cards and direct edit opts out. */
   inputMode(): EditorInputMode;
   setInputMode(mode: EditorInputMode): void;
   /** Editing Protection Mode as it stands, or `null` (Issue #951). */
@@ -132,13 +132,9 @@ interface MountOptions {
   onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
   /** A different window was loaded: anything anchored to the blocks that were on screen is gone. */
   onWindowLoaded?(): void;
-  /** 阅读与修订模式 (Issue #1411): the mode the text opens in; 阅读与修订 unless the caller says otherwise. */
+  /** The mode the text opens in; inline revision editing unless the caller says otherwise. */
   initialInputMode?: EditorInputMode;
-  /**
-   * A character or Enter over selected words while the text is guarded: the selection's revision composer opens (`true`), or
-   * the editor says the guard's hint (`false`).
-   */
-  onRevisionIntent?(): boolean;
+
 }
 
 interface BaselineBlock {
@@ -488,14 +484,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   };
 
   let inputMode: EditorInputMode = options.initialInputMode ?? DEFAULT_EDITOR_INPUT_MODE;
-  const guarded = (): boolean => inputMode === 'reading-revision';
-  let hintAt = 0;
-  const sayGuardHint = (): void => {
-    const now = Date.now();
-    if (now - hintAt < 1_500) return;
-    hintAt = now;
-    options.onAnnouncement(READING_REVISION_HINT, 'busy');
-  };
+  const revisionSessions = new Map<string, string>();
   const isEditable = (): boolean =>
     !operationLocked && deferredNavigationContinuity === undefined &&
     ((composing || view?.composing) || (!interrupted && (protection === undefined ? !retryRequired : protection.readOnly === null)));
@@ -553,12 +542,6 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   const candidateIsBounded = (transaction: Transaction): boolean => {
     if (!transaction.docChanged) return true;
-    // 阅读与修订模式 (Issue #1411): whatever reached the text past the key guard — an input method's words, a drag — is refused,
-    // and the view draws the durable text again.
-    if (guarded() && transaction.getMeta(EXPLICIT_EDIT_META) !== true) {
-      queueMicrotask(sayGuardHint);
-      return false;
-    }
     if (transaction.getMeta(STRUCTURE_META) === true) return isEditable();
     const candidate = transaction.doc;
     if (structures.length > 0 ? !pendingStructureAdmits(transaction) : candidate.childCount !== baselines.size) return false;
@@ -602,6 +585,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   const markPlugin = markDecorationPlugin({
     marks: () => windowProjection.marks,
     baselineText: (blockId) => baselines.get(blockId)?.text,
+    draftBaseline: (blockId) => inputMode === 'reading-revision' ? baselines.get(blockId)?.text : undefined,
     active: () => activeMark,
     linked: () => linkedMark,
     visibleMarkIds: () => visibleMarkIds,
@@ -857,6 +841,16 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       baseBlockDigest: baseline.digest,
       expectedJournalSequence: windowProjection.journalSequence,
       ...deriveEdit(baseline.text, text),
+      ...(inputMode === 'reading-revision' ? { editorRevision: {
+        sessionId: revisionSessions.get(baseline.blockId) ?? (() => {
+          const span = deriveEdit(baseline.text, text);
+          const previous = windowProjection.marks.find((mark) => mark.blockId === baseline.blockId && mark.inlineRevision &&
+            mark.anchorState === 'exact' && mark.fromGrapheme <= span.toGrapheme && mark.toGrapheme >= span.fromGrapheme);
+          const id = previous?.inlineRevision?.sessionId ?? crypto.randomUUID();
+          revisionSessions.set(baseline.blockId, id); return id;
+        })(),
+        autoApply: getAutoApplyEditorRevisions(),
+      } } : {}),
     },
   });
 
@@ -1062,7 +1056,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     autoFlushTimer = window.setTimeout(() => {
       autoFlushTimer = undefined;
       void flush();
-    }, 500);
+    }, 700);
   };
 
   view = new EditorView(options.host, {
@@ -1070,12 +1064,15 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     nodeViews: { table: sourceBlockView, image: sourceBlockView },
     editable: isEditable,
     dispatchTransaction(transaction) {
+      const previousBlock = pointAtPosition(view.state.doc, view.state.selection.head).blockId;
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
       view.updateState(nextState);
       if (transaction.docChanged) checkBufferLimit();
       announceState();
       if (transaction.docChanged) scheduleAutomaticFlush();
+      else if (inputMode === 'reading-revision' && transaction.selectionSet && !composing && !view.composing &&
+        previousBlock !== pointAtPosition(transaction.doc, transaction.selection.head).blockId) void flush();
     },
     handleDOMEvents: {
       keydown(currentView, event) {
@@ -1086,17 +1083,6 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
             ? event.metaKey && !event.ctrlKey
             : event.ctrlKey && !event.metaKey;
         const key = event.key.toLocaleLowerCase('en-US');
-        // 阅读与修订模式 (Issue #1411): a key that would write — a character, Enter, a deletion, cut or paste — never reaches the
-        // text. Over selected words a character or Enter opens the selection's revision instead.
-        if (guarded() && !currentView.composing && !event.isComposing) {
-          const intent = readingRevisionKey(event, modifier);
-          if (intent !== null) {
-            event.preventDefault();
-            if (intent === 'revise' && !currentView.state.selection.empty && options.onRevisionIntent?.() === true) return true;
-            sayGuardHint();
-            return true;
-          }
-        }
         if ((currentView.composing || event.isComposing) && (modifier || key === 'pageup' || key === 'pagedown')) {
           event.preventDefault();
           options.onAnnouncement('输入法组合尚未结束，命令已暂缓。', 'busy');
@@ -1137,32 +1123,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         }
         return false;
       },
-      // 阅读与修订模式 (Issue #1411): paste, cut, drop and any other input that writes are refused with the guard's hint; copy,
-      // selection and find are untouched.
-      beforeinput(_currentView, event) {
-        if (!guarded() || !readingRevisionBlocksInput((event as InputEvent).inputType ?? '')) return false;
-        event.preventDefault();
-        sayGuardHint();
-        return true;
-      },
-      paste(_currentView, event) {
-        if (!guarded()) return false;
-        event.preventDefault();
-        sayGuardHint();
-        return true;
-      },
-      cut(_currentView, event) {
-        if (!guarded()) return false;
-        event.preventDefault();
-        sayGuardHint();
-        return true;
-      },
-      drop(_currentView, event) {
-        if (!guarded()) return false;
-        event.preventDefault();
-        sayGuardHint();
-        return true;
-      },
+      blur() { if (inputMode === 'reading-revision' && !composing && !view.composing) void flush(); return false; },
       mousedown(currentView, event) {
         if (!deferredNavigationContinuity) return false;
         const hit = currentView.posAtCoords({ left: event.clientX, top: event.clientY });
@@ -1268,6 +1229,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     captureNavigationContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
     loadWindow: (nextWindow, continuity) => {
       if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
+      revisionSessions.clear();
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
@@ -1286,6 +1248,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     loadNavigationWindow: (nextWindow, continuity) => {
       if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
+      revisionSessions.clear();
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
@@ -1386,6 +1349,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     inputMode: () => inputMode,
     setInputMode: (mode) => {
       if (destroyed || mode === inputMode) return;
+      revisionSessions.clear();
       inputMode = mode;
       applyEditableState();
       announceState();

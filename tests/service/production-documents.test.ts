@@ -816,3 +816,21 @@ it('renames built-in categories and permits deleting an unused category without 
     expect(code(() => store.reorderProductionDocumentTypes({ typeIds: [types[0]!.typeId] }))).toBe('PRODUCTION_DOCUMENT_TYPE_INVALID');
   } finally { store.close(); }
 });
+
+
+it('records and restores a derivative manuscript inline edit through its own journal (#1428)', async () => {
+  await withDocument(async ({ store, created }) => {
+    const initial = store.getManuscriptWindow(created.documentId, created.branchId, null), block = initial.blocks[0]!;
+    const written = store.flushJournalEdit({ manuscriptId: created.documentId, branchId: created.branchId,
+      clientEditId: randomUUID(), baseRevisionId: initial.revisionId, windowStartBlockId: block.blockId,
+      expectedJournalSequence: initial.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest,
+      fromGrapheme: 0, toGrapheme: 0, insertText: '公开修订', editorRevision: { sessionId: randomUUID(), autoApply: false } });
+    const mark = written.window.marks.find((candidate) => candidate.inlineRevision)!;
+    expect(mark).toMatchObject({ status: 'open', categoryKey: 'editor', sourceKind: 'editor' });
+    const result = store.updateEditorialMark({ manuscriptId: created.documentId, branchId: created.branchId,
+      windowStartBlockId: block.blockId, markId: mark.markId, action: 'revert-inline-revision', body: null,
+      highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+    expect(result.window?.blocks[0]!.text === block.text).toBe(true);
+    expect(result.window?.marks.some((candidate) => candidate.markId === mark.markId)).toBe(false);
+  });
+});

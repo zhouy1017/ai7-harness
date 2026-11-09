@@ -2302,7 +2302,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (
         !validMarkBinding(input) ||
         !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
-        !(typeof input.action === 'string' && ['edit-body', 'recolor', 'set-status', 'reply', 'remove', 'convert'].includes(input.action)) ||
+        !(typeof input.action === 'string' && ['edit-body', 'recolor', 'set-status', 'reply', 'remove', 'convert', 'apply-inline-revision', 'revert-inline-revision'].includes(input.action)) ||
         !(input.body === null || isBoundedString(input.body, MAX_MARK_BODY_CODE_UNITS, true)) ||
         !validHighlightColor(input.highlightColor) ||
         !(input.status === null || input.status === 'open' || input.status === 'resolved') ||
@@ -2532,10 +2532,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           'toGrapheme',
           'insertText',
         ],
-        ['structure'],
+        ['structure', 'editorRevision'],
         tentativeId,
       );
       // Protocol 181 (Issue #1175): Enter's split names the new paragraph; Backspace's merge names the paragraph it takes in.
+      const tracking = input.editorRevision;
+      if (tracking !== undefined && !(isRecord(tracking) && hasExactKeys(tracking, ['sessionId', 'autoApply']) &&
+        validUuid(tracking.sessionId) && typeof tracking.autoApply === 'boolean' && input.structure === undefined)) throw new ProtocolError(tentativeId);
       const structure = input.structure;
       if (structure !== undefined && !(isRecord(structure) && (
         (structure.kind === 'split' && hasExactKeys(structure, ['kind', 'newBlockId']) && isBoundedString(structure.newBlockId, 28) &&

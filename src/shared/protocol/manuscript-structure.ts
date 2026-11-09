@@ -23,4 +23,6 @@ export interface JournalEditInput {
   toGrapheme: number;
   insertText: string;
   structure?: JournalStructuralEdit;
+  /** Editor-authored inline changes share the journal's transaction and history. */
+  editorRevision?: { sessionId: string; autoApply: boolean };
 }
