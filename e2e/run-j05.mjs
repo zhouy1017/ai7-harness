@@ -543,8 +543,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { window.__j05Original = { first: window.__j05.text(${JSON.stringify(first)}), second: window.__j05.text(${JSON.stringify(second)}) }; return typeof window.__j05Original.first === 'string'; })()`, 'original-text-kept');
 
     at('selection-menu-empty');
-    // With nothing selected the 编辑标记 group is absent; clipboard shortcuts keep their own column, and in 阅读与修订模式 (Issue #1411)
-    // 粘贴 says why it waits for 自由直接编辑.
+    // With nothing selected the 编辑标记 group is absent; clipboard shortcuts keep their column and paste stays available.
     await rightClickUntil(
       renderer,
       `window.__j05.place(${JSON.stringify(first)}, 0, 0)`,
@@ -552,7 +551,7 @@ async function main() {
       `window.__j05.menu()?.dataset.markMenu === 'selection' && !window.__j05.menu().querySelector('[role="group"][aria-label="编辑标记"]')`,
       'empty-menu',
     );
-    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 2 && groups[0] === '文字处理' && groups[1] === 'AI7 任务' && !window.__j05.item('add-annotation') && !window.__j05.item('add-editor-note') && !window.__j05.item('add-change-suggestion') && !window.__j05.item('add-highlight-1') && disabled('cut') && disabled('copy') && window.__j05.item('paste')?.title === '阅读与修订模式下不能剪切或粘贴到正文' && !menu.textContent.includes('先选中一段文字') && window.__j05.item('copy')?.querySelector('.menu-shortcut')?.textContent === 'Ctrl+C'; })()`, 'empty-menu-hides-mark-group');
+    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 2 && groups[0] === '文字处理' && groups[1] === 'AI7 任务' && !window.__j05.item('add-annotation') && !window.__j05.item('add-editor-note') && !window.__j05.item('add-change-suggestion') && !window.__j05.item('add-highlight-1') && disabled('cut') && disabled('copy') && window.__j05.item('paste')?.disabled === false && window.__j05.item('paste-plain-text')?.disabled === false && !menu.textContent.includes('先选中一段文字') && window.__j05.item('copy')?.querySelector('.menu-shortcut')?.textContent === 'Ctrl+C'; })()`, 'empty-menu-hides-mark-group');
     await press(renderer, 'Escape');
     await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus', 15_000);
 
@@ -1134,6 +1133,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'`, 'revision-pending-card');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-pending-ignore');
     await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-ignore-restores', 30_000);
+    await settled(renderer, 'revision-ignore-settled');
     await assertRenderer(renderer, `(() => { window.__j05ImeJournal=Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence); return window.__j05.place(window.__j05RevBlock,4,8); })()`, 'revision-ime-select');
     await renderer.send('Input.imeSetComposition', { text: REVISED_TEXT, selectionStart: REVISED_TEXT.length, selectionEnd: REVISED_TEXT.length });
     await assertRenderer(renderer, `(async () => { await new Promise((resolve)=>setTimeout(resolve,900)); const editor=document.querySelector('[data-testid="manuscript-editor"]'); return editor.dataset.composing==='true' && Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence)===window.__j05ImeJournal && !window.__j05.block(window.__j05RevBlock).querySelector('[data-mark-status="open"][data-mark-source="editor"]'); })()`, 'revision-ime-no-card-before-end');
@@ -1141,14 +1141,17 @@ async function main() {
     await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'; })()`, 'revision-ime-card-after-end', 30_000);
     await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-ime-ignore');
     await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal`, 'revision-ime-restores', 30_000);
+    await settled(renderer, 'revision-ime-settled');
     await assertRenderer(renderer, `window.__j05.place(window.__j05RevBlock,4,8)`, 'revision-paste-select');
     await assertRenderer(renderer, `(() => { const data=new DataTransfer(); data.setData('text/plain',${JSON.stringify(REVISED_TEXT)}); document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true})); return true; })()`, 'revision-paste');
     await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改'; })()`, 'revision-paste-card', 30_000);
     await assertRenderer(renderer, `(() => { document.querySelector('[data-testid="manuscript-editor"]').focus(); return true; })()`, 'revision-undo-focus');
     await press(renderer, 'z', 2);
     await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && !window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')`, 'revision-history-undo', 30_000);
+    await settled(renderer, 'revision-history-undo-settled');
     await press(renderer, 'z', 10);
     await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改' && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')!==null`, 'revision-history-redo', 30_000);
+    await settled(renderer, 'revision-history-redo-settled');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]').click(); return true; })()`, 'revision-pending-apply');
     await waitFor(renderer, `window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')!==null && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-pending-applied');
     await settled(renderer, 'revision-pending-settled');
