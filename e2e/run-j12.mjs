@@ -1991,7 +1991,8 @@ async function main() {
     await assertRenderer(primary, `(() => { const star=document.querySelector('[data-favorite-model="deepseek-flash"]'); if(!(star instanceof HTMLButtonElement)||star.disabled)return false; star.click(); return true; })()`, 'ordinary-catalogue-favourite');
     await waitFor(primary, `document.querySelector('[data-favorite-model="deepseek-flash"]')?.getAttribute('aria-pressed')==='true'`, 'ordinary-catalogue-favourite-saved');
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(refresh.disabled)return false; refresh.click(); return true; })()`, 'ordinary-catalogue-refresh');
-    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash' && document.querySelector('[data-favorite-model="deepseek-flash"]')?.getAttribute('aria-pressed')==='true'`, 'ordinary-catalogue-refresh-keeps-choice');
+    // The refresh's own re-render settles (its button enabled again) before the Journey leaves the page (#1431: no later step masks it).
+    await waitFor(primary, `document.querySelector('[data-action="retry-model-list"]')?.disabled===false && document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash' && document.querySelector('[data-favorite-model="deepseek-flash"]')?.getAttribute('aria-pressed')==='true'`, 'ordinary-catalogue-refresh-keeps-choice');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'catalogue-restore-settings-ready');
     await click(primary, '帮助', 'catalogue-restore-help');
