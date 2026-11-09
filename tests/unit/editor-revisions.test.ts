@@ -1,7 +1,7 @@
 import { Schema } from 'prosemirror-model';
 import { describe, expect, it } from 'vitest';
-import { readingRevisionBlocksInput, readingRevisionKey } from '../../src/renderer/editor-input-mode.js';
-import { QUICK_REVISE_TOO_MANY_LINES, QUICK_REVISE_UNCHANGED, spanRevisionSegments } from '../../src/renderer/editor-revisions.js';
+import { getAutoApplyEditorRevisions, setAutoApplyEditorRevisions } from '../../src/renderer/editor-input-mode.js';
+import { computeInlineRevisionDiff, QUICK_REVISE_TOO_MANY_LINES, QUICK_REVISE_UNCHANGED, spanRevisionSegments } from '../../src/renderer/editor-revisions.js';
 import { APPLIED_BADGE_TEXT, blockMarkDecorations } from '../../src/renderer/mark-decorations.js';
 import { searchContextParts } from '../../src/renderer/manuscript-search-labels.js';
 import type { EditorialMarkAnchorProjection } from '../../src/shared/protocol.js';
@@ -9,24 +9,23 @@ import { installMiniDom } from '../support/mini-dom.js';
 
 // 阅读与修订模式 and the editor's revisions (Issue #1411), and the find panel's highlighted contexts (Issue #1409): the pure parts.
 
-const key = (key: string, extra: Partial<Pick<KeyboardEvent, 'altKey' | 'shiftKey'>> = {}) => ({ key, altKey: false, shiftKey: false, ...extra });
-
-describe('阅读与修订模式', () => {
-  it('lets reading, moving, selecting, copying and commands through and stops writing keys', () => {
-    for (const reads of ['ArrowLeft', 'ArrowDown', 'Home', 'End', 'PageDown', 'Shift', 'Escape', 'Tab', 'ContextMenu', 'F3']) expect(readingRevisionKey(key(reads), false)).toBeNull();
-    for (const command of ['c', 'a', 'f', 's', 'z', 'h']) expect(readingRevisionKey(key(command), true)).toBeNull();
-    for (const writes of ['甲', 'a', ' ', 'Enter']) expect(readingRevisionKey(key(writes), false)).toBe('revise');
-    expect(readingRevisionKey(key('Enter', { shiftKey: true }), false)).toBe('revise');
-    for (const removes of ['Backspace', 'Delete']) {
-      expect(readingRevisionKey(key(removes), false)).toBe('block');
-      expect(readingRevisionKey(key(removes), true)).toBe('block');
-    }
-    for (const clipboard of ['x', 'V']) expect(readingRevisionKey(key(clipboard), true)).toBe('block');
+describe('inline editor revisions', () => {
+  it('diffs graphemes and separates disjoint spans, with no card for unchanged text', () => {
+    expect(computeInlineRevisionDiff('甲👩‍💻乙丙丁', '甲🙂乙新丁')).toEqual([
+      { fromGrapheme: 1, toGrapheme: 2, currentFromGrapheme: 1, beforeText: '👩‍💻', afterText: '🙂' },
+      { fromGrapheme: 3, toGrapheme: 4, currentFromGrapheme: 3, beforeText: '丙', afterText: '新' },
+    ]);
+    expect(computeInlineRevisionDiff('甲乙', '甲乙')).toEqual([]);
+    const middle = '甲乙丙丁'.repeat(300);
+    expect(computeInlineRevisionDiff('始' + middle + '终', '新' + middle + '尾')).toHaveLength(2);
+    expect(computeInlineRevisionDiff('甲乙', '甲')).toMatchObject([{ beforeText: '乙', afterText: '' }]);
+    expect(computeInlineRevisionDiff('甲', '甲乙')).toMatchObject([{ beforeText: '', afterText: '乙' }]);
   });
-
-  it('refuses every writing input but an input method composing, which the transaction guard refuses at its end', () => {
-    for (const writes of ['insertText', 'insertFromPaste', 'insertFromDrop', 'deleteContentBackward', 'deleteByCut', 'insertParagraph']) expect(readingRevisionBlocksInput(writes)).toBe(true);
-    for (const passes of ['insertCompositionText', 'historyUndo', '']) expect(readingRevisionBlocksInput(passes)).toBe(false);
+  it('defaults to auto apply when preference storage is unavailable', () => {
+    expect(getAutoApplyEditorRevisions()).toBe(true);
+    expect(() => setAutoApplyEditorRevisions(false)).not.toThrow();
+    expect(getAutoApplyEditorRevisions()).toBe(false);
+    setAutoApplyEditorRevisions(true);
   });
 });
 

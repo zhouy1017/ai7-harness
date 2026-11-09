@@ -255,6 +255,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   production_documents: 'owned',
   production_document_categories: 'shared',
   production_document_metadata: 'owned',
+  editor_inline_revision_commands: 'owned',
+  editor_inline_revision_marks: 'owned',
   production_document_versions: 'owned',
   production_document_deliveries: 'owned',
   production_document_origin_readings: 'owned',

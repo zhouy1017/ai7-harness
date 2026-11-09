@@ -1,3 +1,4 @@
+import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
 import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
 import type { SaveProductionDocumentTypeInput, DeleteProductionDocumentTypeInput, ReorderProductionDocumentTypesInput, UpdateProductionDocumentMetaInput, ProductionDocumentTypesProjection } from '../shared/protocol.js';
@@ -3259,6 +3260,7 @@ export class EditorialStore {
       // Revision 111 (Issue #1412): the 🔒 AI edit lock ledger; `initializeTaskAuthorizationSchema` stamps the version.
       initializeAiEditLockSchema(authority);
       initializeDerivativeWorkspaceSchema(authority);
+      initializeInlineEditorRevisionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -13315,6 +13317,9 @@ export class EditorialStore {
   }
 
   updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {
+    if (input.action === 'apply-inline-revision' || input.action === 'revert-inline-revision') {
+      return this.#markCall(() => this.#boundedCall(() => decideInlineEditorRevision(this.#authority, this.#boundedAuthority, this.#lifetimeId, input)));
+    }
     return this.#markCall(() => this.#editorialMarks.update(input));
   }
 

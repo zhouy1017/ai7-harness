@@ -377,7 +377,7 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['模式：阅读与修订（防误触）', '让 AI 修改…', '撤销', '重做', '重试权威刷新']);
+      .toEqual(['修订模式', '修订模式 · 人工修改自动应用：开', '让 AI 修改…', '撤销', '重做', '重试权威刷新']);
     app.showing?.destroy();
   });
 
