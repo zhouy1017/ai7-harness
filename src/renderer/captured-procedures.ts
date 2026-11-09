@@ -221,8 +221,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       }));
     }
     if (procedure.versionCount > 1 && (procedure.runnable || procedure.latestState !== 'stopped')) {
-      actions.append(button(PROCEDURE_ACTIONS.stopAll, 'quiet', 'stop-all', () => openStop(procedure.procedureId, null,
-        `[data-procedure-id="${procedure.procedureId}"] > .captured-procedure-stop h5`)));
+      actions.append(button(PROCEDURE_ACTIONS.stopAllNow, 'quiet', 'stop-all-now', () => stopNow(procedure.procedureId, null, `[data-procedure-id="${procedure.procedureId}"] h4`)),
+        button(PROCEDURE_ACTIONS.stopAll, 'quiet', 'stop-all', () => openStop(procedure.procedureId, null,
+          `[data-procedure-id="${procedure.procedureId}"] > .captured-procedure-stop h5`)));
     }
     const toggle = button(page === null ? `查看各版本（${procedure.versionCount}）` : '收起各版本', 'quiet', 'versions', async () => {
       if (procedurePages.has(procedure.procedureId)) procedurePages.delete(procedure.procedureId);
@@ -312,7 +313,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     if (version.state !== 'stopped') {
       const stop = button(PROCEDURE_ACTIONS.stop, 'quiet', 'stop', () => openStop(procedure.procedureId, version.versionId,
         `[data-version-id="${version.versionId}"] .captured-procedure-stop h5`));
-      actions.append(stop);
+      actions.append(button(PROCEDURE_ACTIONS.stopNow, 'quiet', 'stop-now', () => stopNow(procedure.procedureId, version.versionId, `[data-version-id="${version.versionId}"]`)), stop);
     }
     if (actions.childElementCount > 0) item.append(actions);
     if (open.stop !== null && open.stop.versionId === version.versionId) item.append(stopPanel(open.stop));
@@ -326,6 +327,26 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       ...version.steps.flatMap((step) => [el('dt', undefined, step.label), el('dd', 'technical-identity', `${step.categoryId} · ${step.procedureTitle} · ${technicalWords(`第 ${step.procedureVersion} 版`, '版本')}`)]),
     ));
     return item;
+  }
+
+  /**
+   * `停用` in one step (Issue #1431 item 95): the impact is read and confirmed in the same action; only when the Runs it touches moved
+   * meanwhile does the preview open, in the same action, for the editor to look before stopping. `查看停用影响…` stays optional.
+   */
+  async function stopNow(procedureId: string, versionId: string | null, focus: string): Promise<void> {
+    let stale = false;
+    await act('正在停用…', '无法停用。', async () => {
+      const preview = await api.previewCapturedProcedureStop({ procedureId, versionId });
+      const confirmation = await confirmProcedureStop(api, preview);
+      if (confirmation.kind === 'stopped') {
+        open.stop = null;
+        options.setStatus(procedureStoppedLine(confirmation.result.title, preview.versionCount), 'success');
+      } else {
+        open.stop = confirmation.preview;
+        stale = true;
+        options.setStatus(PROCEDURE_STOP_STALE, 'error');
+      }
+    }, () => stale ? `#${CSS.escape(`procedure-stop-${procedureId}-${versionId ?? 'all'}`)}` : focus);
   }
 
   /** `停用…` (Issue #66, S31): read the preview first; nothing is stopped until `确认停用`. */

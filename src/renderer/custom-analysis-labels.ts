@@ -22,11 +22,11 @@ export function customTabVersionLine(version: number, revisionLabel: string, ord
 }
 
 export function customTabCountsLine(counts: { units: number; rows: number; located: number; unlocated: number }): string {
-  return `${counts.units} 个单元作答 · ${counts.rows} 条回答 · ${counts.located} 条已定位原文${counts.unlocated === 0 ? '' : ` · ${counts.unlocated} 条未能定位`}`;
+  return `${technicalWords(`${counts.units} 个单元作答 · `)}${counts.rows} 条回答 · ${counts.located} 条已定位原文${counts.unlocated === 0 ? '' : ` · ${counts.unlocated} 条未能定位`}`;
 }
 
 export function customTabGapLine(gap: { unitOrdinal: number; reason: string }): string {
-  return `第 ${gap.unitOrdinal} 单元缺口：${gap.reason}`;
+  return technicalWords(`第 ${gap.unitOrdinal} 单元缺口：${gap.reason}`, `正文第 ${gap.unitOrdinal} 部分尚未完成：${gap.reason}`);
 }
 
 export function customTabMoreRows(shown: number): string {

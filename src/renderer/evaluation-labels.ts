@@ -176,7 +176,7 @@ export function evaluationConclusionLabel(profile: Pick<EvaluationProfileProject
 /** One version in the list: its number and state, the revision, the total and — once chosen — the conclusion. */
 export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection): string {
   const conclusion = summary.conclusion === null ? '' : ` · ${evaluationConclusionLabel(profile, summary.conclusion)}`;
-  return `${evaluationHeading(summary)} · 修订版${technicalWords(` ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
+  return `${evaluationHeading(summary)}${technicalWords(` · 修订版 ${summary.revisionLabel}`)} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
 }
 
 /** The Book's 评估 on 工作概览, in one line. */
@@ -287,13 +287,13 @@ export function evaluationAi7TaskLine(task: NonNullable<EvaluationInitialProject
 export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjection, 'bands'>, latest: NonNullable<EvaluationInitialProjection['latest']>): string {
   const total = latest.complete ? evaluationTotalLine(profile, latest.total) : '全书综合没有给出分数';
   const moved = latest.current ? '' : '（稿件此后改过：重新生成后才能在报告上修改）';
-  return `第 ${latest.ordinal} 次初评 · 读的是修订版${technicalWords(` ${latest.revisionLabel}`)} · ${total}${moved}`;
+  return `第 ${latest.ordinal} 次初评${technicalWords(` · 读的是修订版 ${latest.revisionLabel}`)} · ${total}${moved}`;
 }
 
 /** 依据充分度 of one item (EVAL-005), with what it rests on. */
 export function evaluationAi7SufficiencyLine(item: Pick<EvaluationInitialDraftProjection['items'][number], 'sufficiency' | 'citedBlocks' | 'unitsCited'>): string {
   const label = `依据充分度 ${EVALUATION_AI7_SUFFICIENCY[item.sufficiency]}`;
-  return item.citedBlocks === 0 ? `${label}（没有引用段落）` : `${label}（引用 ${item.citedBlocks} 个段落，分布在 ${item.unitsCited} 个阅读范围）`;
+  return item.citedBlocks === 0 ? `${label}（没有引用段落）` : `${label}（引用 ${item.citedBlocks} 个段落${technicalWords(`，分布在 ${item.unitsCited} 个阅读范围`)}）`;
 }
 
 /**
@@ -334,11 +334,11 @@ export function evaluationStartingScore(record: Pick<EvaluationRecordProjection,
  * notes are cut to a few spread over the ranges (Issue #689), and the summary then says how many there are in all.
  */
 export function evaluationAi7EvidenceSummary(shown: number, count: number = shown): string {
-  return shown >= count ? `AI7 的依据（${count} 条）` : `AI7 的依据（共 ${count} 条，这里列出分布在各阅读范围的 ${shown} 条）`;
+  return shown >= count ? `AI7 的依据（${count} 条）` : `AI7 的依据（共 ${count} 条，这里列出${technicalWords('分布在各阅读范围的', '其中')} ${shown} 条）`;
 }
 
 export function evaluationAi7EvidenceLine(entry: Pick<EvaluationInitialDraftProjection['items'][number]['evidence'][number], 'unitOrdinal' | 'note'>): string {
-  return `阅读范围 ${entry.unitOrdinal}：${entry.note}`;
+  return `${technicalWords(`阅读范围 ${entry.unitOrdinal}`, `正文第 ${entry.unitOrdinal} 部分`)}：${entry.note}`;
 }
 
 /**
@@ -347,7 +347,9 @@ export function evaluationAi7EvidenceLine(entry: Pick<EvaluationInitialDraftProj
  */
 export function evaluationAi7UnreadLine(draft: Pick<EvaluationInitialDraftProjection, 'unitsTotal' | 'unreadUnits'>): string | null {
   if (draft.unreadUnits.length === 0) return null;
-  return `AI7 这次没有读到 ${draft.unreadUnits.length} / ${draft.unitsTotal} 个阅读范围（第 ${draft.unreadUnits.join('、')} 个）：这些范围里的内容没有进入它的分数和评语。`;
+  // Ordinary mode keeps the real gap and where it is, without the chunk count (Issue #1431 item 71).
+  return technicalWords(`AI7 这次没有读到 ${draft.unreadUnits.length} / ${draft.unitsTotal} 个阅读范围（第 ${draft.unreadUnits.join('、')} 个）：这些范围里的内容没有进入它的分数和评语。`,
+    `AI7 这次有部分内容没有读到（正文第 ${draft.unreadUnits.join('、')} 部分）：这些内容没有进入它的分数和评语。`);
 }
 
 /** What a version begun from AI7's 初评 says it began from. */
@@ -385,7 +387,7 @@ export const READERS_REPORT_STATUS = {
 
 /** The 定稿 version a new 审稿意见 drafts from, or `null` while there is none (the template rows then say why). */
 export function readersReportBasisLine(basis: EvaluationReadersReportProjection['basis']): string | null {
-  return basis === null ? null : `依据${technicalWords(`第 ${basis.ordinal} 版`, '版本')}定稿（评估的是修订版${technicalWords(` ${basis.revisionLabel}`)}）`;
+  return basis === null ? null : technicalWords(`依据第 ${basis.ordinal} 版定稿（评估的是修订版 ${basis.revisionLabel}）`, '依据已定稿的评估');
 }
 
 /** The Book's latest 审稿意见 Task in one line: its template, and its state as the drawer names it. */
@@ -528,9 +530,10 @@ export function evaluationRewriteProposalLine(proposal: NonNullable<EvaluationRe
  * whenever a proposal shows, and plainly when some were not read.
  */
 export function evaluationRewriteReadingLine(reading: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['reading']): string {
+  // Ordinary mode: whether the rewrite read everything, never the ranges counted (Issue #1431 item 73).
   return reading.unitsRead < reading.unitsTotal
-    ? `AI7 这次重写只读到 ${reading.unitsRead} / ${reading.unitsTotal} 个阅读范围：没读到的范围里的内容没有进入重写的评语。`
-    : `AI7 这次重写读了全部 ${reading.unitsTotal} 个阅读范围。`;
+    ? technicalWords(`AI7 这次重写只读到 ${reading.unitsRead} / ${reading.unitsTotal} 个阅读范围：没读到的范围里的内容没有进入重写的评语。`, 'AI7 这次重写有部分内容没有读到：这些内容没有进入重写的评语。')
+    : technicalWords(`AI7 这次重写读了全部 ${reading.unitsTotal} 个阅读范围。`, 'AI7 这次重写读了全书。');
 }
 
 /** The version's last decision on a rewrite. */

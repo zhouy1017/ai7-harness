@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type {
   AnalysisGapProjection,
   BaselineAnalysisResultSetRevisionProjection,
@@ -59,11 +59,11 @@ export const TASK_PANEL_LEAVE_STATUS = {
 } as const;
 
 export const TASK_PANEL_COMPOSE_STATUS = {
-  preparing: '正在为任务保存修订版…',
+  get preparing() { return technicalWords('正在为任务保存修订版…', '正在准备任务…'); },
   prepared: '任务已开始；可随时查看计划。',
-  cancelled: '任务准备已取消；稿件与任务草稿保持不变。',
+  get cancelled() { return technicalWords('任务准备已取消；稿件与任务草稿保持不变。', '已取消任务准备。'); },
   failed: '无法准备这项任务。',
-} as const;
+};
 
 // ---- 查看结果: the floating window beside the text (TASK-045) --------------------------------------------------
 
@@ -87,7 +87,7 @@ export function taskResultTaskLine(entry: BookTaskItemProjection): string {
 
 /** An analysis read the whole manuscript as it stood at the revision it pins. */
 export function analysisResultReadLine(revision: { units: ReadonlyArray<{ unitOrdinal: number }>; manuscriptPin: BaselineAnalysisResultSetRevisionProjection['manuscriptPin']; unitPage?: { total: number } }): string {
-  return `全书 ${revision.unitPage?.total ?? revision.units.length} 个阅读范围 · 稿件修订版${technicalWords(` ${revision.manuscriptPin.revisionLabel}`)}`;
+  return technicalWords(`全书 ${revision.unitPage?.total ?? revision.units.length} 个阅读范围 · 稿件修订版 ${revision.manuscriptPin.revisionLabel}`, '全书稿件');
 }
 export const ANALYSIS_RESULT_NOT_DONE = '没有修改稿件：分析只读稿件。';
 
@@ -99,6 +99,7 @@ export const REVIEW_RESULT_NOT_DONE = '没有修改稿件：发现作为标记�
 
 /** A reading range, by the heading the manuscript gives it when it has one. */
 export function taskResultRangeTitle(unitOrdinal: number, heading: string | null): string {
+  if (!technicalLayerVisible) return heading === null ? `正文第 ${unitOrdinal} 部分` : `「${heading}」`;
   return heading === null ? `第 ${unitOrdinal} 个阅读范围` : `第 ${unitOrdinal} 个阅读范围 · 「${heading}」`;
 }
 
@@ -180,7 +181,7 @@ export function taskComposerBookLine(bookTitle: string): string {
 }
 /** The branch and revision the composer was opened on (TASK-002); `待保存修订版` while edits are newer than it. */
 export function taskComposerRevisionLine(revisionLabel: string, journalSequence: number, pending: boolean): string {
-  return `修订版 ${technicalWords(revisionLabel)} · 修订日志${technicalWords(`序号 ${journalSequence}`)}${pending ? ' · 待保存修订版' : ''}`;
+  return technicalWords(`修订版 ${revisionLabel} · 修订日志序号 ${journalSequence}${pending ? ' · 待保存修订版' : ''}`, pending ? '有未保存修改' : '当前稿件');
 }
 export const TASK_COMPOSER_NO_RANGES = '没有带所选文字。';
 /** Words pinned while the journal holds edits no revision holds yet (TASK-002, 031). */

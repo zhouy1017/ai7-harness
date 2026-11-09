@@ -671,7 +671,8 @@ export class ProductionDocuments {
   }
 
   updateMeta(input: import('../shared/protocol.js').UpdateProductionDocumentMetaInput): void {
-    const row = this.documentById(input.bookId, input.documentId);
+    // An explicit `deleted: false` is the 撤销 of a one-step delete (Issue #1431 item 28): it alone reaches a deleted document.
+    const row = this.#documentRows(input.bookId, input.deleted === false).find((entry) => entry.documentId === input.documentId);
     requireDocument(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份衍生稿件。');
     const typeId = input.typeId ?? row.typeId;
     requireDocument(productionDocumentType(typeId, this.#db) !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个类别已不存在。');
@@ -682,15 +683,15 @@ export class ProductionDocuments {
       .run(row.documentId, typeId, input.finalized === undefined ? null : Number(input.finalized), Number(input.deleted ?? false), new Date().toISOString());
   }
 
-  #documentRows(bookId: string): ProductionDocumentRow[] {
+  #documentRows(bookId: string, includeDeleted = false): ProductionDocumentRow[] {
     return (this.#db.prepare(
       `SELECT pd.document_id, pd.book_id, coalesce(meta.type_id, pd.type_id) type_id, pd.origin_source_version_id, pd.created_at, pd.parser_identity, mb.branch_id, mb.name
        FROM production_documents pd
        LEFT JOIN production_document_metadata meta ON meta.document_id = pd.document_id
        JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
        JOIN manuscript_branches mb ON mb.manuscript_id = pd.document_id
-       WHERE pd.book_id = ? AND coalesce(meta.deleted, 0) = 0 ORDER BY pd.created_at, pd.rowid`,
-    ).all(bookId) as SqlRow[]).map((row) => ({
+       WHERE pd.book_id = ? AND (? = 1 OR coalesce(meta.deleted, 0) = 0) ORDER BY pd.created_at, pd.rowid`,
+    ).all(bookId, includeDeleted ? 1 : 0) as SqlRow[]).map((row) => ({
       documentId: text(row.document_id),
       bookId: text(row.book_id),
       typeId: text(row.type_id),

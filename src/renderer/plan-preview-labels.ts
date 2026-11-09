@@ -1,4 +1,4 @@
-import { technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisCoverageAxis,
@@ -201,9 +201,10 @@ export function analysisFourSentences(revision: {
   const { coverage, reducerClosure, freshness, assurance } = revision;
   const read = revision.manuscriptPin.revisionLabel;
   const leads = assurance.unresolvedConflictCount + assurance.crossUnitFindingCount;
+  // Ordinary mode keeps every real gap and the lack of currency, without the revision, the chunk count or the invariant (Issue #1431 item 68).
   const trust = [
-    assurance.statement,
-    ...(assurance.lowConfidenceUnitCount === 0 ? [] : [`其中 ${assurance.lowConfidenceUnitCount} 个阅读范围模型自评把握较低。`]),
+    technicalWords(assurance.statement, 'AI 分析，可反馈有误之处。'),
+    ...(assurance.lowConfidenceUnitCount === 0 ? [] : [technicalWords(`其中 ${assurance.lowConfidenceUnitCount} 个阅读范围模型自评把握较低。`, '其中部分内容 AI 把握较低。')]),
     ...(assurance.sampledPrecision === null ? [] : [`抽样复核了 ${assurance.sampledPrecision.size} 条，${assurance.sampledPrecision.upheld} 条成立。`]),
     ...(leads === 0 && assurance.unresolvedItemCount === 0
       ? []
@@ -211,11 +212,12 @@ export function analysisFourSentences(revision: {
   ].join('');
   return [
     coverage.state === 'complete'
-      ? { axis: 'coverage', heading: '覆盖范围', sentence: `全稿分成 ${coverage.unitsTotal} 个阅读范围，全部读完。`, nextAction: '无需处理。', target: null }
+      ? { axis: 'coverage', heading: '覆盖范围', sentence: technicalWords(`全稿分成 ${coverage.unitsTotal} 个阅读范围，全部读完。`, '全稿已分析。'), nextAction: '无需处理。', target: null }
       : {
           axis: 'coverage',
           heading: '覆盖范围',
-          sentence: `全稿分成 ${coverage.unitsTotal} 个阅读范围，已读完 ${coverage.unitsClosed} 个；还有 ${coverage.gapCount} 个没有读成，在「各章」里标为尚未分析。`,
+          sentence: technicalWords(`全稿分成 ${coverage.unitsTotal} 个阅读范围，已读完 ${coverage.unitsClosed} 个；还有 ${coverage.gapCount} 个没有读成，在「各章」里标为尚未分析。`,
+            '全稿还有部分内容没有分析完，在「各章」里标为尚未分析。'),
           nextAction: '可在「历史与更新」里重新分析所选范围。',
           target: 'history',
         },
@@ -231,20 +233,20 @@ export function analysisFourSentences(revision: {
           target: reducerClosure.state === 'closed' ? null : 'chapters',
         },
     freshness.state === 'current'
-      ? { axis: 'freshness', heading: '与当前稿件', sentence: `这份分析读的是 ${read}，稿件此后没有改动。`, nextAction: '无需处理。', target: null }
+      ? { axis: 'freshness', heading: '与当前稿件', sentence: technicalWords(`这份分析读的是 ${read}，稿件此后没有改动。`, '与当前稿件一致。'), nextAction: '无需处理。', target: null }
       : freshness.state === 'stale'
-        ? { axis: 'freshness', heading: '与当前稿件', sentence: `这份分析读的是 ${read}，稿件此后有改动，分析已不是最新。`, nextAction: '可在「历史与更新」里同步到当前稿件。', target: 'history' }
-        : { axis: 'freshness', heading: '与当前稿件', sentence: `这是较早的一份分析，读的是 ${read}；之后已有更新的分析，它按原样保留。`, nextAction: '可在「历史与更新」里返回最新的一份。', target: 'history' },
+        ? { axis: 'freshness', heading: '与当前稿件', sentence: technicalWords(`这份分析读的是 ${read}，稿件此后有改动，分析已不是最新。`, '稿件已更新，这份分析已不是最新。'), nextAction: '可在「历史与更新」里同步到当前稿件。', target: 'history' }
+        : { axis: 'freshness', heading: '与当前稿件', sentence: technicalWords(`这是较早的一份分析，读的是 ${read}；之后已有更新的分析，它按原样保留。`, '这是较早的一份分析，之后已有更新的分析。'), nextAction: '可在「历史与更新」里返回最新的一份。', target: 'history' },
     { axis: 'assurance', heading: '可信程度', sentence: trust, nextAction: '需要核实的地方，到「审阅」的「情节逻辑与前后一致」处理。', target: null },
   ];
 }
 
 /** The Run Report's four stages in the editor's words; `阅读范围` is what the record calls a unit. */
 export const RUN_REPORT_STAGE_LABELS: Record<RunReportStageId, string> = {
-  units: '逐个阅读范围分析',
+  get units() { return technicalWords('逐个阅读范围分析', '分析中'); },
   'cross-unit-reduction': '跨范围比对',
   'assurance-sampling': '抽样复核',
-  reduction: '合并整理',
+  get reduction() { return technicalWords('合并整理', '整理结果'); },
 };
 
 export const RUN_REPORT_STAGE_STATE_LABELS: Record<RunReportStageProjection['state'], string> = {
@@ -276,8 +278,8 @@ export function durationLabel(wallMs: number | null): string {
  * already kept, which is what its label says so that an editor never reads it as the analysis still open.
  */
 export const RUN_LIVENESS_STAGE_LABELS: Record<'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection' | 'platform-tools', string> = {
-  units: '正在逐个阅读范围分析',
-  'cross-unit-reduction': '正在跨范围比对',
+  get units() { return technicalWords('正在逐个阅读范围分析', '正在分析'); },
+  get 'cross-unit-reduction'() { return technicalWords('正在跨范围比对', '正在前后比对'); },
   'assurance-sampling': '正在抽样复核',
   'run-report-reflection': '分析已保存，正在写运行报告',
   'platform-tools': '联网检索',

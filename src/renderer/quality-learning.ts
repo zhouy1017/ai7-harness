@@ -1,4 +1,4 @@
-import { identityWords, technicalWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { filterChoices } from './components/controls.js';
 import { windowStep } from './components/controls.js';
 import { createButton } from './components/controls.js';
@@ -151,7 +151,8 @@ export function mountWordTrackedEditDetail(options: {
       heading.append(` · ${fields[item.field]}${technicalWords(` · UTF-16 ${item.startCodeUnit}–${item.endCodeUnit} / ${item.totalCodeUnits}`)}${item.complete ? '' : ' · 后续页继续'}`);
       const text = el('pre', 'word-detail-text', item.text === null ? '未提供' : item.text === '' ? '空内容' : item.text);
       text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere'; entry.append(text);
-      if (item.sha256 !== null || item.fragment !== null) {
+      // Raw positions, digests and records are diagnostics (Issue #1431 item 110): no empty technical shells in ordinary mode.
+      if (technicalLayerVisible && (item.sha256 !== null || item.fragment !== null)) {
         const provenance = el('details'); provenance.append(el('summary', undefined, '原始位置与摘要'),
           el('pre', 'technical-identity', JSON.stringify({ sha256: item.sha256, fragment: item.fragment }, null, 2)));
         entry.append(provenance);
@@ -164,8 +165,10 @@ export function mountWordTrackedEditDetail(options: {
         ? '段落边界（结构变化，不是空文字）' : labels[record.type]));
       if (record.type === 'import') entry.append(el('p', undefined, record.mode === 'suggestions'
         ? '修改前阅读作为稿件基线，原修订保留为建议。' : '经单独确认，修改后阅读作为稿件基线。'));
-      const details = el('details'); details.append(el('summary', undefined, '查看完整原始记录'), el('pre', 'technical-identity', JSON.stringify(record, null, 2)));
-      entry.append(details);
+      if (technicalLayerVisible) {
+        const details = el('details'); details.append(el('summary', undefined, '查看完整原始记录'), el('pre', 'technical-identity', JSON.stringify(record, null, 2)));
+        entry.append(details);
+      }
     }
     return entry;
   };

@@ -266,7 +266,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const versionOf = (windowNow: ManuscriptWindowProjection): string | undefined =>
     productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
   const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
-    if (!isDocument) return `修订版 ${windowNow.revisionLabel.replace(/^r/u, '')}`;
+    if (!isDocument) return technicalWords(`修订版 ${windowNow.revisionLabel.replace(/^r/u, '')}`, '当前稿件');
     if (!technicalLayerVisible) return '当前文档';
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
@@ -375,7 +375,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       value.startsWith('heading-') ? Number(value.slice(8)) : value === 'title' ? 1 : null);
     editor?.focus();
   });
-  const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
+  const retryAuthoritativeRefreshButton = button(technicalWords('重试权威刷新', '重新打开稿件'), 'quiet', () => void retryAuthoritativeRefresh());
   retryAuthoritativeRefreshButton.hidden = true;
   // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
   // first, exactly as for 分析. A Mark Card's 查看任务 leaves the same way, for its Review Run and finding.
@@ -1377,7 +1377,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     } catch (error) {
       if (!authoritativeMutation || !target || !continuity) {
         if (authoritativeMutation) setAuthoritativeMutation(false);
-        setStatus(rendererErrorMessage(error, '待保存编辑未能排空；权威操作未开始。'), 'error');
+        setStatus(rendererErrorMessage(error, technicalWords('待保存编辑未能排空；权威操作未开始。', '刚才的编辑尚未保存，这项操作没有开始。')), 'error');
         return undefined;
       }
       try {
@@ -1386,17 +1386,18 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         clearAuthoritativeRecovery();
         setAuthoritativeMutation(false);
         if (result) {
-          setStatus(`${result.completionLabel}；编辑器已从刷新中断中恢复。`, 'success');
+          setStatus(technicalWords(`${result.completionLabel}；编辑器已从刷新中断中恢复。`, `${result.completionLabel}；稿件已重新打开。`), 'success');
           return result;
         }
-        setStatus(rendererErrorMessage(error, '权威操作未完成；编辑器已恢复到当前持久状态。'), 'error');
+        setStatus(rendererErrorMessage(error, technicalWords('权威操作未完成；编辑器已恢复到当前持久状态。', '操作未完成；稿件已恢复到最近保存的状态。')), 'error');
       } catch (refreshError) {
         pendingAuthoritativeRecovery = result
           ? { target, continuity, expected: result, reconcile: (value) => reconcile(value as T) }
           : { target, continuity };
         retryAuthoritativeRefreshButton.hidden = false;
         setStatus(
-          `无法确认权威操作后的当前窗口；编辑区保持只读且保留可见缓冲区。请重试权威刷新。${refreshError instanceof Error ? refreshError.message : ''}`,
+          technicalWords(`无法确认权威操作后的当前窗口；编辑区保持只读且保留可见缓冲区。请重试权威刷新。${refreshError instanceof Error ? refreshError.message : ''}`,
+            '暂时无法显示最新稿件；在重新打开前暂不能编辑，屏幕上的文字仍保留。请点「重新打开稿件」。'),
           'error',
         );
       }
@@ -1424,13 +1425,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       setAuthoritativeMutation(false);
       setStatus(
         recovery.expected
-          ? `${recovery.expected.completionLabel}；权威窗口刷新已恢复。`
-          : '权威操作失败后已恢复到当前持久窗口。',
+          ? technicalWords(`${recovery.expected.completionLabel}；权威窗口刷新已恢复。`, `${recovery.expected.completionLabel}；稿件已重新打开。`)
+          : technicalWords('权威操作失败后已恢复到当前持久窗口。', '操作未完成；稿件已恢复到最近保存的状态。'),
         recovery.expected ? 'success' : 'error',
       );
     } catch (error) {
       retryAuthoritativeRefreshButton.disabled = false;
-      setStatus(`权威窗口仍无法刷新；编辑区继续保持只读，请再次重试。${rendererErrorMessage(error, '')}`, 'error');
+      setStatus(technicalWords(`权威窗口仍无法刷新；编辑区继续保持只读，请再次重试。${rendererErrorMessage(error, '')}`, '仍无法打开最新稿件，暂不能编辑；请再试一次。'), 'error');
     }
   }
 

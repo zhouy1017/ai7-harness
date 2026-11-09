@@ -15,6 +15,7 @@ import type {
 export const KNOWLEDGE_HEADING = '书系知识';
 export const KNOWLEDGE_NOTE = '书系知识只有经过纳入审阅才会成为书系可以选用的知识；候选项不会被任何任务读取，纳入也不会授权读取、发送或改动稿件。';
 export const KNOWLEDGE_PROPOSE_OPEN = '提议为书系知识…';
+export const KNOWLEDGE_ADD_DIRECT = '加入书系知识';
 export const KNOWLEDGE_PROPOSE = '提议为书系知识';
 export const KNOWLEDGE_CANCEL = '取消';
 export const KNOWLEDGE_TARGET_LEGEND = '条目';
@@ -90,14 +91,15 @@ export function knowledgeTargetLine(candidate: Pick<SeriesKnowledgeCandidateProj
 export function knowledgeProvenanceLine(provenance: SeriesKnowledgeProvenanceProjection | null): string {
   if (provenance === null) return '编辑撰写';
   if (provenance.uncheckpointed) {
-    return `来自《${provenance.bookTitle}》的稿件（${technicalWords(provenance.revisionLabel, '修订版')} 之后另有尚未保存为修订版的改动）：「${provenance.quote}」`;
+    return technicalWords(`来自《${provenance.bookTitle}》的稿件（${provenance.revisionLabel} 之后另有尚未保存为修订版的改动）：「${provenance.quote}」`,
+      `来自《${provenance.bookTitle}》的原文（原文已更新）：「${provenance.quote}」`);
   }
-  return `来自《${provenance.bookTitle}》${technicalWords(provenance.revisionLabel, '修订版')} 的原文：「${provenance.quote}」`;
+  return technicalWords(`来自《${provenance.bookTitle}》${provenance.revisionLabel} 的原文：「${provenance.quote}」`, `来自《${provenance.bookTitle}》的原文：「${provenance.quote}」`);
 }
 
 /** An item as the list heads it: its name, class and current version. */
 export function knowledgeItemLine(item: { readonly subject: string; readonly classLabel: string; readonly current: Pick<SeriesKnowledgeRevisionProjection, 'ordinal'> }): string {
-  return `「${item.subject}」 · ${item.classLabel} · ${technicalWords(`第 ${item.current.ordinal} 版`, '版本')}`;
+  return `「${item.subject}」 · ${item.classLabel}${technicalWords(` · 第 ${item.current.ordinal} 版`)}`;
 }
 
 /** One revision in an item's history. */

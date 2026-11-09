@@ -120,7 +120,7 @@ export function createImportReview(options: ImportReviewOptions) {
     let selected: WordTrackedChangesChoice = { ...chosen, acceptedBaselineConfirmed: chosen.mode === 'accepted-baseline' };
     wordIntakeFormChoices.set(key, { ...selected });
     while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
-    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未建立稿件基线。`);
+    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}${technicalWords('；尚未建立稿件基线。', '')}`);
     const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
@@ -129,10 +129,10 @@ export function createImportReview(options: ImportReviewOptions) {
       input.addEventListener('change', () => { if (!input.checked || busy) return;
         selected = { ...selected, mode, acceptedBaselineConfirmed: mode === 'accepted-baseline' }; changed(); });
     }
-    const confirmationLabel = element('p', 'field-note', '以接受修订后的文字建立稿件基线，原始修订留在原文件中。');
+    const confirmationLabel = element('p', 'field-note', technicalWords('以接受修订后的文字建立稿件基线，原始修订留在原文件中。', '导入修订后的正文，原始修订留在原文件中。'));
     confirmationLabel.dataset['wordAcceptedBaselineNote'] = '';
     const learningLabel = element('label', 'choice'); const learning = element('input'); learning.type = 'checkbox'; learning.dataset['wordLearnFromEdits'] = '';
-    learningLabel.append(learning, element('span', undefined, '允许按当前学习设置在本机保留原始修改对 · 关闭与排除优先，本次不创建编辑记忆、更新审阅偏好或调用模型。'));
+    learningLabel.append(learning, element('span', undefined, technicalWords('允许按当前学习设置在本机保留原始修改对 · 关闭与排除优先，本次不创建编辑记忆、更新审阅偏好或调用模型。', '允许学习这些修改')));
     const notice = element('p', 'field-note'); notice.dataset['wordReadingAvailability'] = '';
     group.append(confirmationLabel, learningLabel, notice);
     let busy = false;
@@ -145,10 +145,10 @@ export function createImportReview(options: ImportReviewOptions) {
       learning.checked = selected.learnFromEdits; learning.disabled = busy;
       const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
       notice.textContent = !reading.usable ? reading.blockCount === 0
-        ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
-          : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
-        : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
-        : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
+        ? selected.mode === 'suggestions' ? technicalWords('撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。', '撤销修订后没有可编辑的正文；可以改为「导入修订后的正文」。')
+          : technicalWords('接受修订后没有可编辑的非空稿件，不能建立该基线。', '接受修订后没有可编辑的正文。')
+        : technicalWords('所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。', '暂不支持按这种方式导入，请选择另一种方式。')
+        : technicalWords('最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。', '');
       for (const control of buttons) control.disabled = busy || !allowed();
     };
     const changed = (): void => { wordIntakeFormChoices.set(key, { ...selected }); paint(); };
@@ -355,7 +355,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const structureView = renderStructureReview(staged.structure);
       const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
       const confirm = button('导入', 'primary', async () => {
-        if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', 'error'); return; }
+        if (wordControls !== null && !wordControls.allowed()) { setStatus(technicalWords('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', '请选择一种可用的 Word 修订导入方式。'), 'error'); return; }
         if (relationshipSelection === 'first-manuscript' && !structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = relationshipSelection === 'first-manuscript' ? structureView.choice() : undefined;
         const trackedChanges = wordControls?.choice();
@@ -417,7 +417,7 @@ export function createImportReview(options: ImportReviewOptions) {
       content.append(...wordControls.elements, ...fidelityView.elements, ...structureView.elements);
       const actions = element('div', 'button-row');
       const confirm = button('导入', 'primary', async () => {
-        if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', 'error'); return; }
+        if (!wordControls.allowed()) { setStatus(technicalWords('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', '请选择一种可用的 Word 修订导入方式。'), 'error'); return; }
         if (!structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = structureView.choice();
         const trackedChanges = wordControls.choice();
@@ -541,13 +541,13 @@ export function createImportReview(options: ImportReviewOptions) {
             reuseSourceVersionId, value));
         if (reimportLineageChoice === undefined) revealedControl = radio;
       };
-      addLineageChoice('unconfirmed', '来源关系未确认', '继续保守的两方比较；这不会被解释为来源确认或阻断导入。');
+      addLineageChoice('unconfirmed', technicalWords('来源关系未确认', '不确定是哪个原文件'), technicalWords('继续保守的两方比较；这不会被解释为来源确认或阻断导入。', '只对比这次导入与当前稿件。'));
       verifiedLineageSources.forEach((sourceVersionId, index) => addLineageChoice(sourceVersionId,
         verifiedLineageSources.length === 1 ? technicalWords('确认这个来源版本', '确认此文件') : technicalWords(`确认来源版本（第 ${index + 1} 个）`, `确认第 ${index + 1} 个文件`),
-        '使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', sourceVersionId));
+        technicalWords('使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', '按这份原文件对比变化，结果更准确。'), sourceVersionId));
       const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
         control.disabled = true;
-        setStatus('正在读取来源关系版本页…', 'busy');
+        setStatus(technicalWords('正在读取来源关系版本页…', '正在读取更多文件…'), 'busy');
         try {
           const page = await window.ai7.getReimportLineageSourceVersionPage({
             bookId: selectedChoice.bookId,
@@ -639,7 +639,7 @@ export function createImportReview(options: ImportReviewOptions) {
         cancelPreparation.hidden = true;
         const prepare = button('准备稿件重新导入比较', 'primary', async () => {
           prepare.disabled = true;
-          setStatus('正在保存当前修订版并准备逐段比较…', 'busy');
+          setStatus(technicalWords('正在保存当前修订版并准备逐段比较…', '正在准备比较…'), 'busy');
           try {
             activePreparationJob = await window.ai7.prepareManuscriptReimport({
               draftId: staged.draftId,
@@ -719,7 +719,7 @@ export function createImportReview(options: ImportReviewOptions) {
     replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
     queueMicrotask(() => {
       revealedControl?.focus();
-      if (!selectedChoice) setStatus('请选择精确图书目标。');
+      if (!selectedChoice) setStatus(technicalWords('请选择精确图书目标。', '请选择要导入到哪本书。'));
       else if (relationshipSelection === null) setStatus('图书目标已选择；请另行选择导入关系。');
       else if (relationshipSelection === 'source-only' && reuseSourceVersionId === undefined &&
         selectedChoice.kind === 'existing-book' && staged.identityFindings.some((finding) =>
@@ -790,7 +790,7 @@ export function createImportReview(options: ImportReviewOptions) {
     content.append(
       importSteps('review'),
       element('h2', undefined, '复核来源材料导入'),
-      element('p', 'lede', '本次提交只形成图书拥有的来源材料记录；不会创建或改变稿件及其工作状态。'),
+      element('p', 'lede', technicalWords('本次提交只形成图书拥有的来源材料记录；不会创建或改变稿件及其工作状态。', '将这份资料添加到所选图书。')),
     );
     if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
 
@@ -800,7 +800,7 @@ export function createImportReview(options: ImportReviewOptions) {
     target.dataset['stableIdentity'] = review.target.stableIdentity;
     const targetValues = element('dl');
     targetValues.append(
-      element('dt', undefined, '精确目标'), element('dd', undefined, review.target.label),
+      element('dt', undefined, technicalWords('精确目标', '添加到')), element('dd', undefined, review.target.label),
       ...(review.target.kind === 'new-book'
         ? [element('dt', undefined, '确认书名'), element('dd', undefined, review.target.confirmedTitle)]
         : [element('dt', undefined, '内部编号'), element('dd', undefined, review.target.internalNumber ?? '未设置')]),
@@ -827,7 +827,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const retainedDigest = element('dd', 'technical-identity', review.retainedBoundary.sourceSha256);
     retainedDigest.setAttribute('data-source-sha256', '');
     boundaryValues.append(
-      element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
+      ...(technicalLayerVisible ? [element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label)] : []),
       element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
       element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
       element('dt', undefined, technicalLayerVisible ? '文件大小' : ''), retainedBytes,
@@ -845,7 +845,7 @@ export function createImportReview(options: ImportReviewOptions) {
         element('dt', undefined, '结构摘要'), structureDigest,
       );
     }
-    boundary.append(element('h3', undefined, '完整本地文件与内容边界'), boundaryValues, technicalDetails(
+    boundary.append(element('h3', undefined, technicalWords('完整本地文件与内容边界', '文件')), boundaryValues, technicalDetails(
       undefined,
       element('dt', undefined, '来源 SHA-256'), retainedDigest,
       ...parsedDigestRows,
@@ -860,7 +860,7 @@ export function createImportReview(options: ImportReviewOptions) {
     acquiredAt.setAttribute('data-acquired-at', review.provenance.acquiredAt);
     provenanceValues.append(
       element('dt', undefined, '取得方式'), element('dd', undefined, technicalWords(review.provenance.label, '已选择文件')),
-      element('dt', undefined, '处理范围'), element('dd', undefined, review.provenance.locality === 'local-provider-free' ? '本地 · 未调用 Provider' : review.provenance.locality),
+      ...(technicalLayerVisible ? [element('dt', undefined, '处理范围'), element('dd', undefined, review.provenance.locality === 'local-provider-free' ? '本地 · 未调用 Provider' : review.provenance.locality)] : []),
       element('dt', undefined, '取得时间'), acquiredAt,
     );
     provenance.append(element('h3', undefined, '来源记录'), provenanceValues);
@@ -884,7 +884,7 @@ export function createImportReview(options: ImportReviewOptions) {
       'primary',
       async () => {
         commitButton.disabled = true;
-        setStatus('正在原子提交来源材料记录…', 'busy');
+        setStatus(technicalWords('正在原子提交来源材料记录…', '正在添加资料…'), 'busy');
         try {
           const result = await window.ai7.commitSourceImport({
             draftId: review.draftId,
@@ -956,7 +956,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('h2', undefined, '按章节复核稿件重新导入'),
       element('p', 'lede', review.lineage.status === 'verified'
         ? technicalWords('已由所选图书拥有的精确来源版本建立三方比较。', '已与原文件和当前稿件比较。')
-        : '来源关系未确认；本次使用保守的两方比较，但不会阻断重新导入。'),
+        : technicalWords('来源关系未确认；本次使用保守的两方比较，但不会阻断重新导入。', '对比这次导入与当前稿件；没有找到对应的原文件，请逐处核对变化。')),
     );
     if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
 
@@ -965,21 +965,20 @@ export function createImportReview(options: ImportReviewOptions) {
     values.append(
       element('dt', undefined, '目标图书'), element('dd', undefined, review.target.label),
       element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
-      element('dt', undefined, '已保存的修订版'), element('dd', undefined, `${technicalWords(review.checkpoint.revisionLabel, '修订版')}${technicalWords(` · 修订日志 ${review.checkpoint.journalSequence}`)}`),
+      ...(technicalLayerVisible ? [element('dt', undefined, '已保存的修订版'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`)] : []),
       element('dt', undefined, '保存状态'), element('dd', undefined,
-        review.checkpoint.createdForDirtyJournal ? '已将当前编辑保存为修订版' : '当前稿件已保存'),
-      element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
-      element('dt', undefined, '比较方式'), element('dd', undefined,
-        review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
+        review.checkpoint.createdForDirtyJournal ? technicalWords('已将当前编辑保存为修订版', '已保存当前编辑') : '当前稿件已保存'),
+      ...(technicalLayerVisible ? [element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
+        element('dt', undefined, '比较方式'), element('dd', undefined, review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较')] : []),
       element('dt', undefined, '文件'), element('dd', undefined, review.sourceVersionResult.disposition === 'created' ? '导入新文件' : '使用已导入的文件'),
-      element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
-      element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
+      element('dt', undefined, technicalWords('暂存文件名', '文件名')), element('dd', undefined, review.source.displayName),
+      element('dt', undefined, technicalWords('暂存格式', '格式')), element('dd', undefined, review.source.format),
       element('dt', undefined, technicalLayerVisible ? '文件大小' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
-      element('dt', undefined, '暂存来源范围'), element('dd', undefined, technicalWords(review.source.provenanceLabel, '已选择文件')),
+      ...(technicalLayerVisible ? [element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel)] : []),
     );
     target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
     target.dataset['reimportSourceBytes'] = technicalLayerVisible ? String(review.source.sourceBytes) : '';
-    target.append(element('h3', undefined, '目标、固定点与来源关系'), values, technicalDetails(
+    target.append(element('h3', undefined, technicalWords('目标、固定点与来源关系', '对比对象')), values, technicalDetails(
       undefined,
       element('dt', undefined, '主稿件 ID'), element('dd', 'technical-identity', review.target.manuscriptId),
       element('dt', undefined, '稿件分支 ID'), element('dd', 'technical-identity', review.target.branchId),
@@ -1002,8 +1001,8 @@ export function createImportReview(options: ImportReviewOptions) {
     summary.append(
       element('h3', undefined, '比较摘要'),
       element('p', undefined, `${reimportSummaryLine(review).replace(/。$/u, '')}；${review.comparison.changed
-        ? '每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。'
-        : '稿件逐块一致，提交只记录未发现变化，不创建空修订版。'}`),
+        ? technicalWords('每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。', '请逐处选择拆分、改写与新增、删除或并入。')
+        : technicalWords('稿件逐块一致，提交只记录未发现变化，不创建空修订版。', '与当前稿件相同，没有需要更新的内容。')}`),
     );
     summary.dataset['reimportGroups'] = String(review.comparison.groups);
     summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
@@ -1272,10 +1271,10 @@ export function createImportReview(options: ImportReviewOptions) {
       const word = element('section', 'review-section'); word.dataset['wordReviewedMode'] = choice.mode;
       word.dataset['wordReviewedLearning'] = String(choice.learnFromEdits);
       word.append(element('h3', undefined, '本次 Word 修订导入'), element('p', undefined, `导入方式：${WORD_IMPORT_MODE_NAMES[choice.mode]}`),
-        element('p', undefined, choice.mode === 'suggestions' ? '撤销原修订后的文字作为稿件基线，原修订成为未应用的修改建议。'
-          : '已单独确认：接受原修订后的文字作为稿件基线。原文件和原始修订证据仍会保留。'),
-        element('p', undefined, choice.learnFromEdits ? '已允许按当前本机学习设置保留符合准入的原始修改对。' : '本次不保留学习修改对；来源、稿件对应和导入标记仍会保留。'));
-      if (review.wordLearning !== undefined) word.append(element('p', undefined,
+        element('p', undefined, choice.mode === 'suggestions' ? technicalWords('撤销原修订后的文字作为稿件基线，原修订成为未应用的修改建议。', '原修订将作为待处理的修改建议。')
+          : technicalWords('已单独确认：接受原修订后的文字作为稿件基线。原文件和原始修订证据仍会保留。', '导入修订后的正文，原文件仍保留。')),
+        element('p', undefined, choice.learnFromEdits ? technicalWords('已允许按当前本机学习设置保留符合准入的原始修改对。', '允许学习这些修改。') : technicalWords('本次不保留学习修改对；来源、稿件对应和导入标记仍会保留。', '不学习这些修改。')));
+      if (review.wordLearning !== undefined && technicalLayerVisible) word.append(element('p', undefined,
         `当前全局学习${review.wordLearning.globalEnabled ? '开启' : '关闭'}；本书${review.wordLearning.bookExcluded ? '已被排除' : '未被排除'}。` +
         `此次按当前设置可保留 ${review.wordLearning.eligibleSampleCount} / ${review.wordLearning.sourceTemplateCount} 条原始修改对，尚未用于编辑记忆、审阅偏好或模型任务。`));
       content.append(word);
@@ -1315,8 +1314,7 @@ export function createImportReview(options: ImportReviewOptions) {
     identityDetails.append(
       element('dt', undefined, '本地来源'),
       element('dd', undefined, review.source.displayName),
-      element('dt', undefined, '来源边界'),
-      element('dd', undefined, technicalWords(review.source.provenanceLabel, '已选择文件')),
+      ...(technicalLayerVisible ? [element('dt', undefined, '来源边界'), element('dd', undefined, review.source.provenanceLabel)] : []),
       element('dt', undefined, technicalLayerVisible ? '文件大小' : ''),
       sourceBytes,
       element('dt', undefined, '最终动作'),
@@ -1335,7 +1333,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const explanation = element('p', undefined, commitNote(acceptedDegradation));
       const commitButton = button(finalActionLabel, 'primary', async () => {
         commitButton.disabled = true;
-        setStatus(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', 'busy');
+        setStatus(technicalWords(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', '正在导入…'), 'busy');
         try {
           const result = await window.ai7.commitNewBookImport({
             draftId: review.draftId,

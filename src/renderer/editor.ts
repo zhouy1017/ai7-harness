@@ -4,6 +4,7 @@ import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosem
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-span.js';
+import { technicalWords } from './technical-layer.js';
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.js';
 import { EDITOR_MOTION_META, editorMotionPlugin } from './editor-motion.js';
@@ -19,7 +20,7 @@ import {
   type AtRiskExtent,
   type ProtectionView,
 } from './editor-protection.js';
-import { PENDING_BUFFER_REFUSED, PROTECTION_ACK_MISMATCH, PROTECTION_BUFFER_REFUSED, atRiskLocation, readOnlyLine, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
+import { PENDING_BUFFER_REFUSED, PROTECTION_BUFFER_REFUSED, protectionAckMismatchLine, atRiskLocation, readOnlyLine, type ProtectionCause, type ProtectionReadOnlyReason } from './editor-protection-labels.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
@@ -241,7 +242,7 @@ function requireEditor(condition: unknown, message: string): asserts condition {
 
 /** The acknowledgement binds the exact edit sent, or it is a moved target (DUR-007): never an unavailable write to retry. */
 function requireAcknowledgement(condition: boolean): asserts condition {
-  if (!condition) throw Object.assign(new Error(PROTECTION_ACK_MISMATCH), { code: 'EDITOR_ACK_MISMATCH' });
+  if (!condition) throw Object.assign(new Error(protectionAckMismatchLine()), { code: 'EDITOR_ACK_MISMATCH' });
 }
 
 function validateText(text: string): void {
@@ -970,7 +971,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         retryPrepared = prepared;
         saving = true;
         announceState();
-        options.onAnnouncement('正在自动写入修订日志；可继续编辑当前窗口。', 'busy');
+        options.onAnnouncement(technicalWords('正在自动写入修订日志；可继续编辑当前窗口。', '正在保存…'), 'busy');
         try {
           const ack = await options.flushJournalEdit(prepared.input);
           requireAcknowledgement(
@@ -1029,7 +1030,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       settleProtection();
       announceState();
       if (lastCompletion && !retryRequired && changedBlocks(view.state.doc).length === 0) {
-        options.onAnnouncement(lastCompletion, 'success');
+        options.onAnnouncement(technicalWords(lastCompletion, '已保存'), 'success');
       }
     })().catch((error: unknown) => {
       saving = false;

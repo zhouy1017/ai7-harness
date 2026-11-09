@@ -2483,7 +2483,7 @@ async function main() {
     const driftBar = await readDrawer(renderer);
     requireJourney(driftBar?.bar?.state === 'changed' && driftBar.bar.start === 'changed' && driftBar.bar.statement === BAR_STATEMENT &&
       driftBar.bar.note === '重新确认计划后，新的计划版本才能开始。' && driftBar.bar.status === null &&
-      barActions(driftBar) === 'reconfirm-plan:重新确认计划:enabled|view-plan-revision:查看计划修订:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled' &&
+      barActions(driftBar) === 'reconfirm-and-start:按新计划开始:enabled|reconfirm-plan:重新确认计划:enabled|view-plan-revision:查看计划修订:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled' &&
       driftBar.drift?.tableHidden === false, 'plan-revision-bar', driftBar?.bar);
     await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-drawer-control="start"]') && document.querySelector('#task-drawer [data-task-drawer-control="view-plan-revision"]')?.getAttribute('aria-expanded')==='true' && document.querySelector('#task-drawer [data-task-drawer-control="view-plan-revision"]')?.getAttribute('aria-controls')===document.querySelector('#task-drawer .task-plan-drift-table')?.id`, 'plan-revision-bar-no-start');
 
@@ -2620,14 +2620,14 @@ async function main() {
     requireJourney(JSON.stringify(openDrawer?.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && openDrawer.actions === 0, 'plan-edit-column-words', openDrawer?.adaptable);
 
     at('plan-edit-remove');
-    // × on 核对与抽检 and on the safe retry: each reads 你改的 with 恢复, the bar counts two and offers 更新计划 where
-    // 开始任务 was, and 保存草稿 waits for them. Nothing is recorded yet.
+    // × on 核对与抽检 and on the safe retry: each reads 你改的 with 恢复, the bar counts two and offers 保存并开始 where
+    // 开始任务 was, with 仅保存 beside it (Issue #1431 item 40), and 保存草稿 waits for them. Nothing is recorded yet.
     await reviewAction(renderer, '#task-drawer [data-task-plan-item="assurance-sampling"] [data-task-plan-edit="remove"]', 'plan-edit-remove-sampling');
     await reviewAction(renderer, '#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="remove"]', 'plan-edit-withdraw-retry');
     const pendingDrawer = await readDrawer(renderer);
     requireJourney(pendingDrawer?.bar?.note === '你改了 2 处' && pendingDrawer.bar.statement === null && pendingDrawer.version === '2' &&
-      barActions(pendingDrawer) === 'update-plan:更新计划:enabled|discard-edits:撤销修改:enabled|save-draft:保存草稿:disabled' &&
-      pendingDrawer.bar.actions[2]?.reason === '先更新计划或撤销修改', 'plan-edit-pending-bar', pendingDrawer?.bar);
+      barActions(pendingDrawer) === 'update-and-start:保存并开始:enabled|update-plan:仅保存:enabled|discard-edits:撤销修改:enabled|save-draft:保存草稿:disabled' &&
+      pendingDrawer.bar.actions[3]?.reason === '先更新计划或撤销修改', 'plan-edit-pending-bar', pendingDrawer?.bar);
     const pendingItems = await readEditable(renderer);
     requireJourney(JSON.stringify(pendingItems?.items?.slice(2)) === JSON.stringify([
       { id: 'assurance-sampling', removed: true, tag: '你改的 · 不做', control: 'restore', name: '恢复' },

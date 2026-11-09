@@ -3,6 +3,7 @@
 // follow a sentence straight to the screen it points at. 隐私说明 states only what the active policy set enforces
 // (docs/policies/README.md, MSET-008, slice 11e) and makes no legal promise.
 
+import { technicalLayerVisible } from './technical-layer.js';
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from './shell-labels.js';
 import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import { TASK_BAR_START } from './task-drawer-labels.js';
@@ -57,11 +58,16 @@ export const HELP_PRIVACY_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
   { heading: '本机处理', paragraphs: [
     'AI7 默认在本机处理文档、索引与检索；本地处理不联网。',
   ] },
-  { heading: '什么会离开本机', paragraphs: [
+  // Ordinary mode says plainly what goes to the chosen AI service and how to choose (Issue #1431 item 113); the policy mechanism is technical.
+  { heading: '什么会离开本机', get paragraphs() { return technicalLayerVisible ? [
     `任务计划由你选择「${TASK_BAR_START}」开始；模型请求只按当前生效的模型处理策略发送，可能包含任务获准读取的稿件、资料与提问。`,
     '你主动提问、润色、翻译或快速开始时，也可能发送策略允许的模型请求；已登记的后台分析可在登记范围与预算内运行。',
     '联网检索只发送模型提出的查询；抓取只读取模型引用的公开网页，两者都须当前策略允许，并限于获准使用它们的任务。',
-  ] },
+  ] : [
+    `你选择「${TASK_BAR_START}」后，任务计划里列出的稿件、资料与提问会发给你在「设置 › 模型服务」中选择的 AI 服务。`,
+    '你主动提问、润色、翻译或快速开始时，所选文字和问题也会发给这个 AI 服务；你开启的后台分析会在你设定的范围和用量上限内运行。',
+    '联网检索只发送检索用的查询词，并只读取引用到的公开网页。',
+  ]; } },
   { heading: '凭据', paragraphs: [
     '模型服务凭据保存在系统保护位置，界面只显示连接名与状态；凭据不会被显示、复制、导出，也不会进入任务文本或诊断包。',
   ] },

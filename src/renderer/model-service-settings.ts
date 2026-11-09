@@ -1,5 +1,5 @@
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
-import { technicalDisclosure, technicalLayerVisible, modelLabelWords } from './technical-layer.js';
+import { technicalDisclosure, technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { modelServiceFlow } from './model-service-flow.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
@@ -92,7 +92,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       }
     });
     form.append(mode, input, save);
-    section.append(form, element('p', 'field-note', '本机代理通常使用 http://127.0.0.1:端口，仅在代理支持 TLS 时使用 https://；代理只用于获准的模型请求，设置不随数据库迁移，暂不支持代理认证。'));
+    // Ordinary mode: how to fill the address and what is not supported (Issue #1431 item 100); the protocol and authority facts are technical.
+    section.append(form, element('p', 'field-note', technicalWords('本机代理通常使用 http://127.0.0.1:端口，仅在代理支持 TLS 时使用 https://；代理只用于获准的模型请求，设置不随数据库迁移，暂不支持代理认证。',
+      '本机代理通常填写 http://127.0.0.1:端口；暂不支持需要用户名和密码的代理。')));
     if (projection.lastProxyProbe) {
       const probe = projection.lastProxyProbe;
       const line = element('p', probe.status === 'available' ? 'success-note' : 'attention-note',
@@ -205,7 +207,11 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
     content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }),
       renderModelServiceProxyBlock(projection));
-    content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
+    // Ordinary mode says only what the connection state means for the editor (Issue #1431 item 99): a denial or that nothing is sent
+    // yet. The policy-boundary sentence and the authority statement are the developer layer's.
+    const label = projection.launchPolicy.providerProcessing.label;
+    const ordinaryPolicy = projection.launchPolicy.integrityState !== 'verified' || label.endsWith('零次实时传输') || label.endsWith('当前不会传输');
+    content.append(...(technicalLayerVisible ? [] : [...(ordinaryPolicy ? [policyIntegrity] : []), ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
     restoreInteraction(content);
     if (searchHadFocus) focusSearchSettings();

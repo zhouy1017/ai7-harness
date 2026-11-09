@@ -1,5 +1,5 @@
 import type { ModelServiceSettingsProjection, RendererApi, SearchBackendCandidateProjection, SearchBackendProbeProjection, SearchCandidateProbeOutcome } from '../shared/protocol.js';
-import { technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 
 /**
  * 设置 › 模型服务 › 联网检索 (Issue #883): the shipped backends in rank order with 选择后端 and 测试检索, and (Issue #1055) the
@@ -142,9 +142,10 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
         ? `评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`
         : '可配置为检索来源或备用来源'}${!technicalLayerVisible || backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
     const actions = element('div', 'button-row');
-    const choose = button('选择后端', 'quiet', () => void (async () => {
-      try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
-      catch (error) { setStatus(errorMessage(error, '无法保存联网检索后端。'), 'error'); }
+    // Ordinary mode says 检索服务 for a backend (Issue #1431 item 101).
+    const choose = button(technicalWords('选择后端', '选择检索服务'), 'quiet', () => void (async () => {
+      try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus(technicalWords('联网检索后端已保存', '检索服务已保存')); }
+      catch (error) { setStatus(errorMessage(error, technicalWords('无法保存联网检索后端。', '无法保存检索服务。')), 'error'); }
     })());
     choose.disabled = selected || !keyed;
     const output = element('div');
@@ -163,7 +164,8 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       backend.backendId === fallbackBackendId ? null : backend.backendId, backend.backendId === fallbackBackendId ? '备用来源已清除' : '备用来源已保存'));
     fallback.dataset['action'] = backend.backendId === fallbackBackendId ? 'clear-search-fallback' : 'select-search-fallback';
     fallback.disabled = backend.backendId !== fallbackBackendId && (backend.backendId === selectedBackendId || !keyed);
-    fallback.title = backend.backendId === selectedBackendId ? '默认后端不能同时作为备用来源' : keyed ? '' : '需先保存这个后端的密钥';
+    fallback.title = backend.backendId === selectedBackendId ? technicalWords('默认后端不能同时作为备用来源', '默认检索服务不能同时作为备用服务')
+      : keyed ? '' : technicalWords('需先保存这个后端的密钥', '需先保存这个检索服务的密钥');
     actions.append(choose, probe, fallback);
     if (projection.launchPolicy.operationalScope === 'ordinary-production') {
       const secret = element('input'); secret.type = 'password'; secret.autocomplete = 'off';

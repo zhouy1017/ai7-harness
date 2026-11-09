@@ -1,5 +1,5 @@
 import { stateTerm, windowStep } from './components/controls.js';
-import { identityWords, technicalLayerVisible } from './technical-layer.js';
+import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
@@ -28,6 +28,7 @@ import {
   PACKAGE_CONDITION_STATE,
   PACKAGE_CONDITIONS_HEADING,
   PACKAGE_CURRENT_MARK,
+  PACKAGE_EXPORT_DIRECT,
   PACKAGE_EXCLUDED_HEADING,
   PACKAGE_EXPORT_ACTION_LABELS,
   PACKAGE_EXPORT_APPROVE_REASON,
@@ -129,6 +130,8 @@ type ExportPhase = 'reviewing' | 'ready' | 'choosing' | 'prepared' | 'writing' |
 
 interface ExportState {
   route: 'folder' | 'archive';
+  /** 导出到文件夹… (Issue #1431 item 92): once the default review answers with nothing degraded, the folder dialog opens by itself. */
+  autoChoose?: boolean;
   packageVersionId: string;
   versionLabel: string;
   /** The switches as the editor left them; the review answers for the ones it was asked with. */
@@ -475,8 +478,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       open.dataset['packageVersionId'] = version.packageVersionId;
       open.setAttribute('aria-label', packageExportOpenAccessibleName(version.label));
       open.disabled = busy();
+      // One step for the default export (Issue #1431 item 92): the files are listed and the system's folder dialog opens at once;
+      // 导出… stays the way to choose files and switches first, and a degraded file stops for its notice.
+      const direct = el('button', 'primary', PACKAGE_EXPORT_DIRECT);
+      direct.type = 'button';
+      direct.dataset['packageAction'] = 'export-direct';
+      direct.disabled = busy();
+      direct.addEventListener('click', () => openExport(version, true));
       const actions = el('div', 'button-row compact-actions');
-      actions.append(open);
+      actions.append(direct, open);
       line.append(' · ', el('span', 'package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))));
       item.append(line, el('p', 'package-version-summary', version.summary));
       if (version.exports.length > 0) item.append(renderHistory(version));
@@ -640,7 +650,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function renderExportOptions(current: ExportState): HTMLElement {
     const fieldset = el('fieldset', 'export-options package-export-options');
     const legend = el('legend', undefined, EXPORT_OPTIONS_LEGEND);
-    legend.append(' · ', el('span', undefined, PACKAGE_EXPORT_OPTIONS_NOTE));
+    legend.append(' · ', el('span', undefined, technicalWords(PACKAGE_EXPORT_OPTIONS_NOTE, '选择是否包含批注和修改建议')));
     fieldset.append(legend);
     for (const key of PACKAGE_EXPORT_OPTION_ORDER) {
       const option = el('label', 'export-option');
@@ -756,10 +766,11 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
 
   // ---- a version's export ---------------------------------------------------------------------------------------
 
-  function openExport(version: BookDeliveryPackageVersionProjection): void {
+  function openExport(version: BookDeliveryPackageVersionProjection, direct = false): void {
     if (destroyed || busy()) return;
     exporting = {
       route: 'folder',
+      autoChoose: direct,
       packageVersionId: version.packageVersionId,
       versionLabel: version.label,
       options: { includeAnnotations: true, includeSuggestions: true },
@@ -780,6 +791,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function changeOption(current: ExportState, key: keyof BookDeliveryPackageExportOptions, value: boolean): void {
     if (destroyed || exporting !== current || current.result !== null || current.phase === 'choosing' || current.phase === 'writing') return;
     current.options = { ...current.options, [key]: value };
+    current.autoChoose = false;
     current.prepared = null;
     current.phase = 'reviewing';
     current.problem = null;
@@ -811,6 +823,10 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         if (current.route === 'folder' && current.selected.size === 0) for (const file of next.files) current.selected.add(file.key);
         draw(focus);
         options.setStatus(PACKAGE_EXPORT_STATUS_LINES.reviewed, 'success');
+        if (current.autoChoose === true) {
+          current.autoChoose = false;
+          if (!next.degraded && !next.filesTruncated) void chooseFolder();
+        }
       },
       (error) => {
         if (destroyed || exporting !== current || request !== exportTicket) return;

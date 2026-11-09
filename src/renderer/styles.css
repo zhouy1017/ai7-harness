@@ -456,6 +456,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-inline-form { margin-top: .6rem; padding: .7rem; border: 1px dashed var(--boundary); border-radius: 9px; background: var(--surface-subdued); }
 .review-field { display: grid; gap: .25rem; margin: .4rem 0; font-weight: 700; }
 .review-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid var(--boundary); border-radius: 8px; font: inherit; font-weight: 400; resize: vertical; }
+.review-book-terms { border: 1px solid var(--boundary); border-radius: 8px; padding: .5rem .7rem; }
+.review-book-term-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: .4rem; margin: .3rem 0; font-weight: 400; }
+.review-book-terms textarea { min-height: 4rem; }
 .review-problem { margin: .45rem 0 0; color: var(--status-blocked); font-weight: 700; }
 .review-problem[hidden] { display: none; }
 .review-capability p { margin: 0 0 .5rem; }

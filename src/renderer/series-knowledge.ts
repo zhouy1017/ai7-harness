@@ -1,4 +1,4 @@
-import { technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   SERIES_KNOWLEDGE_CLASSES,
   SERIES_KNOWLEDGE_CLASS_LABELS,
@@ -29,6 +29,7 @@ import {
   KNOWLEDGE_ITEMS_HEADING,
   KNOWLEDGE_ITEMS_MORE,
   KNOWLEDGE_NOTE,
+  KNOWLEDGE_ADD_DIRECT,
   KNOWLEDGE_PRESERVE,
   KNOWLEDGE_PRESERVED_NOTE,
   KNOWLEDGE_PROMOTE_NOTE,
@@ -162,7 +163,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     root.dataset['knowledgeCandidates'] = String(knowledge.candidates.length);
     const heading = el('h3', 'knowledge-heading', KNOWLEDGE_HEADING);
     heading.tabIndex = -1;
-    const nodes: HTMLElement[] = [heading, el('p', 'field-note knowledge-note', KNOWLEDGE_NOTE)];
+    const nodes: HTMLElement[] = [heading, el('p', 'field-note knowledge-note', technicalWords(KNOWLEDGE_NOTE, '供本书系参考的知识。'))];
     const toolbar = el('div', 'button-row');
     const open = action(KNOWLEDGE_PROPOSE_OPEN, 'secondary', 'propose-open', () => {
       if (busy) return;
@@ -459,6 +460,13 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const open = action(KNOWLEDGE_REVIEW_OPEN, 'quiet', 'review', () => void openReview(candidate.candidateId));
     open.disabled = busy || reviewing !== null;
     node.append(open);
+    // 加入书系知识 (Issue #1431 item 84): a candidate with no conflict is checked and taken under its first offered use in one
+    // click; a conflict or a block leaves the review open with why, and 纳入审阅… stays the way to choose another use.
+    if (candidate.conflicts === 0) {
+      const add = action(KNOWLEDGE_ADD_DIRECT, 'primary', 'add', () => void addDirect(candidate.candidateId));
+      add.disabled = busy || reviewing !== null;
+      node.append(add);
+    }
     return node;
   };
 
@@ -716,6 +724,12 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       setStatus(errorMessage(error, KNOWLEDGE_STATUS.failed), 'error');
       paint(null);
     }
+  };
+
+  const addDirect = async (candidateId: string): Promise<void> => {
+    await openReview(candidateId);
+    if (review === null || reviewing !== candidateId || knowledgePromoteWaits(review, reuse !== null, preserved) !== null) return;
+    await submitPromote();
   };
 
   /** Replace one conflict page without changing the editor's choices under this same complete review. */

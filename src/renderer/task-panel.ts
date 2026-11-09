@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import { retainPollInteraction } from './poll-interaction.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -675,7 +676,8 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       words.append(el('span', 'task-composer-range-quote', range.text), el('footer', undefined, taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1)));
       item.append(words);
       if (range.stateLabel !== null) {
-        const label = el('span', `state-term status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
+        const label = el('span', `state-term status-pill review-pill task-composer-range-state task-composer-range-${range.state}`,
+          range.state === 'pending-save' ? technicalWords(range.stateLabel, '有未保存修改') : range.stateLabel);
         label.dataset['rangeStateLabel'] = range.state;
         item.append(label);
       }

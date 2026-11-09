@@ -1,5 +1,5 @@
 import type { WritingTaskMaterialProjection, WritingTaskProjection } from '../shared/protocol.js';
-import { technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 
 /**
  * The words of 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, plan slice S84a; editor-surfaces §9; V2-UX-DELIV-007, KB-004).
@@ -97,7 +97,7 @@ export function writingQuickStarting(ruleName: string): string {
 /** What a quick start that started its Task says: a start the launch has no route for is recorded and blocked before dispatch. */
 export function writingQuickStarted(ruleName: string, blocked: boolean): string {
   return blocked
-    ? `已按默认执行规则「${ruleName}」记下这项写作任务；当前启动没有可执行的路由，派发前已阻止。`
+    ? technicalWords(`已按默认执行规则「${ruleName}」记下这项写作任务；当前启动没有可执行的路由，派发前已阻止。`, '暂时无法开始写作，请检查模型服务设置。')
     : `已按默认执行规则「${ruleName}」开始写作任务。`;
 }
 

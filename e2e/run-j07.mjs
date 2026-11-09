@@ -2810,7 +2810,6 @@ async function main() {
       JSON.stringify(writingBefore.buttons) === '[]', 'writing-section-words', writingBefore);
     // 新建 / 导入衍生稿件 → 稿件题目 → 宣传文章 → AI 写作生成 opens the sheet with the type chosen and the title carried (Issue #1404).
     await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-new');
-    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-new-continue');
     const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
     await assertRenderer(renderer, `(() => { const first = document.querySelector('.writing-task-sheet [data-document-field]'); return first?.dataset.documentField === 'title' && first.value === '宣传文章'; })()`, 'writing-sheet-title-first');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
@@ -2891,7 +2890,6 @@ async function main() {
     at('writing-quick-start');
     // The ordinary primary action prepares and starts without a rule or plan drawer.
     await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-direct-new');
-    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-direct-continue');
     await readWriting((page) => page.open, 'writing-direct-sheet');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
@@ -2974,7 +2972,6 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-library-manuscript', 120_000);
     await readWriting((page) => page.heading === 'AI 写作' && page.state === 'settled', 'writing-library-section');
     await openDerivativePanel(renderer, { title: '评论文章', typeId: WRITING_LIBRARY_REQUEST.typeId, mode: 'writing' }, 'writing-library-new');
-    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-library-continue');
     const librarySheet = await readWriting((page) => page.open, 'writing-library-sheet');
     const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="editor"] .writing-task input[data-writing-material]').length] : null; })()`);
     requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料` &&
@@ -3065,7 +3062,7 @@ async function main() {
     // ticked derivative document at a saved version with no delivery recorded.
     await openDeliverables(renderer, 'multi-package');
     await waitFor(renderer, `document.querySelectorAll('.deliverables-package .package-document-choices > li').length === 4`, 'multi-package-choices');
-    await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-manuscript"]')?.textContent === '前往稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-derivatives"]')?.textContent === '前往衍生稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
     const renamedId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title==='另一篇宣传文章')?.documentId ?? null)`);
     requireJourney(UUID_PATTERN.test(renamedId ?? ''), 'multi-package-renamed-id', renamedId);
     await assertRenderer(renderer, `(() => { const box = document.querySelector('.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]'); if (!(box instanceof HTMLInputElement) || box.checked || box.disabled) return false; box.click(); return true; })()`, 'multi-package-tick');

@@ -150,8 +150,10 @@ export interface MountDeliverablesOptions {
   openReview(): void;
   /** 录入定价与首印… (Issue #430, S82): the destination is left for 设置 › 评估校准与预测, with this Book's entry open. */
   openActuals?(bookId: string): void;
-  /** 前往稿件 (Issue #1403): 新闻稿、简介等衍生稿件 are written, imported and renamed on 稿件. */
+  /** 前往稿件 (Issue #1403): the Book's manuscript. */
   openManuscript(): void;
+  /** 前往衍生稿件 (Issue #1427/#1431 item 30): 新闻稿、简介等衍生稿件 have their own workspace. */
+  openDerivatives?(): void;
 }
 
 /** 交付…'s inline form while it is open (DELIV-003): the version, who it goes to and the note, none preselected. */
@@ -249,11 +251,11 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   // documents' earlier Delivery Records and workflow for audit.
   if (!technicalLayerVisible) {
     const pointer = el('section', 'deliverables-manuscript-pointer');
-    pointer.append(el('p', 'field-note', '新闻稿、内容简介等衍生稿件的日常编写、导入与改名已归入「稿件」选项卡；这里只需勾选要随书打包的稿件版本。'));
-    const go = el('button', 'secondary', '前往稿件');
+    pointer.append(el('p', 'field-note', '新闻稿、内容简介等衍生稿件在「衍生稿件」中编写和导入；这里只需勾选要随书打包的稿件版本。'));
+    const go = el('button', 'secondary', options.openDerivatives === undefined ? '前往稿件' : '前往衍生稿件');
     go.type = 'button';
-    go.dataset['deliverablesAction'] = 'open-manuscript';
-    go.addEventListener('click', () => options.openManuscript());
+    go.dataset['deliverablesAction'] = options.openDerivatives === undefined ? 'open-manuscript' : 'open-derivatives';
+    go.addEventListener('click', () => (options.openDerivatives ?? options.openManuscript)());
     pointer.append(go);
     documentsSlot.replaceChildren(pointer);
   }

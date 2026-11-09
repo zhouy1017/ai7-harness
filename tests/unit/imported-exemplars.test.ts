@@ -84,6 +84,7 @@ function importFormHarness() {
   const statuses: string[] = [];
   const context = createContext({
     document: { createElement: (tag: string) => new FormElement(tag) },
+    technicalWords: (_technical: string, ordinary = '') => ordinary,
     surface: {
       api: {
         previewImportedExemplar: async () => preview,

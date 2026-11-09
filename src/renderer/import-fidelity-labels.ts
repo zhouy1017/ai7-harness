@@ -49,7 +49,7 @@ export function wordIntakeRefusalLabel(code: WordIntakeRefusalCode): string { re
 /** ADR 0094 §5's two tracked-change import modes, by the names the import confirmation commits. */
 export const WORD_IMPORT_MODE_NAMES: Readonly<Record<WordTrackedChangesChoice['mode'], string>> = {
   suggestions: '转为 AI7 修订建议',
-  'accepted-baseline': '直接并入正文 · 定稿基线',
+  get 'accepted-baseline'() { return technicalWords('直接并入正文 · 定稿基线', '导入修订后的正文'); },
 };
 
 /** The choice as offered before preparation: 转为 AI7 修订建议 is recommended and the default. */
@@ -93,16 +93,19 @@ export function needsDegradationDecision(fidelity: ReadonlyArray<FidelityCategor
 }
 
 export function fidelityReviewHeading(fidelity: ReadonlyArray<FidelityCategoryProjection>): string {
-  return `导入保真审阅 · ${fidelityRows(fidelity).length} 类与预计往返`;
+  return `导入保真审阅 · ${fidelityRows(fidelity).length} 类${roundTripWords()}`;
 }
 
 export function reimportFidelityHeading(fidelity: ReadonlyArray<FidelityCategoryProjection>): string {
-  return `重新导入保真审阅 · ${fidelityRows(fidelity).length} 类与预计往返`;
+  return `重新导入保真审阅 · ${fidelityRows(fidelity).length} 类${roundTripWords()}`;
 }
 
 export function fidelityDisclosureSummary(fidelity: ReadonlyArray<FidelityCategoryProjection>): string {
-  return `查看导入保真审阅 · ${fidelityRows(fidelity).length} 类与预计往返`;
+  return `查看导入保真审阅 · ${fidelityRows(fidelity).length} 类${roundTripWords()}`;
 }
+
+function roundTripWords(): string { return technicalWords('与预计往返', '与导出后的效果'); }
+function noDecisionWords(): string { return technicalWords('不需要导入降级决定', '可直接导入'); }
 
 /**
  * Whether a class was found in the file. Every class the service reports as not found reads 未检测到… and
@@ -124,7 +127,7 @@ export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProj
   const rows = fidelityRows(fidelity);
   const found = rows.filter(fidelityClassFound);
   const absent = rows.length - found.length;
-  if (found.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，不需要导入降级决定。`;
+  if (found.length === 0) return `${rows.length} 类内容都未检测到，稿件完整保留，${noDecisionWords()}。`;
   const converted = found.filter((category) => category.status === 'preserved' && category.count > 0);
   const merged = found.filter((category) => textBoxes === 'merge' && category.key === 'text-boxes' && category.count > 0);
   const kept = found.filter((category) => !converted.includes(category) && !merged.includes(category));
@@ -135,7 +138,7 @@ export function fidelitySummaryLine(fidelity: ReadonlyArray<FidelityCategoryProj
     ...(merged.length > 0 ? [`${merged.map(counted).join('、')}并入正文`] : []),
     ...(converted.length > 0 ? [`${converted.map(counted).join('、')}转为稿件上的批注与修改建议`] : []),
   ];
-  return `${rows.length} 类内容都完整保留，不需要导入降级决定：${clauses.join('；')}` +
+  return `${rows.length} 类内容都完整保留，${noDecisionWords()}：${clauses.join('；')}` +
     (absent > 0 ? `，其余 ${absent} 类未检测到。` : '。');
 }
 
@@ -143,7 +146,8 @@ export const FIDELITY_DETAILS_SUMMARY = '展开各类明细';
 
 /** A converted file says so above its review (ADR 0072 §3). */
 export function conversionNoteText(conversion: ManuscriptConversionProjection): string {
-  return `本稿件由 ${conversion.converterIdentity} 从 ${conversion.sourceFormat} 转换为 DOCX 工作表示后读取；` +
+  return technicalWords(`本稿件由 ${conversion.converterIdentity} 从 ${conversion.sourceFormat} 转换为 DOCX 工作表示后读取；`,
+    `本稿件已从 ${conversion.sourceFormat} 转换为可编辑格式；`) +
     '下列损失由转换造成，原始文件原样保留。';
 }
 

@@ -77,7 +77,8 @@ function mountSettings(calls: ReturnType<typeof api>) {
 }
 
 describe('the one model-service flow', () => {
-  it.each([false, true])('restores the last explicit catalogue choice after clearing a manual ID (technical=%s, #1374)', async (technical) => {
+  // A manual model ID is the developer layer's (#1431 item 97), so only the technical layer offers it.
+  it.each([true])('restores the last explicit catalogue choice after clearing a manual ID (technical=%s, #1374)', async (technical) => {
     setTechnicalLayerVisible(technical);
     const { node, calls } = flow(settings(['anthropic-claude']));
     const choices = node.querySelectorAll('[data-model-choice]');
@@ -259,7 +260,7 @@ describe('the one model-service flow', () => {
     button(ready, 'remove-model-service-credential').click();
     await vi.waitFor(() => expect(calls.removeModelServiceCredential).toHaveBeenCalledWith({ route: 'opencode-zen' }));
   });
-  it.each([false, true])('chooses a custom ID independently for either role (technical=%s)', async (technical) => {
+  it.each([true])('chooses a custom ID independently for either role (technical=%s)', async (technical) => {
     setTechnicalLayerVisible(technical);
     const { node, calls } = flow(settings(['anthropic-claude']));
     const custom = node.querySelector('[data-custom-model-id]')!;
@@ -400,7 +401,7 @@ describe('the one model-service flow', () => {
         providerProcessing: { ...projection.launchPolicy.providerProcessing, label: '本机生产：需先设置模型服务，当前不会传输' } } });
       await screen.renderModelServiceSettings();
       expect(page.querySelector('[data-policy-integrity-state]')?.textContent).toBe('尚未设置模型服务，当前不会发送内容。');
-      expect(page.textContent).toContain('合成设置');
+      expect(page.textContent).not.toContain('合成设置');
       calls.getModelServiceSettings.mockResolvedValue({ ...projection, launchPolicy: { ...projection.launchPolicy,
         integrityState: 'denied', denialReason: 'binding-not-allowed' } });
       await screen.renderModelServiceSettings();
@@ -548,7 +549,7 @@ it('offers one ordinary model view and saves both underlying roles without a tes
   expect(node.querySelectorAll('select')).toHaveLength(2);
   expect(node.querySelector('[data-action="select-main-role-model"]')).not.toBeNull();
   expect(node.querySelector('[data-action="select-fast-role-model"]')).not.toBeNull();
-  expect(node.querySelector('[data-custom-model-id]')).not.toBeNull();
+  expect(node.querySelector('[data-custom-model-id]')).toBeNull();
   expect(node.textContent).toContain('AI7 使用的模型');
   button(node, 'use-model-for-both-roles').click();
   await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
@@ -571,7 +572,7 @@ it('scans connection-test feedback and the repainted model page when discovery u
     await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
     expectNoTechnicalText({ textContent: String(setStatus.mock.lastCall![0]) });
     const painted = flow(answer).node;
-    expect(painted.querySelector('[data-connection-test-outcome="passed"]')!.textContent).toContain('文本连接测试通过');
+    expect(painted.querySelector('[data-connection-test-outcome="passed"]')!.textContent).toBe('连接成功，可以使用。');
     expectNoTechnicalText(painted);
     const projection = { ...answer, routeChoice: { ...answer.routeChoice, unsupportedProviders: [] },
       proxy: { mode: 'direct', protocol: 'http', hostPort: '' }, lastProxyProbe: null,

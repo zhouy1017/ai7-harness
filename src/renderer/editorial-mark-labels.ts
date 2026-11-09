@@ -6,6 +6,7 @@ import type {
   ProposalItemDisposition,
 } from '../shared/protocol.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
+import { technicalWords } from './technical-layer.js';
 
 /**
  * The editorial wording of the Mark surface (Issue #407): kind names, who a mark comes from
@@ -175,5 +176,5 @@ export function selectionMenuReason(kind: 'none' | 'span' | 'across-note' | 'uns
   if (kind === 'none') return '先选中一段文字，再添加标记。';
   if (kind === 'span') return '标记需要落在同一段落内；请只选一个段落里的文字。';
   if (kind === 'across-note') return SELECTION_SPAN_NOTE;
-  return '这段文字还有未写入修订日志的改动，请稍候再试。';
+  return technicalWords('这段文字还有未写入修订日志的改动，请稍候再试。', '这段文字尚未保存，请稍后再试。');
 }

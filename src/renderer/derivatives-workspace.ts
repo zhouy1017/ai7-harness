@@ -2,6 +2,7 @@ import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type Pr
   type ProductionDocumentsProjection, type RendererApi } from '../shared/protocol.js';
 import { importedDerivativeTitle } from './manuscript-switcher.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { showToast } from './components/toast.js';
 
 interface WorkspaceOptions {
   root: HTMLElement;
@@ -204,7 +205,13 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
         button(doc.finalized ? '撤回草稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); })),
         button('导出 DOCX', () => void act(() => exportDocument(doc, 'docx'), '')),
         button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), '')),
-        button('删除', () => { if (window.confirm(`删除衍生稿件「${doc.title}」？`)) void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: true }); }, '已删除衍生稿件'); }, 'quiet'));
+        // One step with 撤销 (Issue #1431 item 28): the delete is a soft record the toast's action restores.
+        button('删除', () => void act(async () => {
+          await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: true });
+          showToast(`已删除「${doc.title}」`, { tone: 'success', action: { label: '撤销', run: () => void act(async () => {
+            await api.updateProductionDocumentMeta({ documentId: doc.documentId, deleted: false });
+          }, '已恢复衍生稿件') } });
+        }, ''), 'quiet'));
       row.append(title, meta, el('p', doc.preview ?? '', 'derivatives-preview'), actions); list.append(row);
     }
   }

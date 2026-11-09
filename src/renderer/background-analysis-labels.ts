@@ -1,5 +1,5 @@
 export const BACKGROUND_SUMMARY = '登记后，仅在稿件有已确认改动且空闲时处理，每次不超过预算上限；暂停或撤销不开始新任务，未接入的工序不会运行。';
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.js';
 
 /**
@@ -13,6 +13,9 @@ export const BACKGROUND_ENROLL_OPEN = '登记后台处理…';
 export const BACKGROUND_DISCLOSURE_HEADING = '登记后台处理';
 /** The token ceiling an enrollment form starts with (Issue #1410 item 24); the editor may write another. */
 export const BACKGROUND_CEILING_DEFAULT = '100000';
+/** The ordinary mode's ceiling choices (Issue #1431 item 81): the same default, read as a level; the token count is technical. */
+export const BACKGROUND_CEILING_LEVELS: ReadonlyArray<readonly [string, string]> = [['50000', '较少'], [BACKGROUND_CEILING_DEFAULT, '标准（推荐）'], ['200000', '较多']];
+export const BACKGROUND_CEILING_ORDINARY_LABEL = '后台分析用量上限';
 export const BACKGROUND_SCOPE_LABEL = '范围';
 export const BACKGROUND_WHAT_LABEL = '分析';
 export const BACKGROUND_WHEN_LABEL = '何时开始';
@@ -55,6 +58,8 @@ export function backgroundCeilingOf(text: string, books: number, max: number): n
 
 /** What each Book's background Runs are held to under the ceiling typed so far. */
 export function backgroundSharePreview(ceiling: number, books: ReadonlyArray<{ title: string }>): string {
+  // Ordinary mode says what the ceiling does, not its token count (Issue #1431 item 81).
+  if (!technicalLayerVisible) return books.length <= 1 ? '每次后台分析用到上限就停下。' : `${books.length} 本书平分这个上限，每本书的每次后台分析用到它那一份就停下。`;
   if (books.length <= 1) return `每次后台分析最多用 ${ceiling} tokens，达到就停下。`;
   const shares = backgroundCeilingShares(ceiling, books.length);
   const each = shares[books.length - 1]!;
@@ -65,7 +70,8 @@ export function backgroundSharePreview(ceiling: number, books: ReadonlyArray<{ t
 
 /** `范围：书系《乙》的 3 本书 · 预算上限 900 tokens，本书份额 300 tokens（第 2 本）`. */
 export function backgroundCeilingLine(enrollment: NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>): string {
-  if (enrollment.ceilingTokens === null || enrollment.shareTokens === null) return `范围：${enrollment.scope.label} · 这份登记没有预算上限`;
+  if (enrollment.ceilingTokens === null || enrollment.shareTokens === null) return `范围：${enrollment.scope.label} · ${technicalWords('这份登记没有预算上限', '没有用量上限')}`;
+  if (!technicalLayerVisible) return `范围：${enrollment.scope.label} · 已设用量上限`;
   return enrollment.scope.kind === 'book'
     ? `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens`
     : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens · 第 ${enrollment.scope.position} 本`;
@@ -103,7 +109,8 @@ export function backgroundStartedLine(
   instant: (value: string) => string,
 ): string {
   const by = run.enrollmentOrdinal === null ? '按另一份数据的登记' : `按第 ${run.enrollmentOrdinal} 版登记`;
-  return `${run.modeLabel} · ${by} · 授权于 ${instant(run.authorizedAt)}`;
+  // Ordinary mode: when the background analysis began (Issue #1431 item 74); its enrollment version and authorization are technical.
+  return technicalWords(`${run.modeLabel} · ${by} · 授权于 ${instant(run.authorizedAt)}`, `${run.modeLabel} · 后台分析 · 开始于 ${instant(run.authorizedAt)}`);
 }
 
 /** One state of the Enrollment's history: `第 1 版 · 已登记 · …`. */

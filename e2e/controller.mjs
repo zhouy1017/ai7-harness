@@ -1652,13 +1652,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1): the Book reimported without it.
     'selection-task-gone',
     // Agent 工作区 (Issue #90, wave 13 slice 13a): the row gated before Revision 2, entry that records nothing, one proposal
-    // round, promotion into one atomic group, the group decided and applied through the existing owners, and 放弃.
+    // round made 修改建议 in the same step (Issue #1431 item 34), and the marks decided through the existing owners.
     'workspace-row-gated',
     'workspace-entry',
     'workspace-propose',
     'workspace-promote',
     'workspace-mark-decision',
-    'workspace-discard-records-nothing',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

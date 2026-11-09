@@ -42,7 +42,7 @@ export function packageNotReadyLine(unmet: ReadonlyArray<string>): string {
 
 /** The content moved on since the newest version (BUNDLE-004). */
 export function packageChangedLine(label: string): string {
-  return `内容与图书交付包 ${label} 不同：再次准备会生成新的版本，${label} 保持不变。`;
+  return technicalWords(`内容与图书交付包 ${label} 不同：再次准备会生成新的版本，${label} 保持不变。`, '稿件已更新，可重新准备交付包。');
 }
 
 /** `v2 · 图书交付包已准备 · 暂无导出记录` (DPKG-011): the prepared state beside its derived export history. */
@@ -67,6 +67,8 @@ export function packageUnchangedLine(label: string): string {
 // ---- a version's export (Issue #416, plan slice S67b; BUNDLE-004, DPKG-011, EXP-010 to EXP-022) ------------------------
 
 /** The label of every `data-package-action` of a version's export. */
+/** 导出到文件夹… (Issue #1431 item 92): the default export in one step. */
+export const PACKAGE_EXPORT_DIRECT = '导出到文件夹…';
 export const PACKAGE_EXPORT_ACTION_LABELS = {
   open: '导出…',
   choose: '选择位置…',

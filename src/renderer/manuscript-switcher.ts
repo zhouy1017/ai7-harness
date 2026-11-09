@@ -27,7 +27,6 @@ export const SWITCHER_WORDS = {
   mode: '创建方式',
   source: '来源材料',
   confirm: '创建并打开',
-  continue: '继续填写写作要求…',
   cancel: '取消',
   pickSource: '请先选择一份来源材料。',
   unavailable: '本书的衍生稿件暂时无法读取。',
@@ -313,6 +312,9 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
         if (!radio.checked) return;
         state.mode = mode;
         state.problem = null;
+        // AI 写作生成 goes straight to the one writing sheet with the title and type carried (Issue #1431 item 29): its own
+        // 开始写作 starts, so this form adds no 继续 step.
+        if (mode === 'writing') { void create(state); return; }
         // Issue #1410 item 23: 从来源材料创建 begins with the Book's first source chosen; another stays one click away.
         if (mode === 'source' && state.sourceVersionId === null) state.sourceVersionId = next.sources[0]?.sourceVersionId ?? null;
         paintPanel(mode === 'source' ? 'source' : null);
@@ -345,7 +347,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       node.append(problem);
     }
     const row = el('div', 'button-row compact-actions');
-    const confirm = el('button', 'primary', state.mode === 'writing' ? SWITCHER_WORDS.continue : SWITCHER_WORDS.confirm);
+    const confirm = el('button', 'primary', SWITCHER_WORDS.confirm);
     confirm.type = 'button';
     confirm.dataset['documentAction'] = 'create-derivative';
     confirm.disabled = working;
