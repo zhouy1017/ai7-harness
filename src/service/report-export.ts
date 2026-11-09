@@ -34,7 +34,7 @@ import { PRINT_BASE_STYLE, escapeHtml, escapeLineStart, escapeMarkdown, htmlLine
  * The generation time is written in the machine's local time, as 审阅 shows it.
  */
 export const REPORT_EXPORT_WRITER_IDENTITIES: Readonly<Record<ManuscriptExportFormat, string>> = {
-  docx: 'ai7-report-docx/1',
+  docx: 'ai7-report-docx/2',
   pdf: 'ai7-report-pdf/1',
   markdown: 'ai7-report-markdown/1',
 };
@@ -182,6 +182,85 @@ function reportDocx(layout: ReportLayout): Uint8Array {
   return freshBodyPackage(layout.title, body.join(''));
 }
 
+// Publication report (Issue #1430). Legacy /1 records keep their original layout.
+const REPORT_BANNER_COLORS = { consistency: 'C0392B', factual: 'B9770E', language: '2E86C1', literary: '117864', style: '566573', risk: 'D35400', editor: '7030A0', other: '566573' } as const;
+const REPORT_STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+  '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="SimSun"/><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+  '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="160"/></w:pPr><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="40"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="280" w:after="120"/><w:pBdr><w:bottom w:val="single" w:sz="6" w:color="1F3864"/></w:pBdr><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:color w:val="1F3864"/><w:sz w:val="30"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="220" w:after="80"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:color w:val="2F5496"/><w:sz w:val="26"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="420" w:hanging="210"/></w:pPr><w:rPr><w:sz w:val="21"/></w:rPr></w:style></w:styles>';
+
+function reportParagraph(text: string, properties = '', runProperties = ''): string {
+  return `<w:p><w:pPr>${properties}</w:pPr>` + text.split('\n').map((line, index) =>
+    `<w:r><w:rPr>${runProperties}</w:rPr>${index > 0 ? '<w:br/>' : ''}<w:t xml:space="preserve">${escapeWordText(line)}</w:t></w:r>`).join('') + '</w:p>';
+}
+function reportTable(rows: ReadonlyArray<ReadonlyArray<string>>, widths: ReadonlyArray<number>, statistics = false): string {
+  const color = statistics ? 'BFBFBF' : 'D9D9D9';
+  const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map((side) => `<w:${side} w:val="single" w:sz="4" w:color="${color}"/>`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((a, b) => a + b, 0)}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+    `<w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>` +
+    rows.map((row, rowIndex) => {
+      const header = statistics && rowIndex === 0;
+      const total = statistics && rowIndex === rows.length - 1;
+      return `<w:tr><w:trPr>${header ? '<w:tblHeader/>' : ''}<w:cantSplit/></w:trPr>` + row.map((text, column) => {
+        const fill = header ? 'DCE6F1' : total ? 'F2F4F8' : !statistics && column === 0 ? 'EEF2F7' : null;
+        return `<w:tc><w:tcPr><w:tcW w:w="${widths[column]}" w:type="dxa"/>${fill === null ? '' : `<w:shd w:val="clear" w:fill="${fill}"/>`}<w:vAlign w:val="top"/></w:tcPr>` +
+          reportParagraph(text, statistics && column > 0 ? '<w:jc w:val="center"/>' : '', `<w:sz w:val="20"/>${header || total || !statistics && column === 0 ? '<w:b/>' : ''}`) + '</w:tc>';
+      }).join('') + '</w:tr>';
+    }).join('') + '</w:tbl>';
+}
+
+function publicationReportDocx(input: ReportExportInput): Uint8Array {
+  const { record } = input;
+  const entries = record.findings?.entries ?? [];
+  const categories = [...new Set(entries.map((entry) => entry.categoryLabel ?? entry.categoryLabels.join('、')))];
+  const chapters = [...new Set(entries.map((entry) => (entry.chapterTitle ?? entry.chapterLabel) || '全书/跨章节'))];
+  const title = `《${input.bookTitle}》审阅报告`;
+  const date = new Date(input.generatedAt);
+  const dateLabel = Number.isNaN(date.getTime()) ? input.generatedAt : `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+  const extent = record.manuscriptExtent;
+  const scope = extent === undefined ? '篇幅未记录' : `正文约 ${(extent.characterCount / 10000).toFixed(1)} 万字，共 ${extent.chapterCount} 章`;
+  const section = (text: string): string => wordParagraph(text, 'Heading1');
+  const body = [reportParagraph(title, '<w:pStyle w:val="Title"/><w:jc w:val="center"/>', '<w:b/><w:sz w:val="40"/><w:color w:val="1F3864"/>'),
+    reportParagraph(record.overview.rows.map((row) => row.label).join(' · '), '<w:jc w:val="center"/>', '<w:sz w:val="22"/><w:color w:val="555555"/>'),
+    reportParagraph(`审阅对象：《${input.bookTitle}》（${scope}）｜审阅日期：${dateLabel}`, '<w:jc w:val="center"/>', '<w:sz w:val="19"/><w:color w:val="777777"/>'),
+    section('一、审阅说明'),
+    wordParagraph(`本次审阅范围：${record.run.scopeLabel}；审阅对象为《${input.bookTitle}》，${scope}，稿件版本为 ${record.run.manuscript.revisionLabel}。`),
+    ...record.categorySummaries.entries.map((entry) => wordParagraph(`${entry.label}：${entry.basisStatement}`)),
+    wordParagraph('每条问题包含四项：问题简述、问题所对应的原文（与稿件逐字一致，可直接检索定位）、建议修改后的文本、修改建议的原因与理由；知识性/事实性类问题另附“引用来源”，每个来源给出原始网址或出处、相关片段及支持结论的说明。'),
+    wordParagraph('位置按“章节名｜段落 N”标注，便于在稿件中快速检索定位。'),
+    section('二、问题统计'), wordParagraph(`全稿共列出问题 ${entries.length} 条。统计按问题所在章节与类别计数（一条问题只计一次）。`),
+    reportTable([['章节', ...categories, '合计'], ...chapters.map((chapter) => {
+      const located = entries.filter((entry) => ((entry.chapterTitle ?? entry.chapterLabel) || '全书/跨章节') === chapter);
+      return [chapter, ...categories.map((category) => String(located.filter((entry) => (entry.categoryLabel ?? entry.categoryLabels.join('、')) === category).length)), String(located.length)];
+    }), ['合计', ...categories.map((category) => String(entries.filter((entry) => (entry.categoryLabel ?? entry.categoryLabels.join('、')) === category).length)), String(entries.length)]], [2600, ...categories.map(() => 1160), 1000], true),
+    reportParagraph('事实核查结论以已记录的核查结果为准；引用来源列出本次核查保留的资料。', '', '<w:sz w:val="20"/><w:color w:val="555555"/>'),
+    section('三、建议优先处理的重点问题')];
+  const priority = entries.filter((entry) => entry.priority === 'must' || entry.severityLabel === '必须处理' || (entry.chapterTitle ?? '').includes('跨章节'));
+  const highlights = priority.length > 0 ? priority : entries.slice(0, 5);
+  body.push(...(highlights.length === 0 ? [wordParagraph(REVIEW_REPORT_NO_MUST_ITEMS)] : highlights.map((entry) =>
+    wordParagraph(`• ${entry.summary ?? entry.reason}（问题 ${entry.index ?? String(entries.indexOf(entry) + 1).padStart(3, '0')}）`, 'ListParagraph'))), section('四、逐项问题清单'));
+  for (const chapter of chapters) {
+    body.push(wordParagraph(chapter, 'Heading2'));
+    for (const entry of entries.filter((candidate) => ((candidate.chapterTitle ?? candidate.chapterLabel) || '全书/跨章节') === chapter)) {
+      const index = entry.index ?? String(entries.indexOf(entry) + 1).padStart(3, '0');
+      const location = entry.paragraphOrdinal == null ? '段落位置未记录' : `段落 ${entry.paragraphOrdinal}`;
+      body.push(reportParagraph(`问题 ${index}  【${entry.categoryLabel ?? entry.categoryLabels.join('、')}】  位置：${chapter}｜${location}`,
+        '<w:keepNext/><w:shd w:val="clear" w:fill="F7F7F7"/><w:spacing w:before="180" w:after="40"/>', `<w:b/><w:sz w:val="23"/><w:color w:val="${REPORT_BANNER_COLORS[entry.categoryKey ?? 'other']}"/>`));
+      const rows = [['问题简述', entry.summary ?? entry.reason], ['问题所对应的原文', entry.originalText ?? entry.quote],
+        ['建议修改后的文本', entry.suggestedText === null ? '（开放性建议，见理由）' : entry.suggestedText || '（删去）'], ['修改建议的原因与理由', entry.rationale ?? entry.reason]];
+      if (entry.sources.length > 0) rows.push(['引用来源', entry.sources.map((source, sourceIndex) =>
+        [`来源${sourceIndex + 1}：${source.url ?? source.name}`, `相关片段：${source.snippet ?? '（未记录）'}`, ...(source.translation === null ? [] : [`译文：${source.translation}`]), `说明：${source.note}`].join('\n')).join('\n\n')]);
+      body.push(reportTable(rows, [1950, 7450]));
+    }
+  }
+  if ((record.findings?.omitted ?? 0) > 0) body.push(wordParagraph(reviewReportOmittedLine(record.findings!.omitted)!));
+  return freshBodyPackage(title, body.join(''), REPORT_STYLES, 1253);
+}
+
 // ---- PDF: the page the main process prints ---------------------------------------------------------------
 
 const REPORT_PRINT_STYLE = PRINT_BASE_STYLE + [
@@ -319,6 +398,6 @@ export function renderReportExport(input: ReportExportInput, format: ManuscriptE
   const fidelity = reportFidelityRows(format, layout);
   const degraded = fidelity.some((row) => row.status === 'degraded' || row.status === 'unavailable');
   if (!options.emit) return { bytes: null, fidelity, degraded };
-  const bytes = format === 'docx' ? reportDocx(layout) : format === 'pdf' ? reportPage(layout) : reportMarkdown(layout);
+  const bytes = format === 'docx' ? input.record.schema === 'ai7.review.report/1' ? reportDocx(layout) : publicationReportDocx(input) : format === 'pdf' ? reportPage(layout) : reportMarkdown(layout);
   return { bytes, fidelity, degraded };
 }

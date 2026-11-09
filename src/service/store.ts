@@ -1,3 +1,4 @@
+import { reviewRunConclusions } from './review/report-evidence.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
 import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
@@ -14783,6 +14784,12 @@ export class EditorialStore {
    * is saved as a revision for the export first.
    */
   async reviewManuscriptExport(input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
+    if (input.target.kind === 'book-review-report') {
+      this.#assertAvailable();
+      const reportId = this.#reviewCall(() => this.#reviewRuns.compileBookReport(input.bookId,
+        (runId) => reviewRunEvidence(this, input.bookId, runId), input.target.kind === 'book-review-report' ? input.target.reviewRunId : undefined, (runId) => reviewRunConclusions(this, input.bookId, runId)));
+      return this.#exportCall(() => this.#manuscriptExport.review({ ...input, target: { kind: 'report', reportId } }, available));
+    }
     return this.#exportCall(() => this.#manuscriptExport.review(input, available));
   }
 

@@ -67,6 +67,7 @@ export interface ReviewReportFindingInput {
   readonly replacement?: string | null;
   readonly chapter?: ReportChapter;
   readonly sources?: ReadonlyArray<ReviewEvidenceSource>;
+  readonly conclusion?: string | null;
 }
 
 /** A chapter as the report names it: by its order and its block positions, never by its heading's words. */
@@ -83,6 +84,8 @@ export interface ReviewReportInput {
   readonly configuration: { readonly schema: string; readonly version: string; readonly digest: string };
   readonly categories: ReadonlyArray<ReviewReportCategoryInput>;
   readonly findings: ReadonlyArray<ReviewReportFindingInput>;
+  /** Local export compiles all rows; IPC projections retain their existing bound. */
+  readonly complete?: boolean;
 }
 
 /** Findings by severity and by status; every finding counts once in each. */
@@ -107,7 +110,7 @@ export function reportChapterOf(chapters: ReadonlyArray<ReviewChapterOptionProje
   if (chapter === null) return { order: chapters.length + 1, label: '章节之外' };
   const order = chapters.indexOf(chapter) + 1;
   const blocks = chapter.position === chapter.endPosition ? `${chapter.position}` : `${chapter.position}–${chapter.endPosition}`;
-  return { order, label: `章节 ${order}（内容块 ${blocks}）` };
+  return { order, label: chapter.title.trim() || `章节 ${order}（内容块 ${blocks}）` };
 }
 
 const distinct = <T>(values: ReadonlyArray<T>): T[] => [...new Set(values)];
@@ -141,7 +144,7 @@ function reportFindings(input: ReviewReportInput): NonNullable<ReviewReportRecor
   const groups = new Map<string, ReviewReportFindingInput[]>();
   for (const finding of input.findings) {
     const place = finding.place;
-    const key = place === undefined ? finding.findingId : JSON.stringify([place.blockId, place.fromGrapheme, place.toGrapheme, finding.quote]);
+    const key = place === undefined ? finding.findingId : JSON.stringify([finding.categoryId, place.blockId, place.fromGrapheme, place.toGrapheme, finding.quote, finding.note, finding.replacement]);
     groups.set(key, [...(groups.get(key) ?? []), finding]);
   }
   const at = (finding: ReviewReportFindingInput): number[] =>
@@ -157,25 +160,38 @@ function reportFindings(input: ReviewReportInput): NonNullable<ReviewReportRecor
     for (const source of members.flatMap((member) => member.sources ?? [])) {
       sources.set(JSON.stringify([source.url ?? source.name, source.snippet]), {
         ...source,
-        snippet: source.snippet === null ? null : reportQuote(source.snippet, MAX_REPORT_SOURCE_GRAPHEMES),
-        translation: source.translation === null ? null : reportQuote(source.translation, MAX_REPORT_SOURCE_GRAPHEMES),
+        snippet: input.complete || source.snippet === null ? source.snippet : reportQuote(source.snippet, MAX_REPORT_SOURCE_GRAPHEMES),
+        translation: input.complete || source.translation === null ? source.translation : reportQuote(source.translation, MAX_REPORT_SOURCE_GRAPHEMES),
       });
     }
     const replacements = distinct(members.flatMap((member) => member.replacement ?? []));
+    const first = members[0]!;
+    const categoryLabel = labels.get(first.categoryId) ?? '其他';
+    const categoryKey = reportCategoryKey(first.categoryId);
+    const priority = SEVERITY_ORDER.find((severity) => members.some((member) => member.severity === severity))!;
+    const reason = distinct(members.map((member) => member.note)).join('；');
+    const conclusion = members.find((member) => member.conclusion)?.conclusion;
     const entry: ReviewReportFindingEntry = {
+      index: String(entries.length + 1).padStart(3, '0'), categoryKey, categoryLabel,
+      chapterTitle: first.chapter?.label ?? '全书/跨章节', chapterOrder: first.chapter?.order ?? 0,
+      paragraphOrdinal: first.place?.position ?? null, priority: priority === 'note' ? 'consider' : priority,
+      summary: first.note || '（见原文与修改建议）', originalText: first.quote,
+      rationale: categoryKey === 'factual' && conclusion ? `【核查结论：${conclusion}】${reason}` : reason,
+      citations: [...sources.values()].map((source) => ({ urlOrSource: source.url ?? source.name,
+        snippet: source.snippet, translation: source.translation, explanation: source.note })),
       findingIds: members.map((member) => member.findingId),
       categoryLabels: distinct(members.map((member) => labels.get(member.categoryId) ?? member.categoryId)),
       severityLabel: REVIEW_FINDING_SEVERITY_LABELS[SEVERITY_ORDER.find((severity) => members.some((member) => member.severity === severity))!],
       statusLabel: distinct(members.map((member) => REVIEW_FINDING_STATUS_LABELS[member.status])).join('；'),
       chapterLabel: members[0]!.chapter?.label ?? '',
       locationLabel: members[0]!.locationLabel,
-      quote: reportQuote(members[0]!.quote),
+      quote: members[0]!.quote,
       suggestedText: replacements.length === 0 ? null : replacements.join(' / '),
       reason: distinct(members.map((member) => member.note)).join('；'),
       sources: [...sources.values()],
     };
     const weight = Buffer.byteLength(JSON.stringify(entry), 'utf8') + 1;
-    if (spent + weight > MAX_REPORT_FINDING_BYTES) break;
+    if (!input.complete && spent + weight > MAX_REPORT_FINDING_BYTES) break;
     spent += weight;
     entries.push(entry);
   }
@@ -255,4 +271,16 @@ export function buildReviewReport(input: ReviewReportInput): ReviewReportRecord 
       })),
     },
   };
+}
+
+/** Report semantics use the same keys as manuscript mark categories. */
+export function reportCategoryKey(categoryId: string): NonNullable<ReviewReportFindingEntry['categoryKey']> {
+  if (/factual|knowledge/u.test(categoryId)) return 'factual';
+  if (/consistency|plot|timeline/u.test(categoryId)) return 'consistency';
+  if (/literary|expression/u.test(categoryId)) return 'literary';
+  if (/typo|usage|language|local-text/u.test(categoryId)) return 'language';
+  if (/style|format/u.test(categoryId)) return 'style';
+  if (/risk|compliance|copyright|political/u.test(categoryId)) return 'risk';
+  if (/editor/u.test(categoryId)) return 'editor';
+  return 'other';
 }

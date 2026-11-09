@@ -1,3 +1,4 @@
+import { reviewReportExportButton } from './review-report-export.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -846,7 +847,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     node.setAttribute('aria-busy', run?.state === 'running' ? 'true' : 'false');
     const heading = el('div', 'review-workspace-heading');
-    heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
+    heading.append(el('h2', undefined, REVIEW_CARD_HEADING), reviewReportExportButton({ api, bookId,
+      enabled: next.runs.some((summary) => summary.findingCounts.must + summary.findingCounts.should + summary.findingCounts.note > 0), setStatus: options.setStatus }));
     if (run !== null && !runHasResults(run)) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     const hasReviews = next.runs.length > 0 || next.coverage.some((row) => row.lastRunOrdinal !== null);
     if (!hasReviews) {

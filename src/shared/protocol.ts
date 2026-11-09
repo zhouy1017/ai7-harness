@@ -5353,7 +5353,7 @@ export const MAX_EXPORT_DESTINATION_CODE_UNITS = 1024;
 
 export interface ReviewManuscriptExportInput {
   bookId: string;
-  target: ManuscriptExportTargetInput;
+  target: ManuscriptExportTargetInput | { kind: 'book-review-report'; reviewRunId?: string };
   options: ManuscriptExportOptions;
   /** Absent reads as DOCX, so a request made before S64b (Issue #500) still means what it meant. */
   format?: ManuscriptExportFormat;

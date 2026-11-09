@@ -1,3 +1,4 @@
+import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
@@ -690,6 +691,16 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
     setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });
   const exportMenu = manuscriptExport.menu(() => isDocument ? { kind: 'document', documentId: currentWindow.manuscriptId, revisionId: currentWindow.revisionId } : { kind: 'current' }, null);
+  if (!isDocument) {
+    const reportButton = reviewReportExportButton({ api, bookId: initialWindow.bookId, enabled: true, setStatus, beforeExport: () => settleLocalEdit() });
+    reportButton.disabled = true;
+    const refreshReportExport = (): void => { void api.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => {
+      reportButton.disabled = !workspace.runs.some((run) => run.findingCounts.must + run.findingCounts.should + run.findingCounts.note > 0);
+    }).catch(() => { reportButton.disabled = true; }); };
+    exportMenu.querySelector('.export-menu-body')?.append(reportButton);
+    exportMenu.addEventListener('toggle', () => { if (exportMenu instanceof HTMLDetailsElement && exportMenu.open) refreshReportExport(); });
+    refreshReportExport();
+  }
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';
   analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);

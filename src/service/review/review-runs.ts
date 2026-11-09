@@ -3370,12 +3370,22 @@ export class ReviewRunStore {
   // ---- the Report (B8) ----------------------------------------------------------------------------
 
   /** Record the next version of the Run's 审阅报告, over what stands now, with the sources its factual cards list. */
-  generateReport(bookId: string, reviewRunId: string, evidence: () => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>> = () => new Map()): void {
+  generateReport(bookId: string, reviewRunId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>> = () => new Map(), bookWide = false, readConclusions: (runId: string) => ReadonlyMap<string, string> = () => new Map()): string {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const view = this.#runView(snapshot);
     requireReview(view.authorization !== null, 'REVIEW_REPORT_UNAVAILABLE', '这次审阅尚未授权，还没有可以报告的结果。');
-    requireReview(!view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
-    const sources = view.findings.some((finding) => finding.categoryId === 'factual-review') ? evidence() : new Map<string, ReadonlyArray<ReviewEvidenceSource>>();
+    requireReview(bookWide || !view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
+    const views = bookWide ? (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
+      .map((row) => this.#runView(this.#snapshotOf(row))).filter((candidate) => candidate.authorization !== null) : [view];
+    // Repeated runs referencing the same mark are one issue. Independent issues at one anchor remain separate.
+    const findings = [...new Map(views.flatMap((candidate) => candidate.findings.map((finding) =>
+      [finding.markId ?? finding.findingId, { finding, runId: candidate.snapshot.reviewRunId }] as const)).reverse()).values()];
+    const categories = [...new Map(views.flatMap((candidate) => candidate.categories.map((category) =>
+      [category.category.categoryId, category] as const)).reverse()).values()];
+    const sources = new Map(views.flatMap((candidate) => candidate.findings.some((finding) => finding.categoryId === 'factual-review')
+      ? [...evidence(candidate.snapshot.reviewRunId)] : []));
+    const conclusions = new Map(views.flatMap((candidate) => [...readConclusions(candidate.snapshot.reviewRunId)]));
+    const reportId = randomUUID();
     const head = this.#head(bookId);
     const chapters = head === null ? [] : this.#chapterOptions(bookId, head).chapters;
     transact(this.#db, () => {
@@ -3394,7 +3404,8 @@ export class ReviewRunStore {
           manuscript: { revisionId: snapshot.manuscript.revisionId, revisionLabel: snapshot.manuscript.revisionLabel, journalSequence: snapshot.manuscript.journalSequence },
         },
         configuration: snapshot.configuration,
-        categories: view.categories.map((categoryView) => {
+        complete: bookWide,
+        categories: categories.map((categoryView) => {
           const { category } = categoryView;
           const output = categoryView.materialized ?? categoryView.retained;
           const stateLabel = categoryView.stateLabel;
@@ -3418,13 +3429,14 @@ export class ReviewRunStore {
             adapterPin: isRecord(pin) ? pin as { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null } : null,
           };
         }),
-        findings: view.findings.map((finding) => ({
+        findings: findings.map(({ finding }) => ({
           findingId: finding.findingId,
           categoryId: finding.categoryId,
           severity: finding.severity,
           status: finding.status,
           quote: finding.quote,
           note: finding.note,
+          conclusion: conclusions.get(finding.findingId),
           locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`,
           place: { blockId: finding.blockId, position: finding.blockPosition, fromGrapheme: finding.fromGrapheme, toGrapheme: finding.toGrapheme },
           replacement: finding.replacement,
@@ -3432,6 +3444,10 @@ export class ReviewRunStore {
           sources: sources.get(finding.findingId) ?? [],
         })),
       });
+      if (bookWide && head !== null) {
+        const count = this.#db.prepare('SELECT sum(length(text)) characters FROM working_blocks WHERE branch_id = ?').get(head.branchId) as SqlRow;
+        Object.assign(record, { manuscriptExtent: { chapterCount: chapters.length, characterCount: Number(count.characters ?? 0) } });
+      }
       // Named as the report names a finding elsewhere (its category and place), never by an internal identity alone.
       const categoryLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.label] as const));
       const referencedRules = view.findings.filter((finding) => finding.referencedRuleVersions.length > 0)
@@ -3440,14 +3456,28 @@ export class ReviewRunStore {
       if (referencedRules.length > 0) record.appendix.referencedRules = referencedRules;
       const canonical = canonicalRecord(record);
       this.#db.prepare('INSERT INTO review_reports(report_id, review_run_id, version, generated_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(randomUUID(), reviewRunId, version, generatedAt, canonical.json, canonical.digest);
+        .run(reportId, reviewRunId, version, generatedAt, canonical.json, canonical.digest);
     });
+    return reportId;
+  }
+
+  /** Compile directly into the existing report/export ledger without returning manuscript text through IPC. */
+  compileBookReport(bookId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>>, runId?: string, conclusions: (runId: string) => ReadonlyMap<string, string> = () => new Map()): string {
+    const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[];
+    const snapshot = runId === undefined ? rows.map((row) => this.#snapshotOf(row)).find((candidate) => this.#runView(candidate).findings.length > 0) : this.#runOfBook(bookId, runId);
+    requireReview(snapshot !== undefined, 'REVIEW_REPORT_UNAVAILABLE', '这本书还没有审阅发现。');
+    return this.generateReport(bookId, snapshot.reviewRunId, evidence, runId === undefined, conclusions);
   }
 
   #reports(reviewRunId: string): ReviewReportProjection[] {
     return (this.#db.prepare('SELECT * FROM review_reports WHERE review_run_id = ? ORDER BY version').all(reviewRunId) as SqlRow[]).map((row) => {
       const record = recordOf(text(row.canonical_json), text(row.sha256)) as unknown as ReviewReportRecord;
       requireReview(REVIEW_REPORT_SCHEMAS.includes(record.schema) && record.version === integer(row.version), 'REVIEW_RECORD_INVALID', '审阅报告记录无效。');
+      if (record.findings !== undefined) {
+        let bytes = 0;
+        const entries = record.findings.entries.filter((entry) => { bytes += Buffer.byteLength(JSON.stringify(entry), 'utf8'); return bytes <= 192 * 1024; });
+        Object.assign(record, { findings: { ...record.findings, entries, omitted: record.findings.omitted + record.findings.entries.length - entries.length } });
+      }
       return { reportId: text(row.report_id), version: integer(row.version), generatedAt: text(row.generated_at), digest: text(row.sha256), record };
     });
   }

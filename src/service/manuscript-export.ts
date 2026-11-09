@@ -2018,7 +2018,9 @@ export class ManuscriptExportStore {
       ...exportRetentionDisclosure(fidelity),
       suggestedFileName: target.manifest !== null
         ? target.manifest.member === 'manifest' ? PACKAGE_MANIFEST_FILE_NAME : suggestedExportFileName(target.bookTitle, target.manifest.fileLabel, format)
-        : suggestedExportFileName(
+        : report?.record.manuscriptExtent !== undefined && format === 'docx'
+          ? `《${Array.from(target.bookTitle.replace(INVALID_FILE_NAME_CHARACTERS, '_')).slice(0, 100).join('')}》_审阅报告.docx`
+          : suggestedExportFileName(
         target.bookTitle,
         report !== null ? reportExportLabel(report.runLabel, report.version)
           : target.document !== null ? target.document.versionLabel : target.milestoneLabel ?? target.revisionLabel,

@@ -3109,7 +3109,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // The format (Issue #500, S64b) is optional: a request without it still means DOCX.
     case 'reviewManuscriptExport': {
       const input = requireInputWithOptional(value.input, ['bookId', 'target', 'options'], ['format'], tentativeId);
-      if (!validUuid(input.bookId) || !validExportTarget(input.target) || !validExportOptions(input.options) ||
+      const compile = isRecord(input.target) && input.target.kind === 'book-review-report' &&
+        (hasExactKeys(input.target, ['kind']) || hasExactKeys(input.target, ['kind', 'reviewRunId']) && validUuid(input.target.reviewRunId));
+      if (!validUuid(input.bookId) || !(compile || validExportTarget(input.target)) || !validExportOptions(input.options) ||
           (Object.hasOwn(input, 'format') && !validExportFormat(input.format))) throw new ProtocolError(tentativeId);
       break;
     }

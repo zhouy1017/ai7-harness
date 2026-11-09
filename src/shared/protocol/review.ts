@@ -44,6 +44,7 @@ type FindingCounts = import('../protocol.js').ReviewFindingCountsProjection;
 
 /** What `ai7.review.report/2` adds to the four parts of /1; absent on a /1 record, which reads and exports as it was. */
 export interface ReviewReportDerivedSections {
+  readonly manuscriptExtent?: { readonly chapterCount: number; readonly characterCount: number };
   /** Every finding of the Run by severity and status, each counted once in both. */
   readonly totals?: FindingCounts;
   /** Findings per chapter (by position, never heading words) and category; each finding counts in its own category. */
@@ -64,6 +65,17 @@ export interface ReviewReportDerivedSections {
 }
 
 export interface ReviewReportFindingEntry {
+  readonly index?: string;
+  readonly categoryKey?: 'factual' | 'consistency' | 'literary' | 'language' | 'style' | 'risk' | 'editor' | 'other';
+  readonly categoryLabel?: string;
+  readonly chapterTitle?: string;
+  readonly chapterOrder?: number;
+  readonly paragraphOrdinal?: number | null;
+  readonly priority?: 'must' | 'should' | 'consider';
+  readonly summary?: string;
+  readonly originalText?: string;
+  readonly rationale?: string;
+  readonly citations?: ReadonlyArray<{ readonly urlOrSource: string; readonly snippet: string | null; readonly translation?: string | null; readonly explanation?: string }>;
   readonly findingIds: ReadonlyArray<string>;
   readonly categoryLabels: ReadonlyArray<string>;
   readonly severityLabel: string;
