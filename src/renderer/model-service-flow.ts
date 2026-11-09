@@ -1,4 +1,4 @@
-import { technicalLayerVisible, modelLabelWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import {
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   type ModelServiceChannelId,
@@ -229,7 +229,10 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
-    const note = el('p', 'field-note', checked === null ? '' : `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own).replace(/。$/u, '')}${own === null ? '。' : '；测试仅核验缓冲文本，不核验工具或流式。'}`);
+    // Ordinary mode reads the test's outcome only (Issue #1431 item 96); the capability matrix and the test's technical scope are developer words.
+    const note = el('p', 'field-note', checked === null ? '' : technicalLayerVisible
+      ? `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own).replace(/。$/u, '')}${own === null ? '。' : '；测试仅核验缓冲文本，不核验工具或流式。'}`
+      : own === null ? '' : own.outcome === 'passed' ? '连接成功，可以使用。' : '连接失败，请检查密钥和所选模型后重试。');
     if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [note, ...modelConnectionTestDisclosure(own)]));
     repaintCatalogue();
@@ -287,7 +290,8 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const active = modelId !== undefined && (favourites[channel.channelId] ?? []).includes(modelId);
     button.textContent = active ? '★ 已收藏' : '☆ 收藏';
     button.setAttribute('aria-pressed', String(active));
-    button.setAttribute('aria-label', `${active ? '取消收藏' : '收藏'} ${modelId ?? '模型'}`);
+    const named = modelId === undefined ? undefined : channel.models.find((model) => model.modelId === modelId);
+    button.setAttribute('aria-label', `${active ? '取消收藏' : '收藏'} ${named === undefined ? technicalWords(modelId ?? '模型', '模型') : modelLabelWords(named)}`);
     button.dataset['favoriteModel'] = modelId ?? '';
     button.disabled = savingFavourite || modelId === undefined;
   };
@@ -364,7 +368,8 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   if (checked !== null) options.chooseModel?.(checked.modelId);
   const actions = el('div', 'button-row');
   actions.append(...(technicalLayerVisible ? [test] : []), ...roleButtons, use);
-  step.append(filterLabel, group, matchCount, customLabel, actions);
+  // A manual model ID is the developer layer's (Issue #1431 item 97); ordinary settings choose from the searchable catalogue.
+  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), actions);
   const testStep = el('div', 'model-service-flow-test');
   if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test);
   testStep.append(feedback, el('p', 'field-note', technicalLayerVisible ? MODEL_CONNECTION_TEST_NOTE : '只发送一条测试消息，不含图书文字。'));

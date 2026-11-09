@@ -27,7 +27,6 @@ export const SWITCHER_WORDS = {
   mode: '创建方式',
   source: '来源材料',
   confirm: '创建并打开',
-  continue: '继续填写写作要求…',
   cancel: '取消',
   pickSource: '请先选择一份来源材料。',
   unavailable: '本书的衍生稿件暂时无法读取。',
@@ -74,6 +73,7 @@ export interface MountManuscriptSwitcherOptions {
   awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** Leave for the manuscript, its edits settled first by the caller. */
   openPrimary(): Promise<void>;
+  openWorkspace?(): Promise<void>;
   /** Open one document in this editor; `notice` says what its creation did not carry. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
   openWritingPlan(taskIntentId: string, note?: string): void;
@@ -191,7 +191,10 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       return button;
     };
     entry(SWITCHER_WORDS.primary(bookTitle), 'primary', () => void leave(() => options.openPrimary()));
-    for (const { type, document: documentNow } of projection === null ? [] : documentsOf(projection)) {
+    const all = projection === null ? [] : documentsOf(projection);
+    const compact = all.length <= 3 ? all : [...all].sort((a, b) => Number(b.document.documentId === options.currentDocumentId) - Number(a.document.documentId === options.currentDocumentId) ||
+      (b.document.updatedAt ?? b.document.createdAt).localeCompare(a.document.updatedAt ?? a.document.createdAt)).slice(0, 3);
+    for (const { type, document: documentNow } of compact) {
       const button = entry(derivativeSwitchLabel(type.label, documentNow.title), 'document',
         () => void leave(() => options.openDocument(documentNow, { typeId: type.typeId, label: type.label })), documentNow.documentId);
       button.dataset['documentTypeId'] = type.typeId;
@@ -206,7 +209,12 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     const state = el('span', 'manuscript-switcher-state');
     state.textContent = writingState.drafted > 0 ? SWITCHER_WORDS.draftReady(writingState.drafted) : writingState.underWay ? SWITCHER_WORDS.writing : '';
     state.hidden = state.textContent === '';
-    bar.replaceChildren(list, create, state);
+    const manage = el('button', 'quiet manuscript-switch-manage', `管理全部衍生稿件 (${all.length})`);
+    manage.type = 'button';
+    manage.dataset['manuscriptSwitch'] = 'manage';
+    manage.disabled = working || options.openWorkspace === undefined;
+    manage.addEventListener('click', () => { if (options.openWorkspace) void leave(options.openWorkspace); });
+    bar.replaceChildren(list, create, manage, state);
     bar.dataset['documentCount'] = String(projection === null ? 0 : documentsOf(projection).length);
     if (focused !== null) {
       const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-manuscript-switch]'))
@@ -304,6 +312,9 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
         if (!radio.checked) return;
         state.mode = mode;
         state.problem = null;
+        // AI 写作生成 goes straight to the one writing sheet with the title and type carried (Issue #1431 item 29): its own
+        // 开始写作 starts, so this form adds no 继续 step.
+        if (mode === 'writing') { void create(state); return; }
         // Issue #1410 item 23: 从来源材料创建 begins with the Book's first source chosen; another stays one click away.
         if (mode === 'source' && state.sourceVersionId === null) state.sourceVersionId = next.sources[0]?.sourceVersionId ?? null;
         paintPanel(mode === 'source' ? 'source' : null);
@@ -336,7 +347,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       node.append(problem);
     }
     const row = el('div', 'button-row compact-actions');
-    const confirm = el('button', 'primary', state.mode === 'writing' ? SWITCHER_WORDS.continue : SWITCHER_WORDS.confirm);
+    const confirm = el('button', 'primary', SWITCHER_WORDS.confirm);
     confirm.type = 'button';
     confirm.dataset['documentAction'] = 'create-derivative';
     confirm.disabled = working;

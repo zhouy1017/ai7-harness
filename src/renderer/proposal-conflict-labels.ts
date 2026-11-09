@@ -1,6 +1,7 @@
 import type { ConflictResolution, ConflictUnitKind } from '../shared/conflict-units.js';
 import type { ProposalConflictKind } from '../shared/protocol.js';
 import { markTimeLabel } from './editorial-mark-labels.js';
+import { technicalWords } from './technical-layer.js';
 
 /**
  * The editorial wording of 稿件冲突 (Issue #57, plan slice S22; ADR 0085; V2-UX-CONFLICT-004 to 013;
@@ -22,8 +23,8 @@ export const CONFLICT_REBASED_NOTICE = '稿件又有改动，已按最新内容�
 /** The three read-only panes, persistently labelled (V2-UX-CONFLICT-004). */
 export function conflictPaneLabels(kind: ProposalConflictKind): { base: string; current: string; proposed: string } {
   return {
-    base: '提案基准',
-    current: '当前权威稿件',
+    base: technicalWords('提案基准', '原文'),
+    current: technicalWords('当前权威稿件', '当前稿件'),
     proposed: kind === 'reversal' ? '提议内容 · 撤销后会恢复的原文' : '提议内容',
   };
 }
@@ -189,7 +190,7 @@ export function conflictCompletionOn(onDocument: boolean, completion: string): s
 
 export const CONFLICT_STATUS_LINES = {
   opening: '正在打开稿件冲突…',
-  opened: '稿件冲突已打开；三处文字只读，稿件不会改动。',
+  get opened() { return technicalWords('稿件冲突已打开；三处文字只读，稿件不会改动。', '请对比文字并选择处理方式'); },
   openFailed: '无法打开稿件冲突。',
   returning: '正在返回稿件…',
   returnFailed: '无法返回稿件。',

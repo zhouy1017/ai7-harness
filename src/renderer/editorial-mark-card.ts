@@ -1,4 +1,5 @@
 import type { EditorialMarkCardProjection } from '../shared/protocol.js';
+import { resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
 import { MARK_KIND_LABELS, markSourceLine, markStateLabel, markTimeLabel } from './editorial-mark-labels.js';
 
 /** Renderer-session memory shared by cards even when the manuscript surface is remounted. */
@@ -37,9 +38,13 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   panel.dataset['markCard'] = card.markId;
   panel.dataset['learningDecisionId'] = card.suggestion?.decision?.decisionId ?? '';
   panel.dataset['markKind'] = card.kind;
+  panel.dataset['markCategory'] = card.categoryKey;
   panel.dataset['markAnchor'] = card.anchorState;
   const header = node('header', 'editorial-mark-card-header');
-  header.append(node('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]), options.dismiss);
+  const category = resolveEditorialMarkCategory({ sourceKind: card.source.kind, sourceOrigin: card.source.origin, sourceLabel: card.source.label });
+  const badge = node('span', 'editorial-mark-category-badge', category.badgeText);
+  badge.title = card.categoryLabel;
+  header.append(badge, node('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]), options.dismiss);
   // The author, time and state pill are the header's second line (Issue #1413 cluster 3).
   const author = node('p', 'editorial-mark-author');
   author.dataset['markBlock'] = 'author';

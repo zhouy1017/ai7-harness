@@ -2,6 +2,7 @@ import type { IconId } from './components/icon-sprite.js';
 import type { ShellBookSection } from '../shared/preferences.js';
 import type { DialogueAttemptProjection } from '../shared/protocol.js';
 import { dialogueIncompleteLine } from './dialogue-labels.js';
+import { technicalWords } from './technical-layer.js';
 
 export function globalAgentAnswerStatus(attempt: DialogueAttemptProjection | undefined): string {
   if (attempt?.causeCode === 'QUOTA') return '模型服务按账户限额拒绝了请求，回答已停下，已收到的内容已保存；处理好模型服务、限额解除后可重新回答。';
@@ -34,7 +35,8 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
   readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: IconId }>;
 }> = Object.freeze([
   { key: 'work', label: '工作', sections: [
-    { key: 'manuscript', label: '稿件', icon: 'i-ms' },
+    { key: 'manuscript', label: '主稿件', icon: 'i-ms' },
+    { key: 'derivatives', label: '衍生稿件', icon: 'i-ms' },
     { key: 'review', label: '审阅', icon: 'i-review' },
     { key: 'evaluation', label: '评估', icon: 'i-star' },
     { key: 'deliverables', label: '交付物', icon: 'i-box' },
@@ -55,7 +57,8 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
  * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
  * section, and nothing opens it on its own.
  */
-export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-workspace', state: 'agent-workspace' } as const);
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work' as const, get label(): string { return technicalWords('Agent 工作区', 'AI 协作'); },
+  icon: 'i-workspace' as const, state: 'agent-workspace' as const });
 
 export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
 
@@ -81,7 +84,7 @@ export const SHELL_LABELS = Object.freeze({
   untitledBook: '未命名图书',
   bookIcon: '书',
   openingBook: '正在打开图书工作台…',
-  bookUnavailable: '无法打开精确图书工作台。',
+  get bookUnavailable() { return technicalWords('无法打开精确图书工作台。', '无法打开这本书，请重试。'); },
   preferenceWriteFailed: '本机界面设置未能保存，界面仍按原来的设置显示。',
   preferenceReadFailed: '本机界面设置无法读取，已按默认设置显示。',
   library: '书库',

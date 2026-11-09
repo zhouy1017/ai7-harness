@@ -1,4 +1,7 @@
+import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
+import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
+import type { SaveProductionDocumentTypeInput, DeleteProductionDocumentTypeInput, ReorderProductionDocumentTypesInput, UpdateProductionDocumentMetaInput, ProductionDocumentTypesProjection } from '../shared/protocol.js';
 import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
@@ -481,6 +484,7 @@ import {
 } from './task-authorization.js';
 import {
   initializeLocalStageSchema,
+  reviewRunConclusions,
   reviewRunEvidence,
   initializeReviewRunSchema,
   ReviewRunError,
@@ -3256,6 +3260,8 @@ export class EditorialStore {
       initializeFactualRangeTaskSchema(authority);
       // Revision 111 (Issue #1412): the 🔒 AI edit lock ledger; `initializeTaskAuthorizationSchema` stamps the version.
       initializeAiEditLockSchema(authority);
+      initializeDerivativeWorkspaceSchema(authority);
+      initializeInlineEditorRevisionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4030,7 +4036,8 @@ export class EditorialStore {
   /** The next version of the Run's 审阅报告 (REV-009). */
   generateReviewReport(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(this, bookId, reviewRunId));
+      this.#reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(this, bookId, reviewRunId),
+        { conclusions: () => reviewRunConclusions(this, bookId, reviewRunId) });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
   }
@@ -13312,6 +13319,9 @@ export class EditorialStore {
   }
 
   updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {
+    if (input.action === 'apply-inline-revision' || input.action === 'revert-inline-revision') {
+      return this.#markCall(() => this.#boundedCall(() => decideInlineEditorRevision(this.#authority, this.#boundedAuthority, this.#lifetimeId, input)));
+    }
     return this.#markCall(() => this.#editorialMarks.update(input));
   }
 
@@ -14412,7 +14422,7 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.bookId) && (input.sourceVersionId == null || UUID_PATTERN.test(input.sourceVersionId)),
       'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
-    const type = productionDocumentType(input.typeId);
+    const type = productionDocumentType(input.typeId, this.#authority);
     requireStore(type !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
     const plan = this.#documentCall(() => this.#productionDocumentPlan(input));
     const title = input.title === undefined ? undefined : publicationText(input.title, 80);
@@ -14522,6 +14532,27 @@ export class EditorialStore {
     return this.#productionDocumentResult(input.bookId, input.typeId, notCarried === 0 ? null : productionDocumentMarksNotCarried(notCarried), documentId);
   }
 
+  saveProductionDocumentType(input: SaveProductionDocumentTypeInput): ProductionDocumentTypesProjection {
+    this.#assertAvailable();
+    return saveProductionDocumentType(this.#authority, input);
+  }
+
+  deleteProductionDocumentType(input: DeleteProductionDocumentTypeInput): ProductionDocumentTypesProjection {
+    this.#assertAvailable();
+    return deleteProductionDocumentType(this.#authority, input.typeId);
+  }
+
+  reorderProductionDocumentTypes(input: ReorderProductionDocumentTypesInput): ProductionDocumentTypesProjection {
+    this.#assertAvailable();
+    return reorderProductionDocumentTypes(this.#authority, input.typeIds);
+  }
+
+  updateProductionDocumentMeta(input: UpdateProductionDocumentMetaInput): ProductionDocumentsProjection {
+    this.#assertAvailable();
+    this.#documentCall(() => this.#productionDocuments.updateMeta(input));
+    return this.inspectProductionDocuments(input.bookId);
+  }
+
   renameProductionDocument(input: RenameProductionDocumentInput): ProductionDocumentResultProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId), 'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
@@ -14530,6 +14561,7 @@ export class EditorialStore {
     const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
     requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
     this.#authority.prepare('UPDATE manuscript_branches SET name = ? WHERE manuscript_id = ?').run(title, row.documentId);
+    if (productionDocumentType(row.typeId, this.#authority) !== undefined) this.#productionDocuments.updateMeta({ bookId: input.bookId, documentId: row.documentId });
     return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
   }
 
@@ -14783,6 +14815,14 @@ export class EditorialStore {
    * is saved as a revision for the export first.
    */
   async reviewManuscriptExport(input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
+    // 导出审阅报告（DOCX） (Issue #1430): the report is recorded first, then reviewed as any recorded version is.
+    const target = input.target;
+    if (target.kind === 'book-review-report') {
+      await this.#exportCall(async () => this.#manuscriptExport.requireAvailable(available));
+      const reportId = this.#reviewCall(() => this.#reviewRuns.compileBookReport(input.bookId, (runId) => reviewRunEvidence(this, input.bookId, runId),
+        (runId) => reviewRunConclusions(this, input.bookId, runId), target.reviewRunId));
+      return this.#exportCall(() => this.#manuscriptExport.review({ ...input, target: { kind: 'report', reportId } }, available));
+    }
     return this.#exportCall(() => this.#manuscriptExport.review(input, available));
   }
 

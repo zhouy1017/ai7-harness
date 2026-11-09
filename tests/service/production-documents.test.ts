@@ -305,7 +305,7 @@ describe('Production Documents', () => {
 
   it('creates only a house type from material imported as a source', async () => {
     await withBook(async (store, book) => {
-      const manuscriptSource = store.getBookOverview(book.bookId).records.find((record) => record.kind === 'source')!;
+      const manuscriptSource = store.getBookOverview(book.bookId, null).records.find((record) => record.kind === 'source')!;
       expect(await asyncCode(() => store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId: manuscriptSource.sourceVersionId })))
         .toBe('PRODUCTION_DOCUMENT_SOURCE_INVALID');
       const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22, 23]));
@@ -413,7 +413,7 @@ describe('Production Documents', () => {
 
   it('copies material under document identities without changing the Manuscript or its history', async () => {
     await withBook(async (store, book) => {
-      const overviewBefore = store.getBookOverview(book.bookId);
+      const overviewBefore = store.getBookOverview(book.bookId, null);
       const manuscriptWindow = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
       const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22, 23]));
       const created = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId })).document!;
@@ -421,7 +421,7 @@ describe('Production Documents', () => {
       expect(window.bookId).toBe(book.bookId);
       expect(window.blocks.map((block) => block.text)).toEqual(await Promise.all([21, 22, 23].map((block) => sourceSpanText(SOURCE, span(block)))));
       expect(window.blocks.some((block) => manuscriptWindow.blocks.some((other) => other.blockId === block.blockId))).toBe(false);
-      const overviewAfter = store.getBookOverview(book.bookId);
+      const overviewAfter = store.getBookOverview(book.bookId, null);
       expect(overviewAfter.manuscriptState).toEqual(overviewBefore.manuscriptState);
       expect(overviewAfter.records.filter((record) => record.kind === 'revision')).toEqual(overviewBefore.records.filter((record) => record.kind === 'revision'));
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).toEqual(manuscriptWindow);
@@ -773,4 +773,64 @@ describe('交付 of a Production Document (S66b)', () => {
       expect(documents.types[0]!.document!.deliveries).toEqual([]);
     });
   }, 120_000);
+});
+
+
+it('persists editable categories, document reassignment and workspace status across restart (#1427)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const book = await importBook(store, await compose('类别测试', [1, 2]));
+  const categories = store.saveProductionDocumentType({ name: '人物小传', description: '人物资料' });
+  const custom = categories.types.at(-1)!;
+  const doc = (await store.createProductionDocument({ bookId: book.bookId, typeId: custom.typeId, title: '人物索引' })).document!;
+  expect(code(() => store.deleteProductionDocumentType({ typeId: custom.typeId }))).toBe('PRODUCTION_DOCUMENT_TYPE_IN_USE');
+  store.saveProductionDocumentType({ typeId: 'news-release', name: '媒体新闻稿' });
+  store.reorderProductionDocumentTypes({ typeIds: categories.types.map((type) => type.typeId).reverse() });
+  store.updateProductionDocumentMeta({ bookId: book.bookId, documentId: doc.documentId, typeId: 'news-release', finalized: true });
+  store.deleteProductionDocumentType({ typeId: custom.typeId });
+  store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const restored = store.inspectProductionDocuments(book.bookId);
+    expect(restored.types.map((type) => type.typeId)).toEqual(categories.types.slice(0, -1).map((type) => type.typeId).reverse());
+    expect(restored.types.find((type) => type.typeId === 'news-release')).toMatchObject({ label: '媒体新闻稿', documents: [{ documentId: doc.documentId, finalized: true, characterCount: 0 }] });
+    store.updateProductionDocumentMeta({ bookId: book.bookId, documentId: doc.documentId, finalized: false });
+    expect(store.inspectProductionDocuments(book.bookId).types.flatMap((type) => type.documents)[0]!.finalized).toBe(false);
+    store.updateProductionDocumentMeta({ bookId: book.bookId, documentId: doc.documentId, deleted: true });
+    expect(store.inspectProductionDocuments(book.bookId).types.flatMap((type) => type.documents)).toHaveLength(0);
+    expect(store.getBookOverview(book.bookId, null).manuscriptAnchor!.manuscriptId).toBe(book.manuscriptId);
+  } finally { store.close(); }
+});
+
+it('renames built-in categories and permits deleting an unused category without reseeding it (#1427)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const book = await importBook(store, await compose('类别测试', [1, 2]));
+  store.saveProductionDocumentType({ typeId: 'news-release', name: '媒体稿' });
+  store.deleteProductionDocumentType({ typeId: 'marketing-points' });
+  store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const types = store.inspectProductionDocuments(book.bookId).types;
+    expect(types).toHaveLength(4);
+    expect(types[0]!.label).toBe('媒体稿');
+    expect(types.some((type) => type.typeId === 'marketing-points')).toBe(false);
+    expect(code(() => store.reorderProductionDocumentTypes({ typeIds: [types[0]!.typeId] }))).toBe('PRODUCTION_DOCUMENT_TYPE_INVALID');
+  } finally { store.close(); }
+});
+
+
+it('records and restores a derivative manuscript inline edit through its own journal (#1428)', async () => {
+  await withDocument(async ({ store, created }) => {
+    const initial = store.getManuscriptWindow(created.documentId, created.branchId, null), block = initial.blocks[0]!;
+    const written = store.flushJournalEdit({ manuscriptId: created.documentId, branchId: created.branchId,
+      clientEditId: randomUUID(), baseRevisionId: initial.revisionId, windowStartBlockId: block.blockId,
+      expectedJournalSequence: initial.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest,
+      fromGrapheme: 0, toGrapheme: 0, insertText: '公开修订', editorRevision: { sessionId: randomUUID(), autoApply: false } });
+    const mark = written.window.marks.find((candidate) => candidate.inlineRevision)!;
+    expect(mark).toMatchObject({ status: 'open', categoryKey: 'editor', sourceKind: 'editor' });
+    const result = store.updateEditorialMark({ manuscriptId: created.documentId, branchId: created.branchId,
+      windowStartBlockId: block.blockId, markId: mark.markId, action: 'revert-inline-revision', body: null,
+      highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+    expect(result.window?.blocks[0]!.text === block.text).toBe(true);
+    expect(result.window?.marks.some((candidate) => candidate.markId === mark.markId)).toBe(false);
+  });
 });

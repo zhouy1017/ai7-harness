@@ -366,6 +366,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         if (book !== null) options.openSection(book, key);
       });
       link.dataset['navBookSection'] = key;
+      link.dataset['shellSection'] = key;
       sectionLinks.set(key, link);
       const item = el('li');
       item.append(link);
@@ -527,6 +528,11 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     for (const [key, node] of sectionLinks) {
       if (active.kind === 'section' && active.section === key) node.setAttribute('aria-current', 'page');
       else node.removeAttribute('aria-current');
+    }
+    // The row's name follows the technical layer, which can change after the sidebar is built (Issue #1431 item 32).
+    if (agentWorkspaceLink) {
+      const label = agentWorkspaceLink.querySelector('.nav-label');
+      if (label !== null && label.textContent !== SHELL_AGENT_WORKSPACE_ROW.label) { label.textContent = SHELL_AGENT_WORKSPACE_ROW.label; agentWorkspaceLink.title = SHELL_AGENT_WORKSPACE_ROW.label; }
     }
     if (state === SHELL_AGENT_WORKSPACE_ROW.state) agentWorkspaceLink?.setAttribute('aria-current', 'page');
     else agentWorkspaceLink?.removeAttribute('aria-current');

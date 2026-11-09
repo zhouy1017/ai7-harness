@@ -142,7 +142,7 @@ describe('the direct-search candidate in 联网检索', () => {
     input.value = 'synthetic-search-key'; input.dispatchEvent({ type: 'input' });
     await press('保存密钥'); expect(input.value).toBe('');
     expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-brave', secret: 'synthetic-search-key' });
-    await press('选择后端'); expect(card().dataset['selected']).toBe('true');
+    await press('选择检索服务'); expect(card().dataset['selected']).toBe('true');
     paint(); expect(card().dataset['selected']).toBe('true');
     await press('测试检索'); expect(card().querySelector('[data-search-probe]')!.textContent).toContain('可达');
     expect(card().querySelector('[data-search-probe]')!.textContent).not.toContain('延迟');

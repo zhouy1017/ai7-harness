@@ -25,8 +25,8 @@ import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
 import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import {
-  BUILTIN_PRODUCTION_DOCUMENT_TYPES,
-  BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
+  listProductionDocumentTypes,
+  productionDocumentTypeConfiguration,
   productionDocumentType,
   documentTypeLabel,
   type ProductionDocumentTypeConfiguration,
@@ -119,15 +119,17 @@ export const REVIEW_DELIVERABLE_CHANGED = '跨交付物一致性所依据的交�
 export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeliverableReading {
   const participants: ReviewDeliverableParticipant[] = [];
   const leftOut: Array<{ documentId: string; title: string; reason: string }> = [];
-  const houseTypes = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type) => type.typeId);
-  const rows = db.prepare(`SELECT * FROM production_documents WHERE book_id = ? AND type_id IN (${houseTypes.map(() => '?').join(', ')})
-    ORDER BY type_id, created_at, rowid LIMIT 17`).all(bookId, ...houseTypes) as SqlRow[];
+  const houseTypes = listProductionDocumentTypes(db).types.map((type) => type.typeId);
+  const rows = db.prepare(`SELECT pd.*, coalesce(meta.type_id, pd.type_id) type_id FROM production_documents pd
+    LEFT JOIN production_document_metadata meta ON meta.document_id = pd.document_id
+    WHERE pd.book_id = ? AND coalesce(meta.deleted, 0) = 0 AND coalesce(meta.type_id, pd.type_id) IN (${houseTypes.map(() => '?').join(', ')})
+    ORDER BY coalesce(meta.type_id, pd.type_id), pd.created_at, pd.rowid LIMIT 17`).all(bookId, ...houseTypes) as SqlRow[];
   if (rows.length > 16) return { participants, leftOut, unavailableReason: '交付物数量超出本次比对边界。' };
   let corrupt: string | null = null;
   for (const row of rows) {
     const documentId = text(row.document_id);
     const typeId = text(row.type_id);
-    const typeLabel = documentTypeLabel(typeId);
+    const typeLabel = documentTypeLabel(typeId, db);
     const peers = rows.filter((candidate) => candidate.type_id === typeId);
     const refPrefix = peers.length === 1 ? `deliverable/${typeId}` : `deliverable/${typeId}/${peers.findIndex((candidate) => candidate.document_id === documentId) + 1}`;
     let title = typeLabel;
@@ -258,15 +260,16 @@ export class ProductionDocuments {
     const decisions = this.#latestDecisions(bookId);
     const rows = this.#documentRows(bookId);
     const read = this.#sources(bookId, MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED + 1);
+    const configuration = productionDocumentTypeConfiguration(this.#db);
     return {
       bookId,
       configuration: {
-        schema: BUILTIN_PRODUCTION_DOCUMENT_TYPES.schema,
-        version: BUILTIN_PRODUCTION_DOCUMENT_TYPES.version,
-        digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
+        schema: configuration.schema,
+        version: configuration.version,
+        digest: sha256Hex(canonicalJson(configuration)),
       },
       unavailableReason: hasManuscript ? null : PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT,
-      types: BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type) => {
+      types: listProductionDocumentTypes(this.#db).types.map((type) => {
         const documents = rows.filter((row) => row.typeId === type.typeId).map((row) => this.document(row));
         return {
           typeId: type.typeId,
@@ -318,6 +321,10 @@ export class ProductionDocuments {
       revisionDigest: text(version.revision_digest),
     }));
     requireDocument(versions.length > 0, 'PRODUCTION_DOCUMENT_RECORD_INVALID', '生产文档没有版本。');
+    const facts = this.#db.prepare(`SELECT coalesce(sum(length(text)), 0) characters,
+      substr(group_concat(substr(text, 1, 160), ' '), 1, 240) preview FROM working_blocks WHERE branch_id = ?`).get(row.branchId) as SqlRow;
+    const meta = this.#db.prepare('SELECT finalized, updated_at FROM production_document_metadata WHERE document_id = ?').get(row.documentId) as SqlRow | undefined;
+    const modified = this.#db.prepare('SELECT max(durable_at) changed FROM edit_journal_entries WHERE branch_id = ?').get(row.branchId) as SqlRow | undefined;
     const workingDigest = text(state.working_digest);
     const deliveries = this.#deliveries(row, MAX_PRODUCTION_DOCUMENT_DELIVERIES_LISTED + 1);
     const changedSinceVersion = workingDigest !== versions[0]!.revisionDigest;
@@ -335,6 +342,13 @@ export class ProductionDocuments {
       origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name), marksNotCarried: this.#originMarks(row), drafted: row.drafted, ...(row.blank ? { blank: true } : {}) },
       versions: versions.slice(0, MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED),
       versionsTruncated: versions.length > MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
+      preview: text(facts.preview ?? ''),
+      characterCount: integer(facts.characters),
+      updatedAt: [row.createdAt, text(meta?.updated_at ?? ''), text(modified?.changed ?? ''), versions[0]!.createdAt].sort().at(-1)!,
+      finalized: meta?.finalized != null ? meta.finalized === 1 : this.#workflow.projection(row.documentId, {
+        changedSinceVersion, delivered: deliveries.length > 0, changedSinceDelivery, openSuggestions,
+        deliveryExported: false,
+      }).phases.some((phase) => phase.phaseId === 'finalization' && phase.state === 'completed'),
       changedSinceVersion,
       journalSequence: integer(state.journal_sequence),
       workingDigest,
@@ -471,7 +485,7 @@ export class ProductionDocuments {
   packageReadings(bookId: string): PackageDocumentReading[] {
     const decisions = this.#latestDecisions(bookId);
     const rows = this.#documentRows(bookId);
-    return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.flatMap((type): PackageDocumentReading[] => {
+    return listProductionDocumentTypes(this.#db).types.flatMap((type): PackageDocumentReading[] => {
       const matching = rows.filter((candidate) => candidate.typeId === type.typeId);
       if (decisions.get(type.typeId) === 'not-for-this-book') return [{ typeId: type.typeId, typeLabel: type.label, notForThisBook: true, document: null }];
       return (matching.length === 0 ? [undefined] : matching).map((row): PackageDocumentReading => {
@@ -501,7 +515,7 @@ export class ProductionDocuments {
    */
   deliveryReadings(bookId: string): Array<{ typeId: string; typeLabel: string; title: string; documentId: string; deliveries: (order: 'latest' | 'version') => Iterable<PackageDeliveryReading> }> {
     const rows = this.#documentRows(bookId);
-    return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.flatMap((type) => {
+    return listProductionDocumentTypes(this.#db).types.flatMap((type) => {
       return rows.filter((row) => row.typeId === type.typeId).map((row) => ({ typeId: type.typeId, typeLabel: type.label, title: row.title, documentId: row.documentId, deliveries: (order: 'latest' | 'version') => this.#deliveryReadings(row.documentId, order) }));
     });
   }
@@ -553,7 +567,7 @@ export class ProductionDocuments {
    */
   decide(bookId: string, typeId: string, notForThisBook: boolean): 'recorded' | 'unchanged' {
     requireDocument(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-    requireDocument(productionDocumentType(typeId) !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
+    requireDocument(productionDocumentType(typeId, this.#db) !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
     if (this.notForThisBook(bookId, typeId) === notForThisBook) return 'unchanged';
     const last = this.#db.prepare(
       'SELECT max(sequence) sequence FROM production_document_type_decisions WHERE book_id = ? AND type_id = ?',
@@ -563,7 +577,7 @@ export class ProductionDocuments {
       `INSERT INTO production_document_type_decisions(
          decision_id, book_id, type_id, type_configuration_version, type_configuration_digest, sequence, decision, recorded_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), bookId, typeId, BUILTIN_PRODUCTION_DOCUMENT_TYPES.version, BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
+    ).run(randomUUID(), bookId, typeId, productionDocumentTypeConfiguration(this.#db).version, sha256Hex(canonicalJson(productionDocumentTypeConfiguration(this.#db))),
       sequence, notForThisBook ? 'not-for-this-book' : 'restored', new Date().toISOString());
     return 'recorded';
   }
@@ -610,8 +624,8 @@ export class ProductionDocuments {
     parserIdentity: string;
     createdAt: string;
   }, configuration: { readonly types: ProductionDocumentTypeConfiguration; readonly digest: string } = {
-    types: BUILTIN_PRODUCTION_DOCUMENT_TYPES,
-    digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
+    types: productionDocumentTypeConfiguration(this.#db),
+    digest: sha256Hex(canonicalJson(productionDocumentTypeConfiguration(this.#db))),
   }): void {
     requireDocument(configuration.types.types.some((type) => type.typeId === input.typeId), 'PRODUCTION_DOCUMENT_TYPE_INVALID',
       '这个文档类型不在本社的类型配置中。');
@@ -632,6 +646,10 @@ export class ProductionDocuments {
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(input.documentId, input.bookId, input.typeId, configuration.types.version,
       configuration.digest, input.originSourceVersionId, input.parserIdentity, recordDigest, input.createdAt);
+    if (productionDocumentType(input.typeId, this.#db) !== undefined) {
+      this.#db.prepare('INSERT INTO production_document_metadata(document_id, type_id, updated_at) VALUES (?, ?, ?)')
+        .run(input.documentId, input.typeId, input.createdAt);
+    }
   }
 
   /**
@@ -652,14 +670,28 @@ export class ProductionDocuments {
     return version;
   }
 
-  #documentRows(bookId: string): ProductionDocumentRow[] {
+  updateMeta(input: import('../shared/protocol.js').UpdateProductionDocumentMetaInput): void {
+    // An explicit `deleted: false` is the 撤销 of a one-step delete (Issue #1431 item 28): it alone reaches a deleted document.
+    const row = this.#documentRows(input.bookId, input.deleted === false).find((entry) => entry.documentId === input.documentId);
+    requireDocument(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份衍生稿件。');
+    const typeId = input.typeId ?? row.typeId;
+    requireDocument(productionDocumentType(typeId, this.#db) !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个类别已不存在。');
+    this.#db.prepare(`INSERT INTO production_document_metadata(document_id, type_id, finalized, deleted, updated_at)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(document_id) DO UPDATE SET type_id = excluded.type_id,
+      finalized = coalesce(excluded.finalized, production_document_metadata.finalized),
+      deleted = excluded.deleted, updated_at = excluded.updated_at`)
+      .run(row.documentId, typeId, input.finalized === undefined ? null : Number(input.finalized), Number(input.deleted ?? false), new Date().toISOString());
+  }
+
+  #documentRows(bookId: string, includeDeleted = false): ProductionDocumentRow[] {
     return (this.#db.prepare(
-      `SELECT pd.document_id, pd.book_id, pd.type_id, pd.origin_source_version_id, pd.created_at, pd.parser_identity, mb.branch_id, mb.name
+      `SELECT pd.document_id, pd.book_id, coalesce(meta.type_id, pd.type_id) type_id, pd.origin_source_version_id, pd.created_at, pd.parser_identity, mb.branch_id, mb.name
        FROM production_documents pd
+       LEFT JOIN production_document_metadata meta ON meta.document_id = pd.document_id
        JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
        JOIN manuscript_branches mb ON mb.manuscript_id = pd.document_id
-       WHERE pd.book_id = ? ORDER BY pd.created_at, pd.rowid`,
-    ).all(bookId) as SqlRow[]).map((row) => ({
+       WHERE pd.book_id = ? AND (? = 1 OR coalesce(meta.deleted, 0) = 0) ORDER BY pd.created_at, pd.rowid`,
+    ).all(bookId, includeDeleted ? 1 : 0) as SqlRow[]).map((row) => ({
       documentId: text(row.document_id),
       bookId: text(row.book_id),
       typeId: text(row.type_id),

@@ -338,7 +338,9 @@ for (const shape of ['headings', 'dense'] as const) it(`sweeps drawer replies fo
       sweep(shape, 'one-draft', 'inspectBookTasks', store.inspectBookTasks(commit.bookId, () => null));
     }
   } finally { store.close(); await roots.dispose(); }
-}, 120_000);
+// The 6,000-heading sweep exceeded 120 s on the 4.4 GB background guest (#1429).
+// This is its give-up point; every wire-budget and paging assertion still runs.
+}, shape === 'headings' ? 300_000 : 120_000);
 
 it('pages the 500 retained drafts a Book lists, each saved for real, and refuses a page once the list moved', async () => {
   const roots = await createServiceTestRoots('ai7-task-drafts-wire-');

@@ -2302,7 +2302,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (
         !validMarkBinding(input) ||
         !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
-        !(typeof input.action === 'string' && ['edit-body', 'recolor', 'set-status', 'reply', 'remove', 'convert'].includes(input.action)) ||
+        !(typeof input.action === 'string' && ['edit-body', 'recolor', 'set-status', 'reply', 'remove', 'convert', 'apply-inline-revision', 'revert-inline-revision'].includes(input.action)) ||
         !(input.body === null || isBoundedString(input.body, MAX_MARK_BODY_CODE_UNITS, true)) ||
         !validHighlightColor(input.highlightColor) ||
         !(input.status === null || input.status === 'open' || input.status === 'resolved') ||
@@ -2532,10 +2532,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           'toGrapheme',
           'insertText',
         ],
-        ['structure'],
+        ['structure', 'editorRevision'],
         tentativeId,
       );
       // Protocol 181 (Issue #1175): Enter's split names the new paragraph; Backspace's merge names the paragraph it takes in.
+      const tracking = input.editorRevision;
+      if (tracking !== undefined && !(isRecord(tracking) && hasExactKeys(tracking, ['sessionId', 'autoApply']) &&
+        validUuid(tracking.sessionId) && typeof tracking.autoApply === 'boolean' && input.structure === undefined)) throw new ProtocolError(tentativeId);
       const structure = input.structure;
       if (structure !== undefined && !(isRecord(structure) && (
         (structure.kind === 'split' && hasExactKeys(structure, ['kind', 'newBlockId']) && isBoundedString(structure.newBlockId, 28) &&
@@ -3043,6 +3046,28 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'saveProductionDocumentType': {
+      const input = requireInputWithOptional(value.input, ['name'], ['typeId', 'description'], tentativeId);
+      if (!validPublicationText(input.name, 80) || (input.typeId !== undefined && !validProductionDocumentTypeId(input.typeId)) ||
+          (input.description !== undefined && (typeof input.description !== 'string' || input.description.length > 2000))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'deleteProductionDocumentType': {
+      const input = requireInputWithOptional(value.input, ['typeId'], ['fallbackTypeId'], tentativeId);
+      if (!validProductionDocumentTypeId(input.typeId) || (input.fallbackTypeId !== undefined && !validProductionDocumentTypeId(input.fallbackTypeId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'reorderProductionDocumentTypes': {
+      const input = requireInput(value.input, ['typeIds'], tentativeId);
+      if (!Array.isArray(input.typeIds) || input.typeIds.length > 1000 || !input.typeIds.every(validProductionDocumentTypeId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'updateProductionDocumentMeta': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'documentId'], ['typeId', 'finalized', 'deleted'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) || (input.typeId !== undefined && !validProductionDocumentTypeId(input.typeId)) ||
+          (input.finalized !== undefined && typeof input.finalized !== 'boolean') || (input.deleted !== undefined && typeof input.deleted !== 'boolean')) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'renameProductionDocument': {
       const input = requireInput(value.input, ['bookId', 'documentId', 'title'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.documentId) || publicationText(input.title, 80) === null) throw new ProtocolError(tentativeId);
@@ -3109,7 +3134,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // The format (Issue #500, S64b) is optional: a request without it still means DOCX.
     case 'reviewManuscriptExport': {
       const input = requireInputWithOptional(value.input, ['bookId', 'target', 'options'], ['format'], tentativeId);
-      if (!validUuid(input.bookId) || !validExportTarget(input.target) || !validExportOptions(input.options) ||
+      const compile = isRecord(input.target) && input.target.kind === 'book-review-report' &&
+        (hasExactKeys(input.target, ['kind']) || hasExactKeys(input.target, ['kind', 'reviewRunId']) && validUuid(input.target.reviewRunId));
+      if (!validUuid(input.bookId) || !(compile || validExportTarget(input.target)) || !validExportOptions(input.options) ||
           (Object.hasOwn(input, 'format') && !validExportFormat(input.format))) throw new ProtocolError(tentativeId);
       break;
     }

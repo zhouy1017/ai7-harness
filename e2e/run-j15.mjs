@@ -1028,7 +1028,7 @@ async function main() {
         card.querySelector('[data-exemplar-type="news-release"]')?.textContent.includes('仅本社');
     })()`, 'earlier-exemplar-grouped');
     await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
-    await click(renderer, '记录学习准入', 'earlier-exemplar-eligibility');
+    await clickSelector(renderer, '.exemplar-items [data-exemplar-action="record-eligibility"]', 'earlier-exemplar-eligibility');
     await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');

@@ -39,7 +39,7 @@ export type ExportPendingLabel =
 /** 导出… names the version it exports for a screen reader, since several stand side by side. */
 export function exportOpenAccessibleName(target: ExportPendingLabel): string {
   if (target.kind === 'report' || target.kind === 'document') return `导出「${target.label}」…`;
-  return target.kind === 'current' ? '导出当前修订版…' : `导出里程碑版本「${target.label}」…`;
+  return target.kind === 'current' ? technicalWords('导出当前修订版…', '导出当前稿件…') : `导出里程碑版本「${target.label}」…`;
 }
 
 // ---- the card ------------------------------------------------------------------------------------
@@ -47,18 +47,18 @@ export function exportOpenAccessibleName(target: ExportPendingLabel): string {
 export function exportCardHeading(target: ManuscriptExportTargetProjection | null, pending: ExportPendingLabel): string {
   if (target === null) {
     if (pending.kind === 'report' || pending.kind === 'document') return `导出 · ${pending.label}`;
-    return pending.kind === 'current' ? '导出 · 当前修订版' : `导出 · 里程碑版本「${pending.label}」`;
+    return pending.kind === 'current' ? technicalWords('导出 · 当前修订版', '导出 · 当前稿件') : `导出 · 里程碑版本「${pending.label}」`;
   }
   if (target.report !== null) return `导出 · ${technicalWords(reportExportLabel(target.report.runLabel, target.report.version), target.report.runLabel)}`;
   if (target.document !== null) return `导出 · ${target.document.typeLabel}${technicalWords(` · ${target.document.versionLabel}`)}`;
   return target.kind === 'current'
-    ? `导出 · 当前修订版${technicalWords(` ${target.revisionLabel}`)}`
-    : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${technicalWords(target.revisionLabel, '修订版')}`;
+    ? technicalWords(`导出 · 当前修订版 ${target.revisionLabel}`, '导出 · 当前稿件')
+    : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」${technicalWords(` · ${target.revisionLabel}`)}`;
 }
 
 /** V2-UX-TASK-040's low ceremony: unsaved edits became a revision for the export, and nothing more. */
 export function exportSavedRevisionLine(revisionLabel: string): string {
-  return `未保存的修改已为导出保存为修订版 ${technicalWords(revisionLabel)}；这不是里程碑版本。`;
+  return technicalWords(`未保存的修改已为导出保存为修订版 ${revisionLabel}；这不是里程碑版本。`, '已保存并导出。');
 }
 
 /** V2-UX-EXP-015, EXP-017: the export ends at the chosen local file. */
@@ -166,7 +166,7 @@ export function exportVersionText(target: ManuscriptExportTargetProjection): str
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   // A Production Document's version by its type and 版本 N (Issue #415, S66b), never by the revision behind it.
   if (target.document !== null) return `${target.document.typeLabel}${technicalWords(` · ${target.document.versionLabel}`)}`;
-  return target.kind === 'current' ? `修订版${technicalWords(` ${target.revisionLabel}`)}` : `里程碑版本「${target.milestoneLabel ?? ''}」 · ${technicalWords(target.revisionLabel, '修订版')}`;
+  return target.kind === 'current' ? technicalWords(`修订版 ${target.revisionLabel}`, '当前稿件') : `里程碑版本「${target.milestoneLabel ?? ''}」${technicalWords(` · ${target.revisionLabel}`)}`;
 }
 
 // ---- the records on 交付物 ------------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard } from './editorial-mark-card.js';
+import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
+import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -64,7 +66,7 @@ import {
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
-import { READING_REVISION_CLIPBOARD_REASON, type EditorInputMode } from './editor-input-mode.js';
+import { type EditorInputMode } from './editor-input-mode.js';
 import {
   AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_MENU_LABEL, openScopedAiEditComposer, selectionLockTargets, selectionLocked,
   setAiLocks, type ScopedAiEditHost,
@@ -233,10 +235,11 @@ interface MountOptions {
    * settled, the editor locked, the window reloaded from the service and checked against the state the
    * Effect Receipt names. `undefined` when it did not complete; the surface has then said why.
    */
+  writeInlineRevision?(operation: () => Promise<EditorialMarkCommandProjection>): Promise<EditorialMarkCommandProjection | undefined>;
   writeManuscript<T extends ManuscriptApplyCommandProjection>(operation: () => Promise<T>, done: string): Promise<T | undefined>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
-  /** 阅读与修订模式 (Issue #1411): while the text is guarded, the menu's 剪切 and 粘贴 are refused with their reason. */
+  /** The surface's current input mode. Clipboard input remains available in both modes. */
   inputMode?(): EditorInputMode;
   /** Open the 批注栏 for a card it should show; `false` where it cannot show now (专注模式), and the card floats instead. */
   revealComments?(): boolean;
@@ -521,11 +524,53 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const cardCache = new EditorialCardCache();
   const commentNodes = new Map<string, { card: EditorialMarkCardProjection; node: HTMLElement; receipt?: ApplyReceiptProjection | undefined; readState?: string }>();
   const commentsScroll = el('div', 'manuscript-comments-scroll');
+  // These nodes and this selection belong to the mounted pane, never to a polling/card redraw.
+  const markFilter: EditorialMarkFilter = { selectedCategories: new Set(), status: 'all', keyword: '' };
+  const filterBar = el('div', 'editorial-mark-filters');
+  filterBar.setAttribute('role', 'region');
+  filterBar.setAttribute('aria-label', '筛选批注');
+  const categoryChips = el('div', 'editorial-mark-filter-chips');
+  categoryChips.setAttribute('role', 'group');
+  categoryChips.setAttribute('aria-label', '批注分类（可多选）');
+  const categoryButtons = new Map<EditorialMarkCategoryKey | 'all', HTMLButtonElement>();
+  for (const key of ['all', ...Object.keys(EDITORIAL_MARK_CATEGORIES)] as Array<EditorialMarkCategoryKey | 'all'>) {
+    const chip = el('button', 'quiet');
+    chip.type = 'button';
+    chip.dataset['markCategoryFilter'] = key;
+    if (key !== 'all') chip.dataset['markCategory'] = key;
+    chip.addEventListener('click', () => {
+      if (key === 'all') markFilter.selectedCategories.clear();
+      else if (!markFilter.selectedCategories.delete(key)) markFilter.selectedCategories.add(key);
+      scheduleCommentsLayout();
+    });
+    categoryButtons.set(key, chip);
+    categoryChips.append(chip);
+  }
+  const statusChips = el('div', 'editorial-mark-filter-chips');
+  statusChips.setAttribute('role', 'group');
+  statusChips.setAttribute('aria-label', '批注状态');
+  for (const [status, label] of [['all', '全部'], ['open', '待处理'], ['applied', '已应用']] as const) {
+    const chip = el('button', 'quiet', label);
+    chip.type = 'button';
+    chip.dataset['markStatusFilter'] = status;
+    chip.addEventListener('click', () => { markFilter.status = status; scheduleCommentsLayout(); });
+    statusChips.append(chip);
+  }
+  const search = el('input', 'editorial-mark-search');
+  search.type = 'search';
+  search.dataset['markSearchInput'] = '';
+  search.placeholder = '搜索原文、修改建议或理由';
+  search.setAttribute('aria-label', '搜索批注');
+  search.addEventListener('input', () => { markFilter.keyword = search.value; scheduleCommentsLayout(); });
+  const filterSummary = el('p', 'editorial-mark-filter-summary');
+  filterSummary.setAttribute('role', 'status');
+  filterSummary.setAttribute('aria-live', 'polite');
+  filterBar.append(categoryChips, statusChips, search, filterSummary);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
   commentsScroll.append(commentsCanvas);
-  options.comments?.host.append(commentsScroll);
+  options.comments?.host.append(filterBar, commentsScroll);
   const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   leaders.classList.add('manuscript-comments-leaders');
   leaders.setAttribute('aria-hidden', 'true');
@@ -611,13 +656,31 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   function layoutComments(): void {
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
-    if (!visible) return;
+    if (!visible) { editor.setVisibleMarkIds(null); return; }
+    const marks = editor.currentWindow().marks;
+    const comments = marks.filter((mark) => mark.kind !== 'personal-highlight');
+    const matching = new Set(comments.filter((mark) => matchesEditorialMarkFilter(mark, cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card, markFilter)).map((mark) => mark.markId));
+    if (inlinePreviewId !== undefined && !matching.has(inlinePreviewId)) clearInlinePreview();
+    if (activeComment !== undefined && !matching.has(activeComment)) activateComment(undefined);
+    const filtering = markFilter.selectedCategories.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
+    editor.setVisibleMarkIds(filtering ? new Set([...matching, ...marks.filter((mark) => mark.kind === 'personal-highlight').map((mark) => mark.markId)]) : null);
+    for (const [key, button] of categoryButtons) {
+      const count = key === 'all' ? comments.length : comments.filter((mark) => mark.categoryKey === key).length;
+      const label = key === 'all' ? '全部' : EDITORIAL_MARK_CATEGORIES[key].label;
+      const text = `${label} (${count})`;
+      if (button.textContent !== text) button.textContent = text;
+      button.hidden = key !== 'all' && count === 0 && !markFilter.selectedCategories.has(key);
+      button.setAttribute('aria-pressed', String(key === 'all' ? markFilter.selectedCategories.size === 0 : markFilter.selectedCategories.has(key)));
+    }
+    for (const button of statusChips.querySelectorAll<HTMLButtonElement>('button')) button.setAttribute('aria-pressed', String(button.dataset['markStatusFilter'] === markFilter.status));
+    const summary = `当前区域 ${matching.size} / ${comments.length} 条批注${matching.size === 0 && filtering ? ' · 没有匹配的批注' : ''}`;
+    if (filterSummary.textContent !== summary) filterSummary.textContent = summary;
     const viewport = options.scroll.getBoundingClientRect();
     const base = commentsScroll.getBoundingClientRect();
     const items = [];
     const present = new Set<string>();
     for (const mark of editor.currentWindow().marks) {
-      if (mark.kind === 'personal-highlight') continue;
+      if (mark.kind === 'personal-highlight' || !matching.has(mark.markId)) continue;
       const anchor = commentAnchor(mark);
       if (!anchor) continue;
       const rect = anchor.getBoundingClientRect();
@@ -1313,6 +1376,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     ...extra,
   });
 
+  async function changeInlineRevision(markId: string, action: 'apply-inline-revision' | 'revert-inline-revision'): Promise<void> {
+    if (refuseWhileBusy() || !options.writeInlineRevision) return;
+    working = true;
+    try {
+      const result = await options.writeInlineRevision(() => update(markId, action, {}));
+      if (result) { applyCommand(result); refreshComments(); }
+    } catch (error) { options.setStatus(options.errorMessage(error, '修订未能更新。'), 'error'); }
+    finally { working = false; }
+  }
+
   /** Apply one change to a mark and show what it became: its card, or nothing when it has none now. */
   const change = (
     markId: string,
@@ -1582,13 +1655,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       // An insertion a file's author proposed stands at a point and replaces nothing (Issue #411).
       const inserts = suggestion.changeType === 'insert';
       more.append(
-        el('p', 'muted', applied !== null
+        el('p', 'muted', card.inlineRevision
+          ? card.status === 'applied' ? '这处修改已保存并应用；可撤销本次修改。' : '正文正在显示你的修改；可应用修改或忽略/还原。'
+          : applied !== null
           ? '这处修改已经写入稿件；正文里是应用后的文字。'
           : exact && decision?.disposition !== 'rejected'
-            ? inserts
+            ? technicalWords(inserts
               ? '正文里在插入处显示要插入的文字（预览 · 未应用）；稿件本身仍是原文。'
-              : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
-            : '稿件本身仍是原文。'),
+              : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。', '待采纳的修改')
+            : technicalWords('稿件本身仍是原文。', '尚未应用')),
         region('basis', '依据与核查', basisList(card), ...factualLineage(card), ...findingEvidence(card)),
       );
       const yours = actions;
@@ -1606,14 +1681,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
           if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) workspaceRow.append(cardAction('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
           if (item.atomicGroupId !== null) {
-            workspaceRow.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
-            for (const member of workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId)) workspaceRow.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
+            workspaceRow.append(el('p', 'muted', technicalWords(`原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`,
+              `这些修改需要一起处理${item.atomicReason === null ? '' : `：${item.atomicReason}`}`)));
+            for (const member of workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId)) workspaceRow.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段${technicalWords(` ${member.fromGrapheme}–${member.toGrapheme}`)}`));
           }
         }).catch(() => {});
       }
 
-      if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
-        yours.append(el('p', 'muted', '应用结果确认前不能再次应用。'));
+      if (card.inlineRevision) {
+        const act = (action: 'apply-inline-revision' | 'revert-inline-revision') => changeInlineRevision(card.markId, action);
+        if (card.status === 'open') disposition.append(cardAction('accept-and-apply', '应用修改', 'primary', () => void act('apply-inline-revision')));
+        disposition.append(exact ? cardAction('reverse-revision', card.status === 'applied' ? REVERSE_REVISION_LABEL : '忽略/还原', 'secondary',
+          () => void act('revert-inline-revision')) : disabledAction('reverse-revision', '这处文字又改过', '请先查看当前稿件。'));
+        yours.append(disposition);
+      } else if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
+        yours.append(el('p', 'muted', technicalWords('应用结果确认前不能再次应用。', '正在确认上次修改的结果，请稍后再试。')));
         // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
         if (pendingReceipt.state === 'unresolved') yours.append(cardAction('receipt-recheck', '重新核对应用结果', 'secondary', () => void api.inspectApplyReceipt({
           manuscriptId: binding().manuscriptId, branchId: binding().branchId, clientEffectId: pendingReceipt.clientEffectId, recovery: 'recheck',
@@ -2488,8 +2570,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
-    const guardedText = options.inputMode?.() === 'reading-revision';
-    const writes = (run: () => void): Pick<MenuItem, 'run' | 'disabledReason'> => guardedText ? { disabledReason: READING_REVISION_CLIPBOARD_REASON } : { run };
+    const writes = (run: () => void): Pick<MenuItem, 'run' | 'disabledReason'> => ({ run });
     // 修改此处 (Issue #1411) leads: the selected words, across paragraphs too, revised with a card and applied at once.
     const reviseReason = range.kind === 'range' || range.kind === 'span' ? undefined : range.kind === 'none' ? '先选中文字' : why ?? selectionMenuReason(range.kind);
     showMenu('selection', '稿件右键菜单', [
@@ -2636,7 +2717,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         { action: 'remove', label: '删除', run: () => void change(mark.markId, 'remove', {}, '已删除备注。') },
       ];
     } else {
-      items = [
+      items = mark.inlineRevision ? [
+        { action: 'open-card', label: '打开编辑修订', run: () => void openCard(mark.markId) },
+        ...(mark.status === 'open' ? [{ action: 'accept-and-apply', label: '应用修改', run: () => void changeInlineRevision(mark.markId, 'apply-inline-revision') }] : []),
+        { action: 'reverse-revision', label: mark.status === 'applied' ? REVERSE_REVISION_LABEL : '忽略/还原',
+          ...(exact ? { run: () => void changeInlineRevision(mark.markId, 'revert-inline-revision') } : { disabledReason: '这处文字又改过，请先查看当前稿件。' }) },
+      ] : [
         { action: 'open-card', label: '打开修改建议', run: () => void openCard(mark.markId) },
         mark.status === 'applied'
           // The menu's undo is the card's one click (Issue #1410 item 7); the service refuses it when the words changed again.
@@ -2815,8 +2901,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       commentsScroll.removeEventListener('scroll', scheduleCommentsLayout);
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
+      filterBar.remove();
       leaders.remove();
       editor.setLinkedMark(null);
+      editor.setVisibleMarkIds(null);
       reflow.disconnect();
       options.scroll.removeEventListener('wheel', onReaderScroll);
       options.scroll.removeEventListener('touchmove', onReaderScroll);

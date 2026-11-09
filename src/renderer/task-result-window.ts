@@ -1,4 +1,5 @@
 import { hydrateAnalysisRevision } from './analysis-paging.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { stateTerm } from './components/controls.js';
 import { ANALYSIS_MORE_RANGES } from './analysis-paging-labels.js';
 import type {
@@ -198,7 +199,8 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     list.append(
       el('dt', undefined, TASK_RESULT_ROWS.task), el('dd', undefined, taskResultTaskLine(entry)),
       el('dt', undefined, TASK_RESULT_ROWS.read), el('dd', undefined, read),
-      el('dt', undefined, TASK_RESULT_ROWS.notDone), el('dd', undefined, notDone),
+      // What a Task did not do is an invariant, kept for the developer layer (Issue #1431 item 48).
+      ...(technicalLayerVisible ? [el('dt', undefined, TASK_RESULT_ROWS.notDone), el('dd', undefined, notDone)] : []),
     );
     return list;
   }
@@ -233,7 +235,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     list.append(...rows);
     body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), list);
     if (revision.unitPage.nextOrdinal !== null) {
-      const more = el('button', 'secondary', ANALYSIS_MORE_RANGES);
+      const more = el('button', 'secondary', technicalWords(ANALYSIS_MORE_RANGES, '显示更多'));
       more.type = 'button';
       more.addEventListener('click', async () => {
         more.disabled = true;
@@ -306,7 +308,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
       if (result === null && isTask) {
         const completion = entry.item.facts.completion;
         body.replaceChildren(el('p', undefined, completion
-          ? `已完成 ${completion.total - completion.gaps} / ${completion.total} 个单元。`
+          ? technicalWords(`已完成 ${completion.total - completion.gaps} / ${completion.total} 个单元。`, completion.gaps === 0 ? '任务已完成。' : '任务已完成，部分内容尚未完成。')
           : '在这项任务中查看已有结果与后续操作。'));
         if (completion?.reason) body.append(el('p', undefined, completion.reason));
       } else if (result === null) throw new Error(TASK_RESULT_UNAVAILABLE);

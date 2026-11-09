@@ -44,6 +44,8 @@ import { DIALOGUE_FOREIGN_KEYS } from '../dialogue/dialogue-ledger.js';
 import { CAPTURED_PROCEDURE_FOREIGN_KEYS } from '../captured-procedures.js';
 import { EVALUATION_REWRITE_FOREIGN_KEYS } from '../evaluation-rewrites.js';
 import { WRITING_TASK_FOREIGN_KEYS } from '../writing-tasks.js';
+import { INLINE_EDITOR_REVISION_FOREIGN_KEYS } from '../inline-editor-revisions.js';
+import { DERIVATIVE_WORKSPACE_FOREIGN_KEYS } from '../production-document-types.js';
 import { AI_EDIT_LOCK_FOREIGN_KEYS } from '../ai-edit-locks.js';
 import { MATERIAL_INDEX_FOREIGN_KEYS, MATERIAL_INDEX_LAYER_FOREIGN_KEYS, MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS } from '../material-index.js';
 import { EVALUATION_PROFILE_FOREIGN_KEYS } from '../evaluation-profiles.js';
@@ -1699,6 +1701,8 @@ export const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>
   ...EVALUATION_REWRITE_FOREIGN_KEYS,
   ...WRITING_TASK_FOREIGN_KEYS,
   ...AI_EDIT_LOCK_FOREIGN_KEYS,
+  ...DERIVATIVE_WORKSPACE_FOREIGN_KEYS,
+  ...INLINE_EDITOR_REVISION_FOREIGN_KEYS,
   ...BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
   ...MATERIAL_INDEX_FOREIGN_KEYS,
   ...OUTCOME_RESOLUTION_FOREIGN_KEYS,

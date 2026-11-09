@@ -1,3 +1,4 @@
+import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 import type { JournalEditInput } from './protocol/manuscript-structure.js';
@@ -120,6 +121,11 @@ import type {
   SaveMaintenanceErrataInput,
   CreateProductionDocumentInput,
   RenameProductionDocumentInput,
+  ProductionDocumentTypesProjection,
+  SaveProductionDocumentTypeInput,
+  DeleteProductionDocumentTypeInput,
+  ReorderProductionDocumentTypesInput,
+  UpdateProductionDocumentMetaInput,
   ProductionDocumentResultProjection,
   DecideProductionDocumentTypeInput,
   SaveProductionDocumentVersionInput,
@@ -328,8 +334,13 @@ export * from './protocol/scoped-edit.js';
  * Protocol 200 (Issue #1400 Batch 3): 局部 AI 修改与 🔒 锁定 (#1412) — setAiEditLocks, inspectAiEditLocks, startScopedAiEdit,
  * inspectScopedAiEdit and the window's optional `aiLockedBlockIds`/`aiLocksDigest` — and 全部替换 as per-occurrence revision
  * cards (#1411) — commitReplacementRevisions.
+ *
+ * Protocol 201 (#1426 after-wave-24c closure, 0.6.3): editable derivative categories and document management (#1427) —
+ * saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes, updateProductionDocumentMeta;
+ * mark category/source fields on mark projections (#1429); inline editor revisions with apply/revert card actions (#1428);
+ * the one-click `book-review-report` DOCX export target and its report sections (#1430).
  */
-export const SERVICE_PROTOCOL_VERSION = 200 as const;
+export const SERVICE_PROTOCOL_VERSION = 201 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -750,6 +761,10 @@ export const IPC_CHANNELS = {
   cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   renameProductionDocument: 'ai7:j07:rename-production-document',
+  saveProductionDocumentType: 'ai7:derivatives:saveProductionDocumentType',
+  deleteProductionDocumentType: 'ai7:derivatives:deleteProductionDocumentType',
+  reorderProductionDocumentTypes: 'ai7:derivatives:reorderProductionDocumentTypes',
+  updateProductionDocumentMeta: 'ai7:derivatives:updateProductionDocumentMeta',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
@@ -1926,6 +1941,7 @@ export interface EditorialMarkSourceProjection {
 
 /** One mark as the manuscript surface draws it; the card's content is read on demand. */
 export interface EditorialMarkAnchorProjection {
+  inlineRevision?: { beforeText: string; afterText: string; sessionId: string };
   markId: string;
   kind: EditorialMarkKind;
   blockId: string;
@@ -1936,6 +1952,10 @@ export interface EditorialMarkAnchorProjection {
   status: EditorialMarkStatus;
   highlightColor: PersonalHighlightColor | null;
   sourceKind: EditorialMarkSourceProjection['kind'];
+  sourceOrigin: EditorialMarkSourceProjection['origin'];
+  sourceLabel: string | null;
+  categoryKey: EditorialMarkCategoryKey;
+  categoryLabel: string;
   /** The current Proposal Decision of a Change Suggestion, which the surface shows without a card. */
   disposition: ProposalItemDisposition | null;
   /**
@@ -1988,7 +2008,10 @@ export interface ProposalItemDecisionProjection {
  * from any change to the manuscript.
  */
 export interface EditorialMarkCardProjection {
+  inlineRevision?: boolean;
   markId: string;
+  categoryKey: EditorialMarkCategoryKey;
+  categoryLabel: string;
   kind: EditorialMarkKind;
   status: EditorialMarkStatus;
   anchorState: 'exact' | 'drifted' | 'detached';
@@ -2071,7 +2094,7 @@ export interface CreateEditorialMarkInput extends EditorialMarkBindingInput {
  */
 export interface UpdateEditorialMarkInput extends EditorialMarkBindingInput {
   markId: string;
-  action: 'edit-body' | 'recolor' | 'set-status' | 'reply' | 'remove' | 'convert';
+  action: 'edit-body' | 'recolor' | 'set-status' | 'reply' | 'remove' | 'convert' | 'apply-inline-revision' | 'revert-inline-revision';
   body: string | null;
   highlightColor: PersonalHighlightColor | null;
   status: EditorialMarkStatus | null;
@@ -2120,6 +2143,7 @@ export interface RecordProposalDecisionFeedbackInput extends EditorialMarkBindin
 }
 
 export interface EditorialMarkCommandProjection {
+  window?: ManuscriptWindowProjection;
   markId: string;
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;
@@ -5187,7 +5211,9 @@ export type ExportFidelityKey =
   | 'report-overview'
   | 'report-must-items'
   | 'report-summaries' | 'report-statistics' | 'report-findings'
-  | 'report-appendix';
+  | 'report-appendix'
+  // The published DOCX's 审阅说明 and 重点问题 (Issue #1430).
+  | 'report-explanation' | 'report-priorities';
 
 /** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */
 export type ExportFidelityStatus = 'preserved' | 'degraded' | 'unavailable' | 'excluded';
@@ -5353,7 +5379,7 @@ export const MAX_EXPORT_DESTINATION_CODE_UNITS = 1024;
 
 export interface ReviewManuscriptExportInput {
   bookId: string;
-  target: ManuscriptExportTargetInput;
+  target: ManuscriptExportTargetInput | { kind: 'book-review-report'; reviewRunId?: string };
   options: ManuscriptExportOptions;
   /** Absent reads as DOCX, so a request made before S64b (Issue #500) still means what it meant. */
   format?: ManuscriptExportFormat;
@@ -6655,6 +6681,10 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   appendMaintenanceCaseRevision: { input: AppendMaintenanceCaseRevisionInput; output: MaintenanceCaseResultProjection };
   saveMaintenanceErrata: { input: SaveMaintenanceErrataInput; output: MaintenanceCaseResultProjection };
   renameProductionDocument: { input: RenameProductionDocumentInput; output: ProductionDocumentResultProjection };
+  saveProductionDocumentType: { input: SaveProductionDocumentTypeInput; output: ProductionDocumentTypesProjection };
+  deleteProductionDocumentType: { input: DeleteProductionDocumentTypeInput; output: ProductionDocumentTypesProjection };
+  reorderProductionDocumentTypes: { input: ReorderProductionDocumentTypesInput; output: ProductionDocumentTypesProjection };
+  updateProductionDocumentMeta: { input: UpdateProductionDocumentMetaInput; output: ProductionDocumentsProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -7225,6 +7255,10 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   renameProductionDocument(input: Omit<RenameProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  saveProductionDocumentType(input: SaveProductionDocumentTypeInput): Promise<ProductionDocumentTypesProjection>;
+  deleteProductionDocumentType(input: DeleteProductionDocumentTypeInput): Promise<ProductionDocumentTypesProjection>;
+  reorderProductionDocumentTypes(input: ReorderProductionDocumentTypesInput): Promise<ProductionDocumentTypesProjection>;
+  updateProductionDocumentMeta(input: Omit<UpdateProductionDocumentMetaInput, 'bookId'>): Promise<ProductionDocumentsProjection>;
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
   decideProductionDocumentType(input: Omit<DecideProductionDocumentTypeInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;

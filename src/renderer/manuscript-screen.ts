@@ -1,3 +1,4 @@
+import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
@@ -28,7 +29,7 @@ import {
 } from './manuscript-search-labels.js';
 import { replacementRevisionRationale } from '../shared/editor-revision-words.js';
 import { AI_LOCK_SECTION_LABEL, AI_UNLOCK_SECTION_LABEL, setAiLocks, type ScopedAiEditHost } from './scoped-ai-edit.js';
-import { DEFAULT_EDITOR_INPUT_MODE, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
+import { DEFAULT_EDITOR_INPUT_MODE, getAutoApplyEditorRevisions, setAutoApplyEditorRevisions, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
 import { shortcutHint } from './commands.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
 import {
@@ -131,6 +132,7 @@ interface ManuscriptScreenOptions {
   returnToRecoveryComparison(attentionId: string): Promise<void>;
   /** 本书稿件 (Issue #1403): the Book's manuscript, and one of its derivative documents, opened on this surface. */
   openPrimaryManuscript(bookId: string, bookTitle: string): Promise<void>;
+  openDerivativesWorkspace?(bookId: string, bookTitle: string): void;
   openProductionDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, bookTitle: string, notice?: string | null): Promise<void>;
   openWritingPlan(bookId: string, taskIntentId: string, note?: string): void;
 }
@@ -264,7 +266,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const versionOf = (windowNow: ManuscriptWindowProjection): string | undefined =>
     productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
   const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
-    if (!isDocument) return `修订版 ${windowNow.revisionLabel.replace(/^r/u, '')}`;
+    if (!isDocument) return technicalWords(`修订版 ${windowNow.revisionLabel.replace(/^r/u, '')}`, '当前稿件');
     if (!technicalLayerVisible) return '当前文档';
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
@@ -373,7 +375,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       value.startsWith('heading-') ? Number(value.slice(8)) : value === 'title' ? 1 : null);
     editor?.focus();
   });
-  const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
+  const retryAuthoritativeRefreshButton = button(technicalWords('重试权威刷新', '重新打开稿件'), 'quiet', () => void retryAuthoritativeRefresh());
   retryAuthoritativeRefreshButton.hidden = true;
   // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
   // first, exactly as for 分析. A Mark Card's 查看任务 leaves the same way, for its Review Run and finding.
@@ -438,9 +440,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
-  // 阅读与修订模式 (Issue #1411): the text opens guarded; this pill is the one explicit way to type straight into it.
-  const inputModeToggle = button(INPUT_MODE_LABELS[DEFAULT_EDITOR_INPUT_MODE], 'secondary', () =>
-    setInputMode(editor?.inputMode() === 'direct-edit' ? 'reading-revision' : 'direct-edit'));
+  // Revision mode records ordinary input; direct edit is the explicit opt-out from revision cards.
+  const inputModeToggle = button(INPUT_MODE_LABELS[DEFAULT_EDITOR_INPUT_MODE], 'secondary', () => {
+    const mode = editor?.inputMode() === 'direct-edit' ? 'reading-revision' : 'direct-edit';
+    if (!dirty && !saving && !retryRequired) setInputMode(mode);
+    else void editor?.flush().then(() => setInputMode(mode));
+  });
   inputModeToggle.className = `${inputModeToggle.className} editor-input-mode-toggle`;
   inputModeToggle.dataset['editorInputModeToggle'] = 'true';
   const paintInputMode = (mode: EditorInputMode): void => {
@@ -458,9 +463,23 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
   // 让 AI 修改… (Issue #1412): the unlocked parts of this section or of the whole text, on the manuscript and on a document.
+  let autoApplyRevisions = getAutoApplyEditorRevisions();
+  const autoApplyToggle = button('', 'secondary', () => {
+    void editor?.flush().then(() => {
+      autoApplyRevisions = !autoApplyRevisions;
+      setAutoApplyEditorRevisions(autoApplyRevisions);
+      paintAutoApply();
+    });
+  });
+  autoApplyToggle.dataset['editorAutoApplyToggle'] = 'true';
+  const paintAutoApply = (): void => {
+    autoApplyToggle.textContent = `修订模式 · 人工修改自动应用：${autoApplyRevisions ? '开' : '关'}`;
+    autoApplyToggle.setAttribute('aria-pressed', String(autoApplyRevisions));
+  };
+  paintAutoApply();
   const scopedAiEditEntry = button('让 AI 修改…', 'secondary', () => editorialMarks?.composeScopedAiEdit());
   scopedAiEditEntry.dataset['scopedAiEditEntry'] = 'true';
-  toolbarActions.append(inputModeToggle, scopedAiEditEntry, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.append(inputModeToggle, autoApplyToggle, scopedAiEditEntry, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
   // 本书稿件 (Issue #1403): the manuscript and every derivative document of the Book, and 新建 / 导入衍生稿件, above the editor.
   let switcher: ManuscriptSwitcher | undefined;
@@ -690,6 +709,20 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
     setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });
   const exportMenu = manuscriptExport.menu(() => isDocument ? { kind: 'document', documentId: currentWindow.manuscriptId, revisionId: currentWindow.revisionId } : { kind: 'current' }, null);
+  // 导出审阅报告（.docx） beside the manuscript's formats (Issue #1430), offered once the Book's review has findings.
+  if (!isDocument) {
+    let hasFindings = false;
+    const reportButton = reviewReportExportButton({ api, bookId: initialWindow.bookId, enabled: () => hasFindings, setStatus, errorMessage: rendererErrorMessage,
+      inMenu: true, beforeExport: () => settleLocalEdit(), onStart: () => { if (exportMenu instanceof HTMLDetailsElement) exportMenu.open = false; } });
+    exportMenu.querySelector('.export-menu-options')?.before(reportButton);
+    exportMenu.addEventListener('toggle', () => {
+      if (!(exportMenu instanceof HTMLDetailsElement) || !exportMenu.open) return;
+      void api.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => {
+        hasFindings = workspace.runs.some((run) => run.findingCounts.must + run.findingCounts.should + run.findingCounts.note > 0);
+        reportButton.disabled = !hasFindings;
+      }).catch(() => { hasFindings = false; reportButton.disabled = true; });
+    });
+  }
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';
   analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);
@@ -885,6 +918,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     setStatus,
     errorMessage: rendererErrorMessage,
     awaitServiceJob,
+    ...(options.openDerivativesWorkspace === undefined ? {} : { openWorkspace: () => leaveFor(async () => options.openDerivativesWorkspace!(initialWindow.bookId, bookTitle)) }),
     openPrimary: () => leaveFor(() => options.openPrimaryManuscript(initialWindow.bookId, bookTitle)),
     openDocument: (document, type, notice) => leaveFor(() => options.openProductionDocument(document, type, bookTitle, notice)),
     openWritingPlan: (ref, note) => options.openWritingPlan(initialWindow.bookId, ref, note),
@@ -1343,7 +1377,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     } catch (error) {
       if (!authoritativeMutation || !target || !continuity) {
         if (authoritativeMutation) setAuthoritativeMutation(false);
-        setStatus(rendererErrorMessage(error, '待保存编辑未能排空；权威操作未开始。'), 'error');
+        setStatus(rendererErrorMessage(error, technicalWords('待保存编辑未能排空；权威操作未开始。', '刚才的编辑尚未保存，这项操作没有开始。')), 'error');
         return undefined;
       }
       try {
@@ -1352,17 +1386,18 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         clearAuthoritativeRecovery();
         setAuthoritativeMutation(false);
         if (result) {
-          setStatus(`${result.completionLabel}；编辑器已从刷新中断中恢复。`, 'success');
+          setStatus(technicalWords(`${result.completionLabel}；编辑器已从刷新中断中恢复。`, `${result.completionLabel}；稿件已重新打开。`), 'success');
           return result;
         }
-        setStatus(rendererErrorMessage(error, '权威操作未完成；编辑器已恢复到当前持久状态。'), 'error');
+        setStatus(rendererErrorMessage(error, technicalWords('权威操作未完成；编辑器已恢复到当前持久状态。', '操作未完成；稿件已恢复到最近保存的状态。')), 'error');
       } catch (refreshError) {
         pendingAuthoritativeRecovery = result
           ? { target, continuity, expected: result, reconcile: (value) => reconcile(value as T) }
           : { target, continuity };
         retryAuthoritativeRefreshButton.hidden = false;
         setStatus(
-          `无法确认权威操作后的当前窗口；编辑区保持只读且保留可见缓冲区。请重试权威刷新。${refreshError instanceof Error ? refreshError.message : ''}`,
+          technicalWords(`无法确认权威操作后的当前窗口；编辑区保持只读且保留可见缓冲区。请重试权威刷新。${refreshError instanceof Error ? refreshError.message : ''}`,
+            '暂时无法显示最新稿件；在重新打开前暂不能编辑，屏幕上的文字仍保留。请点「重新打开稿件」。'),
           'error',
         );
       }
@@ -1390,13 +1425,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       setAuthoritativeMutation(false);
       setStatus(
         recovery.expected
-          ? `${recovery.expected.completionLabel}；权威窗口刷新已恢复。`
-          : '权威操作失败后已恢复到当前持久窗口。',
+          ? technicalWords(`${recovery.expected.completionLabel}；权威窗口刷新已恢复。`, `${recovery.expected.completionLabel}；稿件已重新打开。`)
+          : technicalWords('权威操作失败后已恢复到当前持久窗口。', '操作未完成；稿件已恢复到最近保存的状态。'),
         recovery.expected ? 'success' : 'error',
       );
     } catch (error) {
       retryAuthoritativeRefreshButton.disabled = false;
-      setStatus(`权威窗口仍无法刷新；编辑区继续保持只读，请再次重试。${rendererErrorMessage(error, '')}`, 'error');
+      setStatus(technicalWords(`权威窗口仍无法刷新；编辑区继续保持只读，请再次重试。${rendererErrorMessage(error, '')}`, '仍无法打开最新稿件，暂不能编辑；请再试一次。'), 'error');
     }
   }
 
@@ -2481,8 +2516,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       }
     },
     onAnnouncement: setStatus,
-    // 阅读与修订模式 (Issue #1411): a key over selected words opens 修改此处.
-    onRevisionIntent: () => editorialMarks?.quickRevise() === true,
     onCommand: (command) => {
       if (command === 'search' || command === 'replace') {
         setNavigationOpen(true);
@@ -2685,6 +2718,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     setStatus,
     errorMessage: rendererErrorMessage,
     inputMode: () => editor?.inputMode() ?? DEFAULT_EDITOR_INPUT_MODE,
+    writeInlineRevision: async (operation) => runAuthoritativeMutation(async () => {
+      const result = await operation();
+      if (result.window === undefined) throw new Error('修订保存后无法读取稿件。');
+      return { ...result, revisionId: result.window.revisionId, journalSequence: result.window.journalSequence,
+        workingDigest: result.window.workingDigest, completionLabel: '已更新编辑修订。' };
+    }, async () => { await loadOutline(true); }),
     scopedAiEdit: { host: scopedAiEditHost, sectionOf },
     // ✎ 已改 (Issue #1411): the 批注栏 opens on the revision's card, unless 专注模式 keeps it closed.
     revealComments: () => {

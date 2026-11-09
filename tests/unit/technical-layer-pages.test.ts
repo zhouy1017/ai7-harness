@@ -77,6 +77,6 @@ it('scans the settled baseline, historical revision, plan versions and update co
     leaveReturnChip: vi.fn(), openEditorWindow: vi.fn(), openTaskPlan: vi.fn(), quickStartStartedLine: () => '', renderBookReview: vi.fn() });
   card.renderBaselineAnalysis(root, projection, '公开样书'); await settle();
   expect(root.querySelector('.baseline-analysis-card')).not.toBeNull();
-  expect(root.textContent).toContain('历史分析结果');
+  expect(root.textContent).toContain('历史记录（稿件已有更新）');
   scan(root);
 });

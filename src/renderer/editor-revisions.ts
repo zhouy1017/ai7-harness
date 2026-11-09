@@ -1,4 +1,5 @@
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
+export { computeInlineRevisionDiff } from '../shared/inline-revision-diff.js';
 
 // 修改此处 (Issue #1411): the editor's own revision of the words they selected, recorded as a 修改建议 of theirs and applied at
 // once. Words inside one paragraph are one revision. Words across paragraphs are one revision per paragraph they touch — the

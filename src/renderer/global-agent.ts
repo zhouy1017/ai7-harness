@@ -180,11 +180,13 @@ export function mountGlobalAgent(options: {
         displayedAttempt = last?.attemptId ?? null; displayedFragments = 0; prose.replaceChildren();
       }
       for (const fragment of (last?.fragments ?? []).slice(displayedFragments)) prose.append(el('p', fragment.text));
-      tools.replaceChildren(...(dialogue.toolCalls?.length ? [el('h3', '本次对话的工具调用')] : []),
+      // Ordinary mode: what was consulted and the preference suggested (Issue #1431 item 115); tool execution and the supervision
+      // protocol stay in the developer layer.
+      tools.replaceChildren(...(dialogue.toolCalls?.length ? [el('h3', technicalWords('本次对话的工具调用', '查阅的资料'))] : []),
         ...(dialogue.toolCalls ?? []).map((call) => {
           const card = el('article'); card.className = 'global-agent-tool-card';
           card.append(el('h4', TOOL_LABELS[call.tool] ?? '本机工具'),
-            el('p', call.tool === 'retrieve' ? '在所选图书与记忆中查找相关内容。' : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : '整理可由你确认的学习监督建议。'),
+            el('p', call.tool === 'retrieve' ? '在所选图书与记忆中查找相关内容。' : call.tool === 'exact_fetch' ? '读取检索结果对应的原文。' : call.tool === 'read_procedure' ? '读取选入工序的说明与阶段。' : technicalWords('整理可由你确认的学习监督建议。', '整理可由你采用的审阅偏好建议。')),
             el('p', call.outcome === 'returned' ? toolResultSummary(call.tool, call.result) : call.outcome === 'refused' ? '未能读取，请检查所选范围。' : '正在读取所选范围…'),
             technical(`工具：${call.tool}`, `参数：${call.arguments}`, `结果：${call.result ?? '等待返回'}`, `回答：${call.attemptId}`, `调用：${call.callId}`));
           return card;
@@ -192,7 +194,7 @@ export function mountGlobalAgent(options: {
       proposals.replaceChildren();
       for (const proposal of dialogue.supervisionProposals ?? []) {
         const key = `${proposal.attemptId}/${proposal.callId}`;
-        const confirm = el('button', confirmed.has(key) ? '已记录' : '确认并记录为学习监督指令'); confirm.type = 'button'; confirm.disabled = confirmed.has(key);
+        const confirm = el('button', confirmed.has(key) ? technicalWords('已记录', '已采用') : technicalWords('确认并记录为学习监督指令', '采用这条偏好')); confirm.type = 'button'; confirm.disabled = confirmed.has(key);
         confirm.className = 'btn ' + ('secondary');
         confirm.dataset['globalAgentConfirmProposal'] = key;
         confirm.addEventListener('click', () => {
@@ -200,11 +202,11 @@ export function mountGlobalAgent(options: {
           const memory = proposal.input.targets.some((pin) => current?.items.find((item) => item.itemId === pin.itemId)?.kind === 'memory');
           void options.api.recordLearningSupervision({ ...(memory ? { actionId: crypto.randomUUID() } : {}), ...proposal.input }).then((projection) => {
             confirmed.add(key);
-            if (root.isConnected) { render(projection); options.setStatus('已按你的确认记录学习监督指令。', 'success'); }
-          }).catch((error: unknown) => { confirm.disabled = false; options.setStatus(options.errorMessage(error, '学习监督指令未能记录。'), 'error'); });
+            if (root.isConnected) { render(projection); options.setStatus(technicalWords('已按你的确认记录学习监督指令。', '已采用这条偏好。'), 'success'); }
+          }).catch((error: unknown) => { confirm.disabled = false; options.setStatus(options.errorMessage(error, technicalWords('学习监督指令未能记录。', '未能采用这条偏好。')), 'error'); });
         });
         const card = el('article'); card.className = 'global-agent-proposal-card';
-        card.append(el('h4', `学习监督建议 · ${EFFECT_LABELS[proposal.input.effect]}`), el('p', proposal.input.text), confirm);
+        card.append(el('h4', `${technicalWords('学习监督建议', '审阅偏好建议')} · ${EFFECT_LABELS[proposal.input.effect]}`), el('p', proposal.input.text), confirm);
         proposals.append(card);
       }
       displayedFragments = last?.fragments.length ?? 0;

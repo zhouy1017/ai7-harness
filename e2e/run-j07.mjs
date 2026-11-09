@@ -98,21 +98,32 @@ const SCOPED_HELPERS = `(() => {
       return true;
     },
     firstText: () => Array.from(editor()?.querySelectorAll(':scope > p[data-block-id]') ?? []).find((node) => (node.textContent ?? '').length >= 8)?.dataset.blockId ?? null,
-    // The selection a reader makes, settled once the editor has read it: the editor reads the page's selection in its own
-    // selectionchange listener, registered before this one, so the event this waits for has been read by then. A selection
-    // equal to the one already there fires no event, and is already read. Bounded at two seconds.
+    // The selection a reader makes, settled once the editor has read it — its own selection snapshot names this paragraph and
+    // these graphemes, and the page shows the same words selected, across a frame. Focus entering the text lets the editor put
+    // back the selection it already holds (here the 查找 match) if it has not read the page's yet; a slow machine reaches that
+    // before the page's selectionchange, so the range is placed again until the editor has it, as J-05 does. Bounded at two
+    // seconds; anything else answers the content-free reason it did not hold.
     select: async (id, from, to) => {
-      const root = block(id); if (!root) return false;
+      const root = block(id); if (!root) return 'no-block';
+      const start = point(root, from); const end = point(root, to); if (!start || !end) return 'no-points';
+      const graphemes = (text) => Array.from(new Intl.Segmenter().segment(text)).length;
+      const anchor = graphemes((root.textContent ?? '').slice(0, from)); const head = anchor + graphemes((root.textContent ?? '').slice(from, to));
+      const place = () => { const range = document.createRange(); range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); };
+      const snapshot = () => { try { return JSON.parse(editor().dataset.selectionSnapshot ?? 'null'); } catch { return null; } };
+      const read = () => { const state = snapshot(); return state?.anchor?.blockId === id && state.head?.blockId === id && state.anchor.grapheme === anchor && state.head.grapheme === head; };
+      const shown = () => { const now = getSelection(); return now.rangeCount === 1 && root.contains(now.anchorNode) && now.toString().length === to - from; };
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
       editor().focus();
-      const start = point(root, from); const end = point(root, to); if (!start || !end) return false;
-      const range = document.createRange(); range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]);
-      const read = new Promise((resolve) => { const done = () => resolve(true); document.addEventListener('selectionchange', done, { once: true }); setTimeout(() => { document.removeEventListener('selectionchange', done); resolve(false); }, 2000); });
-      const selection = getSelection(); const same = selection.rangeCount === 1 && selection.getRangeAt(0).compareBoundaryPoints(Range.START_TO_START, range) === 0 && selection.getRangeAt(0).compareBoundaryPoints(Range.END_TO_END, range) === 0;
-      selection.removeAllRanges(); selection.addRange(range);
-      const settled = (await read) || same;
-      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-      const now = getSelection();
-      return settled && now.rangeCount === 1 && root.contains(now.anchorNode) && now.toString().length === to - from;
+      place();
+      const deadline = performance.now() + 2000;
+      while (performance.now() < deadline) {
+        await frame();
+        if (read() && shown()) { await frame(); if (read() && shown()) return 'ok'; }
+        else place();
+      }
+      const now = getSelection(); const node = now.anchorNode?.nodeType === 1 ? now.anchorNode : now.anchorNode?.parentElement;
+      const where = now.rangeCount === 0 ? 'none' : root.contains(now.anchorNode) ? 'block' : !root.isConnected ? 'block-replaced' : !editor().contains(now.anchorNode) ? 'outside' : node?.closest('[data-block-id]')?.dataset.blockId === window.__j07Scoped.state?.target ? 'target-block' : 'other-block';
+      return ['read' + Number(read()), where, 'l' + now.toString().length, editor().contains(document.activeElement) ? 'fin' : 'fout'].join('-');
     },
     // The right click comes once the editor has read the selection, a task after it was made, as a reader's would.
     rightClick: () => {
@@ -412,6 +423,11 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
+}
+/** A scoped selection that did not hold fails at its check, carrying the helper's content-free reason. */
+async function selectScoped(renderer, args, name) {
+  const reason = await renderer.evaluate(`window.__j07Scoped.select(${args})`);
+  if (reason !== 'ok') throw journeyCheckFailure('J-07', name, { failed: [typeof reason === 'string' && /^[a-z0-9-]{1,60}$/u.test(reason) ? reason : 'unreadable'] });
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
@@ -1779,7 +1795,7 @@ async function main() {
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation","comments"]',
         // It is one of the Book's 稿件 (Issue #1403): the switcher marks it current, beside the manuscript.
-        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null]]' &&
+        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
           shell?.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"]')?.textContent === '[新闻稿] 新闻稿',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
@@ -1793,6 +1809,19 @@ async function main() {
       };
     })()`);
     requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
+    // #1427: the compact switcher reaches the separate workspace and returns to the same editor.
+    await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'derivatives-workspace-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-item') !== null`, 'derivatives-workspace-ready');
+    await assertRenderer(renderer, `(() => {
+      const rows = Array.from(document.querySelectorAll('#app-sidebar [data-shell-section]'));
+      const main = rows.findIndex(row => row.dataset.shellSection === 'manuscript');
+      return main >= 0 && rows[main].textContent.includes('主稿件') && rows[main + 1]?.dataset.shellSection === 'derivatives' &&
+        document.querySelector('.derivatives-category-chips [aria-pressed="true"]')?.textContent === '全部 (1)';
+    })()`, 'derivatives-parallel-navigation');
+    await fill(renderer, '.derivatives-filters input[type="search"]', '新闻稿', 'derivatives-title-search');
+    await assertRenderer(renderer, `document.querySelectorAll('.derivatives-item').length === 1`, 'derivatives-title-search-result');
+    await click(renderer, '打开编辑', 'derivatives-open-editor');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="news-release"] [data-testid="manuscript-editor"]') !== null`, 'derivatives-editor-ready');
     // #1287: opening navigation gives the document text its own readable cell and reflows the workflow below it.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'document-navigation-layout-open');
     await waitFor(renderer, `(() => { const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const panel=document.querySelector('#manuscript-navigation-panel').getBoundingClientRect(); const lens=document.querySelector('.document-lens').getBoundingClientRect(); const workspace=document.querySelector('.editor-workspace'); const actions=document.querySelector('.window-actions').getBoundingClientRect(); return panel.width>0 && panel.height>0 && (panel.left>=text.right-1 || panel.top>=text.bottom-1) && lens.top>=text.bottom-1 && (workspace.clientWidth<864 || text.width>=480) && actions.bottom<=innerHeight+1 && document.documentElement.scrollHeight<=innerHeight+2; })()`, 'document-navigation-no-overlap');
@@ -2797,7 +2826,6 @@ async function main() {
       JSON.stringify(writingBefore.buttons) === '[]', 'writing-section-words', writingBefore);
     // 新建 / 导入衍生稿件 → 稿件题目 → 宣传文章 → AI 写作生成 opens the sheet with the type chosen and the title carried (Issue #1404).
     await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-new');
-    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-new-continue');
     const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
     await assertRenderer(renderer, `(() => { const first = document.querySelector('.writing-task-sheet [data-document-field]'); return first?.dataset.documentField === 'title' && first.value === '宣传文章'; })()`, 'writing-sheet-title-first');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
@@ -2878,7 +2906,6 @@ async function main() {
     at('writing-quick-start');
     // The ordinary primary action prepares and starts without a rule or plan drawer.
     await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-direct-new');
-    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-direct-continue');
     await readWriting((page) => page.open, 'writing-direct-sheet');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
@@ -2961,7 +2988,6 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-library-manuscript', 120_000);
     await readWriting((page) => page.heading === 'AI 写作' && page.state === 'settled', 'writing-library-section');
     await openDerivativePanel(renderer, { title: '评论文章', typeId: WRITING_LIBRARY_REQUEST.typeId, mode: 'writing' }, 'writing-library-new');
-    await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'writing-library-continue');
     const librarySheet = await readWriting((page) => page.open, 'writing-library-sheet');
     const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="editor"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="editor"] .writing-task input[data-writing-material]').length] : null; })()`);
     requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料` &&
@@ -3018,7 +3044,7 @@ async function main() {
     await openManuscript(renderer, 'multi-manuscript');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
     const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
-    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '+ 新建 / 导入衍生稿件', null]]), 'multi-switcher-words', multiSwitches);
+    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '+ 新建 / 导入衍生稿件', null], ['manage', '管理全部衍生稿件 (2)', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
     // 空白新建 under the 稿件题目 offered for the type: the Book's title and the type, numbered after the one already made.
@@ -3042,7 +3068,7 @@ async function main() {
     await openDerivativePanel(renderer, { typeId: 'promotion-article', mode: 'import' }, 'multi-import');
     await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'multi-import');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
-    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 4`, 'multi-four-listed');
+    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 3 && document.querySelector('[data-manuscript-switch="manage"]')?.textContent === '管理全部衍生稿件 (4)'`, 'multi-four-listed');
     at('multi-documents-ordinary-identities');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>{const type=page.types.find(type=>type.typeId==='promotion-article');return type.documents.length===3&&new Set(type.documents.map(doc=>doc.documentId)).size===3&&type.document.documentId===type.documents[0].documentId&&type.documents.every(doc=>doc.versions.length===1);})`, 'multi-independent-identities');
     const primaryAfter = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3052,7 +3078,7 @@ async function main() {
     // ticked derivative document at a saved version with no delivery recorded.
     await openDeliverables(renderer, 'multi-package');
     await waitFor(renderer, `document.querySelectorAll('.deliverables-package .package-document-choices > li').length === 4`, 'multi-package-choices');
-    await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-manuscript"]')?.textContent === '前往稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="book-deliverables"] section.deliverables-documents') === null && document.querySelector('[data-deliverables-action="open-derivatives"]')?.textContent === '前往衍生稿件' && document.querySelector('.maintenance-cases, [data-maintenance-action]') === null && document.querySelector('.package-condition-list li[data-condition-key="document"]') === null`, 'multi-package-ordinary');
     const renamedId = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article').documents.find(doc=>doc.title==='另一篇宣传文章')?.documentId ?? null)`);
     requireJourney(UUID_PATTERN.test(renamedId ?? ''), 'multi-package-renamed-id', renamedId);
     await assertRenderer(renderer, `(() => { const box = document.querySelector('.package-document-choices > li[data-document-id=${JSON.stringify(renamedId)}] input[type="checkbox"]'); if (!(box instanceof HTMLInputElement) || box.checked || box.disabled) return false; box.click(); return true; })()`, 'multi-package-tick');
@@ -3078,7 +3104,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.search-match-position')?.textContent.startsWith('1 /') && window.__j07Scoped.locate()`, 'scoped-sentence-found', 60_000);
     await assertRenderer(renderer, `(() => { const nav=document.querySelector('[data-edge-entry="navigation"]'); if(nav.getAttribute('aria-expanded')==='true') nav.click(); return window.__j07Scoped.locate(); })()`, 'scoped-navigation-closed');
     // 🔒 the next paragraph from the selection menu: it is drawn locked, and the request below does not change because of it.
-    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.next, 0, 4)`, 'scoped-lock-select');
+    await selectScoped(renderer, `window.__j07Scoped.state.next, 0, 4`, 'scoped-lock-select');
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-lock-menu');
     await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-lock-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-lock-item');
@@ -3091,7 +3117,7 @@ async function main() {
       throw journeyCheckFailure('J-07', 'scoped-next-locked', { failed, cause: error });
     }
     await assertRenderer(renderer, `window.__j07Scoped.snapshot()`, 'scoped-snapshot');
-    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to)`, 'scoped-edit-select');
+    await selectScoped(renderer, `window.__j07Scoped.state.target, window.__j07Scoped.state.from, window.__j07Scoped.state.to`, 'scoped-edit-select');
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-edit-menu');
     await waitFor(renderer, `window.__j07Scoped.menuSays(window.__j07Scoped.state.to - window.__j07Scoped.state.from)`, 'scoped-edit-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false`, 'scoped-edit-item');
@@ -3121,9 +3147,12 @@ async function main() {
     at('scoped-ai-edit-derivative');
     // On a derivative document the same entries stand (Issue #1412): 就选中部分让 AI 修改… is offered, and its paragraph is locked
     // and unlocked from the menu and the 🔒 badge.
-    await assertRenderer(renderer, `(() => { const item=Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]')).find((entry)=>entry.textContent.includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})); if(!(item instanceof HTMLElement))return false; item.click(); return true; })()`, 'scoped-derivative-open');
+    await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'scoped-derivatives-manage');
+    await waitFor(renderer, `document.querySelector('.derivatives-item') !== null`, 'scoped-derivatives-list');
+    await fill(renderer, '.derivatives-filters input[type="search"]', WRITING_LIBRARY_TITLE, 'scoped-derivatives-search');
+    await click(renderer, '打开编辑', 'scoped-derivative-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] [data-testid="manuscript-editor"] > p[data-block-id]') !== null && window.__j07Scoped.firstText() !== null`, 'scoped-derivative-ready', 120_000);
-    await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-select');
+    await selectScoped(renderer, `window.__j07Scoped.firstText(), 0, 4`, 'scoped-derivative-select');
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-derivative-menu');
     await waitFor(renderer, `window.__j07Scoped.menuSays(4)`, 'scoped-derivative-menu-names-the-selection');
     await waitFor(renderer, `window.__j07Scoped.item('scoped-ai-edit')?.disabled===false && window.__j07Scoped.item('ai-lock-selection')?.disabled===false`, 'scoped-derivative-entries');

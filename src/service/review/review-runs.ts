@@ -124,8 +124,8 @@ import {
 } from './category-configuration.js';
 import { reviewBaselineSource, reviewLeadBody, reviewLeadsOf } from './review-leads.js';
 import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent, freezeSeriesScope, seriesKnowledgeAllowed, frozenSeriesScopes, seriesScopeMaterials, seriesScopeChanged, SERIES_POLICY_CLOSED, type SeriesKnowledgeReadings } from './series-consistency.js';
-import { REVIEW_REPORT_SCHEMAS, buildReviewReport, reportChapterOf, reportQuote, reviewFindingCounts } from './review-report.js';
-export { reviewRunEvidence } from './report-evidence.js';
+import { MAX_REPORT_FINDING_BYTES, REVIEW_REPORT_SCHEMAS, buildReviewReport, reportChapterOf, reportQuote, reviewFindingCounts } from './review-report.js';
+export { reviewRunConclusions, reviewRunEvidence } from './report-evidence.js';
 import {
   REVIEW_CATEGORY_PLACE_WAIT_DETAIL,
   TERMINAL_CATEGORY_EVENTS,
@@ -3369,13 +3369,31 @@ export class ReviewRunStore {
 
   // ---- the Report (B8) ----------------------------------------------------------------------------
 
-  /** Record the next version of the Run's 审阅报告, over what stands now, with the sources its factual cards list. */
-  generateReport(bookId: string, reviewRunId: string, evidence: () => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>> = () => new Map()): void {
+  /**
+   * Record the next version of the Run's 审阅报告, over what stands now, with the sources and 核查结论 its factual cards list.
+   * `bookWide` (Issue #1430) records it over every authorized Run of the Book instead, each mark once as its latest Run
+   * states it, with every finding and source whole and the manuscript's extent, for the one-step DOCX export.
+   */
+  generateReport(bookId: string, reviewRunId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>> = () => new Map(),
+    options: { readonly bookWide?: boolean; readonly conclusions?: (runId: string) => ReadonlyMap<string, string> } = {}): string {
+    const bookWide = options.bookWide ?? false;
+    const readConclusions = options.conclusions ?? (() => new Map<string, string>());
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const view = this.#runView(snapshot);
     requireReview(view.authorization !== null, 'REVIEW_REPORT_UNAVAILABLE', '这次审阅尚未授权，还没有可以报告的结果。');
-    requireReview(!view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
-    const sources = view.findings.some((finding) => finding.categoryId === 'factual-review') ? evidence() : new Map<string, ReadonlyArray<ReviewEvidenceSource>>();
+    requireReview(bookWide || !view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
+    const views = bookWide ? (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
+      .map((row) => this.#runView(this.#snapshotOf(row))).filter((candidate) => candidate.authorization !== null) : [view];
+    // Views run newest first: a mark several Runs found is one finding as its latest Run states it, and a category is the
+    // latest Run's, in that Run's order; a single Run's report reads exactly its own.
+    const newestOf = <T>(values: ReadonlyArray<T>, key: (value: T) => string): T[] =>
+      [...values.reduce((kept, value) => (kept.has(key(value)) ? kept : kept.set(key(value), value)), new Map<string, T>()).values()];
+    const findings = newestOf(views.flatMap((candidate) => candidate.findings), (finding) => finding.markId ?? finding.findingId);
+    const categories = newestOf(views.flatMap((candidate) => candidate.categories), (category) => category.category.categoryId);
+    const sources = new Map(views.flatMap((candidate) => candidate.findings.some((finding) => finding.categoryId === 'factual-review')
+      ? [...evidence(candidate.snapshot.reviewRunId)] : []));
+    const conclusions = new Map(views.flatMap((candidate) => [...readConclusions(candidate.snapshot.reviewRunId)]));
+    const reportId = randomUUID();
     const head = this.#head(bookId);
     const chapters = head === null ? [] : this.#chapterOptions(bookId, head).chapters;
     transact(this.#db, () => {
@@ -3394,7 +3412,12 @@ export class ReviewRunStore {
           manuscript: { revisionId: snapshot.manuscript.revisionId, revisionLabel: snapshot.manuscript.revisionLabel, journalSequence: snapshot.manuscript.journalSequence },
         },
         configuration: snapshot.configuration,
-        categories: view.categories.map((categoryView) => {
+        complete: bookWide,
+        compilation: bookWide ? { runCount: views.length } : undefined,
+        manuscriptExtent: head === null ? undefined : { chapterCount: chapters.length, characterCount: Number((this.#db
+          .prepare("SELECT coalesce(sum(length(text)), 0) characters FROM working_blocks WHERE branch_id = ? AND kind = 'paragraph'")
+          .get(head.branchId) as SqlRow).characters) },
+        categories: categories.map((categoryView) => {
           const { category } = categoryView;
           const output = categoryView.materialized ?? categoryView.retained;
           const stateLabel = categoryView.stateLabel;
@@ -3418,13 +3441,14 @@ export class ReviewRunStore {
             adapterPin: isRecord(pin) ? pin as { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null } : null,
           };
         }),
-        findings: view.findings.map((finding) => ({
+        findings: findings.map((finding) => ({
           findingId: finding.findingId,
           categoryId: finding.categoryId,
           severity: finding.severity,
           status: finding.status,
           quote: finding.quote,
           note: finding.note,
+          conclusion: conclusions.get(finding.findingId) ?? null,
           locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`,
           place: { blockId: finding.blockId, position: finding.blockPosition, fromGrapheme: finding.fromGrapheme, toGrapheme: finding.toGrapheme },
           replacement: finding.replacement,
@@ -3440,14 +3464,35 @@ export class ReviewRunStore {
       if (referencedRules.length > 0) record.appendix.referencedRules = referencedRules;
       const canonical = canonicalRecord(record);
       this.#db.prepare('INSERT INTO review_reports(report_id, review_run_id, version, generated_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(randomUUID(), reviewRunId, version, generatedAt, canonical.json, canonical.digest);
+        .run(reportId, reviewRunId, version, generatedAt, canonical.json, canonical.digest);
     });
+    return reportId;
+  }
+
+  /**
+   * 导出审阅报告（DOCX） (Issue #1430): records the report the export writes and answers its id, so the existing export
+   * ledger reviews, prepares and writes it. Without a Run it is the Book's report, recorded on its latest Run with findings.
+   */
+  compileBookReport(bookId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>>,
+    conclusions: (runId: string) => ReadonlyMap<string, string>, runId?: string): string {
+    const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[];
+    const snapshot = runId === undefined
+      ? rows.map((row) => this.#snapshotOf(row)).find((candidate) => { const view = this.#runView(candidate); return view.authorization !== null && view.findings.length > 0; })
+      : this.#runOfBook(bookId, runId);
+    requireReview(snapshot !== undefined, 'REVIEW_REPORT_UNAVAILABLE', '这本书还没有审阅发现。');
+    return this.generateReport(bookId, snapshot.reviewRunId, evidence, { bookWide: runId === undefined, conclusions });
   }
 
   #reports(reviewRunId: string): ReviewReportProjection[] {
     return (this.#db.prepare('SELECT * FROM review_reports WHERE review_run_id = ? ORDER BY version').all(reviewRunId) as SqlRow[]).map((row) => {
       const record = recordOf(text(row.canonical_json), text(row.sha256)) as unknown as ReviewReportRecord;
       requireReview(REVIEW_REPORT_SCHEMAS.includes(record.schema) && record.version === integer(row.version), 'REVIEW_RECORD_INVALID', '审阅报告记录无效。');
+      // A Book report (Issue #1430) is recorded whole for its file; what crosses to 审阅 keeps the 发现详单's byte bound.
+      if (record.findings !== undefined) {
+        let bytes = 0;
+        const entries = record.findings.entries.filter((entry) => { bytes += Buffer.byteLength(JSON.stringify(entry), 'utf8'); return bytes <= MAX_REPORT_FINDING_BYTES; });
+        Object.assign(record, { findings: { ...record.findings, entries, omitted: record.findings.omitted + record.findings.entries.length - entries.length } });
+      }
       return { reportId: text(row.report_id), version: integer(row.version), generatedAt: text(row.generated_at), digest: text(row.sha256), record };
     });
   }

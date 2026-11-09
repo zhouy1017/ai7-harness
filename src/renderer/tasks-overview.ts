@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import type { RendererApi, TaskOverviewGroupProjection, TaskOverviewItemProjection, TaskOverviewProjection, TaskOverviewCall } from '../shared/protocol.js';
 import { createSheet, sheetContent } from './components/sheet.js';
@@ -17,11 +18,12 @@ function progressLine(item: TaskOverviewItemProjection): string {
   const usage = item.usage === null ? '' : ` · 用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`;
   if (item.state === 'queued') return item.attention.state === 'analysis-waiting-network' ? '等待联网' : item.attention.state === 'analysis-waiting-connection' ? '等待模型连接' : item.attention.state === 'analysis-waiting-admission' ? '等待开始前检查' : item.queuePosition === null ? '等待运行名额' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
   if (item.state === 'waiting') return globalAttentionReason(item.attention);
-  if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? ` · 已完成 ${item.progress.done} / ${item.progress.total}` : ''} · 可续行`;
+  if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? technicalWords(` · 已完成 ${item.progress.done} / ${item.progress.total}`, ` · 已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`) : ''} · 可续行`;
   if (item.state === 'completed') return `已有结果${usage}`;
   if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}${usage}`;
   if (item.state === 'stopped') return `已停止 · 可查看运行${usage}`;
-  return item.progress === null ? '正在处理稿件。' : `已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围${item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
+  // Ordinary mode reads a share of the work, never the reading ranges counted (Issue #1431 item 106).
+  return item.progress === null ? '正在处理稿件。' : `${technicalWords(`已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围`, `已完成约 ${item.progress.total === 0 ? 0 : Math.floor((item.progress.done / item.progress.total) * 100)}%`)}${item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
 }
 export type TaskCardAction = 'open' | 'plan' | 'run' | 'book' | 'pause' | 'resume' | 'cancel' | 'up' | 'top' | 'answer' | 'redo' | 'result' | 'again' | 'jump';
 /** Both the global page and the in-Book pane render this exact card. */

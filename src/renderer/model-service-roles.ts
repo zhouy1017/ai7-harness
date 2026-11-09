@@ -1,4 +1,4 @@
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type { ModelConnectionTestStatus } from '../shared/protocol.js';
 
 /** Editor-facing guidance; exact codes remain in the existing technical disclosure. */
@@ -12,14 +12,14 @@ export function modelConnectionTestFeedback(test: ModelConnectionTestStatus | nu
     return { message: `结果待确认 · ${target}；没有收到完整测试结果，不会自动重试。`, tone: 'error' };
   }
   const guidance: Readonly<Record<string, string>> = {
-    INVALID_CREDENTIAL: '凭据被拒绝，请检查 API key。',
+    INVALID_CREDENTIAL: technicalWords('凭据被拒绝，请检查 API key。', '密钥无效，请重新填写。'),
     MODEL_SERVICE_UNREACHABLE: '模型服务不可达，请检查网络或网络代理。',
     AI7_PROXY_UNREACHABLE: '代理不可达，请检查网络或网络代理。',
     TRANSPORT_FAILED: '连接未完成，请检查网络或网络代理。',
     // The current service also uses INVALID_RESPONSE for a model-not-found HTTP response.
-    INVALID_RESPONSE: '模型服务未返回有效结果，请检查模型 ID 是否正确及渠道是否支持该模型。',
+    INVALID_RESPONSE: technicalWords('模型服务未返回有效结果，请检查模型 ID 是否正确及渠道是否支持该模型。', '所选模型不可用，请重新选择。'),
   };
-  return { message: `连接测试未通过 · ${guidance[test.code ?? ''] ?? '请检查渠道设置与模型 ID，并查看测试详情。'} · ${target}`, tone: 'error' };
+  return { message: `连接测试未通过 · ${guidance[test.code ?? ''] ?? technicalWords('请检查渠道设置与模型 ID，并查看测试详情。', '请检查渠道设置与所选模型。')} · ${target}`, tone: 'error' };
 }
 
 /**
