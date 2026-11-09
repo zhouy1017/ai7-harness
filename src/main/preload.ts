@@ -756,6 +756,14 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<Awaited<ReturnType<RendererApi['appendMaintenanceCaseRevision']>>>(IPC_CHANNELS.appendMaintenanceCaseRevision, input),
   saveMaintenanceErrata: (input: Parameters<RendererApi['saveMaintenanceErrata']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['saveMaintenanceErrata']>>>(IPC_CHANNELS.saveMaintenanceErrata, input),
+  saveProductionDocumentType: (input: Parameters<RendererApi['saveProductionDocumentType']>[0]) =>
+    invoke<ServiceOperationMap['saveProductionDocumentType']['output']>(IPC_CHANNELS.saveProductionDocumentType, input),
+  deleteProductionDocumentType: (input: Parameters<RendererApi['deleteProductionDocumentType']>[0]) =>
+    invoke<ServiceOperationMap['deleteProductionDocumentType']['output']>(IPC_CHANNELS.deleteProductionDocumentType, input),
+  reorderProductionDocumentTypes: (input: Parameters<RendererApi['reorderProductionDocumentTypes']>[0]) =>
+    invoke<ServiceOperationMap['reorderProductionDocumentTypes']['output']>(IPC_CHANNELS.reorderProductionDocumentTypes, input),
+  updateProductionDocumentMeta: (input: Parameters<RendererApi['updateProductionDocumentMeta']>[0]) =>
+    invoke<ServiceOperationMap['updateProductionDocumentMeta']['output']>(IPC_CHANNELS.updateProductionDocumentMeta, input),
   renameProductionDocument: (input: Omit<ServiceOperationMap['renameProductionDocument']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['renameProductionDocument']['output']>(IPC_CHANNELS.renameProductionDocument, input),
   createProductionDocument: (input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>

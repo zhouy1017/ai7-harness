@@ -34,7 +34,8 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
   readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: IconId }>;
 }> = Object.freeze([
   { key: 'work', label: '工作', sections: [
-    { key: 'manuscript', label: '稿件', icon: 'i-ms' },
+    { key: 'manuscript', label: '主稿件', icon: 'i-ms' },
+    { key: 'derivatives', label: '衍生稿件', icon: 'i-ms' },
     { key: 'review', label: '审阅', icon: 'i-review' },
     { key: 'evaluation', label: '评估', icon: 'i-star' },
     { key: 'deliverables', label: '交付物', icon: 'i-box' },

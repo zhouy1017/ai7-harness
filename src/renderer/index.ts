@@ -142,6 +142,7 @@ import {
   showRestoreStands,
 } from './production-document-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
+import { mountDerivativesWorkspace } from './derivatives-workspace.js';
 import { conflictCompletionOn } from './proposal-conflict-labels.js';
 import {
   fidelityDetailText,
@@ -638,6 +639,7 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
 let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 /** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
 let deliverablesSurface: DeliverablesSurface | undefined;
+let derivativesSurface: ReturnType<typeof mountDerivativesWorkspace> | undefined;
 /** The dedicated Proposal review workspace while it is on screen (Issue #902): it stops painting once replaced. */
 let proposalWorkspaceSurface: ReturnType<typeof mountProposalWorkspace> | undefined;
 let agentWorkspaceSurface: ReturnType<typeof mountAgentWorkspace> | undefined;
@@ -1097,6 +1099,8 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   reviewWorkspace = undefined;
   deliverablesSurface?.destroy();
   deliverablesSurface = undefined;
+  derivativesSurface?.destroy();
+  derivativesSurface = undefined;
   proposalWorkspaceSurface?.destroy();
   proposalWorkspaceSurface = undefined;
   agentWorkspaceSurface?.destroy();
@@ -3015,6 +3019,20 @@ async function openProductionDocument(documentNow: ProductionDocumentProjection,
   renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
 }
 
+function renderDerivativesWorkspace(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.dataset['bookId'] = bookId;
+  const surface = mountDerivativesWorkspace({ root: content, bookId, bookTitle, api: window.ai7,
+    setStatus, errorMessage: rendererErrorMessage,
+    openDocument: (doc, type, notice) => openProductionDocument(doc, type, bookTitle, notice),
+  });
+  replaceScreen('book-derivatives', content, { bookId, title: bookTitle, section: 'derivatives' });
+  derivativesSurface = surface;
+  agentWorkspaceReturns.set(content, () => renderDerivativesWorkspace(bookId, bookTitle));
+  surface.start();
+  setStatus('衍生稿件');
+}
+
 function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {
   const content = panel();
   content.classList.add('book-deliverables');
@@ -4091,6 +4109,7 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
     const openSection = async (route: ResolvedBookWorkbenchRoute): Promise<void> => {
       const { bookId, bookTitle } = route;
       if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, recoveryReturn);
+      else if (section === 'derivatives') renderDerivativesWorkspace(bookId, bookTitle);
       else if (section === 'review') renderBookReview(bookId, bookTitle);
       else if (section === 'evaluation') renderBookEvaluation(bookId, bookTitle);
       else if (section === 'deliverables') renderBookDeliverables(bookId, bookTitle);
@@ -4129,6 +4148,7 @@ const AGENT_WORKSPACE_RETURN_SECTIONS: Readonly<Record<string, ShellBookSection>
   'book-review': 'review',
   'book-evaluation': 'evaluation',
   'book-deliverables': 'deliverables',
+  'book-derivatives': 'derivatives',
   'book-findings': 'findings',
   'book-sources': 'sources',
 });
@@ -4745,6 +4765,7 @@ function renderEditorWindow(
     renderBookDeliverables, renderProposalConflict, renderProposalWorkspace,
     returnToRecoveryComparison,
     openPrimaryManuscript: renderBookManuscript,
+    openDerivativesWorkspace: renderDerivativesWorkspace,
     openProductionDocument,
     openWritingPlan: (bookId, ref, note) => openTaskPlan(bookId, 'writing', ref, note),
   });

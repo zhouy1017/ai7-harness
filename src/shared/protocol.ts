@@ -121,6 +121,11 @@ import type {
   SaveMaintenanceErrataInput,
   CreateProductionDocumentInput,
   RenameProductionDocumentInput,
+  ProductionDocumentTypesProjection,
+  SaveProductionDocumentTypeInput,
+  DeleteProductionDocumentTypeInput,
+  ReorderProductionDocumentTypesInput,
+  UpdateProductionDocumentMetaInput,
   ProductionDocumentResultProjection,
   DecideProductionDocumentTypeInput,
   SaveProductionDocumentVersionInput,
@@ -751,6 +756,10 @@ export const IPC_CHANNELS = {
   cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
   renameProductionDocument: 'ai7:j07:rename-production-document',
+  saveProductionDocumentType: 'ai7:derivatives:saveProductionDocumentType',
+  deleteProductionDocumentType: 'ai7:derivatives:deleteProductionDocumentType',
+  reorderProductionDocumentTypes: 'ai7:derivatives:reorderProductionDocumentTypes',
+  updateProductionDocumentMeta: 'ai7:derivatives:updateProductionDocumentMeta',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
@@ -6662,6 +6671,10 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   appendMaintenanceCaseRevision: { input: AppendMaintenanceCaseRevisionInput; output: MaintenanceCaseResultProjection };
   saveMaintenanceErrata: { input: SaveMaintenanceErrataInput; output: MaintenanceCaseResultProjection };
   renameProductionDocument: { input: RenameProductionDocumentInput; output: ProductionDocumentResultProjection };
+  saveProductionDocumentType: { input: SaveProductionDocumentTypeInput; output: ProductionDocumentTypesProjection };
+  deleteProductionDocumentType: { input: DeleteProductionDocumentTypeInput; output: ProductionDocumentTypesProjection };
+  reorderProductionDocumentTypes: { input: ReorderProductionDocumentTypesInput; output: ProductionDocumentTypesProjection };
+  updateProductionDocumentMeta: { input: UpdateProductionDocumentMetaInput; output: ProductionDocumentsProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -7232,6 +7245,10 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
   renameProductionDocument(input: Omit<RenameProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
+  saveProductionDocumentType(input: SaveProductionDocumentTypeInput): Promise<ProductionDocumentTypesProjection>;
+  deleteProductionDocumentType(input: DeleteProductionDocumentTypeInput): Promise<ProductionDocumentTypesProjection>;
+  reorderProductionDocumentTypes(input: ReorderProductionDocumentTypesInput): Promise<ProductionDocumentTypesProjection>;
+  updateProductionDocumentMeta(input: Omit<UpdateProductionDocumentMetaInput, 'bookId'>): Promise<ProductionDocumentsProjection>;
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
   decideProductionDocumentType(input: Omit<DecideProductionDocumentTypeInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;

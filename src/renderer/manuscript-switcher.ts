@@ -74,6 +74,7 @@ export interface MountManuscriptSwitcherOptions {
   awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** Leave for the manuscript, its edits settled first by the caller. */
   openPrimary(): Promise<void>;
+  openWorkspace?(): Promise<void>;
   /** Open one document in this editor; `notice` says what its creation did not carry. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
   openWritingPlan(taskIntentId: string, note?: string): void;
@@ -191,7 +192,10 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       return button;
     };
     entry(SWITCHER_WORDS.primary(bookTitle), 'primary', () => void leave(() => options.openPrimary()));
-    for (const { type, document: documentNow } of projection === null ? [] : documentsOf(projection)) {
+    const all = projection === null ? [] : documentsOf(projection);
+    const compact = all.length <= 3 ? all : [...all].sort((a, b) => Number(b.document.documentId === options.currentDocumentId) - Number(a.document.documentId === options.currentDocumentId) ||
+      (b.document.updatedAt ?? b.document.createdAt).localeCompare(a.document.updatedAt ?? a.document.createdAt)).slice(0, 3);
+    for (const { type, document: documentNow } of compact) {
       const button = entry(derivativeSwitchLabel(type.label, documentNow.title), 'document',
         () => void leave(() => options.openDocument(documentNow, { typeId: type.typeId, label: type.label })), documentNow.documentId);
       button.dataset['documentTypeId'] = type.typeId;
@@ -206,7 +210,12 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     const state = el('span', 'manuscript-switcher-state');
     state.textContent = writingState.drafted > 0 ? SWITCHER_WORDS.draftReady(writingState.drafted) : writingState.underWay ? SWITCHER_WORDS.writing : '';
     state.hidden = state.textContent === '';
-    bar.replaceChildren(list, create, state);
+    const manage = el('button', 'quiet manuscript-switch-manage', `管理全部衍生稿件 (${all.length})`);
+    manage.type = 'button';
+    manage.dataset['manuscriptSwitch'] = 'manage';
+    manage.disabled = working || options.openWorkspace === undefined;
+    manage.addEventListener('click', () => { if (options.openWorkspace) void leave(options.openWorkspace); });
+    bar.replaceChildren(list, create, manage, state);
     bar.dataset['documentCount'] = String(projection === null ? 0 : documentsOf(projection).length);
     if (focused !== null) {
       const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-manuscript-switch]'))

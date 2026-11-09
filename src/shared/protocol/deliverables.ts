@@ -376,7 +376,26 @@ export interface ProductionDocumentVersionProjection {
 }
 
 /** A Production Document as it stands: its versions and whether its working text moved past the latest one. */
+export type ProductionDocumentTypeId = string;
+export const BUILTIN_PRODUCTION_DOCUMENT_TYPE_IDS = [
+  'news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points',
+] as const;
+
+export interface ProductionDocumentTypesProjection {
+  types: ReadonlyArray<{ typeId: string; name: string; label: string; description: string }>;
+}
+export interface SaveProductionDocumentTypeInput { typeId?: string; name: string; description?: string }
+export interface DeleteProductionDocumentTypeInput { typeId: string; fallbackTypeId?: string }
+export interface ReorderProductionDocumentTypesInput { typeIds: readonly string[] }
+export interface UpdateProductionDocumentMetaInput {
+  bookId: string; documentId: string; typeId?: string; finalized?: boolean; deleted?: boolean;
+}
+
 export interface ProductionDocumentProjection {
+  preview?: string;
+  characterCount?: number;
+  updatedAt?: string;
+  finalized?: boolean;
   title: string;
   documentId: string;
   branchId: string;
