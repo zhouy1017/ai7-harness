@@ -1071,7 +1071,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       if (transaction.docChanged) checkBufferLimit();
       announceState();
       if (transaction.docChanged) scheduleAutomaticFlush();
-      else if (transaction.selectionSet && !composing && !view.composing &&
+      else if (inputMode === 'reading-revision' && transaction.selectionSet && !composing && !view.composing &&
         previousBlock !== pointAtPosition(transaction.doc, transaction.selection.head).blockId) void flush();
     },
     handleDOMEvents: {
@@ -1123,7 +1123,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         }
         return false;
       },
-      blur() { if (!composing && !view.composing) void flush(); return false; },
+      blur() { if (inputMode === 'reading-revision' && !composing && !view.composing) void flush(); return false; },
       mousedown(currentView, event) {
         if (!deferredNavigationContinuity) return false;
         const hit = currentView.posAtCoords({ left: event.clientX, top: event.clientY });
