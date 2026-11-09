@@ -1,3 +1,4 @@
+import { resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
 import { EditorialLearningLedger } from './learning/ledger.js';
 import { historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -808,7 +809,7 @@ export function openMarkPlaces(
  */
 function anchorSelect(withConflicts: boolean): string {
   return `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
-       em.highlight_color, em.source_kind,
+       em.highlight_color, em.source_kind, em.source_origin, em.source_label,
        CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i
                                            WHERE i.mark_id = em.mark_id AND i.change_type <> 'insert') END deleted_text,
        CASE WHEN em.pinned_text = '' THEN (SELECT i.proposed_text FROM proposal_change_items i
@@ -823,6 +824,10 @@ function anchorSelect(withConflicts: boolean): string {
 
 function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
   const disposition = nullableText(row.current_disposition);
+  const sourceKind = text(row.source_kind) as EditorialMarkSourceProjection['kind'];
+  const sourceOrigin = nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'];
+  const sourceLabel = nullableText(row.source_label);
+  const category = resolveEditorialMarkCategory({ sourceKind, sourceOrigin, sourceLabel });
   return {
     markId: text(row.mark_id),
     kind: text(row.kind) as EditorialMarkKind,
@@ -832,7 +837,7 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
     anchorState: text(row.anchor_state) as 'exact' | 'drifted',
     status: text(row.status) as EditorialMarkStatus,
     highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
-    sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
+    sourceKind, sourceOrigin, sourceLabel, categoryKey: category.key, categoryLabel: category.label,
     disposition: disposition === null || disposition === 'withdrawn' ? null : disposition as ProposalItemDisposition,
     deletedText: nullableText(row.deleted_text),
     insertedText: nullableText(row.inserted_text),
@@ -1337,8 +1342,12 @@ export class EditorialMarkStore {
       'SELECT editors_text FROM book_people_versions WHERE book_id = ? ORDER BY version DESC LIMIT 1',
     ).get(text(row.book_id))?.editors_text : null;
     const modelLabels = row.source_kind === 'ai7' ? historicalMarkModelLabels(this.#db, markId) : {};
+    const category = resolveEditorialMarkCategory({ sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
+      sourceOrigin: nullableText(row.source_origin) as EditorialMarkSourceProjection['origin'], sourceLabel: nullableText(row.source_label) });
     return {
       markId,
+      categoryKey: category.key,
+      categoryLabel: category.label,
       kind,
       status: text(row.status) as EditorialMarkStatus,
       anchorState: text(row.anchor_state) as EditorialMarkCardProjection['anchorState'],

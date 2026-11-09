@@ -1,3 +1,4 @@
+import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 import type { JournalEditInput } from './protocol/manuscript-structure.js';
@@ -1936,6 +1937,10 @@ export interface EditorialMarkAnchorProjection {
   status: EditorialMarkStatus;
   highlightColor: PersonalHighlightColor | null;
   sourceKind: EditorialMarkSourceProjection['kind'];
+  sourceOrigin: EditorialMarkSourceProjection['origin'];
+  sourceLabel: string | null;
+  categoryKey: EditorialMarkCategoryKey;
+  categoryLabel: string;
   /** The current Proposal Decision of a Change Suggestion, which the surface shows without a card. */
   disposition: ProposalItemDisposition | null;
   /**
@@ -1989,6 +1994,8 @@ export interface ProposalItemDecisionProjection {
  */
 export interface EditorialMarkCardProjection {
   markId: string;
+  categoryKey: EditorialMarkCategoryKey;
+  categoryLabel: string;
   kind: EditorialMarkKind;
   status: EditorialMarkStatus;
   anchorState: 'exact' | 'drifted' | 'detached';

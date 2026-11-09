@@ -78,6 +78,7 @@ export interface BoundedEditor {
   setActiveMark(active: { markId: string; previewText: string | null } | null): void;
   /** Highlight a range linked to a supporting card without changing the active card's preview or the selection. */
   setLinkedMark(markId: string | null): void;
+  setVisibleMarkIds(markIds: ReadonlySet<string> | null): void;
   /**
    * What the editor has selected, in the window's own vocabulary: one block and a grapheme range of
    * its durable text, or — across paragraphs (Issue #1176) — the exact span over the contiguous blocks
@@ -465,6 +466,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   };
   let activeMark: { markId: string; previewText: string | null } | undefined;
   let linkedMark: string | undefined;
+  let visibleMarkIds: ReadonlySet<string> | null = null;
   // Focus has just entered the text and the browser's caret reveal, if it makes one, is still to be heard.
   let focusReveal: object | undefined;
   // Editing Protection Mode (Issue #951; DUR-001 to DUR-012): entered when a journal write is not acknowledged, left only when
@@ -602,6 +604,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     baselineText: (blockId) => baselines.get(blockId)?.text,
     active: () => activeMark,
     linked: () => linkedMark,
+    visibleMarkIds: () => visibleMarkIds,
     locked: () => windowProjection.aiLockedBlockIds,
     generation: () => baselines,
   });
@@ -1337,6 +1340,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     setLinkedMark: (markId) => {
       if (destroyed || linkedMark === (markId ?? undefined)) return;
       linkedMark = markId ?? undefined;
+      view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
+    },
+    setVisibleMarkIds: (markIds) => {
+      if (destroyed || (markIds === null && visibleMarkIds === null) || (markIds !== null && visibleMarkIds !== null &&
+        markIds.size === visibleMarkIds.size && [...markIds].every((id) => visibleMarkIds!.has(id)))) return;
+      visibleMarkIds = markIds;
       view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
     selectedRange: (): EditorSelectedRange => {

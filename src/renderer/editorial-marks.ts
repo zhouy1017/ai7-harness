@@ -1,4 +1,6 @@
 import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard } from './editorial-mark-card.js';
+import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
+import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
@@ -521,11 +523,53 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const cardCache = new EditorialCardCache();
   const commentNodes = new Map<string, { card: EditorialMarkCardProjection; node: HTMLElement; receipt?: ApplyReceiptProjection | undefined; readState?: string }>();
   const commentsScroll = el('div', 'manuscript-comments-scroll');
+  // These nodes and this selection belong to the mounted pane, never to a polling/card redraw.
+  const markFilter: EditorialMarkFilter = { selectedCategories: new Set(), status: 'all', keyword: '' };
+  const filterBar = el('div', 'editorial-mark-filters');
+  filterBar.setAttribute('role', 'region');
+  filterBar.setAttribute('aria-label', '筛选批注');
+  const categoryChips = el('div', 'editorial-mark-filter-chips');
+  categoryChips.setAttribute('role', 'group');
+  categoryChips.setAttribute('aria-label', '批注分类（可多选）');
+  const categoryButtons = new Map<EditorialMarkCategoryKey | 'all', HTMLButtonElement>();
+  for (const key of ['all', ...Object.keys(EDITORIAL_MARK_CATEGORIES)] as Array<EditorialMarkCategoryKey | 'all'>) {
+    const chip = el('button', 'quiet');
+    chip.type = 'button';
+    chip.dataset['markCategoryFilter'] = key;
+    if (key !== 'all') chip.dataset['markCategory'] = key;
+    chip.addEventListener('click', () => {
+      if (key === 'all') markFilter.selectedCategories.clear();
+      else if (!markFilter.selectedCategories.delete(key)) markFilter.selectedCategories.add(key);
+      scheduleCommentsLayout();
+    });
+    categoryButtons.set(key, chip);
+    categoryChips.append(chip);
+  }
+  const statusChips = el('div', 'editorial-mark-filter-chips');
+  statusChips.setAttribute('role', 'group');
+  statusChips.setAttribute('aria-label', '批注状态');
+  for (const [status, label] of [['all', '全部'], ['open', '待处理'], ['applied', '已应用']] as const) {
+    const chip = el('button', 'quiet', label);
+    chip.type = 'button';
+    chip.dataset['markStatusFilter'] = status;
+    chip.addEventListener('click', () => { markFilter.status = status; scheduleCommentsLayout(); });
+    statusChips.append(chip);
+  }
+  const search = el('input', 'editorial-mark-search');
+  search.type = 'search';
+  search.dataset['markSearchInput'] = '';
+  search.placeholder = '搜索原文、修改建议或理由';
+  search.setAttribute('aria-label', '搜索批注');
+  search.addEventListener('input', () => { markFilter.keyword = search.value; scheduleCommentsLayout(); });
+  const filterSummary = el('p', 'editorial-mark-filter-summary');
+  filterSummary.setAttribute('role', 'status');
+  filterSummary.setAttribute('aria-live', 'polite');
+  filterBar.append(categoryChips, statusChips, search, filterSummary);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
   commentsScroll.append(commentsCanvas);
-  options.comments?.host.append(commentsScroll);
+  options.comments?.host.append(filterBar, commentsScroll);
   const leaders = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   leaders.classList.add('manuscript-comments-leaders');
   leaders.setAttribute('aria-hidden', 'true');
@@ -611,13 +655,31 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   function layoutComments(): void {
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
-    if (!visible) return;
+    if (!visible) { editor.setVisibleMarkIds(null); return; }
+    const marks = editor.currentWindow().marks;
+    const comments = marks.filter((mark) => mark.kind !== 'personal-highlight');
+    const matching = new Set(comments.filter((mark) => matchesEditorialMarkFilter(mark, cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card, markFilter)).map((mark) => mark.markId));
+    if (inlinePreviewId !== undefined && !matching.has(inlinePreviewId)) clearInlinePreview();
+    if (activeComment !== undefined && !matching.has(activeComment)) activateComment(undefined);
+    const filtering = markFilter.selectedCategories.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
+    editor.setVisibleMarkIds(filtering ? new Set([...matching, ...marks.filter((mark) => mark.kind === 'personal-highlight').map((mark) => mark.markId)]) : null);
+    for (const [key, button] of categoryButtons) {
+      const count = key === 'all' ? comments.length : comments.filter((mark) => mark.categoryKey === key).length;
+      const label = key === 'all' ? '全部' : EDITORIAL_MARK_CATEGORIES[key].label;
+      const text = `${label} (${count})`;
+      if (button.textContent !== text) button.textContent = text;
+      button.hidden = key !== 'all' && count === 0 && !markFilter.selectedCategories.has(key);
+      button.setAttribute('aria-pressed', String(key === 'all' ? markFilter.selectedCategories.size === 0 : markFilter.selectedCategories.has(key)));
+    }
+    for (const button of statusChips.querySelectorAll<HTMLButtonElement>('button')) button.setAttribute('aria-pressed', String(button.dataset['markStatusFilter'] === markFilter.status));
+    const summary = `当前区域 ${matching.size} / ${comments.length} 条批注${matching.size === 0 && filtering ? ' · 没有匹配的批注' : ''}`;
+    if (filterSummary.textContent !== summary) filterSummary.textContent = summary;
     const viewport = options.scroll.getBoundingClientRect();
     const base = commentsScroll.getBoundingClientRect();
     const items = [];
     const present = new Set<string>();
     for (const mark of editor.currentWindow().marks) {
-      if (mark.kind === 'personal-highlight') continue;
+      if (mark.kind === 'personal-highlight' || !matching.has(mark.markId)) continue;
       const anchor = commentAnchor(mark);
       if (!anchor) continue;
       const rect = anchor.getBoundingClientRect();
@@ -2815,8 +2877,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       commentsScroll.removeEventListener('scroll', scheduleCommentsLayout);
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
+      filterBar.remove();
       leaders.remove();
       editor.setLinkedMark(null);
+      editor.setVisibleMarkIds(null);
       reflow.disconnect();
       options.scroll.removeEventListener('wheel', onReaderScroll);
       options.scroll.removeEventListener('touchmove', onReaderScroll);
