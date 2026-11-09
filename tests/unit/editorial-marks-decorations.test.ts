@@ -49,15 +49,15 @@ function marks(): EditorialMarkAnchorProjection[] {
     const [from, to] = ([[0, 3], [5, 9], [12, 12], [20, 26]] as const)[slot]!;
     return {
       markId: `m${index}`, kind: KINDS[slot]!, blockId: blockId(Math.floor(index / PER_BLOCK)), fromGrapheme: from, toGrapheme: to, anchorState: 'exact',
-      status: 'open', highlightColor: slot === 3 ? 1 : null, sourceKind: 'editor', disposition: null, deletedText: null, insertedText: null, conflict: null,
+      status: 'open', highlightColor: slot === 3 ? 1 : null, sourceKind: 'editor', sourceOrigin: null, sourceLabel: null, categoryKey: 'editor', categoryLabel: '编辑人工修订', disposition: null, deletedText: null, insertedText: null, conflict: null,
     } as EditorialMarkAnchorProjection;
   });
 }
 
 function setup() {
   const doc = schema.node('doc', null, Array.from({ length: BLOCKS }, (_, index) => schema.node('paragraph', { blockId: blockId(index) }, schema.text(TEXT))));
-  const source = { current: marks(), active: undefined as ActiveMark | undefined, linked: undefined as string | undefined, generation: {} as object };
-  const drawn = { marks: () => source.current, baselineText: () => TEXT, active: () => source.active, linked: () => source.linked, generation: () => source.generation };
+  const source = { current: marks(), active: undefined as ActiveMark | undefined, linked: undefined as string | undefined, visible: null as ReadonlySet<string> | null, generation: {} as object };
+  const drawn = { marks: () => source.current, baselineText: () => TEXT, active: () => source.active, linked: () => source.linked, generation: () => source.generation, visibleMarkIds: () => source.visible };
   const plugin = markDecorationPlugin(drawn);
   let state = EditorState.create({ doc, plugins: [plugin] });
   const set = () => plugin.getState(state)!.set;
@@ -81,6 +81,20 @@ function paragraphSets(set: DecorationSet, doc: ProseMirrorNode): DecorationSour
   doc.forEach((node, offset) => sets.push(set.forChild(offset, node)));
   return sets;
 }
+
+it('carries categories and dims only filtered-out marks, then restores them without changing words (#1429)', () => {
+  const ui = setup();
+  const original = ui.state().doc;
+  ui.source.visible = new Set(ui.source.current.slice(1).map((mark) => mark.markId));
+  expect(ui.apply(ui.state().tr.setMeta(MARK_DECORATIONS_META, true))).toBe(1);
+  const attrs = (decoration: Decoration) => (decoration as unknown as { type: { attrs?: Record<string, string> } }).type.attrs;
+  expect(ui.set().find().some((entry) => attrs(entry)?.['data-mark-id'] === 'm0' && attrs(entry)?.['data-mark-category'] === 'editor' && attrs(entry)?.['data-mark-filtered-out'] === 'true')).toBe(true);
+  expect(ui.set().find().some((entry) => attrs(entry)?.['data-mark-id'] === 'm1' && attrs(entry)?.['data-mark-filtered-out'] === 'true')).toBe(false);
+  ui.source.visible = null;
+  expect(ui.apply(ui.state().tr.setMeta(MARK_DECORATIONS_META, true))).toBe(1);
+  expect(ui.set().find().some((entry) => attrs(entry)?.['data-mark-filtered-out'] === 'true')).toBe(false);
+  expect(ui.state().doc.eq(original)).toBe(true);
+});
 
 function signature(decorations: ReadonlyArray<Decoration>): string[] {
   return decorations.map((decoration) => JSON.stringify([decoration.from, decoration.to, decoration.spec, (decoration as unknown as { type: { attrs?: unknown } }).type.attrs ?? null])).sort();

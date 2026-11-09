@@ -2914,6 +2914,90 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
   .review-finding.is-split > .review-finding-actions { grid-column: 1; flex-wrap: wrap; }
 }
 
+/* BEGIN Issue #1429: semantic mark categories and persistent comments filters. */
+:root {
+  --mark-category-factual-accent: #B9770E;
+  --mark-category-factual-fill: #FEF5E7;
+  --mark-category-factual-text: #7E5109;
+  --mark-category-consistency-accent: #C0392B;
+  --mark-category-consistency-fill: #FDEDEC;
+  --mark-category-consistency-text: #922B21;
+  --mark-category-literary-accent: #117864;
+  --mark-category-literary-fill: #E8F8F5;
+  --mark-category-literary-text: #0E6251;
+  --mark-category-language-accent: #2E86C1;
+  --mark-category-language-fill: #EBF5FB;
+  --mark-category-language-text: #1B4F72;
+  --mark-category-style-accent: #566573;
+  --mark-category-style-fill: #EBEDEF;
+  --mark-category-style-text: #2C3E50;
+  --mark-category-risk-accent: #D35400;
+  --mark-category-risk-fill: #FBEEE6;
+  --mark-category-risk-text: #873600;
+  --mark-category-editor-accent: #7D3C98;
+  --mark-category-editor-fill: #F5EEF8;
+  --mark-category-editor-text: #512E5F;
+  --mark-category-other-accent: #6B705C;
+  --mark-category-other-fill: #F1F2EB;
+  --mark-category-other-text: #3F4635;
+}
+:root[data-theme="dark"] {
+  --mark-category-factual-accent: #E9B65D;
+  --mark-category-factual-fill: #3C2C17;
+  --mark-category-factual-text: #FFE1A4;
+  --mark-category-consistency-accent: #F18C83;
+  --mark-category-consistency-fill: #402420;
+  --mark-category-consistency-text: #FFD3CD;
+  --mark-category-literary-accent: #61CCB1;
+  --mark-category-literary-fill: #19372F;
+  --mark-category-literary-text: #B1EFDC;
+  --mark-category-language-accent: #78BAEB;
+  --mark-category-language-fill: #203344;
+  --mark-category-language-text: #C5E5FF;
+  --mark-category-style-accent: #ABB9C7;
+  --mark-category-style-fill: #2C333A;
+  --mark-category-style-text: #E0E8EF;
+  --mark-category-risk-accent: #F6A369;
+  --mark-category-risk-fill: #402A1C;
+  --mark-category-risk-text: #FFD7B5;
+  --mark-category-editor-accent: #C49BDF;
+  --mark-category-editor-fill: #35283F;
+  --mark-category-editor-text: #EAD4FB;
+  --mark-category-other-accent: #BDC5A6;
+  --mark-category-other-fill: #313629;
+  --mark-category-other-text: #E4EACF;
+}
+[data-mark-category="factual"] { --category-accent: var(--mark-category-factual-accent); --category-fill: var(--mark-category-factual-fill); --category-text: var(--mark-category-factual-text); }
+[data-mark-category="consistency"] { --category-accent: var(--mark-category-consistency-accent); --category-fill: var(--mark-category-consistency-fill); --category-text: var(--mark-category-consistency-text); }
+[data-mark-category="literary"] { --category-accent: var(--mark-category-literary-accent); --category-fill: var(--mark-category-literary-fill); --category-text: var(--mark-category-literary-text); }
+[data-mark-category="language"] { --category-accent: var(--mark-category-language-accent); --category-fill: var(--mark-category-language-fill); --category-text: var(--mark-category-language-text); }
+[data-mark-category="style"] { --category-accent: var(--mark-category-style-accent); --category-fill: var(--mark-category-style-fill); --category-text: var(--mark-category-style-text); }
+[data-mark-category="risk"] { --category-accent: var(--mark-category-risk-accent); --category-fill: var(--mark-category-risk-fill); --category-text: var(--mark-category-risk-text); }
+[data-mark-category="editor"] { --category-accent: var(--mark-category-editor-accent); --category-fill: var(--mark-category-editor-fill); --category-text: var(--mark-category-editor-text); }
+[data-mark-category="other"] { --category-accent: var(--mark-category-other-accent); --category-fill: var(--mark-category-other-fill); --category-text: var(--mark-category-other-text); }
+
+.editorial-mark-card[data-mark-category] { border-top: 1px solid var(--boundary); border-left: 4px solid var(--category-accent); background: color-mix(in srgb, var(--category-fill) 28%, var(--surface)); }
+.editorial-mark-category-badge { display: inline-flex; padding: .12rem .4rem; border-radius: 999px; background: var(--category-fill); color: var(--category-text); font-size: .8rem; font-weight: 750; }
+.ProseMirror .editorial-mark[data-mark-category]:not(.editorial-mark-personal-highlight) { border-bottom-color: var(--category-accent); background-color: color-mix(in srgb, var(--category-fill) 60%, transparent); }
+.ProseMirror .editorial-mark-point[data-mark-category] { --mark-point: var(--category-accent); }
+.ProseMirror .editorial-mark-applied-badge[data-mark-category] { color: var(--category-text); background: var(--category-fill); }
+.ProseMirror .editorial-mark[data-mark-filtered-out="true"] { background-color: transparent; border-bottom-color: color-mix(in srgb, var(--category-accent) 20%, transparent); outline: none; }
+.ProseMirror :is(.editorial-mark-point, .editorial-mark-applied-badge)[data-mark-filtered-out="true"] { opacity: .25; }
+.editorial-mark-filters { position: sticky; top: 0; z-index: 2; flex: none; padding: .45rem .55rem; border-bottom: 1px solid var(--boundary); background: var(--surface); max-height: 45%; overflow: auto; }
+.editorial-mark-filter-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .4rem; }
+.editorial-mark-filter-chips button { min-height: 28px; padding: .15rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .76rem; }
+.editorial-mark-filter-chips button[aria-pressed="true"] { background: var(--category-fill, var(--surface-subdued)); color: var(--category-text, var(--text)); border-color: var(--category-accent, var(--focus)); box-shadow: inset 0 0 0 1px var(--category-accent, var(--focus)); font-weight: 700; }
+.editorial-mark-search { width: 100%; box-sizing: border-box; min-height: 30px; }
+.editorial-mark-filter-summary { margin: .3rem 0 0; color: var(--text-subdued); font-size: .76rem; }
+@media (forced-colors: active) {
+  .editorial-mark-card[data-mark-category] { border-color: CanvasText; background: Canvas; }
+  .editorial-mark-category-badge { background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
+  .editorial-mark-filter-chips button[aria-pressed="true"] { color: HighlightText; background: Highlight; border-color: Highlight; }
+  .ProseMirror .editorial-mark[data-mark-category]:not(.editorial-mark-personal-highlight) { background: Canvas; border-bottom-color: CanvasText; }
+  .ProseMirror .editorial-mark[data-mark-filtered-out="true"] { border-bottom-color: GrayText; }
+}
+/* END Issue #1429. */
+
 /* BEGIN #1427 derivative manuscripts workspace */
 .derivatives-workspace { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 .derivatives-toolbar, .derivatives-filters, .derivatives-create-panel, .derivatives-category-row,

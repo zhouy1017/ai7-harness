@@ -554,13 +554,14 @@ describe('Editorial Marks on a manuscript', () => {
         proposedText: null,
         rationale: null,
         atomicGroupId: null,
-        source: { kind: 'ai7', origin: 'review-category', label: '人名与称谓一致', taskId: null },
+        source: { kind: 'ai7', origin: 'review-category', label: '人物与称谓一致', taskId: null },
         basis: [{ label: '第三章 第二节', blockId: window.blocks[1]!.blockId, fromGrapheme: 0, toGrapheme: 2, quote: null }],
       });
       const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, produced);
-      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: '人名与称谓一致', taskId: null, modelLabel: 'AI7 本地检查' });
+      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: '人物与称谓一致', taskId: null, modelLabel: 'AI7 本地检查' });
       expect(card.basis).toHaveLength(1);
-      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks[0]).toMatchObject({ markId: produced, sourceKind: 'ai7' });
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks[0]).toMatchObject({ markId: produced, sourceKind: 'ai7', sourceOrigin: 'review-category', sourceLabel: '人物与称谓一致', categoryKey: 'consistency', categoryLabel: '剧情与人物逻辑' });
+      expect(card).toMatchObject({ categoryKey: 'consistency', categoryLabel: '剧情与人物逻辑' });
       // AI7's words are not the editor's to rewrite; what the editor may do is turn the comment into a suggestion.
       expect(storeError(() => store.updateEditorialMark(change(book, window, produced, 'edit-body', { body: '改写 AI7 的批注' })))).toBe('MARK_ACTION_INVALID');
       const suggestion = store.updateEditorialMark(change(book, window, produced, 'convert', { targetKind: 'change-suggestion', proposedText: '统一后的称谓' }));

@@ -48,6 +48,8 @@ export interface MarkDecorationSource {
   linked?(): string | undefined;
   /** 🔒 锁定 (Issue #1412): the window's blocks the AI may not change, drawn with their badge. */
   locked?(): ReadonlyArray<string> | undefined;
+  /** null/undefined shows every mark; a set dims the marks outside the comments filter. */
+  visibleMarkIds?(): ReadonlySet<string> | null;
   /** The durable text as it was last read: when it is read again, every mark is drawn again. */
   generation(): unknown;
 }
@@ -61,6 +63,7 @@ interface MarkDecorationState {
   readonly active: ActiveMark | undefined;
   readonly linked: string | undefined;
   readonly generation: unknown;
+  readonly visibleMarkIds: ReadonlySet<string> | null | undefined;
 }
 
 /**
@@ -77,6 +80,7 @@ export function blockMarkDecorations(
   activeMark: ActiveMark | undefined,
   linkedMarkId?: string,
   aiLocked = false,
+  visibleMarkIds?: ReadonlySet<string> | null,
 ): Decoration[] {
   const blockId = String(node.attrs['blockId']);
   const decorations: Decoration[] = [];
@@ -105,6 +109,7 @@ export function blockMarkDecorations(
   let line: EditorialMarkKind | undefined;
   let revised = false;
   for (const mark of blockMarks) {
+    const filteredOut = visibleMarkIds != null && !visibleMarkIds.has(mark.markId);
     const followed = local ? followSpanEdit(mark, local) : { ...mark, touched: false };
     const drifted = mark.anchorState === 'drifted' || followed.touched;
     if (mark.status === 'open' && (line === undefined || MARK_LINE_PRIORITY.indexOf(mark.kind) < MARK_LINE_PRIORITY.indexOf(line))) {
@@ -128,11 +133,13 @@ export function blockMarkDecorations(
         badge.setAttribute('aria-label', `${APPLIED_BADGE_TEXT} · ${badge.title}`);
         badge.dataset['appliedMarkId'] = mark.markId;
         badge.dataset['markSource'] = mark.sourceKind;
+        badge.dataset['markCategory'] = mark.categoryKey;
+        if (filteredOut) badge.dataset['markFilteredOut'] = 'true';
         badge.addEventListener('mousedown', (event) => {
           if (event.button === 0) event.preventDefault();
         });
         return badge;
-      }, { side: 2, ignoreSelection: true, key: `applied:${mark.markId}:${mark.deletedText ?? ''}:${mark.sourceKind}`, blockId }));
+      }, { side: 2, ignoreSelection: true, key: `applied:${mark.markId}:${mark.deletedText ?? ''}:${mark.sourceKind}:${mark.categoryKey}:${filteredOut}`, blockId }));
     }
     const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
     const preview = (at: number): void => {
@@ -171,6 +178,8 @@ export function blockMarkDecorations(
         point.title = label;
         point.dataset['markId'] = mark.markId;
         point.dataset['markKind'] = mark.kind;
+        point.dataset['markCategory'] = mark.categoryKey;
+        if (filteredOut) point.dataset['markFilteredOut'] = 'true';
         point.dataset['markSource'] = mark.sourceKind;
         point.dataset['markStatus'] = mark.status;
         point.dataset['markAnchor'] = anchor;
@@ -183,7 +192,7 @@ export function blockMarkDecorations(
       }, {
         side: 1,
         ignoreSelection: true,
-        key: `point:${mark.markId}:${mark.status}:${mark.disposition ?? ''}:${anchor}:${active ? 'active' : ''}:${label}${linkedMarkId === mark.markId ? ':linked' : ''}`,
+        key: `point:${mark.markId}:${mark.status}:${mark.disposition ?? ''}:${anchor}:${active ? 'active' : ''}:${label}:${mark.categoryKey}:${filteredOut}${linkedMarkId === mark.markId ? ':linked' : ''}`,
         blockId,
       }));
       if (previewing && pointKind === 'insertion') preview(from);
@@ -199,6 +208,8 @@ export function blockMarkDecorations(
       ].join(' '),
       'data-mark-id': mark.markId,
       'data-mark-kind': mark.kind,
+      'data-mark-category': mark.categoryKey,
+      ...(filteredOut ? { 'data-mark-filtered-out': 'true' } : {}),
       'data-mark-source': mark.sourceKind,
       'data-mark-status': mark.status,
       'data-mark-anchor': drifted ? 'drifted' : 'exact',
@@ -239,7 +250,7 @@ export function buildMarkDecorations(doc: ProseMirrorNode, source: MarkDecoratio
   doc.forEach((node, offset) => {
     const blockId = String(node.attrs['blockId']);
     const blockMarks = byBlock.get(blockId);
-    if (blockMarks || locked.has(blockId)) decorations.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId)));
+    if (blockMarks || locked.has(blockId)) decorations.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId), source.visibleMarkIds?.()));
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -319,7 +330,7 @@ export function redrawBlocks(set: DecorationSet, doc: ProseMirrorNode, blocks: R
     stale.push(...set.find(offset, offset + node.nodeSize, (spec: { blockId?: string }) =>
       spec.blockId === blockId || (spec.blockId !== undefined && !present.has(spec.blockId))));
     const blockMarks = byBlock.get(blockId);
-    if (blockMarks || locked.has(blockId)) fresh.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId)));
+    if (blockMarks || locked.has(blockId)) fresh.push(...blockMarkDecorations(node, offset, blockMarks ?? [], source.baselineText(blockId), active, source.linked?.(), locked.has(blockId), source.visibleMarkIds?.()));
   });
   return set.remove(stale).add(doc, fresh);
 }
@@ -328,19 +339,23 @@ export function redrawBlocks(set: DecorationSet, doc: ProseMirrorNode, blocks: R
 export function markDecorationPlugin(source: MarkDecorationSource): Plugin<MarkDecorationState> {
   return new Plugin<MarkDecorationState>({
     state: {
-      init: (_config, state: EditorState) => ({ set: buildMarkDecorations(state.doc, source), marks: source.marks(), active: source.active(), linked: source.linked?.(), generation: source.generation() }),
+      init: (_config, state: EditorState) => ({ set: buildMarkDecorations(state.doc, source), marks: source.marks(), active: source.active(), linked: source.linked?.(), generation: source.generation(), visibleMarkIds: source.visibleMarkIds?.() }),
       apply: (tr, previous) => {
         const generation = source.generation();
-        if (generation !== previous.generation) return { set: buildMarkDecorations(tr.doc, source), marks: source.marks(), active: source.active(), linked: source.linked?.(), generation };
+        if (generation !== previous.generation) return { set: buildMarkDecorations(tr.doc, source), marks: source.marks(), active: source.active(), linked: source.linked?.(), generation, visibleMarkIds: source.visibleMarkIds?.() };
         const marked = tr.getMeta(MARK_DECORATIONS_META) === true;
         if (!marked && !tr.docChanged) return previous;
         const marks = source.marks();
         const active = source.active();
         const linked = source.linked?.();
+        const visibleMarkIds = source.visibleMarkIds?.();
         const blocks = marked ? changedMarkBlocks(previous.marks, marks, previous.active, active, previous.linked, linked) : new Set<string>();
+        if (visibleMarkIds !== previous.visibleMarkIds) {
+          for (const mark of marks) if ((visibleMarkIds?.has(mark.markId) ?? true) !== (previous.visibleMarkIds?.has(mark.markId) ?? true)) blocks.add(mark.blockId);
+        }
         if (tr.docChanged) for (const blockId of editedBlocks(tr)) blocks.add(blockId);
         const mapped = tr.docChanged ? previous.set.map(tr.mapping, tr.doc) : previous.set;
-        return { set: redrawBlocks(mapped, tr.doc, blocks, source), marks, active, linked, generation };
+        return { set: redrawBlocks(mapped, tr.doc, blocks, source), marks, active, linked, generation, visibleMarkIds };
       },
     },
     props: {

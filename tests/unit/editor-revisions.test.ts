@@ -58,7 +58,7 @@ describe('✎ 已改 and 🔒 in the text', () => {
   const schema = new Schema({ nodes: { doc: { content: 'paragraph+' }, paragraph: { content: 'text*', attrs: { blockId: { default: '' } }, toDOM: () => ['p', 0] }, text: {} } });
   const mark = (changes: Partial<EditorialMarkAnchorProjection>): EditorialMarkAnchorProjection => ({
     markId: 'm1', kind: 'change-suggestion', blockId: 'b1', fromGrapheme: 1, toGrapheme: 3, anchorState: 'exact', status: 'applied', highlightColor: null,
-    sourceKind: 'ai7', disposition: 'accepted', deletedText: null, insertedText: null, conflict: null, ...changes,
+    sourceKind: 'ai7', sourceOrigin: 'task', sourceLabel: '校对', categoryKey: 'other', categoryLabel: '校对', disposition: 'accepted', deletedText: null, insertedText: null, conflict: null, ...changes,
   }) as EditorialMarkAnchorProjection;
   const node = schema.node('paragraph', { blockId: 'b1' }, schema.text('甲乙丙丁'));
   const widgets = (decorations: ReturnType<typeof blockMarkDecorations>) => decorations.filter((decoration) => decoration.from === decoration.to);
@@ -69,9 +69,9 @@ describe('✎ 已改 and 🔒 in the text', () => {
       const written = blockMarkDecorations(node, 0, [mark({})], '甲乙丙丁', undefined);
       expect(widgets(written).map((decoration) => decoration.from)).toEqual([4]);
       const badge = (widgets(written)[0]!.spec as { key: string }).key;
-      expect(badge).toBe('applied:m1::ai7');
+      expect(badge).toBe('applied:m1::ai7:other:false');
       const deleted = blockMarkDecorations(node, 0, [mark({ fromGrapheme: 2, toGrapheme: 2, deletedText: '删去的字' })], '甲乙丙丁', undefined);
-      expect(widgets(deleted).map((decoration) => (decoration.spec as { key: string }).key)).toEqual(['applied:m1:删去的字:ai7', expect.stringMatching(/^point:m1:/u)]);
+      expect(widgets(deleted).map((decoration) => (decoration.spec as { key: string }).key)).toEqual(['applied:m1:删去的字:ai7:other:false', expect.stringMatching(/^point:m1:/u)]);
       expect(APPLIED_BADGE_TEXT).toBe('✎ 已改');
       const line = written.find((decoration) => decoration.from === 0 && decoration.to === node.nodeSize);
       expect((line as unknown as { type: { attrs: Record<string, string> } }).type.attrs).toMatchObject({ 'data-mark-line': 'applied', 'data-mark-revised': 'true' });
