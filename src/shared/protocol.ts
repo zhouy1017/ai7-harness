@@ -334,8 +334,13 @@ export * from './protocol/scoped-edit.js';
  * Protocol 200 (Issue #1400 Batch 3): 局部 AI 修改与 🔒 锁定 (#1412) — setAiEditLocks, inspectAiEditLocks, startScopedAiEdit,
  * inspectScopedAiEdit and the window's optional `aiLockedBlockIds`/`aiLocksDigest` — and 全部替换 as per-occurrence revision
  * cards (#1411) — commitReplacementRevisions.
+ *
+ * Protocol 201 (#1426 after-wave-24c closure, 0.6.3): editable derivative categories and document management (#1427) —
+ * saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes, updateProductionDocumentMeta;
+ * mark category/source fields on mark projections (#1429); inline editor revisions with apply/revert card actions (#1428);
+ * the one-click `book-review-report` DOCX export target and its report sections (#1430).
  */
-export const SERVICE_PROTOCOL_VERSION = 200 as const;
+export const SERVICE_PROTOCOL_VERSION = 201 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
