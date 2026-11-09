@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   REVIEW_SCOPE_LABELS,
@@ -191,7 +191,7 @@ export const REVIEW_STATUS_PILLS: Readonly<Record<ReviewFindingStatus, ReviewPil
 // ---- the coverage matrix and the 审阅记录 -----------------------------------------------------------
 
 export function reviewCoverageLastReview(row: Pick<ReviewCoverageRowProjection, 'lastRunOrdinal' | 'lastReviewedRevisionLabel'>): string {
-  return row.lastRunOrdinal === null ? '—' : `第 ${row.lastRunOrdinal} 次 · 读的是 ${technicalWords(row.lastReviewedRevisionLabel ?? '—', "修订版")}`;
+  return row.lastRunOrdinal === null ? '—' : technicalWords(`第 ${row.lastRunOrdinal} 次 · 读的是 ${row.lastReviewedRevisionLabel ?? '—'}`, `已审阅 ${row.lastRunOrdinal} 次`);
 }
 
 export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'changedBlocks'>): string {
@@ -323,7 +323,7 @@ export function reviewPreparationLine(progress: { completed: number; total: numb
 export const REVIEW_PLAN_HEADING = '审阅计划';
 
 export function reviewPlanCategoriesLine(categories: number): string {
-  return `${categories} 个类别，授权一次后逐类审阅`;
+  return technicalWords(`${categories} 个类别，授权一次后逐类审阅`, `${categories} 个类别，开始后逐类审阅`);
 }
 
 // ---- running ----------------------------------------------------------------------------------------
@@ -333,8 +333,8 @@ export const REVIEW_CONTINUE_NOTE = '这次审阅中途停止了；继续审阅�
 
 /** The step a category's Run is in (V2-UX-LIVE-001), in 审阅's words. */
 export const REVIEW_STAGE_LABELS: Readonly<Record<'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection', string>> = {
-  units: '正在逐个阅读范围审阅',
-  'cross-unit-reduction': '正在跨范围比对',
+  get units() { return technicalWords('正在逐个阅读范围审阅', '正在审阅'); },
+  get 'cross-unit-reduction'() { return technicalWords('正在跨范围比对', '正在前后比对'); },
   'assurance-sampling': '正在抽样复核',
   'run-report-reflection': '发现已保存，正在写运行报告',
 };
@@ -349,7 +349,12 @@ export function reviewCategoryProgressLine(category: Pick<ReviewRunCategoryProje
   if (category.state === 'running' && facts !== null) {
     const elapsedMs = facts.currentUnitStartedAt === null ? null : now - Date.parse(facts.currentUnitStartedAt);
     const stale = elapsedMs !== null && runStepIsStale(elapsedMs, facts.longestSettledUnitMs);
-    const reading = [
+    // Ordinary mode: the overall progress, not the ranges, attempts and model turns (Issue #1431 item 51).
+    const reading = !technicalLayerVisible ? [
+      REVIEW_STAGE_LABELS[facts.stage],
+      `已完成约 ${facts.unitsTotal === 0 ? 0 : Math.floor((facts.unitsSettled / facts.unitsTotal) * 100)}%`,
+      ...(elapsedMs === null ? [] : [`本步已用时 ${elapsedLabel(elapsedMs)}`]),
+    ].join(' · ') : [
       REVIEW_STAGE_LABELS[facts.stage],
       `已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`,
       ...(facts.currentUnitOrdinal === null ? [] : [`正在读第 ${facts.currentUnitOrdinal} 个`]),
@@ -371,7 +376,7 @@ export function reviewCategoryProgressLine(category: Pick<ReviewRunCategoryProje
     case 'waiting':
       return category.detail ?? '排在前面的类别完成后开始';
     case 'prepared':
-      return '计划已冻结，等你授权';
+      return technicalWords('计划已冻结，等你授权', '审阅已准备好');
     default:
       return category.detail ?? category.stateLabel;
   }
@@ -383,7 +388,8 @@ export function reviewLiveLine(runLabel: string, category: Pick<ReviewRunCategor
   const facts = category.progress;
   return facts === null
     ? `${runLabel}审阅 · ${category.label} · ${category.stateLabel}`
-    : `${runLabel}审阅 · ${category.label} · 已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`;
+    : `${runLabel}审阅 · ${category.label} · ${technicalWords(`已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围`,
+      `已完成约 ${facts.unitsTotal === 0 ? 0 : Math.floor((facts.unitsSettled / facts.unitsTotal) * 100)}%`)}`;
 }
 
 // ---- results ----------------------------------------------------------------------------------------
@@ -435,7 +441,7 @@ export function reviewReplacementLine(replacement: string): string {
 }
 
 export function reviewClauseLine(clause: { documentTitle: string; clauseId: string; text: string }): string {
-  if (clause.clauseId.startsWith('deliverable/')) return `比对来源（只读）：${clause.documentTitle}：${clause.text}`;
+  if (clause.clauseId.startsWith('deliverable/')) return `${technicalWords('比对来源（只读）', '比对来源')}：${clause.documentTitle}：${clause.text}`;
   return `依据：条款 ${clause.clauseId} · ${clause.documentTitle}：${clause.text}`;
 }
 
@@ -506,7 +512,7 @@ export function reviewRunHeading(label: string): string {
 }
 
 export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): string {
-  return `${scopeLabel.replaceAll('内容块', '段落')} · 读的是修订版 ${technicalWords(revisionLabel)}`;
+  return `${scopeLabel.replaceAll('内容块', '段落')}${technicalWords(` · 读的是修订版 ${revisionLabel}`)}`;
 }
 
 export function reviewCreatedLine(localInstant: string): string {
@@ -514,7 +520,7 @@ export function reviewCreatedLine(localInstant: string): string {
 }
 
 export function reviewAuthorizedLine(localInstant: string): string {
-  return `授权于 ${localInstant}`;
+  return technicalWords(`授权于 ${localInstant}`, `开始于 ${localInstant}`);
 }
 
 /** What the status line says as each action of the destination starts and ends. */
@@ -522,8 +528,8 @@ export const REVIEW_STATUS_LINES = {
   opened: '审阅已打开',
   refreshFailed: '无法刷新审阅。',
   preparing: '正在准备审阅计划…',
-  prepared: '审阅计划已冻结；可在任务计划里开始审阅。',
-  preparationCancelled: '审阅计划准备已取消；稿件与审阅记录保持不变。',
+  get prepared() { return technicalWords('审阅计划已冻结；可在任务计划里开始审阅。', '审阅已准备好，可以开始。'); },
+  get preparationCancelled() { return technicalWords('审阅计划准备已取消；稿件与审阅记录保持不变。', '已取消审阅准备。'); },
   preparationFailed: '无法准备审阅计划。',
   started: '已开始审阅；完整计划在任务计划里。',
   startNeedsPlan: '这次审阅需要先看计划：请在任务计划里确认后开始。',

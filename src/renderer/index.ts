@@ -1273,7 +1273,9 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
         const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
         const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
         heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
-        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full); content.append(details);
+        // The raw receipt is diagnostics only (Issue #1431 item 103), gated like the proposal workspace's.
+        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full);
+        if (technicalLayerVisible) content.append(technicalDisclosure(details));
         // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
         if (receipt.state === 'unresolved') {
           const recheck = button('重新核对应用结果', 'primary', async () => {
@@ -1560,11 +1562,11 @@ async function requestBookWorkbenchRoute(
 async function renderOwnedBookWorkbenchRoute(): Promise<void> {
   const route = await window.ai7.getBookWorkbenchRoute();
   if (!route) return;
-  setStatus('正在读取精确图书工作台路由…', 'busy');
+  setStatus(technicalWords('正在读取精确图书工作台路由…', '正在打开图书…'), 'busy');
   try {
     await renderResolvedBookWorkbenchRoute(route);
   } catch (error) {
-    setStatus(rendererErrorMessage(error, '无法读取精确图书工作台路由。'), 'error');
+    setStatus(rendererErrorMessage(error, technicalWords('无法读取精确图书工作台路由。', '无法打开这本书，请重试。')), 'error');
   }
 }
 
@@ -1822,13 +1824,20 @@ function recoveryCandidateCard(
   revisionIdentity.dataset['candidateRevisionId'] = candidate.revisionId;
   const revisionDigest = element('dd', 'technical-identity', candidate.revisionDigest);
   revisionDigest.dataset['candidateRevisionDigest'] = candidate.revisionDigest;
-  details.append(
+  // Ordinary mode keeps the candidate's time, what it restores and its real risk (Issue #1431 item 26); the chain,
+  // boundary and verification facts stay in the developer layer.
+  details.append(...(technicalLayerVisible ? [
     element('dt', undefined, '修订版'), element('dd', undefined, candidate.revisionLabel),
-    element('dt', undefined, '持久边界'), element('dd', undefined, `${technicalWords(`修订日志序号 ${candidate.journalSequence} · `)}${localInstantLabel(candidate.durableAt)}`),
+    element('dt', undefined, '持久边界'), element('dd', undefined, `修订日志序号 ${candidate.journalSequence} · ${localInstantLabel(candidate.durableAt)}`),
     element('dt', undefined, '覆盖范围'), element('dd', undefined, candidate.coveredChangeExtent),
     element('dt', undefined, '校验'), element('dd', undefined, candidate.verification),
     element('dt', undefined, '限制'), element('dd', undefined, candidate.limitation),
-  );
+  ] : [
+    element('dt', undefined, '保存时间'), element('dd', undefined, localInstantLabel(candidate.durableAt)),
+    element('dt', undefined, '恢复内容'), element('dd', undefined, candidate.kind === 'journal'
+      ? '包含最近保存的全部修改。'
+      : candidate.kind === 'checkpoint' ? '只包含上一个保存点的文字；之后的修改不会恢复，但也不会被删除。' : '只包含该里程碑时的文字；之后的修改不会恢复。'),
+  ]));
   const exact = [
     element('dt', undefined, '修订版身份'), revisionIdentity,
     element('dt', undefined, '修订摘要'), revisionDigest,
@@ -1865,11 +1874,12 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   let selection: RecoverySelection | undefined;
   const content = panel();
   content.classList.add('manuscript-recovery-panel');
-  const sectionLabel = element('p', 'section-label', `稿件恢复优先 · ${recovery.unresolvedCount} 项待确认`);
+  const sectionLabel = element('p', 'section-label', `${technicalWords('稿件恢复优先', '稿件恢复')} · ${recovery.unresolvedCount} 项待确认`);
   const heading = element('h2', undefined, '先确认中断后的稿件状态');
-  const lede = element('p', 'lede', recovery.snapshot.state === 'eligible'
+  const lede = element('p', 'lede', technicalWords(recovery.snapshot.state === 'eligible'
     ? '系统不会替你选择恢复来源。三个已校验证据保持并列，恢复只会形成新的后代修订版。'
-    : '系统不会替你选择恢复来源。当前两个可选证据保持并列；快照状态另行披露，恢复只会形成新的后代修订版。');
+    : '系统不会替你选择恢复来源。当前两个可选证据保持并列；快照状态另行披露，恢复只会形成新的后代修订版。',
+  '请选择要恢复的稿件。恢复会保存为新版本，原有内容不会被删除。'));
   content.append(sectionLabel, heading, lede);
   const identity = element('section', 'source-card recovery-identity');
   const identityDetails = element('dl');
@@ -1881,17 +1891,17 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   if (technicalLayerVisible) durableBoundary.prepend(`修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · `);
   identityDetails.append(
     ...recoveryIdentityRows(recovery).flatMap(([term, value]) => [element('dt', undefined, term), element('dd', technicalLayerVisible && term === '稿件' ? 'technical-identity' : undefined, value)]),
-    element('dt', undefined, '最后持久写入边界'), durableBoundary,
-    element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent),
+    element('dt', undefined, technicalWords('最后持久写入边界', '最近保存时间')), durableBoundary,
+    ...(technicalLayerVisible ? [element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent)] : []),
   );
-  identity.append(element('h3', undefined, '精确受影响稿件'), identityDetails,
-    element('p', 'uncertain-support', recovery.lastDurableEditBoundary.uncertainty));
+  identity.append(element('h3', undefined, technicalWords('精确受影响稿件', '受影响的稿件')), identityDetails,
+    element('p', 'uncertain-support', technicalWords(recovery.lastDurableEditBoundary.uncertainty, '最近保存之后输入的文字可能没有保存下来。')));
   content.append(identity);
 
   const choices = element('fieldset', 'recovery-comparison');
   choices.setAttribute('role', 'radiogroup');
-  choices.setAttribute('aria-label', '恢复来源比较');
-  const legend = element('legend', undefined, '选择一个证据来源');
+  choices.setAttribute('aria-label', technicalWords('恢复来源比较', '可恢复的稿件'));
+  const legend = element('legend', undefined, technicalWords('选择一个证据来源', '选择要恢复的稿件'));
   choices.append(legend);
   const cards = element('div', 'recovery-candidate-grid');
   cards.dataset['eligibleCandidateCount'] = recovery.snapshot.state === 'eligible' ? '3' : '2';
@@ -1906,7 +1916,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     view.disabled = true;
     restore.disabled = true;
     defer.disabled = true;
-    setStatus('正在原子创建恢复后代修订版…', 'busy');
+    setStatus(technicalWords('正在原子创建恢复后代修订版…', '正在恢复…'), 'busy');
     let restored: RecoveryRestorationProjection;
     try {
       restored = await window.ai7.restoreRecovery({
@@ -1928,7 +1938,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     let unopened: unknown;
     try {
       await openEditorWindow(restored.window, recovery.bookTitle);
-      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}`, 'success');
+      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本${technicalWords(` ${restored.descendantRevisionLabel}`)}`, 'success');
       return;
     } catch (error) {
       unopened = error;
@@ -1943,7 +1953,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         return;
       }
       await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
-      setStatus(`已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`, 'error');
+      setStatus(`已恢复为新版本${technicalWords(` ${restored.descendantRevisionLabel}`)}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`, 'error');
     };
     try {
       await openBook();
@@ -1965,14 +1975,14 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
           reopen.disabled = false;
           setStatus(onDocument
             ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, '无法打开稿件。')}`
-            : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
+            : `已恢复为新版本${technicalWords(` ${restored.descendantRevisionLabel}`)}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
         }
       });
       actions.replaceChildren(reopen);
       reopen.focus();
       setStatus(onDocument
         ? DOCUMENT_STATUS_LINES.recoveredNothingOpened
-        : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
+        : `已恢复为新版本${technicalWords(` ${restored.descendantRevisionLabel}`)}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
     }
   });
   const selected = (
@@ -1981,7 +1991,8 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
       Extract<RecoveryComparisonProjection['snapshot'], { state: 'eligible' }>['candidate'],
   ): void => {
     selection = next;
-    consequence.textContent = `将以“${candidate.title}”形成当前分支的新后代修订版${technicalWords(`；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}`)}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`;
+    consequence.textContent = technicalWords(`将以“${candidate.title}”形成当前分支的新后代修订版；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`,
+      `将按“${candidate.title}”恢复为新版本；原有内容保持不变。`);
     consequence.dataset['selectedCandidate'] = candidate.kind;
     consequence.hidden = false;
     view.disabled = false;
@@ -2035,10 +2046,10 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   const actions = element('div', 'button-row recovery-decision-actions');
   actions.append(view, defer, restore);
   content.append(actions,
-    element('p', 'field-note', '恢复不会改写、删除或移动既有修订版、修订日志、里程碑、恢复快照或稿件固定点。'));
+    element('p', 'field-note', technicalWords('恢复不会改写、删除或移动既有修订版、修订日志、里程碑、恢复快照或稿件固定点。', '恢复不会删除原有内容或里程碑版本。')));
   replaceScreen('manuscript-recovery', content);
   focusRecoveryHeading(content);
-  setStatus(recovery.status === 'deferred' ? '恢复待确认状态仍然有效' : '等待你比较并明确选择恢复来源');
+  setStatus(recovery.status === 'deferred' ? '恢复待确认状态仍然有效' : technicalWords('等待你比较并明确选择恢复来源', '请选择要恢复的稿件'));
 }
 
 async function openRecoveryViewer(
@@ -2046,7 +2057,7 @@ async function openRecoveryViewer(
   selection: RecoverySelection,
   target: { kind: 'start' } | { kind: 'after'; position: number },
 ): Promise<void> {
-  setStatus('正在读取有界只读恢复窗口…', 'busy');
+  setStatus(technicalWords('正在读取有界只读恢复窗口…', '正在打开…'), 'busy');
   try {
     const projection = await window.ai7.viewRecoveryCandidate({
       attentionId: recovery.attentionId, expectedAttentionVersion: recovery.attentionVersion,
@@ -2054,7 +2065,7 @@ async function openRecoveryViewer(
     });
     renderRecoveryViewer(recovery, projection);
   } catch (error) {
-    setStatus(rendererErrorMessage(error, '无法读取恢复证据。'), 'error');
+    setStatus(rendererErrorMessage(error, technicalWords('无法读取恢复证据。', '无法打开这份稿件。')), 'error');
   }
 }
 
@@ -2062,12 +2073,12 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   const content = panel();
   content.classList.add('recovery-viewer');
   content.append(
-    element('p', 'section-label', '仅查看 · 永久只读'),
+    element('p', 'section-label', technicalWords('仅查看 · 永久只读', '仅查看')),
     element('h2', undefined, projection.title),
-    element('p', 'lede', `${technicalWords(projection.revisionLabel, '修订版')} · 只读`),
+    element('p', 'lede', technicalWords(`${projection.revisionLabel} · 只读`, '查看时不能编辑')),
   );
   const blocks = element('article', 'recovery-readonly-blocks');
-  blocks.setAttribute('aria-label', '恢复证据只读内容窗口');
+  blocks.setAttribute('aria-label', technicalWords('恢复证据只读内容窗口', '稿件内容'));
   for (const block of projection.blocks) {
     const node = element(block.kind === 'paragraph' || block.kind === 'note' ? 'p' : block.kind === 'title' ? 'h1' : 'h2', undefined, block.text);
     node.dataset['blockId'] = block.blockId;
@@ -2077,13 +2088,13 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   const actions = element('div', 'button-row');
   actions.append(button('返回比较', 'secondary', () => renderManuscriptRecovery(recovery)));
   if (projection.nextTarget !== null) {
-    actions.append(button('查看下一窗口', 'quiet', () =>
+    actions.append(button(technicalWords('查看下一窗口', '继续往下看'), 'quiet', () =>
       openRecoveryViewer(recovery, projection.selection, projection.nextTarget!)));
   }
   content.append(actions);
   replaceScreen('recovery-viewer', content);
   focusRecoveryHeading(content);
-  setStatus('正在仅查看已选择的恢复证据；普通编辑保持关闭');
+  setStatus(technicalWords('正在仅查看已选择的恢复证据；普通编辑保持关闭', '正在查看，查看时不能编辑'));
 }
 
 function renderHistoricalRevision(projection: HistoricalRevisionProjection): void {
@@ -2097,8 +2108,8 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   content.dataset['readOnly'] = 'true';
   content.dataset['blockCount'] = String(projection.blocks.length);
   content.append(
-    element('h2', undefined, `稿件修订版${technicalWords(` ${projection.revisionLabel}`)}`),
-    element('p', 'lede', `${projection.position.label} · 只读`),
+    element('h2', undefined, technicalWords(`稿件修订版 ${projection.revisionLabel}`, '历史稿件')),
+    element('p', 'lede', `${projection.position.label} · ${technicalWords('只读', '仅查看')}`),
   );
   const identity = element('section', 'source-card');
   const values = element('dl');
@@ -2107,7 +2118,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   values.append(
     element('dt', undefined, '创建时间'), element('dd', undefined, localInstantLabel(projection.createdAt)),
   );
-  identity.append(element('h3', undefined, '不可变修订身份'), values, technicalDetails(
+  identity.append(element('h3', undefined, technicalWords('不可变修订身份', '这份稿件')), values, technicalDetails(
     undefined,
     element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', projection.bookId),
     element('dt', undefined, '稿件 ID'), element('dd', 'technical-identity', projection.manuscriptId),
@@ -2118,7 +2129,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
     element('dt', undefined, '创建时间（精确）'), element('dd', 'technical-identity', projection.createdAt),
   ));
   const blocks = element('article', 'recovery-readonly-blocks historical-revision-blocks');
-  blocks.setAttribute('aria-label', '历史修订版只读内容窗口');
+  blocks.setAttribute('aria-label', technicalWords('历史修订版只读内容窗口', '历史稿件内容'));
   for (const block of projection.blocks) {
     const tag = block.kind === 'paragraph' || block.kind === 'note' ? 'p' : block.kind === 'title' ? 'h1' : 'h2';
     const node = element(tag, undefined, block.text);
@@ -2171,7 +2182,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'history' });
   agentWorkspaceReturns.set(content, () => renderHistoricalRevision(projection));
   focusRecoveryHeading(content);
-  setStatus(`只读历史修订版已打开；${projection.position.label}。`);
+  setStatus(technicalWords(`只读历史修订版已打开；${projection.position.label}。`, `已打开历史稿件；${projection.position.label}。`));
 }
 
 function renderContinuation(
@@ -2206,13 +2217,13 @@ async function abandonAndContinue(
   recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>,
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
-  setStatus('正在核对提交证据并放弃非权威草稿…', 'busy');
+  setStatus(technicalWords('正在核对提交证据并放弃非权威草稿…', '正在放弃本次导入…'), 'busy');
   try {
     const startup = await window.ai7.abandonImportDraft({
       draftId: recovery.draftId,
       expectedDraftVersion: recovery.draftVersion,
     });
-    setStatus(startup.state === 'none' ? '已放弃导入草稿并安全清理暂存引用' : '已核对导入状态', 'success');
+    setStatus(startup.state === 'none' ? technicalWords('已放弃导入草稿并安全清理暂存引用', '已放弃本次导入') : technicalWords('已核对导入状态', '已更新导入状态'), 'success');
     await renderStartupProjection(startup, recoveryReturn);
   } catch (error) {
     renderError(error, () => void initializeStartup());
@@ -2231,17 +2242,17 @@ function renderImportRecovery(
     element(
       'p',
       'section-label',
-      cleanup ? '启动恢复 · 持久放弃清理' : uncertain ? '启动恢复 · 原子结果待确认' : '启动恢复 · 非权威导入草稿',
+      technicalWords(cleanup ? '启动恢复 · 持久放弃清理' : uncertain ? '启动恢复 · 原子结果待确认' : '启动恢复 · 非权威导入草稿', '上次导入未完成'),
     ),
     element('h2', undefined, cleanup ? '放弃清理尚未完成' : uncertain ? '导入提交结果待确认' : '发现未完成的导入'),
     element(
       'p',
       'lede',
       cleanup
-        ? '放弃意图已经持久化。系统已阻止继续导入和任何新的权威引用；只有在暂存字节与权威记录都完成安全清理后才会报告成功。'
+        ? technicalWords('放弃意图已经持久化。系统已阻止继续导入和任何新的权威引用；只有在暂存字节与权威记录都完成安全清理后才会报告成功。', '已放弃这次导入，但临时文件尚未清理完；请重试清理。')
         : uncertain
-        ? '本地证据目前无法证明这次原子提交已经完成或确定未提交。为避免重复图书或误删来源，系统已阻止重试、放弃和暂存清理。'
-        : '启动不会替你继续、选择目标或提交。请明确选择继续导入或放弃。',
+        ? technicalWords('本地证据目前无法证明这次原子提交已经完成或确定未提交。为避免重复图书或误删来源，系统已阻止重试、放弃和暂存清理。', '暂时无法确认这次导入是否已完成。为避免重复导入，请先不要重试或删除文件。')
+        : technicalWords('启动不会替你继续、选择目标或提交。请明确选择继续导入或放弃。', '可以继续导入，或放弃本次导入。'),
     ),
   );
   const summary = element('section', 'source-card recovery-summary');
@@ -2253,38 +2264,38 @@ function renderImportRecovery(
       'dd',
       undefined,
       cleanup
-        ? '持久放弃清理 · 阻止继续与新权威引用'
+        ? technicalWords('持久放弃清理 · 阻止继续与新权威引用', '正在清理')
         : uncertain
-        ? '非权威草稿 · 提交结果待确认'
+        ? technicalWords('非权威草稿 · 提交结果待确认', '导入结果待确认')
         : recovery.snapshotState === 'complete'
-          ? '完整暂存快照 · 尚未形成导入权威'
-          : '暂存不完整或损坏 · 需要精确重选',
+          ? technicalWords('完整暂存快照 · 尚未形成导入权威', '可以继续导入')
+          : technicalWords('暂存不完整或损坏 · 需要精确重选', '临时文件不完整，请重新选择原文件'),
     ),
     element('dt', undefined, '上次完成位置'),
     element(
       'dd',
       undefined,
       recovery.lastCompletedStep === 'abandonment-cleanup'
-        ? '已持久化放弃与安全清理意图'
+        ? technicalWords('已持久化放弃与安全清理意图', '已放弃')
         : recovery.lastCompletedStep === 'review'
         ? '导入前复核'
         : recovery.lastCompletedStep === 'commit-attempt'
-          ? '已持久化提交尝试，尚未证明提交'
+          ? technicalWords('已持久化提交尝试，尚未证明提交', '正在导入')
           : recovery.lastCompletedStep === 'commit-outcome-uncertain'
-            ? '原子提交边界'
-            : '本地暂存与预检',
+            ? technicalWords('原子提交边界', '正在导入')
+            : technicalWords('本地暂存与预检', '已读取文件'),
     ),
     ...(recovery.reviewedTitle
-      ? [element('dt', undefined, '已复核书名'), element('dd', undefined, recovery.reviewedTitle)]
+      ? [element('dt', undefined, technicalWords('已复核书名', '书名')), element('dd', undefined, recovery.reviewedTitle)]
       : []),
     ...(recovery.targetLabel
-      ? [element('dt', undefined, '已复核目标'), element('dd', undefined, recovery.targetLabel)]
+      ? [element('dt', undefined, technicalWords('已复核目标', '导入到')), element('dd', undefined, recovery.targetLabel)]
       : []),
-    ...(recovery.targetBookId
+    ...(recovery.targetBookId && technicalLayerVisible
       ? [element('dt', undefined, '已复核图书 ID'), element('dd', 'technical-identity', recovery.targetBookId)]
       : []),
     ...(recovery.relationshipLabel
-      ? [element('dt', undefined, '已复核关系'), element('dd', undefined, recovery.relationshipLabel)]
+      ? [element('dt', undefined, technicalWords('已复核关系', '导入方式')), element('dd', undefined, recovery.relationshipLabel)]
       : []),
   );
   summary.append(details);
@@ -2293,7 +2304,7 @@ function renderImportRecovery(
   if (cleanup) {
     const support = element('section', 'uncertain-support');
     support.append(
-      element('h3', undefined, '安全清理状态'),
+      element('h3', undefined, technicalWords('安全清理状态', '清理状态')),
       ...(technicalLayerVisible ? [element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`)] : []),
       element('p', 'field-note', technicalWords('此状态不包含暂存正文或原始文件路径，请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。', '清理尚未完成，请保留 AI7 数据并重试；重试会继续原操作，不会重复导入或放弃。')),
     );
@@ -2302,7 +2313,7 @@ function renderImportRecovery(
     content.append(support, actions);
     appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen('import-cleanup', content);
-    setStatus('放弃清理尚未完成；已阻止继续导入和新权威引用', 'error');
+    setStatus(technicalWords('放弃清理尚未完成；已阻止继续导入和新权威引用', '清理尚未完成，请重试'), 'error');
     return;
   }
   if (recovery.staged) content.append(sourceCard(recovery.staged));
@@ -2313,15 +2324,15 @@ function renderImportRecovery(
     saved.dataset['wordRecoveredMode'] = choice.mode; saved.dataset['wordRecoveredLearning'] = String(choice.learnFromEdits);
     saved.append(element('h3', undefined, '已保存的 Word 导入选择'), element('p', undefined, `导入方式：${WORD_IMPORT_MODE_NAMES[choice.mode]}`),
     element('p', undefined, choice.mode === 'suggestions'
-      ? '撤销原修订后的阅读作为基线，原修订保留为建议。' : '已单独确认：接受原修订后的阅读作为基线。'),
-    element('p', undefined, choice.learnFromEdits ? '已选择学习这些编辑改动；提交时仍会校验当前排除设置。' : '已关闭本次编辑改动学习。'));
+      ? technicalWords('撤销原修订后的阅读作为基线，原修订保留为建议。', '原修订将作为待处理的修改建议。') : technicalWords('已单独确认：接受原修订后的阅读作为基线。', '导入修订后的正文。')),
+    element('p', undefined, choice.learnFromEdits ? technicalWords('已选择学习这些编辑改动；提交时仍会校验当前排除设置。', '允许学习这些修改。') : technicalWords('已关闭本次编辑改动学习。', '不学习这些修改。')));
     content.append(saved);
   }
 
   if (uncertain) {
     const support = element('section', 'uncertain-support');
     support.append(
-      element('h3', undefined, '本地恢复与支持信息'),
+      element('h3', undefined, technicalWords('本地恢复与支持信息', '需要核对')),
       ...(technicalLayerVisible ? [
         element('p', undefined, `草稿标识：${recovery.draftId}`),
         element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
@@ -2332,7 +2343,7 @@ function renderImportRecovery(
     content.append(support);
     appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen('import-uncertain', content);
-    setStatus('导入提交结果待确认；已阻止重试、放弃和清理', 'error');
+    setStatus(technicalWords('导入提交结果待确认；已阻止重试、放弃和清理', '导入结果待确认'), 'error');
     return;
   }
 
@@ -2342,7 +2353,7 @@ function renderImportRecovery(
     const continueButton = button('继续导入', 'primary', async () => {
       continueButton.disabled = true;
       abandonButton.disabled = true;
-      setStatus('正在重新校验暂存字节、解析器、目标与复核…', 'busy');
+      setStatus(technicalWords('正在重新校验暂存字节、解析器、目标与复核…', '正在继续导入…'), 'busy');
       try {
         renderContinuation(
           await window.ai7.continueImportDraft({
@@ -2361,7 +2372,7 @@ function renderImportRecovery(
     const reselect = button('重新选择原文件', 'primary', async () => {
       reselect.disabled = true;
       abandonButton.disabled = true;
-      setStatus('请选择与原暂存来源摘要精确一致的原文件…', 'busy');
+      setStatus(technicalWords('请选择与原暂存来源摘要精确一致的原文件…', '请重新选择同一个原文件…'), 'busy');
       try {
         const result = await window.ai7.reselectImportDraft({
           draftId: recovery.draftId,
@@ -2467,7 +2478,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         appendRecordField(values, '转换器', record.converterIdentity, true);
       }
       appendRecordField(values, '取得方式', '本机文件选择器', true);
-      appendRecordField(values, '处理边界', '本地 · 未调用 Provider');
+      appendRecordField(values, '处理边界', '本地 · 未调用 Provider', true);
       break;
     case 'workflow':
       appendRecordField(values, '工作流实例 ID', record.workflowInstanceId, true);
@@ -2475,9 +2486,9 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '稿件 ID', record.manuscriptId, true);
       appendRecordField(values, '当前阶段', record.currentPhase);
       appendRecordField(values, '实例状态', record.state);
-      appendRecordField(values, 'AI7 投影', `${record.projection.id}@${record.projection.version}`);
+      appendRecordField(values, 'AI7 投影', `${record.projection.id}@${record.projection.version}`, true);
       appendRecordField(values, 'AI7 投影摘要', record.projection.digest, true);
-      appendRecordField(values, '原生 Profile', `${record.nativeProfile.id}@${record.nativeProfile.version}`);
+      appendRecordField(values, '原生 Profile', `${record.nativeProfile.id}@${record.nativeProfile.version}`, true);
       appendRecordField(values, '原生 Profile 摘要', record.nativeProfile.digest, true);
       break;
     case 'import-record':
@@ -2510,9 +2521,9 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         technicalWords(record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本', record.sourceVersionDisposition === 'reused-same-book' ? '使用已导入的文件' : '导入新文件'),
       );
       // The boundary claims a parse only where one happened, and says so when a converter did it (ADR 0072 §2; Issue #583).
-      appendRecordField(values, '保留边界', record.retainedBoundary.label.replace(/^保留/, ''));
-      appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
-      appendRecordField(values, '保留格式', record.retainedBoundary.format);
+      appendRecordField(values, '保留边界', record.retainedBoundary.label.replace(/^保留/, ''), true);
+      appendRecordField(values, technicalWords('保留文件名', '文件名'), record.retainedBoundary.displayName);
+      appendRecordField(values, technicalWords('保留格式', '格式'), record.retainedBoundary.format);
       appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes), true);
       appendRecordField(values, '保留文件 SHA-256', record.retainedBoundary.sourceSha256, true);
       if (record.retainedBoundary.contentDigest !== null && record.retainedBoundary.structureDigest !== null) {
@@ -2532,9 +2543,9 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '前一修订版 ID', record.previousRevisionId, true);
       appendRecordField(values, '结果修订版 ID', record.resultingRevisionId, true);
       appendRecordField(values, '结果', record.resultLabel);
-      appendRecordField(values, '来源关系', record.lineageLabel);
+      appendRecordField(values, '来源关系', record.lineageLabel, true);
       appendRecordField(values, '来源关系版本 ID', record.lineageSourceVersionId, true);
-      appendRecordField(values, '比较方式', record.comparisonKind === 'three-way' ? '三方比较' : '两方比较');
+      appendRecordField(values, '比较方式', record.comparisonKind === 'three-way' ? '三方比较' : '两方比较', true);
       appendRecordField(values, '比较摘要', record.comparisonDigest, true);
       appendRecordField(values, '解决摘要', record.resolutionDigest, true);
       appendRecordField(values, '导入保真审阅 ID', record.fidelityReviewId, true);
@@ -2601,14 +2612,14 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
     detail.append(listSection('不会做', record.namedNonEffects));
   }
   if (record.kind === 'revision') {
-    const openRevision = button('打开此历史修订版', 'secondary', async () => {
+    const openRevision = button(technicalWords('打开此历史修订版', '打开这份历史稿件'), 'secondary', async () => {
       openRevision.disabled = true;
-      setStatus('正在路由到精确历史修订版…', 'busy');
+      setStatus(technicalWords('正在路由到精确历史修订版…', '正在打开历史稿件…'), 'busy');
       try {
         await requestBookWorkbenchRoute({ kind: 'revision', revisionId: record.revisionId });
       } catch (error) {
         openRevision.disabled = false;
-        setStatus(rendererErrorMessage(error, '无法打开精确历史修订版。'), 'error');
+        setStatus(rendererErrorMessage(error, technicalWords('无法打开精确历史修订版。', '无法打开这份历史稿件。')), 'error');
       }
     });
     openRevision.dataset['openRevisionId'] = record.revisionId;
@@ -3056,6 +3067,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     openDocument: (documentNow, type, notice) => openProductionDocument(documentNow, type, bookTitle, notice),
     // 新闻稿、简介等衍生稿件 live on 稿件 (Issue #1403).
     openManuscript: () => void renderBookManuscript(bookId, bookTitle).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error')),
+    openDerivatives: () => renderDerivativesWorkspace(bookId, bookTitle),
     // 前往审阅 from 图书交付包's work records (Issue #416): the Book's 审阅, where a report is generated.
     openReview: () => renderBookReview(bookId, bookTitle),
   });
@@ -3115,14 +3127,14 @@ function renderBookOverview(
     anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
     const anchorValues = element('dl');
     anchorValues.append(
-      element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel),
+      ...(technicalLayerVisible ? [element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel)] : []),
       element('dt', undefined, '上次位置'),
       element('dd', undefined, anchor.entry === null
         ? '尚未记录；打开稿件时从稿件开头开始'
         : anchor.entry.state === 'nearest-anchor'
           ? `${anchor.entry.label} · 原位置已不存在，将从最近的位置打开`
           : anchor.entry.label),
-      element('dt', undefined, '保存状态'), element('dd', undefined, anchor.journalLabel),
+      element('dt', undefined, '保存状态'), element('dd', undefined, technicalWords(anchor.journalLabel, '已保存')),
     );
     anchorSection.append(element('h3', undefined, '稿件'), anchorValues, technicalDetails(
       undefined,
@@ -3225,8 +3237,9 @@ function renderBookOverview(
         analysisHost.replaceChildren(
           element('h3', undefined, '分析'),
           element('p', undefined, projection.resultSetRevision === null
-            ? `基线分析 · ${projection.stateLabel}`
-            : `基线分析 · ${projection.stateLabel} · 读的是 ${technicalWords(projection.resultSetRevision.manuscriptPin.revisionLabel, '修订版')} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`),
+            ? `${technicalWords('基线分析', '稿件分析')} · ${projection.stateLabel}`
+            : technicalWords(`基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`,
+              `稿件分析 · ${projection.stateLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
           open,
         );
       },
@@ -3573,7 +3586,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       goal.removeAttribute('aria-invalid');
       prepare.disabled = true;
       cancel.hidden = false;
-      setStatus('正在为任务保存修订版…', 'busy');
+      setStatus(technicalWords('正在为任务保存修订版…', '正在准备任务…'), 'busy');
       try {
         const initial = await window.ai7.prepareTaskAuthorization({ goal: J03_TASK_GOAL });
         cancel.dataset['serviceJobId'] = initial.jobId;
@@ -3774,7 +3787,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
+  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, '将相关图书归入同一书系。')), host, back);
   replaceScreen('series-list', content);
   setStatus(SERIES_STATUS.loading, 'busy');
   const surface = mountSeriesList({
@@ -4640,8 +4653,8 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
   section.append(
     element('h3', undefined, result.completionLabel),
     element('p', undefined, result.resultKind === 'changed'
-      ? `已形成修订版${technicalWords(` ${result.window.revisionLabel}`)}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
-      : '新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。'),
+      ? `${technicalWords(`已形成修订版 ${result.window.revisionLabel}`, '稿件已更新')}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
+      : technicalWords('新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。', '新文件与当前稿件相同，没有需要更新的内容。')),
   );
   if (record.markOutcomes.unfollowed > 0) {
     const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;

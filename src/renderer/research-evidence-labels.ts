@@ -27,7 +27,7 @@ export const SOURCES_STATUS = {
   unavailable: '无法读取来源与证据。',
   openFailed: '无法打开来源与证据。',
   saving: '正在保存为来源材料…',
-  saved: '已保存为来源材料：资料库里多了一份网页资料，归属与学习准入由你决定。',
+  get saved() { return technicalWords('已保存为来源材料：资料库里多了一份网页资料，归属与学习准入由你决定。', '已保存到资料库，可调整所属图书和使用范围'); },
   saveFailed: '无法保存为来源材料。',
 } as const;
 export const SOURCES_MORE = '更多来源';

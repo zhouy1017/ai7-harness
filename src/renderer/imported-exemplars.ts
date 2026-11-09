@@ -1,4 +1,5 @@
 import type { ExemplarBookProjection, ExemplarProjection, RendererApi, ImportedExemplarPreview } from '../shared/protocol.js';
+import { technicalWords } from './technical-layer.js';
 
 interface Surface {
   api: RendererApi;
@@ -55,7 +56,7 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
     const previewLine = node('p');
     const excerpt = node('pre');
     excerpt.className = 'exemplar-import-excerpt';
-    const note = node('p', '导入后学习准入为「仅本社」，可以更改。范例只参照，不复制。');
+    const note = node('p', technicalWords('导入后学习准入为「仅本社」，可以更改。范例只参照，不复制。', '使用范围：仅本社，导入后可以更改。'));
     const submit = node('button', '导入范例');
     submit.type = 'submit';
     submit.disabled = true;
@@ -121,7 +122,7 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
 export function exemplarEligibility(surface: Surface, exemplar: ExemplarProjection): HTMLElement {
   const root = node('span');
   if (exemplar.imported === undefined) return root;
-  const label = node('label', '学习准入');
+  const label = node('label', technicalWords('学习准入', '使用范围'));
   const select = node('select');
   for (const [choice, caption] of [['house', '仅本社'], ['excluded', '明确排除'], ['deferred', '稍后决定']] as const) {
     const option = node('option', caption);
@@ -130,8 +131,9 @@ export function exemplarEligibility(surface: Surface, exemplar: ExemplarProjecti
   }
   select.value = exemplar.eligibility === 'house-only' ? 'house' : exemplar.eligibility;
   label.append(select);
-  const save = node('button', '记录学习准入');
+  const save = node('button', technicalWords('记录学习准入', '保存使用范围'));
   save.type = 'button';
+  save.dataset['exemplarAction'] = 'record-eligibility';
   save.addEventListener('click', async () => {
     save.disabled = true;
     select.disabled = true;
@@ -139,9 +141,9 @@ export function exemplarEligibility(surface: Surface, exemplar: ExemplarProjecti
       await surface.api.decideImportedExemplar({ revisionId: exemplar.revisionId, revisionDigest: exemplar.revisionDigest,
         expectedDecisions: exemplar.imported!.decisions, choice: select.value as 'house' | 'excluded' | 'deferred' });
       await surface.refresh();
-      surface.status('学习准入已记录');
+      surface.status(technicalWords('学习准入已记录', '已保存'));
     } catch (error) {
-      surface.status(surface.error(error, '无法记录学习准入。请重新打开范例列表后再试。'), 'error');
+      surface.status(surface.error(error, technicalWords('无法记录学习准入。请重新打开范例列表后再试。', '未能保存。请重新打开范例列表后再试。')), 'error');
       save.disabled = false;
       select.disabled = false;
     }

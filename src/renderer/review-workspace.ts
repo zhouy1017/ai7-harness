@@ -71,7 +71,8 @@ import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { oneActionStart } from './one-action-start.js';
 import { mountHouseWordList } from './house-word-list.js';
-import { parseBookTerms } from '../shared/protocol/deterministic.js';
+import { parseBookTerms, validBookTerms } from '../shared/protocol/deterministic.js';
+import type { BookTermEntry } from '../shared/protocol/procedures.js';
 import { openProcedureCapture } from './procedure-capture.js';
 import {
   ProcedureChoiceRequests,
@@ -1143,7 +1144,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     section.dataset['reviewCategories'] = run.categories.map((category) => category.categoryId).join(',');
     section.append(
       el('h5', undefined, REVIEW_PLAN_HEADING),
-      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, `任务输入修订版${technicalWords(` ${run.manuscript.revisionLabel}`)}`])),
+      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, technicalWords(`任务输入修订版 ${run.manuscript.revisionLabel}`, '基于当前稿件')])),
     );
     // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
@@ -1736,7 +1737,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       cancel.disabled = true;
     }
     const row = el('div', 'button-row');
-    const consequence = el('span', 'review-convert-consequence', REVIEW_CONVERT_NOTE);
+    const consequence = el('span', 'review-convert-consequence', technicalWords(REVIEW_CONVERT_NOTE, ''));
     consequence.id = uid('convert-consequence');
     confirm.setAttribute('aria-describedby', consequence.id);
     row.append(consequence, confirm, cancel);
@@ -1810,7 +1811,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       node.append(scope, items);
       if (strip.unknown) {
-        node.append(el('p', 'review-problem', '结果待确认；确认权威记录之前不能再次应用。'));
+        node.append(el('p', 'review-problem', technicalWords('结果待确认；确认权威记录之前不能再次应用。', '正在确认上次修改的结果，请稍后再试。')));
         row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
       } else if (strip.refused || strip.capability) {
         const category = run.categories.find((candidate) => candidate.categoryId === strip.categoryId);
@@ -2572,10 +2573,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const prose = el('input'); prose.type = 'checkbox'; prose.dataset['localCheckProse'] = '';
     prose.checked = state.localOptions.punctuation === 'chinese-prose';
     prose.addEventListener('change', () => { state.localOptions = { ...state.localOptions, punctuation: prose.checked ? 'chinese-prose' : 'off' }; updateSheet(); });
-    proseLabel.append(prose, el('span', undefined, '我确认所选范围为中文正文，启用 P01–P03 标点检查'));
+    proseLabel.append(prose, el('span', undefined, `我确认所选范围为中文正文，启用${technicalWords(' P01–P03 ', '')}标点检查`));
     const numeralLabel = el('label', 'review-field');
     const numerals = el('select'); numerals.dataset['localCheckNumerals'] = '';
-    for (const [value, label] of [['off', '数字检查关闭'], ['national-standard', '按国标有限条款检查 N01、N02'], ['editor-convention', '按编辑约定检查 N01、N02']]) numerals.append(new Option(label, value));
+    // Internal rule codes are the developer layer's (Issue #1431 item 55); the national standard and its scope stay.
+    for (const [value, label] of [['off', '数字检查关闭'], ['national-standard', `按国标有限条款检查${technicalWords(' N01、N02')}`], ['editor-convention', `按编辑约定检查${technicalWords(' N01、N02')}`]]) numerals.append(new Option(label, value));
     numerals.value = state.localOptions.numerals;
     numerals.addEventListener('change', () => {
       const value = numerals.value as typeof state.localOptions.numerals;
@@ -2589,7 +2591,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     publication.value = state.localOptions.publication;
     publication.addEventListener('change', () => { state.localOptions = { ...state.localOptions, publication: publication.value as typeof state.localOptions.publication }; updateSheet(); });
     publicationLabel.append(el('span', undefined, '出版物适用范围'), publication);
-    const confirmationLabel = el('p', 'field-note', '选择数字依据即按 N01、N02 检查；编辑约定不表示国标适用。');
+    const confirmationLabel = el('p', 'field-note', technicalWords('选择数字依据即按 N01、N02 检查；编辑约定不表示国标适用。', '编辑约定不表示国标适用。'));
     confirmationLabel.dataset['localCheckNumeralsNote'] = '';
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
       el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点和无附加条件的异形词可生成机械修正，其余为批注；排除代码、网址和邮件等。'));
@@ -2599,16 +2601,49 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.addEventListener('change', () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, [key]: input.checked } }; updateSheet(); });
       row.append(input, el('span', undefined, label)); localOptions.append(row);
     }
-    const termsLabel = el('label', 'review-field'); const terms = el('textarea'); terms.dataset['localBookTerms'] = '';
-    terms.value = tables.bookTerms.map((entry) => `${entry.kind}\t${entry.preferred}\t${entry.variants.join('|')}`).join('\n');
+    // 本书词表 as a table (Issue #1431 item 56): a type, the adopted form and its variants per row; the entries the checker takes
+    // are built here, and a pasted tab-separated list stays an optional import.
+    const termsField = el('fieldset', 'review-field review-book-terms'); termsField.dataset['localBookTerms'] = '';
+    termsField.append(el('legend', undefined, '本书术语、人名与地名表'), el('p', 'field-note', '列出的异写可机械替换为采用写法，并随本次审阅保存。'));
+    const termRows = el('div', 'review-book-term-rows');
     const termProblem = el('span'); termProblem.setAttribute('role', 'alert'); let invalidTerms = false;
-    terms.addEventListener('input', () => {
-      try { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, bookTerms: parseBookTerms(terms.value) } }; invalidTerms = false; termProblem.textContent = ''; }
-      catch (error) { invalidTerms = true; termProblem.textContent = error instanceof Error ? error.message : '请核对本书词表。'; }
+    const kindWords: ReadonlyArray<readonly [BookTermEntry['kind'], string]> = [['term', '术语'], ['person', '人名'], ['place', '地名']];
+    const readTerms = (): void => {
+      const entries = [...termRows.querySelectorAll<HTMLElement>('[data-book-term-row]')].map((row) => ({
+        kind: row.querySelector<HTMLSelectElement>('select')!.value as BookTermEntry['kind'],
+        preferred: row.querySelector<HTMLInputElement>('[data-book-term-field="preferred"]')!.value.trim(),
+        variants: row.querySelector<HTMLInputElement>('[data-book-term-field="variants"]')!.value.split(/[、，,|]/u).map((variant) => variant.trim()).filter((variant) => variant !== ''),
+      })).filter((entry) => entry.preferred !== '' || entry.variants.length > 0);
+      invalidTerms = !validBookTerms(entries);
+      termProblem.textContent = invalidTerms ? '请核对本书词表：每行需有采用写法和至少一种异写，写法不重复，每条最多 16 种异写，最多 500 条。' : '';
+      if (!invalidTerms) state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, bookTerms: entries } };
       updateSheet();
+    };
+    const addTermRow = (entry: BookTermEntry | null): void => {
+      const row = el('div', 'review-book-term-row'); row.dataset['bookTermRow'] = '';
+      const kind = el('select'); kind.setAttribute('aria-label', '类型');
+      for (const [value, label] of kindWords) kind.append(new Option(label, value));
+      kind.value = entry?.kind ?? 'term';
+      const preferred = el('input'); preferred.dataset['bookTermField'] = 'preferred'; preferred.setAttribute('aria-label', '采用写法'); preferred.placeholder = '采用写法'; preferred.value = entry?.preferred ?? '';
+      const variants = el('input'); variants.dataset['bookTermField'] = 'variants'; variants.setAttribute('aria-label', '异写'); variants.placeholder = '异写，多个用顿号分隔'; variants.value = entry?.variants.join('、') ?? '';
+      const remove = el('button', 'quiet', '删除'); remove.type = 'button';
+      remove.addEventListener('click', () => { row.remove(); readTerms(); });
+      kind.addEventListener('change', readTerms); preferred.addEventListener('input', readTerms); variants.addEventListener('input', readTerms);
+      row.append(kind, preferred, variants, remove); termRows.append(row);
+    };
+    for (const entry of tables.bookTerms) addTermRow(entry);
+    const addTerm = el('button', 'secondary', '添加一行'); addTerm.type = 'button';
+    addTerm.addEventListener('click', () => { addTermRow(null); termRows.lastElementChild?.querySelector<HTMLInputElement>('[data-book-term-field="preferred"]')?.focus(); });
+    const paste = el('details'); paste.append(el('summary', undefined, '从文本导入'));
+    const pasted = el('textarea'); pasted.setAttribute('aria-label', '粘贴的词表'); pasted.placeholder = '每行：类型、采用写法、异写，用制表符分隔';
+    const importTerms = el('button', 'secondary', '导入'); importTerms.type = 'button';
+    importTerms.addEventListener('click', () => {
+      try { for (const entry of parseBookTerms(pasted.value)) addTermRow(entry); pasted.value = ''; paste.open = false; readTerms(); }
+      catch (error) { termProblem.textContent = error instanceof Error ? error.message : '请核对粘贴的词表。'; }
     });
-    termsLabel.append(el('span', undefined, '本书术语、人名与地名表：每行用制表符分隔类型、采用写法和异写，多种异写用 | 分隔；类型为 term/person/place，明确列出的异写可机械替换并随本次审阅保存。'), terms, termProblem);
-    localOptions.append(termsLabel);
+    paste.append(pasted, importTerms);
+    termsField.append(termRows, addTerm, paste, termProblem);
+    localOptions.append(termsField);
     let refreshHouse: (() => Promise<void>) | null = null;
     if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
       const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';

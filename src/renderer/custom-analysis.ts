@@ -1,5 +1,5 @@
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
-import { technicalWords, identityWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { oneActionStart, startPreparedTask } from './one-action-start.js';
 import type {
   BaselineAnalysisUpdateRequest,
@@ -117,7 +117,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       const plan = api.inspectTaskPlan === undefined ? null : await api.inspectTaskPlan({ kind: 'baseline-analysis', ref: prepared.taskIntentId });
       if (plan === null || oneActionStart(plan).kind === 'preview') {
         options.openPlan(prepared.taskIntentId);
-        options.setStatus(CUSTOM_TAB_PREPARED, 'success');
+        options.setStatus(technicalWords(CUSTOM_TAB_PREPARED, '自定义分析已准备好。'), 'success');
       } else {
         await startPreparedTask(api, 'baseline-analysis', prepared.taskIntentId);
         options.setStatus(CUSTOM_TAB_STARTED, 'success');
@@ -170,7 +170,9 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
         })();
       const answer = el('p', 'custom-answer', row.answer);
       answer.append(' · ', el('span', 'custom-confidence', row.confidenceNote));
-      item.append(el('span', 'custom-row-unit', `第 ${row.unitOrdinal} 单元`), answer, anchor);
+      // The execution unit is the developer layer's (Issue #1431 item 77); the quotation link is the row's 原文位置.
+      if (technicalLayerVisible) item.append(el('span', 'custom-row-unit', `第 ${row.unitOrdinal} 单元`));
+      item.append(answer, anchor);
       rows.append(item);
     }
     section.append(rows);

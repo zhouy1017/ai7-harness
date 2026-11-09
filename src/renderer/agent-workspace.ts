@@ -96,6 +96,8 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   let page: ManuscriptWindowProjection | null = null;
   let selection: DialogueSelectionInput | null = null;
   let promoted: AgentWorkspacePromotionProjection | null = null;
+  // The round this surface asked for, made 修改建议 by itself once ready (Issue #1431 item 34).
+  let autoPromote: string | null = null;
   const remembered = readingPlaces.get(bookId);
   let entryBlockId: string | null = null;
 
@@ -272,7 +274,8 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
         item.dataset['anchorTo'] = String(candidate.anchor.toGrapheme);
         const terms = el('dl');
         const original = el('dd', 'agent-workspace-anchor', candidate.anchor.text);
-        original.title = words.position(candidate.anchor.fromGrapheme, candidate.anchor.toGrapheme);
+        const position = words.position(candidate.anchor.fromGrapheme, candidate.anchor.toGrapheme);
+        if (position !== '') original.title = position;
         terms.append(
           el('dt', undefined, words.original), original,
           el('dt', undefined, words.proposed), el('dd', 'agent-workspace-proposed', candidate.proposedText),
@@ -327,6 +330,13 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     paintControls();
     stopPolling();
     if (projection.proposal?.state === 'proposing') poll = window.setTimeout(() => void refresh(), PROPOSING_POLL_MS);
+    // One action (Issue #1431 item 34): a round asked for here becomes 修改建议 on the manuscript as soon as it is ready, with no
+    // separate 提交 step; decisions stay on the Mark Cards. A round left from before keeps its 提交 and 放弃 buttons.
+    const held = projection.proposal;
+    if (held !== null && held.proposalSetId === autoPromote && held.state !== 'proposing' && !busy) {
+      autoPromote = null;
+      if (held.state === 'ready' && held.candidates.length > 0) void runPromote(held.proposalSetId);
+    }
   };
 
   const refresh = async (): Promise<void> => {
@@ -358,6 +368,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     if (selection === null) return;
     promoted = null;
     const projection = await api.proposeAgentWorkspaceChangeSet({ selection, instruction: instruction.value });
+    autoPromote = projection.proposal?.proposalSetId ?? null;
     if (!destroyed) paint(projection);
   }, words.proposeFailed);
 

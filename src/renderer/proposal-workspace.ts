@@ -1,5 +1,5 @@
 import { filterChoices } from './components/controls.js';
-import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { identityWords, technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { MAX_BATCH_APPLY_SUGGESTIONS } from '../shared/protocol.js';
 import type { RendererApi, ProposalWorkspaceInput, ProposalWorkspaceProjection, ProposalNavigatorItem, ProposalReviewReturnPosition, ProposalDraftDisposition, ProposalDraftBatchProjection, EditorialMarkCardProjection, ManuscriptWindowProjection, ApplyReceiptProjection, BatchProposalDecisionDraftInput } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
@@ -10,7 +10,8 @@ import { DECISION_REASON_CHIPS } from './editorial-mark-labels.js';
 import { proposalIdentityRows } from './technical-layer-labels.js';
 
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
-const exclusionLabels = { conflict: '未解决冲突', 'unclassified-stale': '旧基准尚未分类', unloaded: '未加载', 'other-version': '其他版本', 'atomic-group': '原子组需单独处理', applied: '已经应用' } as const;
+const exclusionLabels = { conflict: '未解决冲突', get 'unclassified-stale'() { return technicalWords('旧基准尚未分类', '原文已变化，尚未核对'); }, unloaded: '未加载', 'other-version': '其他版本',
+  get 'atomic-group'() { return technicalWords('原子组需单独处理', '需一起处理的修改请单独处理'); }, applied: '已经应用' };
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = identityWords(text, className); if (className) node.className = className; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
 }
@@ -73,8 +74,8 @@ export function mountProposalWorkspace(options: {
       checkbox.setAttribute('aria-label', `选择第 ${item.position} 段修改`);
       checkbox.addEventListener('click', (event) => event.stopPropagation());
       checkbox.addEventListener('change', () => { if (checkbox.checked) selected.add(item.markId); else selected.delete(item.markId); });
-      row.append(checkbox, el('span', `${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme} · ${item.changeType === 'replace' ? '替换' : item.changeType === 'insert' ? '插入' : '删除'}`),
-        el('small', `${item.draft === null ? item.disposition === null ? '未审阅' : '已记录' : dispositions[item.draft]}${item.stale ? ' · 旧基准' : ''}${item.conflict ? ' · 冲突' : ''}${item.atomicGroupId ? ' · 原子组' : ''}`)); return row;
+      row.append(checkbox, el('span', `${item.chapter} · 第 ${item.position} 段${technicalWords(` ${item.fromGrapheme}–${item.toGrapheme}`)} · ${item.changeType === 'replace' ? '替换' : item.changeType === 'insert' ? '插入' : '删除'}`),
+        el('small', `${item.draft === null ? item.disposition === null ? '未审阅' : '已记录' : dispositions[item.draft]}${item.stale ? technicalWords(' · 旧基准', ' · 原文已变化') : ''}${item.conflict ? ' · 冲突' : ''}${item.atomicGroupId ? technicalWords(' · 原子组', ' · 需一起处理') : ''}`)); return row;
     }, onActivate: (item) => { active = item; position = { ...position, blockId: item.blockId, activeMarkId: item.markId }; rail.setPosition(workspace === null ? 0 : workspace.items.indexOf(item) / Math.max(1, workspace.items.length - 1)); void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error')); void loadComparison(item).catch(() => { message.textContent = '无法加载此修改的精确对比。'; }); },
   });
   async function act(run: () => Promise<void>): Promise<void> {
@@ -114,7 +115,7 @@ export function mountProposalWorkspace(options: {
     message.textContent = workspace?.truncated ? '提案超过本次可审阅的精确范围；本次不能记录或批量执行，请按结果分开审阅。' : `共 ${workspace?.totalItems ?? 0} 项修改；浏览与筛选不会记录决定。`;
     const chapters = [...new Map((workspace?.items ?? []).filter((item) => item.chapterBlockId !== null).map((item) => [item.chapterBlockId!, item.chapter])).entries()];
     const advance = el('input'); advance.type = 'checkbox'; advance.addEventListener('change', () => { autoAdvance = advance.checked; }); const advanceLabel = el('label', '选择后前往下一未决定项'); advanceLabel.append(advance);
-    toolbar.replaceChildren(selectFilter('审阅状态', [['all', '全部'], ['unreviewed', '未审阅'], ['reviewed', '已审阅'], ['stale', '旧基准'], ['conflicting', '冲突']] as const, position.review, (value) => { position.review = value; }),
+    toolbar.replaceChildren(selectFilter('审阅状态', [['all', '全部'], ['unreviewed', '未审阅'], ['reviewed', '已审阅'], ['stale', technicalWords('旧基准', '原文已变化')], ['conflicting', '冲突']] as const, position.review, (value) => { position.review = value; }),
       selectFilter('章节', [['', '全部章节'], ...chapters], position.chapterBlockId ?? '', (value) => { position.chapterBlockId = value || null; }),
       selectFilter('修改类型', [['', '全部类型'], ['replace', '替换'], ['delete', '删除'], ['insert', '插入']] as const, position.changeType ?? '', (value) => { position.changeType = value || null; }), advanceLabel);
   }
@@ -130,14 +131,15 @@ export function mountProposalWorkspace(options: {
     const current = window.blocks.find((block) => block.blockId === item.blockId);
     const words = current ? graphemesOf(current.text) : [];
     const context = `${words.slice(Math.max(0, item.fromGrapheme - 40), item.fromGrapheme).join('')}〔当前范围〕${words.slice(item.toGrapheme, item.toGrapheme + 40).join('')}`;
-    const before = el('div'); before.append(el('h5', '提案基准'), el('del', suggestion.currentText));
-    const now = el('div'); now.append(el('h5', '当前权威稿件'), el('p', words.slice(item.fromGrapheme, item.toGrapheme).join('')));
+    const before = el('div'); before.append(el('h5', technicalWords('提案基准', '原文')), el('del', suggestion.currentText));
+    const now = el('div'); now.append(el('h5', technicalWords('当前权威稿件', '当前稿件')), el('p', words.slice(item.fromGrapheme, item.toGrapheme).join('')));
     const proposed = el('div'); proposed.append(el('h5', '提议内容（未应用）'), el('ins', suggestion.proposedText || '（删去）'));
     content.append(before, now, proposed);
     const yours = region('你的处理'); const group = item.atomicGroupId === null ? [item] : workspace!.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
     if (item.atomicGroupId !== null) {
-      const members = el('ul'); for (const member of group) members.append(el('li', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
-      yours.append(el('p', `原子组依赖与部分采纳后果：${item.atomicReason ?? '依赖说明缺失，不能处理'}`), members, el('p', '以下一个处理适用于全部成员；拆分需要新的提案版本。'));
+      const members = el('ul'); for (const member of group) members.append(el('li', `${member.chapter} · 第 ${member.position} 段${technicalWords(` ${member.fromGrapheme}–${member.toGrapheme}`)}`));
+      yours.append(el('p', technicalWords(`原子组依赖与部分采纳后果：${item.atomicReason ?? '依赖说明缺失，不能处理'}`, `这些修改需要一起处理${item.atomicReason === null ? '' : `：${item.atomicReason}`}`)), members,
+        el('p', technicalWords('以下一个处理适用于全部成员；拆分需要新的提案版本。', '以下处理适用于这一组全部修改。')));
     }
     if (item.appliedRevisionId === null) for (const disposition of ['accepted', 'rejected', 'deferred'] as const) {
       const control = button(dispositions[disposition], `draft-${disposition}`, () => void act(async () => {
@@ -164,7 +166,7 @@ export function mountProposalWorkspace(options: {
       const save = button('保存你的原因', 'reason-own', () => saveReason(field.value.trim(), 'free-text')); save.disabled = true;
       field.addEventListener('input', () => { save.disabled = field.value.trim().length === 0; }); reasons.append(label, save); yours.append(reasons);
     }
-    comparison.replaceChildren(...(item.stale ? [el('p', '旧基准，按精确范围核对')] : []), technical(proposalIdentityRows({ 基准修订: item.baseRevisionId, 当前修订: window.revisionId, 应用后的稿件修订: item.appliedRevisionId })),
+    comparison.replaceChildren(...(item.stale ? [el('p', technicalWords('旧基准，按精确范围核对', '原文已变化，请核对'))] : []), technical(proposalIdentityRows({ 基准修订: item.baseRevisionId, 当前修订: window.revisionId, 应用后的稿件修订: item.appliedRevisionId })),
       button(position.comparison === 'inline' ? '并排对比' : '行内对比', 'comparison', () => { position.comparison = position.comparison === 'inline' ? 'side-by-side' : 'inline'; void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error')); paintComparison(item, card, window); }),
       region('修改内容', content, (() => { const detail = el('details'); detail.open = position.expanded; detail.append(el('summary', '周围语境'), el('p', context)); detail.addEventListener('toggle', () => { position.expanded = detail.open; void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error')); }); return detail; })()), region('修改理由', el('p', suggestion.rationale || '没有填写修改理由。')),
       region('依据与核查', el('p', '支持资料与核查状态见原修改建议卡。'), button('在稿件中查看', 'source-card', () => void options.returnToManuscript(item.blockId, item.markId))), yours);
@@ -182,7 +184,9 @@ export function mountProposalWorkspace(options: {
       const next = await api.inspectApplyReceipt({ ...binding, clientEffectId: receipt.clientEffectId, recovery: 'recheck' });
       if (!destroyed) node.replaceWith(receiptCard(next));
     })));
-    const details = el('details'); details.append(el('summary', '查看完整凭据'), el('pre', JSON.stringify(receipt, null, 2))); node.append(details); return node;
+    // The raw receipt is diagnostics only (Issue #1431 item 23): the whole disclosure, never an empty shell, in ordinary mode.
+    if (technicalLayerVisible) { const details = el('details'); details.append(el('summary', '查看完整凭据'), el('pre', JSON.stringify(receipt, null, 2))); node.append(technicalDisclosure(details)); }
+    return node;
   }
   function renderControls(): void {
     controls.replaceChildren(); if (!workspace) return;

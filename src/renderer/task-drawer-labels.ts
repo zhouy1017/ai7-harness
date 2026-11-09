@@ -123,14 +123,14 @@ export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): Reado
     { key: 'book', text: chips.book },
     { key: 'position', text: chips.position },
     ...(chips.selectedGraphemes === null ? [] : [{ key: 'selected', text: `已选 ${groupedCount(chips.selectedGraphemes)} 字` }]),
-    { key: 'revision', text: `任务输入修订版${technicalWords(` ${chips.taskInputRevision}`)}` },
+    { key: 'revision', text: technicalWords(`任务输入修订版 ${chips.taskInputRevision}`, '基于当前稿件') },
     { key: 'procedure', text: `工序「${chips.procedure}」` },
   ];
 }
 
 /** TASK-039/040's one line: preparing the Task saved a revision, so later editing leaves the Task as it is. */
 export function taskPlanSavedLine(revisionLabel: string): string {
-  return technicalWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`, '已为任务保存当前稿件，之后的编辑不影响这项任务。');
+  return technicalWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`, '基于当前稿件');
 }
 
 /** A count with its thousands grouped, the same text on every host. */
@@ -336,6 +336,9 @@ export const TASK_BAR_REVISE = '返回修改';
 export const TASK_BAR_REVISE_REASON = '这类任务的计划不能在这里修改';
 /** PLAN-011: with edits pending, 更新计划 takes the start's place; 撤销修改 lets them go. */
 export const TASK_BAR_UPDATE_PLAN = '更新计划';
+/** 保存并开始 (Issue #1431 item 40): the edited plan becomes its next version and starts in one click; 仅保存 stays a choice. */
+export const TASK_BAR_UPDATE_AND_START = '保存并开始';
+export const TASK_BAR_UPDATE_ONLY = '仅保存';
 export const TASK_BAR_DISCARD_EDITS = '撤销修改';
 /** 保存草稿 would leave the edits unsaved while saying the plan is saved. */
 export const TASK_BAR_SAVE_DRAFT_EDITING_REASON = '先更新计划或撤销修改';
@@ -375,6 +378,7 @@ export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: bool
 }
 /** AUTH-006: a plan whose key content changed offers these two, and no start. */
 export const TASK_BAR_RECONFIRM = '重新确认计划';
+export const TASK_BAR_RECONFIRM_AND_START = '按新计划开始';
 /**
  * 需要重新确认计划 after Connectivity Wait (Issue #536; OFF-008): the way on for a Run whose plan moved before it could
  * start — a new plan for the same goal and range, which starts only once the editor starts it.
@@ -539,7 +543,7 @@ export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rang
  */
 export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; rereadFailed?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
   const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage]
-    : `第 ${entry.unitOrdinal} 个阅读范围${entry.earlierText === true ? '（当时的文字）' : ''}`;
+    : `${technicalWords(`第 ${entry.unitOrdinal} 个阅读范围`, `正文第 ${entry.unitOrdinal} 部分`)}${entry.earlierText === true ? '（当时的文字）' : ''}`;
   return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回${entry.rereadFailed ? ' · 上次重读未成功' : ''}`;
 }
 
@@ -549,7 +553,12 @@ export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boo
  */
 export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number, pendingAnswerUnits: ReadonlyArray<number> = [],
   pendingTotal = pendingAnswerUnits.length): string {
-  if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
+  if (unitsSettled === null) return technicalWords('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始', '已保存的进度无法核对，不能继续；可以取消后重新开始');
+  // Ordinary mode says what 续行 does, never the execution chunks it counts (Issue #1431 item 42).
+  if (!technicalLayerVisible) {
+    if (pendingTotal > 0 && unitsSettled < unitsTotal) return '已完成的部分都已保存；继续时先按你的回答处理，再继续未完成的部分';
+    return unitsSettled >= unitsTotal ? '已完成的部分都已保存；继续时只处理尚未完成的步骤' : '继续未完成的部分，已完成的部分不会重做';
+  }
   if (pendingTotal > 0 && unitsSettled < unitsTotal) {
     // A list read only in part is counted, never named as though it were all of them (Issue #996).
     const which = pendingTotal > pendingAnswerUnits.length ? ` ${pendingTotal} 个阅读范围` : `第 ${pendingAnswerUnits.join('、')} 个`;
@@ -650,8 +659,10 @@ export const TASK_BAR_RUN_LINKS: Readonly<Record<TaskPlanKind, string>> = {
 /** The bar's actions, each by the `data-task-drawer-control` it carries. */
 export type TaskBarActionName =
   | 'start'
+  | 'update-and-start'
   | 'start-when-online'
   | 'reconfirm-plan'
+  | 'reconfirm-and-start'
   | 'view-plan-revision'
   | 'connect'
   | 'revise'
@@ -724,6 +735,8 @@ export function taskBarQuestionsNote(count: number, more = false): string {
   return `${more ? '至少' : ''}有 ${count} 个问题等你回答`;
 }
 export function taskBarAwaitingAnswerNote(settled: number, total: number, count: number, more = false): string {
+  // Ordinary mode names the wait, not the ranges read (Issue #1431 item 47).
+  if (!technicalLayerVisible) return count === 0 ? '已回答，等待继续' : `有 ${more ? '至少 ' : ''}${count} 个问题等你回答，回答后继续`;
   return count === 0
     ? `已读完 ${settled} / ${total} 个阅读范围；你已回答，另一项任务结束后就接着做`
     : `已读完 ${settled} / ${total} 个阅读范围；${more ? '至少 ' : ''}${count} 个问题等你回答，回答后接着做`;
@@ -764,10 +777,13 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         ...(drifted && plan.drift !== null && plan.drift.entries.length > 0
           ? [{ name: 'view-plan-revision', label: TASK_PLAN_DRIFT_VIEW, tone: 'secondary', disabledReason: null } as const]
           : []),
+        ...(!drifted && readiness === 'ready' && plan.edit.editable
+          ? [{ name: 'update-and-start', label: TASK_BAR_UPDATE_AND_START, tone: 'primary', disabledReason: null } as const]
+          : []),
         {
           name: 'update-plan',
-          label: TASK_BAR_UPDATE_PLAN,
-          tone: drifted ? 'secondary' : 'primary',
+          label: !drifted && readiness === 'ready' && plan.edit.editable ? TASK_BAR_UPDATE_ONLY : TASK_BAR_UPDATE_PLAN,
+          tone: drifted || (readiness === 'ready' && plan.edit.editable) ? 'secondary' : 'primary',
           disabledReason: plan.edit.editable ? null : plan.edit.reason ?? TASK_BAR_REVISE_REASON,
         },
         { name: 'discard-edits', label: TASK_BAR_DISCARD_EDITS, tone: 'secondary', disabledReason: null },
@@ -1020,7 +1036,12 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       note: plan.drift?.resolution ?? TASK_PLAN_DRIFT_HEADING,
       status: null,
       actions: [
-        ...(plan.start.reconfirm === null ? [] : [{ name: 'reconfirm-plan', label: TASK_BAR_RECONFIRM, tone: 'primary', disabledReason: null } as const]),
+        // 按新计划开始 (Issue #1431 item 41): the changed plan is reconfirmed and started in one click once its change is shown;
+        // 重新确认计划 alone stays a choice.
+        ...(plan.start.reconfirm === null ? [] : [
+          { name: 'reconfirm-and-start', label: TASK_BAR_RECONFIRM_AND_START, tone: 'primary', disabledReason: null } as const,
+          { name: 'reconfirm-plan', label: TASK_BAR_RECONFIRM, tone: 'secondary', disabledReason: null } as const,
+        ]),
         ...(plan.drift === null || plan.drift.entries.length === 0 ? [] : [{ name: 'view-plan-revision', label: TASK_PLAN_DRIFT_VIEW, tone: 'secondary', disabledReason: null } as const]),
         revise,
         SAVE_DRAFT,
@@ -1086,6 +1107,21 @@ export function taskPlanActivityRows(
   update: TaskPlanRunControlProjection['update'] = null,
 ): ReadonlyArray<readonly [string, string]> {
   const stepMs = activity.currentUnitStartedAt === null ? null : nowMs - Date.parse(activity.currentUnitStartedAt);
+  const elapsed = [
+    ...(stepMs === null ? [] : [`本步 ${elapsedLabel(stepMs)}`]),
+    ...(executingSince === null ? [] : [`运行 ${elapsedLabel(nowMs - Date.parse(executingSince))}`]),
+  ].join(' · ') || '—';
+  // Ordinary mode reads the overall progress and what is under way; ranges, attempts, model rounds and request places are the
+  // developer layer's execution metrics (Issue #1431 item 46).
+  if (!technicalLayerVisible) {
+    const share = activity.unitsTotal === 0 ? 0 : Math.floor((activity.unitsSettled / activity.unitsTotal) * 100);
+    return [
+      ['阶段', RUN_LIVENESS_STAGE_LABELS[activity.stage]],
+      ['进度', activity.stage === 'units' ? `已完成约 ${share}%` : '正在整理结果'],
+      ['用时', elapsed],
+      ['上次更新', localInstantLabel(activity.lastTransitionAt)],
+    ];
+  }
   // An update Run names its range among the whole manuscript, and counts only the ranges it reads again, as ②A does.
   const current = activity.stage !== 'units'
     ? RUN_LIVENESS_STAGE_LABELS[activity.stage]
@@ -1097,10 +1133,7 @@ export function taskPlanActivityRows(
   return [
     ['阶段', RUN_LIVENESS_STAGE_LABELS[activity.stage]],
     ['当前', current],
-    ['用时', [
-      ...(stepMs === null ? [] : [`本步 ${elapsedLabel(stepMs)}`]),
-      ...(executingSince === null ? [] : [`运行 ${elapsedLabel(nowMs - Date.parse(executingSince))}`]),
-    ].join(' · ') || '—'],
+    ['用时', elapsed],
     ['尝试', activity.attemptState === null ? '—' : attemptStateLabel(activity.attemptState)],
     ['上次更新', localInstantLabel(activity.lastTransitionAt)],
     ['进展', `已读完 ${activity.unitsSettled} / ${activity.unitsTotal} 个阅读范围${update === null ? '' : '（只算要重新分析的）'} · 已完成模型回合 ${activity.completedAttempts} 次`],

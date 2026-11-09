@@ -1,5 +1,5 @@
 import { windowStep } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   LIBRARY_MATERIAL_KINDS,
   MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS,
@@ -454,7 +454,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const section = el('section', 'material-index');
     section.dataset['indexState'] = index.state;
     const heading = el('div', 'material-index-heading');
-    heading.append(el('h4', undefined, MATERIAL_INDEX_TERM), el('span', 'state-term status-pill material-index-state', materialIndexStateLine(index)));
+    heading.append(el('h4', undefined, technicalWords(MATERIAL_INDEX_TERM, '阅读状态')), el('span', 'state-term status-pill material-index-state', materialIndexStateLine(index)));
     const layers = el('dl', 'material-index-layers');
     for (const layer of MATERIAL_INDEX_LAYERS) {
       const line = el('dd', 'material-index-layer', materialIndexLayerLine(index, layer));
@@ -462,7 +462,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       line.dataset['layerState'] = index.layers[layer];
       layers.append(el('dt', undefined, MATERIAL_INDEX_LAYER_TERMS[layer]), line);
     }
-    section.append(heading, layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
+    // The layered index and its boundary are the developer layer's (Issue #1431 item 86); reading, translating and searching stay.
+    section.append(heading);
+    if (technicalLayerVisible) section.append(layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
     const layerActions = indexActions(material);
     if (layerActions !== null) section.append(layerActions);
     if (index.vectors?.state === 'complete') section.append(vectorSearch(material));

@@ -487,7 +487,7 @@ describe('the authorization bar (S74a)', () => {
   it('removes 开始任务 from a changed plan, offering 重新确认计划 when it can be and 查看计划修订 when there is a diff (AUTH-006)', () => {
     const drift = { reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'], entries: [{ field: 'selectedRange', label: '处理范围', prior: '第 1–2 段 · 10 字', proposed: '第 3–4 段 · 20 字', materiality: 'material' as const }], resolution: '重新确认计划后，新的计划版本才能开始。' };
     const reconfirmable = taskBarView(barOf({ readiness: 'changed', planEnvelopeDigest: null, reconfirm: { goal: '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。', update: { mode: 'reanalyze-range', selectedRange: { startPosition: 3, endPosition: 4 } } } }, { drift }));
-    expect(names(reconfirmable)).toEqual(['reconfirm-plan', 'view-plan-revision', 'revise', 'save-draft']);
+    expect(names(reconfirmable)).toEqual(['reconfirm-and-start', 'reconfirm-plan', 'view-plan-revision', 'revise', 'save-draft']);
     expect(action(reconfirmable, 'reconfirm-plan')?.label).toBe('重新确认计划');
     expect(action(reconfirmable, 'view-plan-revision')?.label).toBe(TASK_PLAN_DRIFT_VIEW);
     expect(reconfirmable.note).toBe('重新确认计划后，新的计划版本才能开始。');
@@ -825,17 +825,19 @@ describe('the editable plan (S73)', () => {
     expect(TASK_BAR_SAVE_DRAFT_EDITING_REASON).toBe('先更新计划或撤销修改');
   });
 
-  it('puts 更新计划 where 开始任务 was while edits are pending, beside 撤销修改, and holds the draft back', () => {
+  it('puts 保存并开始 where 开始任务 was while edits are pending, beside 仅保存 and 撤销修改, and holds the draft back', () => {
     const view = taskBarView(plan(), 2);
     expect(view).toMatchObject({ readiness: 'ready', statement: null, note: '你改了 2 处', status: null });
     expect(view.actions).toEqual([
-      { name: 'update-plan', label: '更新计划', tone: 'primary', disabledReason: null },
+      { name: 'update-and-start', label: '保存并开始', tone: 'primary', disabledReason: null },
+      { name: 'update-plan', label: '仅保存', tone: 'secondary', disabledReason: null },
       { name: 'discard-edits', label: '撤销修改', tone: 'secondary', disabledReason: null },
       { name: 'save-draft', label: '保存草稿', tone: 'secondary', disabledReason: '先更新计划或撤销修改' },
     ]);
-    // The edit sends nothing, so it is the editor's to make offline and without a connection as well.
-    expect(rows(taskBarView(barOf({ readiness: 'offline' }), 1))).toEqual(rows(taskBarView(plan(), 1)));
-    expect(rows(taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null }), 1))).toEqual(rows(taskBarView(plan(), 1)));
+    // The edit sends nothing, so it is the editor's to make offline and without a connection as well; only the start waits.
+    const editOnly = [['update-plan', 'primary', null], ['discard-edits', 'secondary', null], ['save-draft', 'secondary', '先更新计划或撤销修改']];
+    expect(rows(taskBarView(barOf({ readiness: 'offline' }), 1))).toEqual(editOnly);
+    expect(rows(taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null }), 1))).toEqual(editOnly);
     // Nothing pending: the start's bar again.
     expect(taskBarView(plan(), 0).actions.map((entry) => entry.name)).toEqual(['start', 'revise', 'save-draft']);
     // Once the Task has started, no edit is pending and the Run's state is the bar.

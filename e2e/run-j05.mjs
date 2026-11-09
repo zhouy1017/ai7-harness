@@ -973,7 +973,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-proposal-active]')?.dataset.proposalActive === window.__j05WorkspaceMarkId`, 'proposal-synthetic-active');
     await click(renderer, '并排对比', 'proposal-side-by-side');
     await waitFor(renderer, `document.querySelector('[data-comparison-mode="side-by-side"]')`, 'proposal-comparison-mode');
-    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); window.__j05ProposalBinding = null; return root.querySelectorAll('[data-windowed-index]').length <= 14 && root.textContent.includes('提案基准') && root.textContent.includes('当前权威稿件') && root.textContent.includes('提议内容（未应用）'); })()`, 'proposal-bounded-labeled-comparison');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); window.__j05ProposalBinding = null; return root.querySelectorAll('[data-windowed-index]').length <= 14 && root.textContent.includes('原文') && root.textContent.includes('当前稿件') && !root.textContent.includes('当前权威稿件') && root.textContent.includes('提议内容（未应用）'); })()`, 'proposal-bounded-labeled-comparison');
 
     at('proposal-decision-draft-batch');
     await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="proposal-workspace"]'); document.getElementById('windowed-' + window.__j05WorkspaceMarkId).querySelector('input').click(); root.querySelector('[data-proposal-action="batch-selection-deferred"]').click(); return true; })()`, 'proposal-preview-batch');

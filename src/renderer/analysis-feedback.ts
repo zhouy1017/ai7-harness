@@ -1,4 +1,4 @@
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalWords } from './technical-layer.js';
 import type { AnalysisFeedbackItemProjection, AnalysisFeedbackProjection, RendererApi } from '../shared/protocol.js';
 import { ANALYSIS_FEEDBACK_JUDGMENTS, ANALYSIS_FEEDBACK_OTHER, type AnalysisFeedbackJudgment } from '../shared/analysis-feedback.js';
 import {
@@ -325,7 +325,7 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
       el('h5', undefined, ANALYSIS_FEEDBACK_HEADING),
       el('p', 'analysis-feedback-total', total),
       ...(dimensions.length === 0 ? [] : [lines]),
-      el('p', 'field-note analysis-feedback-note', ANALYSIS_FEEDBACK_METRIC_NOTE),
+      el('p', 'field-note analysis-feedback-note', technicalWords(ANALYSIS_FEEDBACK_METRIC_NOTE, '仅统计已反馈的条目')),
       technicalDetails(
         'analysis-facts',
         el('dt', undefined, '分析质量指标'),

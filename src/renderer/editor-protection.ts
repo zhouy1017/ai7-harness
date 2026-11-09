@@ -1,7 +1,6 @@
 import { MAX_BLOCK_GRAPHEMES } from '../shared/protocol.js';
 import {
   PROTECTION_CLOSE_OPTIONS,
-  PROTECTION_COPIED,
   PROTECTION_COPY_ACTION,
   PROTECTION_COPY_FAILED,
   PROTECTION_HEADLINE,
@@ -15,6 +14,7 @@ import {
   atRiskLine,
   blockedActionLine,
   lastDurableLine,
+  protectionCopiedLine,
   readOnlyLine,
   retryLine,
   type ProtectionCause,
@@ -276,7 +276,7 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   copyButton.addEventListener('click', () => {
     const text = options.affectedContent();
     void options.writeClipboard(text).then(
-      () => { options.setStatus(PROTECTION_COPIED); },
+      () => { options.setStatus(protectionCopiedLine()); },
       () => { options.setStatus(PROTECTION_COPY_FAILED, 'error'); },
     );
   });

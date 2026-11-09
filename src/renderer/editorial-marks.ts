@@ -3,7 +3,7 @@ import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../sha
 import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { technicalDisclosure, technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -1660,10 +1660,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           : applied !== null
           ? '这处修改已经写入稿件；正文里是应用后的文字。'
           : exact && decision?.disposition !== 'rejected'
-            ? inserts
+            ? technicalWords(inserts
               ? '正文里在插入处显示要插入的文字（预览 · 未应用）；稿件本身仍是原文。'
-              : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
-            : '稿件本身仍是原文。'),
+              : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。', '待采纳的修改')
+            : technicalWords('稿件本身仍是原文。', '尚未应用')),
         region('basis', '依据与核查', basisList(card), ...factualLineage(card), ...findingEvidence(card)),
       );
       const yours = actions;
@@ -1681,8 +1681,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
           if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) workspaceRow.append(cardAction('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
           if (item.atomicGroupId !== null) {
-            workspaceRow.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
-            for (const member of workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId)) workspaceRow.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
+            workspaceRow.append(el('p', 'muted', technicalWords(`原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`,
+              `这些修改需要一起处理${item.atomicReason === null ? '' : `：${item.atomicReason}`}`)));
+            for (const member of workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId)) workspaceRow.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段${technicalWords(` ${member.fromGrapheme}–${member.toGrapheme}`)}`));
           }
         }).catch(() => {});
       }
@@ -1694,7 +1695,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           () => void act('revert-inline-revision')) : disabledAction('reverse-revision', '这处文字又改过', '请先查看当前稿件。'));
         yours.append(disposition);
       } else if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
-        yours.append(el('p', 'muted', '应用结果确认前不能再次应用。'));
+        yours.append(el('p', 'muted', technicalWords('应用结果确认前不能再次应用。', '正在确认上次修改的结果，请稍后再试。')));
         // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
         if (pendingReceipt.state === 'unresolved') yours.append(cardAction('receipt-recheck', '重新核对应用结果', 'secondary', () => void api.inspectApplyReceipt({
           manuscriptId: binding().manuscriptId, branchId: binding().branchId, clientEffectId: pendingReceipt.clientEffectId, recovery: 'recheck',

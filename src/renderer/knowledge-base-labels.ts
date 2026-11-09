@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import type {
   LearningEligibilityChoice,
   LibraryMaterialDecisionProjection,
@@ -489,21 +489,22 @@ export const MATERIAL_SEGMENTS_PREVIOUS = '上一页';
 export const MATERIAL_SEGMENTS_NEXT = '下一页';
 export const MATERIAL_SEGMENTS_FAILED = '暂时无法读取分段，请重试。';
 
+// Ordinary mode names the editor's situation, not the dependency, bound or DTD behind it (Issue #1431 item 87).
 export const MATERIAL_INDEX_REASONS: Readonly<Record<MaterialIndexReason, string>> = {
-  'needs-local-dependency': '读取这种格式的文字需要本地依赖，尚未提供',
+  get 'needs-local-dependency'() { return technicalWords('读取这种格式的文字需要本地依赖，尚未提供', '暂不支持这种格式'); },
   'format-unsupported': 'AI7 还不能提取这种格式的文字',
-  'over-bound': '超出本地读取边界（文件或其中的段落过大）',
+  get 'over-bound'() { return technicalWords('超出本地读取边界（文件或其中的段落过大）', '文件过大，暂时无法读取'); },
   unreadable: '文件无法读取，或内容已损坏',
   'original-changed': '本机保存的原件与放入时的记录不一致',
   empty: '文件里没有可提取的文字',
   encrypted: '文件已加密或带有版权保护（DRM），AI7 不读取其中的文字',
-  'external-entity': '文件声明了实体或内部文档类型定义，AI7 为安全起见不读取',
+  get 'external-entity'() { return technicalWords('文件声明了实体或内部文档类型定义，AI7 为安全起见不读取', '为安全起见，AI7 不读取这个文件'); },
   'needs-recognition': '这份 PDF 没有可用的文字层（像是扫描件），需要先识别文字',
 };
 
 /** What makes an item's similarity vectors, in the editor's words (Issue #892). */
 export function materialEmbeddingLabel(identity: string): string {
-  return identity === 'ai7-embedding/stub-1' ? '本机内置相似向量（按字词相近）' : `本机模型 ${identity}`;
+  return technicalWords(identity === 'ai7-embedding/stub-1' ? '本机内置相似向量（按字词相近）' : `本机模型 ${identity}`, '本机相似搜索');
 }
 
 /** One 相似段落检索 candidate's anchor: its page and place on it for a PDF, its position otherwise. */
@@ -518,6 +519,16 @@ export function materialVectorResultsHeading(count: number): string {
 
 /** The index as a whole, in one line beside its term. */
 export function materialIndexStateLine(index: MaterialIndexProjection): string {
+  // Ordinary mode reads whether the material can be read (Issue #1431 item 86).
+  if (!technicalLayerVisible) {
+    switch (index.state) {
+      case 'queued': return '等待提取';
+      case 'indexing': return '正在提取…';
+      case 'complete': return '可阅读';
+      case 'unsupported': return index.reason === 'needs-recognition' ? '需要识别文字' : '暂不支持这种格式';
+      case 'failed': return `无法读取：${MATERIAL_INDEX_REASONS[index.reason ?? 'unreadable']}`;
+    }
+  }
   switch (index.state) {
     case 'queued':
       return '等待建立索引';
@@ -565,7 +576,7 @@ export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (t
       if (state === 'not-needed') return metadata?.language === 'none' ? '不需要：没有可译的文字' : '不需要：中文资料';
       if (translation === null) return '没有提取出全文，无从翻译';
       if (state === 'building') return `正在生成… 已译 ${translation.translated} / ${translation.total} 段`;
-      if (state === 'complete') return `已生成 ${translation.total} 段（${translation.model ?? '模型'}）；译文只供对照，不替换原文`;
+      if (state === 'complete') return technicalWords(`已生成 ${translation.total} 段（${translation.model ?? '模型'}）；译文只供对照，不替换原文`, `已生成 ${translation.total} 段 AI 译文，只供对照`);
       if (state === 'partial') return `已生成 ${translation.translated} / ${translation.total} 段${translation.lastFailure === null ? '' : `；${translation.lastFailure}`}`;
       return translation.lastFailure === null ? '未生成：非中文资料可以「生成来源译文」（每次至多 1,000 段）' : `未生成：${translation.lastFailure}`;
     }
@@ -574,7 +585,7 @@ export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (t
       if (state === 'complete' && metadata !== null) {
         return metadata.pages !== null
           ? `${metadata.paragraphs} 段 · ${metadata.sentences} 句 · ${metadata.pages} 页；每句可按「第 p 页第 m 段第 s 句」引用`
-          : `${metadata.paragraphs} 段 · ${metadata.sentences} 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）`;
+          : `${metadata.paragraphs} 段 · ${metadata.sentences} 句；每句可按「第 n 段第 m 句」引用${technicalWords('（这种格式没有页码，锚点是位置）')}`;
       }
       return '没有提取出全文，无从分段';
     case 'vectors': {
@@ -582,6 +593,8 @@ export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (t
       if (state === 'pending') return waiting(index);
       if (vectors === null) return '没有提取出全文，无从建立相似索引';
       if (state === 'needs-model') {
+        // The model identity and digest are the developer layer's (Issue #1431 item 88); ordinary mode names the way in.
+        if (!technicalLayerVisible) return '需要安装相似搜索功能：在 设置 › 本机 › 相似索引模型 中添加';
         return vectors.expectedDigest === null ? '需要模型文件：尚未选择嵌入依赖' : `需要模型文件：在 设置 › 本机 › 相似索引模型 放入摘要为 ${vectors.expectedDigest} 的模型文件`;
       }
       if (state === 'building') return `构建中… ${vectors.built} / ${vectors.total} 段`;
@@ -609,6 +622,11 @@ export function materialSegmentsHeading(page: Pick<MaterialSegmentsPageProjectio
 
 /** 索引完成 in 待我处理 (ATTN-009): how the build went, in the card's words. */
 export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported' | 'failed'): string {
+  // Ordinary words for what can now be read (Issue #1431 item 89).
+  if (!technicalLayerVisible) {
+    return outcome === 'complete' ? '资料已准备好，可以阅读和检索。'
+      : outcome === 'unsupported' ? '资料已加入，但这种格式的文字未能提取，暂不能阅读全文。' : '资料已加入，但没能提取文字：打开资料看原因。';
+  }
   switch (outcome) {
     case 'complete':
       return '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。';

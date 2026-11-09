@@ -129,12 +129,12 @@ export function publicationDesignateReason(blockers: ReadonlyArray<string>): str
 
 /** A milestone as the form offers it: its purpose, its exact version and when it was saved. */
 export function publicationMilestoneOptionLine(item: Pick<MilestoneListItemProjection, 'purposeLabel' | 'revisionLabel'>, savedAt: string): string {
-  return `用途：${item.purposeLabel} · 修订版${technicalWords(` ${item.revisionLabel}`)} · ${savedAt} 保存`;
+  return `用途：${item.purposeLabel}${technicalWords(` · 修订版 ${item.revisionLabel}`)} · ${savedAt} 保存`;
 }
 
 /** 里程碑版本 in the summary: the exact label and version, and when it was saved. */
 export function publicationSummaryMilestone(item: Pick<MilestoneListItemProjection, 'label' | 'revisionLabel'>, savedAt: string): string {
-  return `「${item.label}」 · ${technicalWords(item.revisionLabel, '修订版')} · ${savedAt} 保存`;
+  return `「${item.label}」${technicalWords(` · ${item.revisionLabel}`)} · ${savedAt} 保存`;
 }
 
 /** 稿件 in the summary: the Deliverable is the Book's primary Manuscript, read as it stands now. */
@@ -175,7 +175,7 @@ export function milestonesTruncatedLine(listed: number): string {
 
 /** 第 N 次 设为发稿版本: the exact milestone and version it designated, which never moves (PUB-007). */
 export function publicationVersionHeading(item: Pick<PublicationVersionProjection, 'ordinal' | 'milestoneLabel' | 'revisionLabel'>): string {
-  return `第 ${item.ordinal} 次设为发稿版本 · 「${item.milestoneLabel}」 · ${technicalWords(item.revisionLabel, '修订版')}`;
+  return `第 ${item.ordinal} 次设为发稿版本 · 「${item.milestoneLabel}」${technicalWords(` · ${item.revisionLabel}`)}`;
 }
 
 export function publicationScopeLine(scope: string): string {
@@ -199,7 +199,8 @@ export function publicationsTruncatedLine(listed: number): string {
  * designation keeps its version, and a newer one is a separate designation of a new milestone (PUB-007).
  */
 export function publicationChangeNoticeDetail(notice: NonNullable<DeliverablesProjection['publication']['changeNotice']>): string {
-  return `发稿版本定在 ${technicalWords(notice.revisionLabel, '修订版')}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`;
+  return technicalWords(`发稿版本定在 ${notice.revisionLabel}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`,
+    '稿件已更新，可保存新的里程碑版本并更新发稿版本。');
 }
 
 /**

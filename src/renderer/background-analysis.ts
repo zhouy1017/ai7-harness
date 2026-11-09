@@ -5,6 +5,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
 import {
   BACKGROUND_BINDS_SUMMARY,
   BACKGROUND_SUMMARY,
+  BACKGROUND_CEILING_LEVELS,
+  BACKGROUND_CEILING_ORDINARY_LABEL,
   BACKGROUND_CANCEL,
   BACKGROUND_CEILING_FIRST,
   BACKGROUND_CEILING_LABEL,
@@ -219,10 +221,13 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       ceiling.dataset['shareTokens'] = String(projection.enrollment.shareTokens ?? '');
       ceiling.dataset['scopeKind'] = projection.enrollment.scope.kind;
       line.append(' · ', ceiling);
-      const binds = el('details', 'background-analysis-binds');
-      binds.dataset['backgroundDetails'] = 'binds';
-      binds.append(el('summary', undefined, BACKGROUND_BINDS_SUMMARY), rows(projection.enrollment.binds));
-      nodes.push(binds);
+      // The enrollment's bound facts are the developer layer's (Issue #1431 item 80): the line above says the scope and ceiling.
+      if (technicalLayerVisible) {
+        const binds = el('details', 'background-analysis-binds');
+        binds.dataset['backgroundDetails'] = 'binds';
+        binds.append(el('summary', undefined, BACKGROUND_BINDS_SUMMARY), rows(projection.enrollment.binds));
+        nodes.push(binds);
+      }
     }
     if (projection.skipped.length > 0 || projection.lastNotStarted !== null) {
       const status = el('p', 'field-note');
@@ -384,7 +389,18 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     preview.setAttribute('aria-live', 'polite');
     ceilingInput.setAttribute('aria-describedby', preview.id);
     ceilingInput.setAttribute('aria-label', `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`);
-    ceilingLabel.append(el('span', undefined, `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`), ceilingInput, preview);
+    if (technicalLayerVisible) ceilingLabel.append(el('span', undefined, `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`), ceilingInput, preview);
+    else {
+      // A level in place of a token count (Issue #1431 item 81); it fills the same ceiling the service validates.
+      const level = el('select');
+      level.dataset['backgroundCeilingLevel'] = 'true';
+      level.setAttribute('aria-label', BACKGROUND_CEILING_ORDINARY_LABEL);
+      level.setAttribute('aria-describedby', preview.id);
+      for (const [value, words] of BACKGROUND_CEILING_LEVELS) level.append(new Option(words, value));
+      level.value = BACKGROUND_CEILING_DEFAULT;
+      level.addEventListener('change', () => { ceilingInput.value = level.value; ceilingInput.dispatchEvent(new Event('input')); });
+      ceilingLabel.append(el('span', undefined, BACKGROUND_CEILING_ORDINARY_LABEL), level, preview);
+    }
     const notGranted = el('ul', 'analysis-list background-analysis-not-granted');
     for (const entry of offer.notGranted) notGranted.append(el('li', undefined, entry));
     const fieldset = el('fieldset', 'background-analysis-starting-points');

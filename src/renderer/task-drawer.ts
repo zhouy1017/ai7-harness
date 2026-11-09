@@ -1108,13 +1108,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SCOPE_TERMS[0], next.scope.process],
         [TASK_PLAN_SCOPE_TERMS[1], references ?? (next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference, 'task-plan-list'))],
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
-        [TASK_PLAN_SCOPE_TERMS[3], technicalWords(next.scope.notRead, next.scope.notRead.replace('来源材料（来源版本仅作血缘证据，不属于可读范围）', '来源材料'))],
+        // What is not read is an invariant row, kept for the developer layer (Issue #1431 item 38).
+        ...(technicalLayerVisible ? [[TASK_PLAN_SCOPE_TERMS[3], next.scope.notRead] as const] : []),
       ])),
       planSection(2, steps, ...assuranceBlock(next)),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         ...(!technicalLayerVisible ? [
-          [TASK_PLAN_SERVICE_TERMS[7], next.service.budgetCeiling.replace('tokens', '词元')] as const,
+          // A ceiling read as what it does; its exact count stays in the developer layer (Issue #1431 item 49).
+          ...(next.edit.budget === null ? [] : [[TASK_PLAN_SERVICE_TERMS[5], next.edit.budget.ceiling === 'unset' ? '未设上限' : '已设上限，用到上限时任务会暂停'] as const]),
           ['预计用时', next.service.duration] as const,
         ] : [
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
@@ -1128,11 +1130,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SERVICE_TERMS[8], next.service.accountLimit],
         ] as const),
       ]), ...(technicalLayerVisible ? budgetBlock(next) : [])),
-      planSection(5, facts([
+      // 会得到 / 不会做 repeats the goal's outcomes beside an invariant: the technical layer's alone (Issue #1413 cluster 4, #1431 item 38).
+      ...(technicalLayerVisible ? [planSection(5, facts([
         [TASK_PLAN_RESULT_TERMS[0], listOf(next.outcomes, 'task-plan-list')],
-        // 不会做 is the technical layer's alone (Issue #1413 cluster 4).
-        ...(technicalLayerVisible ? [[TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')] as const] : []),
-      ])),
+        [TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')],
+      ]))] : []),
       boundaryBlock(next),
       defaultRuleBlock(next),
       technicalBlock(next),
@@ -1148,6 +1150,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // An adaptation moved into 先问你 (Issue #422, S76d) stands in the right column, where the editor sees it asked first.
     const asked: HTMLElement[] = [];
     for (const entry of next.boundary.adaptable) {
+      // Ordinary mode lists only what the editor can choose (Issue #1431 item 39); the boundary model is the developer layer's.
+      if (!technicalLayerVisible && !(entry.removable || entry.movable)) continue;
       const item = el('li');
       item.dataset['taskPlanItem'] = entry.id;
       const committed = committedEdit(entry);
@@ -1158,12 +1162,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (shown === 'ask-first') asked.push(item);
       else adaptations.append(item);
     }
-    if (next.boundary.adaptable.length === 0 || adaptations.childElementCount === 0) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
+    if (technicalLayerVisible && (next.boundary.adaptable.length === 0 || adaptations.childElementCount === 0)) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
     adaptable.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[0]), adaptations);
     const askFirst = el('div', 'task-plan-boundary-column');
     askFirst.dataset['taskPlanBoundary'] = 'ask-first';
     const locked = el('ul', 'task-plan-list task-plan-locked');
-    for (const item of next.boundary.askFirst) {
+    for (const item of technicalLayerVisible ? next.boundary.askFirst : []) {
       const entry = el('li');
       entry.append(el('span', 'task-plan-lock', TASK_PLAN_LOCKED), item);
       locked.append(entry);
@@ -1175,7 +1179,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       askFirstHeading.append(' · ', el('span', 'task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
     }
     askFirst.append(askFirstHeading, ...(asked.length === 0 ? [] : [movedIn]), locked);
-    section.append(adaptable, askFirst);
+    if (technicalLayerVisible) section.append(adaptable, askFirst);
+    else {
+      if (adaptations.childElementCount > 0) section.append(adaptable);
+      if (asked.length > 0) section.append(askFirst);
+      section.hidden = section.childElementCount === 0;
+    }
     return section;
   }
 
@@ -1417,6 +1426,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       case 'reconfirm-plan':
         button.addEventListener('click', () => void reconfirm());
         break;
+      case 'reconfirm-and-start':
+        button.addEventListener('click', () => void reconfirm(true));
+        break;
       case 'view-plan-revision':
         button.setAttribute('aria-controls', DRIFT_TABLE_ID);
         button.setAttribute('aria-expanded', diffShown ? 'true' : 'false');
@@ -1470,6 +1482,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         break;
       case 'update-plan':
         button.addEventListener('click', () => void updatePlan());
+        break;
+      case 'update-and-start':
+        button.addEventListener('click', () => void updatePlan(true));
         break;
       case 'discard-edits':
         button.addEventListener('click', () => {
@@ -1840,8 +1855,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /** 更新计划 (PLAN-009, PLAN-011): the plan as the editor left it becomes the next version; a refusal is said beside the bar. */
-  async function updatePlan(): Promise<void> {
+  async function updatePlan(andStart = false): Promise<void> {
     const current = plan;
+    let startNext = false;
     const asked = request;
     // The edit's own version: 模型未连接 or 离线 withholds 开始任务's digest, and the edit sends nothing.
     const planEnvelopeDigest = current?.edit.planEnvelopeDigest ?? null;
@@ -1879,12 +1895,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       options.setStatus(`计划已更新为${technicalWords(`第 ${ordinal ?? '?'} 版`, '版本')}。`, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
+      // 保存并开始 (Issue #1431 item 40): the version just written starts in the same click, through the one start path.
+      if (andStart) {
+        const fresh = await api.inspectTaskPlan({ kind: current.kind, ref: current.ref });
+        if (request !== null && request.ref === fresh.ref && request.kind === fresh.kind) {
+          paint(retainTaskPlanPages(fresh, plan), false);
+          startNext = fresh.start.readiness === 'ready';
+        }
+      }
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_UPDATE_FAILED);
       options.setStatus(refusal, 'error');
     } finally {
       endWork(asked);
     }
+    if (startNext) await start();
   }
 
   /** Every bar action waits while one is under way; the bar is painted again when it ends. */
@@ -2266,7 +2291,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       progress = el('div', 'task-plan-progress');
       progress.setAttribute('role', 'progressbar');
-      progress.setAttribute('aria-label', '阅读范围进度');
+      progress.setAttribute('aria-label', technicalWords('阅读范围进度', '任务进度'));
       progress.setAttribute('aria-valuemin', '0');
       progress.append(el('span', 'task-plan-progress-fill'));
       section.append(chain, progress);
@@ -2459,16 +2484,17 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * change the pending Plan Revision proposes, exactly as ②A did before the action moved into the bar. The
    * drawer then reads the next version, whose bar offers 开始任务 again.
    */
-  async function reconfirm(): Promise<void> {
+  async function reconfirm(andStart = false): Promise<void> {
     const current = plan;
     const asked = request;
     const input = current?.start.reconfirm ?? null;
+    let startNext = false;
     if (current === null || input === null || !beginWork()) return;
     options.setStatus('正在按变化后的关键内容重新确认计划…', 'busy');
     try {
       if (current.custom !== undefined) {
         await prepareCustom(current, 'reconfirm', input.update);
-        options.setStatus('计划已重新确认：看过之后再开始任务。', 'success');
+        options.setStatus(technicalWords('计划已重新确认：看过之后再开始任务。', '计划已按变化更新。'), 'success');
       } else {
         const initial = await api.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: true });
         const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
@@ -2483,12 +2509,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
+      // 按新计划开始 (Issue #1431 item 41): the reconfirmed version starts in the same click, through the one start path.
+      if (andStart) {
+        const fresh = await api.inspectTaskPlan({ kind: current.kind, ref: current.ref });
+        if (request !== null && request.ref === fresh.ref && request.kind === fresh.kind) {
+          paint(retainTaskPlanPages(fresh, plan), false);
+          startNext = fresh.start.readiness === 'ready';
+        }
+      }
     } catch (error) {
       refusal = options.errorMessage(error, '无法重新确认计划。');
       options.setStatus(refusal, 'error');
     } finally {
       endWork(asked);
     }
+    if (startNext) await start();
   }
 
   // ---- Clarification Requests (Issue #422, plan slice S76d; CLAR-001 to CLAR-007, INPUT-001 to INPUT-004) ------

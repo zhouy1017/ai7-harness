@@ -33,8 +33,13 @@ export type ProtectionCause = 'journal-unavailable' | 'service-stopped' | 'drift
 export type ProtectionReadOnlyReason = 'capacity' | 'service-stopped' | 'drift';
 
 export function lastDurableLine(sequence: number, durableAt: string): string {
-  return `最后确认写入：修订日志${technicalWords(`序号 ${sequence.toLocaleString('zh-CN')}`)} · ${new Date(durableAt).toLocaleString('zh-CN', { hour12: false })}`;
+  const at = new Date(durableAt).toLocaleString('zh-CN', { hour12: false });
+  return technicalWords(`最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${at}`, `最近保存时间：${at}`);
 }
+
+/** The ordinary words of a copy and of a mismatched acknowledgement (Issue #1431 item 16). */
+export function protectionCopiedLine(): string { return technicalWords(PROTECTION_COPIED, '已复制未保存的文字。'); }
+export function protectionAckMismatchLine(): string { return technicalWords(PROTECTION_ACK_MISMATCH, '保存结果待确认。'); }
 
 /** DUR-004: editor-readable location and character count, never bytes or process detail. */
 export function atRiskLine(location: string | null, characters: number): string {
