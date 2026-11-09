@@ -32,6 +32,7 @@ function preference<Value>(validate: (value: unknown) => value is Value, fallbac
 /** The Book sections of the sidebar's current-Book groups (IA-012): where a recently opened Book was last seen. */
 export const SHELL_BOOK_SECTIONS = Object.freeze([
   'manuscript',
+  'derivatives',
   'review',
   'evaluation',
   'deliverables',

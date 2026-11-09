@@ -476,7 +476,7 @@ export class BookDeliveryPackageExports {
     const deliveries: string[] = [];
     for (const entry of record.content.documents) {
       if (entry.disposition !== 'included') continue;
-      const baseLabel = productionDocumentType(entry.typeId)?.label ?? entry.typeId;
+      const baseLabel = productionDocumentType(entry.typeId, this.#db)?.label ?? '衍生稿件';
       const peers = record.content.documents.filter((candidate) => candidate.typeId === entry.typeId && candidate.disposition === 'included').length;
       const typeLabel = entry.title === undefined || (entry.title === baseLabel && peers === 1) ? baseLabel : `${baseLabel} · 《${entry.title}》`;
       lines.push(`- ${typeLabel} · 版本 ${entry.version}`);
@@ -504,7 +504,7 @@ export class BookDeliveryPackageExports {
     if (deliveries.length > 0) lines.push('', '## 交付记录', ...deliveries);
     const notForThisBook = record.content.documents
       .filter((entry) => entry.disposition === 'not-for-this-book')
-      .map((entry) => productionDocumentType(entry.typeId)?.label ?? entry.typeId);
+      .map((entry) => productionDocumentType(entry.typeId, this.#db)?.label ?? '衍生稿件');
     lines.push(
       '',
       '## 不包含',

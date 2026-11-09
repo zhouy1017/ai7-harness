@@ -204,6 +204,32 @@ export function registerProductionAndPackageHandlers(context: {
     }),
   );
 
+  for (const operation of ['saveProductionDocumentType', 'deleteProductionDocumentType', 'reorderProductionDocumentTypes'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireCurrentBookRoute(owned);
+        const generation = owned.routeGeneration;
+        const result = await service.call(operation, input);
+        requireCurrentRouteGeneration(owned, generation);
+        return result;
+      });
+    }));
+  }
+  ipcMain.handle(IPC_CHANNELS.updateProductionDocumentMeta, (event, input: Parameters<RendererApi['updateProductionDocumentMeta']>[0]) => envelope(async () => {
+    const owned = requireSender(event);
+    return serializeEffect(async () => {
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const generation = owned.routeGeneration;
+      const result = await service.call('updateProductionDocumentMeta', { ...input, bookId: route.bookId });
+      requireCurrentRouteGeneration(owned, generation);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '衍生稿件不属于当前图书。');
+      return result;
+    });
+  }));
+
   const overviewBooks = new WeakMap<OwnedRendererWindow, Set<string>>();
   // 图书交付包 (Issue #416, S67a): a read bound to the route's Book and its read epoch, and 准备图书交付包 serialized
   // like every other command. The service decides whether the content is still what the editor saw; nothing here

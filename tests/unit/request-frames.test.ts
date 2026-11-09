@@ -2385,3 +2385,23 @@ describe('the exact model Settings commands (Issue #1044)', () => {
     }
   });
 });
+
+
+it('accepts editable derivative categories and workspace metadata, and refuses malformed commands (#1427)', () => {
+  const bookId = randomUUID(); const documentId = randomUUID(); const typeId = `custom-${randomUUID()}`;
+  for (const body of [
+    { op: 'saveProductionDocumentType', input: { name: '人物小传', description: '人物资料' } },
+    { op: 'saveProductionDocumentType', input: { typeId, name: '媒体稿' } },
+    { op: 'deleteProductionDocumentType', input: { typeId } },
+    { op: 'reorderProductionDocumentTypes', input: { typeIds: ['news-release', typeId] } },
+    { op: 'updateProductionDocumentMeta', input: { bookId, documentId, typeId, finalized: true } },
+  ]) {
+    const frame = { id: randomUUID(), ...body };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+  }
+  for (const body of [
+    { op: 'saveProductionDocumentType', input: { name: '' } },
+    { op: 'reorderProductionDocumentTypes', input: { typeIds: [false] } },
+    { op: 'updateProductionDocumentMeta', input: { bookId, documentId, finalized: 'yes' } },
+  ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...body })))).toThrow(ProtocolError);
+});

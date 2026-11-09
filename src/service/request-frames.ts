@@ -3043,6 +3043,28 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'saveProductionDocumentType': {
+      const input = requireInputWithOptional(value.input, ['name'], ['typeId', 'description'], tentativeId);
+      if (!validPublicationText(input.name, 80) || (input.typeId !== undefined && !validProductionDocumentTypeId(input.typeId)) ||
+          (input.description !== undefined && (typeof input.description !== 'string' || input.description.length > 2000))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'deleteProductionDocumentType': {
+      const input = requireInputWithOptional(value.input, ['typeId'], ['fallbackTypeId'], tentativeId);
+      if (!validProductionDocumentTypeId(input.typeId) || (input.fallbackTypeId !== undefined && !validProductionDocumentTypeId(input.fallbackTypeId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'reorderProductionDocumentTypes': {
+      const input = requireInput(value.input, ['typeIds'], tentativeId);
+      if (!Array.isArray(input.typeIds) || input.typeIds.length > 1000 || !input.typeIds.every(validProductionDocumentTypeId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'updateProductionDocumentMeta': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'documentId'], ['typeId', 'finalized', 'deleted'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) || (input.typeId !== undefined && !validProductionDocumentTypeId(input.typeId)) ||
+          (input.finalized !== undefined && typeof input.finalized !== 'boolean') || (input.deleted !== undefined && typeof input.deleted !== 'boolean')) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'renameProductionDocument': {
       const input = requireInput(value.input, ['bookId', 'documentId', 'title'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.documentId) || publicationText(input.title, 80) === null) throw new ProtocolError(tentativeId);

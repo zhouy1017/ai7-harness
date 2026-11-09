@@ -366,6 +366,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         if (book !== null) options.openSection(book, key);
       });
       link.dataset['navBookSection'] = key;
+      link.dataset['shellSection'] = key;
       sectionLinks.set(key, link);
       const item = el('li');
       item.append(link);

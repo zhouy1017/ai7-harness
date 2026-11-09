@@ -1779,7 +1779,7 @@ async function main() {
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation","comments"]',
         // It is one of the Book's 稿件 (Issue #1403): the switcher marks it current, beside the manuscript.
-        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null]]' &&
+        switcher: JSON.stringify(Array.from(shell?.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]') ?? [], (item) => [item.dataset.manuscriptSwitch, item.getAttribute('aria-current')])) === '[["primary",null],["document","page"],["new",null],["manage",null]]' &&
           shell?.querySelector('.manuscript-switcher-bar [data-manuscript-switch="document"]')?.textContent === '[新闻稿] 新闻稿',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
         saveVersion: shell?.querySelector('[data-document-action="saveVersion"]')?.textContent === '保存为版本',
@@ -1793,6 +1793,19 @@ async function main() {
       };
     })()`);
     requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
+    // #1427: the compact switcher reaches the separate workspace and returns to the same editor.
+    await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'derivatives-workspace-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-item') !== null`, 'derivatives-workspace-ready');
+    await assertRenderer(renderer, `(() => {
+      const rows = Array.from(document.querySelectorAll('#app-sidebar [data-shell-section]'));
+      const main = rows.findIndex(row => row.dataset.shellSection === 'manuscript');
+      return main >= 0 && rows[main].textContent.includes('主稿件') && rows[main + 1]?.dataset.shellSection === 'derivatives' &&
+        document.querySelector('.derivatives-category-chips [aria-pressed="true"]')?.textContent === '全部 (1)';
+    })()`, 'derivatives-parallel-navigation');
+    await fill(renderer, '.derivatives-filters input[type="search"]', '新闻稿', 'derivatives-title-search');
+    await assertRenderer(renderer, `document.querySelectorAll('.derivatives-item').length === 1`, 'derivatives-title-search-result');
+    await click(renderer, '打开编辑', 'derivatives-open-editor');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"][data-document-type-id="news-release"] [data-testid="manuscript-editor"]') !== null`, 'derivatives-editor-ready');
     // #1287: opening navigation gives the document text its own readable cell and reflows the workflow below it.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'document-navigation-layout-open');
     await waitFor(renderer, `(() => { const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const panel=document.querySelector('#manuscript-navigation-panel').getBoundingClientRect(); const lens=document.querySelector('.document-lens').getBoundingClientRect(); const workspace=document.querySelector('.editor-workspace'); const actions=document.querySelector('.window-actions').getBoundingClientRect(); return panel.width>0 && panel.height>0 && (panel.left>=text.right-1 || panel.top>=text.bottom-1) && lens.top>=text.bottom-1 && (workspace.clientWidth<864 || text.width>=480) && actions.bottom<=innerHeight+1 && document.documentElement.scrollHeight<=innerHeight+2; })()`, 'document-navigation-no-overlap');
@@ -3018,7 +3031,7 @@ async function main() {
     await openManuscript(renderer, 'multi-manuscript');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
     const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
-    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '+ 新建 / 导入衍生稿件', null]]), 'multi-switcher-words', multiSwitches);
+    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '+ 新建 / 导入衍生稿件', null], ['manage', '管理全部衍生稿件 (2)', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
     // 空白新建 under the 稿件题目 offered for the type: the Book's title and the type, numbered after the one already made.
@@ -3042,7 +3055,7 @@ async function main() {
     await openDerivativePanel(renderer, { typeId: 'promotion-article', mode: 'import' }, 'multi-import');
     await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'multi-import');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
-    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 4`, 'multi-four-listed');
+    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 3 && document.querySelector('[data-manuscript-switch="manage"]')?.textContent === '管理全部衍生稿件 (4)'`, 'multi-four-listed');
     at('multi-documents-ordinary-identities');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>{const type=page.types.find(type=>type.typeId==='promotion-article');return type.documents.length===3&&new Set(type.documents.map(doc=>doc.documentId)).size===3&&type.document.documentId===type.documents[0].documentId&&type.documents.every(doc=>doc.versions.length===1);})`, 'multi-independent-identities');
     const primaryAfter = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3121,7 +3134,10 @@ async function main() {
     at('scoped-ai-edit-derivative');
     // On a derivative document the same entries stand (Issue #1412): 就选中部分让 AI 修改… is offered, and its paragraph is locked
     // and unlocked from the menu and the 🔒 badge.
-    await assertRenderer(renderer, `(() => { const item=Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]')).find((entry)=>entry.textContent.includes(${JSON.stringify(WRITING_LIBRARY_TITLE)})); if(!(item instanceof HTMLElement))return false; item.click(); return true; })()`, 'scoped-derivative-open');
+    await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'scoped-derivatives-manage');
+    await waitFor(renderer, `document.querySelector('.derivatives-item') !== null`, 'scoped-derivatives-list');
+    await fill(renderer, '.derivatives-filters input[type="search"]', WRITING_LIBRARY_TITLE, 'scoped-derivatives-search');
+    await click(renderer, '打开编辑', 'scoped-derivative-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] [data-testid="manuscript-editor"] > p[data-block-id]') !== null && window.__j07Scoped.firstText() !== null`, 'scoped-derivative-ready', 120_000);
     await assertRenderer(renderer, `window.__j07Scoped.select(window.__j07Scoped.firstText(), 0, 4)`, 'scoped-derivative-select');
     await assertRenderer(renderer, `window.__j07Scoped.rightClick()`, 'scoped-derivative-menu');

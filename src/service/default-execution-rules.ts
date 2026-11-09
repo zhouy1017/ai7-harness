@@ -185,7 +185,7 @@ export const DEFAULT_EXECUTION_RULE_QUICK_LABELS: Readonly<Record<BaselineDefaul
 
 /** A house type's label, or its identity when the house's configuration no longer holds it. */
 function writingTypeLabel(typeId: string): string {
-  return productionDocumentType(typeId)?.label ?? typeId;
+  return productionDocumentType(typeId)?.label ?? '衍生稿件';
 }
 
 /**

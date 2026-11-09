@@ -21,6 +21,8 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  'production_document_metadata',
+  'production_document_categories',
   // 资料索引 (revision 67; Issue #428, S80a): the segments, then the builds, which name 资料库 items.
   'material_index_segments',
   'material_index_builds',
@@ -97,11 +99,11 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
 
 /**
  * The relation an open writes by itself (Issue #433, S85a): the store's record of the versions that opened it. Every other
- * relation a migration adds starts empty.
+ * relation a migration adds starts empty, except the five seeded derivative categories (schema 112).
  */
 export const OPENING_RECORD_RELATIONS: ReadonlyArray<string> = ['store_versions'];
 /** The relations revisions 37 to 63 add that a migration leaves empty: all but the store's version record. */
-export const MIGRATION_EMPTY_RELATIONS: ReadonlyArray<string> = PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER.filter((relation) => !OPENING_RECORD_RELATIONS.includes(relation));
+export const MIGRATION_EMPTY_RELATIONS: ReadonlyArray<string> = PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER.filter((relation) => !OPENING_RECORD_RELATIONS.includes(relation) && relation !== 'production_document_categories');
 
 /** Drop the relations revisions 37 to 63 added, foreign keys off around it. The caller sets the version. */
 export function dropProductionDocumentRelations(database: DatabaseSync): void {

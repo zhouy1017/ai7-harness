@@ -1585,8 +1585,9 @@ export class ManuscriptExportStore {
    */
   #documentTarget(bookId: string, documentId: string, revisionId: string): ResolvedTarget {
     const row = this.#db.prepare(
-      `SELECT pd.type_id, pv.version, mr.revision_label, mr.revision_digest, mr.branch_id, b.title, mb.name document_title
+      `SELECT coalesce(meta.type_id, pd.type_id) type_id, pv.version, mr.revision_label, mr.revision_digest, mr.branch_id, b.title, mb.name document_title
        FROM production_documents pd
+       LEFT JOIN production_document_metadata meta ON meta.document_id = pd.document_id
        JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
        JOIN production_document_versions pv ON pv.document_id = pd.document_id AND pv.revision_id = ?
        JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id AND mr.manuscript_id = pd.document_id
@@ -1598,7 +1599,7 @@ export class ManuscriptExportStore {
     const revisionDigest = text(row.revision_digest);
     requireExport(DIGEST_PATTERN.test(revisionDigest), 'EXPORT_RECORD_INVALID', '文档版本摘要无效。');
     const typeId = text(row.type_id);
-    const typeLabel = documentTypeLabel(typeId);
+    const typeLabel = documentTypeLabel(typeId, this.#db);
     const versionLabel = `版本 ${integer(row.version)}`;
     return {
       kind: 'document', targetKind: 'production-document-version', targetId: revisionId, milestoneId: null, milestoneLabel: null,

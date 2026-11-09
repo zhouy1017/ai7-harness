@@ -48,6 +48,7 @@ import { DATABASE_MERGE_SCHEMA_SQL, DATABASE_MERGE_TRIGGER_SQL } from '../databa
 import { CAPTURED_PROCEDURE_SCHEMA_SQL, CAPTURED_PROCEDURE_TRIGGER_SQL } from '../captured-procedures.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../evaluation-rewrites.js';
 import { WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from '../writing-tasks.js';
+import { DERIVATIVE_WORKSPACE_SCHEMA_SQL } from '../production-document-types.js';
 import { AI_EDIT_LOCK_SCHEMA_SQL, AI_EDIT_LOCK_TRIGGER_SQL } from '../ai-edit-locks.js';
 import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL, MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL, MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL, validateMaterialTranslationAttemptSchema, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL } from '../material-index.js';
 import { EVALUATION_PROFILE_SCHEMA_SQL, EVALUATION_PROFILE_TRIGGER_SQL } from '../evaluation-profiles.js';
@@ -642,6 +643,7 @@ export function requireManuscriptReimportTargetSchema(
       ...(includeOutcomeResolutionTables ? OUTCOME_RESOLUTION_SCHEMA_SQL : {}),
       ...(includeImportedExemplarTables ? IMPORTED_EXEMPLAR_SCHEMA_SQL : {}),
       ...(includeAiEditLockTables ? AI_EDIT_LOCK_SCHEMA_SQL : {}),
+      ...(Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 112 || committed(DERIVATIVE_WORKSPACE_SCHEMA_SQL) ? DERIVATIVE_WORKSPACE_SCHEMA_SQL : {}),
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_SCHEMA_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
       ...(includeResearchEvidenceUnitRevisions ? RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL : {}),
