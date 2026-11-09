@@ -1921,8 +1921,8 @@ async function main() {
       ['next-step', page.initial.latest.nextStep === null ? [] : [page.initial.latest.nextStep]]].filter(([, lines]) => lines.length > 0)))`);
     const nextStep = JSON.parse(latestWords).find(([key]) => key === 'next-step')?.[1][0] ?? null;
     requireJourney(JSON.parse(latestWords).length >= 2, 'initial-evaluation-report-lists-present', latestWords.length);
-    const readReportView = (page) => page.view === 'report' && page.record === null && page.report !== null &&
-      JSON.stringify(page.report.items) === JSON.stringify(AI7_ITEM_LINES) && JSON.stringify(page.report.comments) === JSON.stringify(AI7_COMMENTS) &&
+    const readReportView = (page, items = AI7_ITEM_LINES) => page.view === 'report' && page.record === null && page.report !== null &&
+      JSON.stringify(page.report.items) === JSON.stringify(items) && JSON.stringify(page.report.comments) === JSON.stringify(AI7_COMMENTS) &&
       JSON.stringify(page.report.evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
       JSON.stringify(page.report.lists) === latestWords && page.report.conclusion === 'AI7 建议的结论：修改后再议' &&
       JSON.stringify(page.report.actions) === JSON.stringify([['edit-report', '修改报告', false]]) && page.report.reason === null &&
@@ -1946,7 +1946,9 @@ async function main() {
       return readEvaluation(renderer, (page) => page.state === 'ready', `${name}-evaluation-ready`);
     };
     const ordinaryReport = await evaluationMode(false, 'initial-evaluation-ordinary');
-    requireJourney(readReportView(ordinaryReport) && ordinaryReport.report.line === '第 1 次初评 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
+    // Ordinary mode cites paragraphs without the reading ranges they fall in (#1431 item 71).
+    const ordinaryItems = AI7_ITEM_LINES.map(([itemId, sufficiency, line]) => [itemId, sufficiency, line.replace(/，分布在 \d+ 个阅读范围/u, '')]);
+    requireJourney(readReportView(ordinaryReport, ordinaryItems) && ordinaryReport.report.line === '第 1 次初评 · 总分 73 / 100 · 优秀' && ordinaryReport.report.technical === 0,
       'initial-evaluation-ordinary-report', ordinaryReport);
     // 修改报告: the report becomes 第 14 版, begun from it past the unfinished 第 13 版, which stays as it was.
     await clickSelector(renderer, '[data-evaluation-action="edit-report"]', 'initial-evaluation-begin');
