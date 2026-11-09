@@ -210,6 +210,10 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   }
 
   async function exportDocument(doc: ProductionDocumentProjection, format: ManuscriptExportFormat): Promise<void> {
+    // Main grants the existing document capability on read, including for documents never opened on this screen.
+    const opened = await api.getManuscriptWindow({ manuscriptId: doc.documentId, branchId: doc.branchId, cursor: null });
+    if (stopped) return;
+    if (opened.bookId !== options.bookId) throw new Error('衍生稿件不属于当前图书。');
     const saved = await api.saveProductionDocumentVersion({ documentId: doc.documentId, branchId: doc.branchId });
     if (stopped || saved.document === null || saved.bookId !== options.bookId) return;
     const target = { kind: 'document' as const, documentId: doc.documentId, revisionId: saved.document.versions[0]!.revisionId };

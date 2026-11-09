@@ -22,6 +22,10 @@ function setup() {
       { typeId: 'custom', label: '人物资料', notForThisBook: false, documents: Array.from({ length: 20 }, (_, i) => doc(i + 20)), document: null },
     ] };
   const methods = { inspectProductionDocuments: vi.fn(async () => projection),
+    getManuscriptWindow: vi.fn(async () => ({ bookId: 'book' })),
+    saveProductionDocumentVersion: vi.fn(async () => ({ bookId: 'book', document: { versions: [{ revisionId: 'saved' }] } })),
+    reviewManuscriptExport: vi.fn(async () => ({ bookId: 'book', target: { revisionId: 'saved' }, reviewDigest: 'review', suggestedFileName: '媒体稿.docx', format: 'docx' })),
+    chooseManuscriptExportDestination: vi.fn(async () => ({ outcome: 'cancelled' })),
     saveProductionDocumentType: vi.fn(async () => ({ types: [] })), reorderProductionDocumentTypes: vi.fn(async () => ({ types: [] })),
     updateProductionDocumentMeta: vi.fn(async () => projection), renameProductionDocument: vi.fn(async () => ({})) };
   const api = methods as unknown as RendererApi;
@@ -76,5 +80,16 @@ it('adds and renames categories and sends their new order from the category edit
   expect(methods.saveProductionDocumentType).toHaveBeenCalledWith({ typeId: 'news-release', name: '媒体稿' });
   click(root.querySelector<HTMLElement>('.derivatives-category-row')!, '下移'); await flush();
   expect(methods.reorderProductionDocumentTypes).toHaveBeenCalledWith({ typeIds: ['custom', 'news-release'] });
+  surface.destroy();
+});
+
+it('acquires the existing editor capability before exporting an unopened document (#1427)', async () => {
+  const { root, methods, surface } = setup(); await flush();
+  click(root.querySelector<HTMLElement>('[data-derivative-document="doc-0"]')!, '导出 DOCX'); await flush();
+  expect(methods.getManuscriptWindow).toHaveBeenCalledWith({ manuscriptId: 'doc-0', branchId: 'branch-0', cursor: null });
+  expect(methods.saveProductionDocumentVersion).toHaveBeenCalledWith({ documentId: 'doc-0', branchId: 'branch-0' });
+  expect(methods.getManuscriptWindow.mock.invocationCallOrder[0]).toBeLessThan(methods.saveProductionDocumentVersion.mock.invocationCallOrder[0]!);
+  expect(methods.reviewManuscriptExport).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: 'document', documentId: 'doc-0', revisionId: 'saved' }, format: 'docx' }));
+  expect(methods.chooseManuscriptExportDestination).toHaveBeenCalledOnce();
   surface.destroy();
 });
