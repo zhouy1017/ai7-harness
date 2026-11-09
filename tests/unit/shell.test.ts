@@ -59,7 +59,7 @@ describe('the sidebar', () => {
 
   it('groups the current Book as 工作 · 处理 · 资料与记录 with every section once', () => {
     expect(SHELL_BOOK_GROUPS.map((group) => [group.label, group.sections.map((section) => section.label)])).toEqual([
-      ['工作', ['稿件', '审阅', '评估', '交付物']],
+      ['工作', ['主稿件', '衍生稿件', '审阅', '评估', '交付物']],
       ['处理', ['发现']],
       ['资料与记录', ['分析', '来源与证据', '工作概览', '历史与恢复']],
     ]);
@@ -132,7 +132,7 @@ describe('pinned and recent Books', () => {
     const rows = sidebarBookRows([b], [{ ...a, section: 'manuscript' }, { ...b, section: 'review' }, { ...c, section: 'history' }], 'a');
     expect(rows.pinned).toEqual([{ bookId: 'b', title: '乙书', state: '上次在「审阅」', pinned: true, current: false }]);
     expect(rows.recent).toEqual([
-      { bookId: 'a', title: '甲书', state: '上次在「稿件」', pinned: false, current: true },
+      { bookId: 'a', title: '甲书', state: '上次在「主稿件」', pinned: false, current: true },
       { bookId: 'c', title: '丙书', state: '上次在「历史与恢复」', pinned: false, current: false },
     ]);
     expect(sidebarBookRows([c], [], null).pinned[0]!.state).toBe(SHELL_LABELS.pinned);
@@ -157,7 +157,7 @@ describe('what a screen marks as current', () => {
 
   it('heads a Book screen with the Book title and its group and section, and a global one with its destination', () => {
     const book = { bookId: 'a', title: '甲书' };
-    expect(contextHeading('editor', { kind: 'section', section: 'manuscript' }, book)).toEqual({ title: '甲书', position: '工作 · 稿件', book: true });
+    expect(contextHeading('editor', { kind: 'section', section: 'manuscript' }, book)).toEqual({ title: '甲书', position: '工作 · 主稿件', book: true });
     expect(contextHeading('book-sources', { kind: 'section', section: 'sources' }, book)).toEqual({ title: '甲书', position: '资料与记录 · 来源与证据', book: true });
     expect(contextHeading('landing', { kind: 'destination', destination: 'library' }, null)).toEqual({ title: '书库', position: '全局', book: false });
     expect(contextHeading('data-storage', { kind: 'settings' }, book)).toEqual({ title: '设置', position: '本机 · 数据与存储', book: false });

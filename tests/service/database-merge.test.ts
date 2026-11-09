@@ -959,7 +959,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 111, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 112, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
@@ -2118,4 +2118,21 @@ it('validates a historical reader91 source through the existing selected-Book me
     expect(target.listBooks(null).items.map((book) => book.bookId)).toContain(bookId);
     expect(target.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
   } finally { await target.close(); }
+});
+
+
+it('merges a custom derivative category and its document management state with its Book (#1427)', async () => {
+  const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const book = await importSample1Book(source, roots.codeRoot, '衍生类别合并');
+  const category = source.saveProductionDocumentType({ name: '活动文案' }).types.at(-1)!;
+  const doc = (await source.createProductionDocument({ bookId: book.bookId, typeId: category.typeId })).document!;
+  source.updateProductionDocumentMeta({ bookId: book.bookId, documentId: doc.documentId, finalized: true });
+  const path = await exportedFrom(source, 'derivative-categories.ai7db');
+  source.close();
+  await prepareMerge(path);
+  const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+  try {
+    expect(target.inspectProductionDocuments(book.bookId).types.find((type) => type.typeId === category.typeId))
+      .toMatchObject({ label: '活动文案', documents: [{ documentId: doc.documentId, finalized: true }] });
+  } finally { target.close(); }
 });
