@@ -92,7 +92,7 @@ describe('the words of quick start and its rules', () => {
     expect(defaultExecutionRuleName('writing:promotion-article', 1)).toBe('写作任务 · 宣传文章 · 第 1 版');
     expect(defaultExecutionRuleTitle('writing:news-release')).toBe('写作任务 · 新闻稿');
     // A type the house's configuration no longer holds is named by its identity.
-    expect(defaultExecutionRuleTitle('writing:gone-type')).toBe('写作任务 · gone-type');
+    expect(defaultExecutionRuleTitle('writing:gone-type')).toBe('写作任务 · 衍生稿件');
     expect(writingRuleTypeId('writing:news-release')).toBe('news-release');
     expect(writingRuleTypeId('sync-current')).toBeNull();
     expect(writingRuleTypeLabel('writing:news-release')).toBe('新闻稿');

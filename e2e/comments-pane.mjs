@@ -58,6 +58,26 @@ export async function seedCommentsPane(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'comments-editor-ready');
   check(await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); editor.querySelector('[data-block-id="'+__comments.blockId+'"]').scrollIntoView({block:'center'}); const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`), 'comments-open');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false) && document.querySelector('.manuscript-comments-canvas').dataset.loading==='false'`, 'comments-five-visible');
+  // #1429: use the existing complete comments journey to exercise category/search linkage.
+  check(await renderer.evaluate(`(() => {
+    const pane=document.querySelector('.manuscript-comments-pane');
+    const cards=__comments.ids.map(id=>pane.querySelector('[data-mark-card="'+id+'"]'));
+    const inline=__comments.ids.map(id=>document.querySelector('.editor-window [data-mark-id="'+id+'"]'));
+    if(!cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='【编辑修订】') || !inline.every(mark=>mark?.dataset.markCategory==='editor'))return false;
+    pane.querySelector('[data-mark-category-filter="editor"]').click();
+    const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
+    globalThis.__commentsSearch=input; return true;
+  })()`), 'comments-category-badges-and-search');
+  await waitFor(renderer, `(() => {
+    const pane=document.querySelector('.manuscript-comments-pane');
+    return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&
+      __comments.ids.every((id,index)=>document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(index===2?undefined:'true'));
+  })()`, 'comments-search-cards-and-highlights');
+  check(await renderer.evaluate(`(() => { window.dispatchEvent(new Event('resize')); return document.querySelector('[data-mark-search-input]')===__commentsSearch && __commentsSearch.value==='公开合成批注 2' && document.querySelector('[data-mark-category-filter="editor"]').getAttribute('aria-pressed')==='true'; })()`), 'comments-filter-controls-survive-redraw');
+  check(await renderer.evaluate(`(() => { document.querySelector('[data-mark-status-filter="applied"]').click(); return true; })()`), 'comments-status-applied');
+  await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===true)`, 'comments-status-no-match');
+  check(await renderer.evaluate(`(() => { __commentsSearch.value=''; __commentsSearch.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-mark-status-filter="all"]').click(); document.querySelector('[data-mark-category-filter="all"]').click(); return true; })()`), 'comments-filter-reset');
+  await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false && !document.querySelector('.editor-window [data-mark-id="'+id+'"][data-mark-filtered-out]'))`, 'comments-filter-all-restored');
 }
 
 export async function commentsGeometryAndScroll(renderer, check, waitFor) {

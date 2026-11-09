@@ -464,7 +464,7 @@ export function createWritingPreparationWork(host: WritingTaskOperationsHost, bo
   internalRequireWritingMaterialScope(host, materialIds.length > 0);
   internalRequireWritingScope(host);
   requireStore(UUID_PATTERN.test(bookId), 'WRITING_INVALID', '写作任务参数无效。');
-  const type = productionDocumentType(request.typeId);
+  const type = productionDocumentType(request.typeId, host.authority);
   requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
   const audience = internalWritingField(host, request.audience, MAX_WRITING_AUDIENCE_GRAPHEMES, '请写下这份文档的受众。', '受众');
   const channel = internalWritingField(host, request.channel, MAX_WRITING_CHANNEL_GRAPHEMES, '请写下这份文档的渠道。', '渠道');
@@ -843,7 +843,7 @@ export function createWritingDraft(host: WritingTaskOperationsHost, bookId: stri
   const inspected = host.analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as WritingProjection;
   const draft = inspected.inspectedRevision?.revision.writing.draft ?? null;
   requireStore(draft !== null && draft.usable !== false, 'WRITING_NOT_DRAFTED', '这一次起草没有写出文档草稿，不能打开草稿。');
-  const type = productionDocumentType(found.task.typeId);
+  const type = productionDocumentType(found.task.typeId, host.authority);
   requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
   // Every revision names a Source Version; a draft's names the manuscript file of the revision the Task read (its export is
   // written fresh from its own words, never from that file).

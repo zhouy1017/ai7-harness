@@ -1543,6 +1543,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.appendMaintenanceCaseRevision(request.input) };
     case 'saveMaintenanceErrata':
       return { id: request.id, ok: true, op: request.op, result: store.saveMaintenanceErrata(request.input) };
+    case 'saveProductionDocumentType':
+      return { id: request.id, ok: true, op: request.op, result: store.saveProductionDocumentType(request.input) };
+    case 'deleteProductionDocumentType':
+      return { id: request.id, ok: true, op: request.op, result: store.deleteProductionDocumentType(request.input) };
+    case 'reorderProductionDocumentTypes':
+      return { id: request.id, ok: true, op: request.op, result: store.reorderProductionDocumentTypes(request.input) };
+    case 'updateProductionDocumentMeta':
+      return { id: request.id, ok: true, op: request.op, result: store.updateProductionDocumentMeta(request.input) };
     case 'renameProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: store.renameProductionDocument(request.input) };
     case 'createProductionDocument':

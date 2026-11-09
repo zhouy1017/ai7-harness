@@ -518,7 +518,7 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
       { productionDocument: { typeId: 'news-release', typeLabel: '新闻稿', document: documentOf('book-one', '首发通稿') as never } });
     await vi.advanceTimersByTimeAsync(0);
     const switches = [...app.screen.querySelectorAll<HTMLButtonElement>('[data-manuscript-switch]')].map((node) => [node.dataset['manuscriptSwitch'], node.textContent, node.getAttribute('aria-current')]);
-    expect(switches).toEqual([['primary', '主稿件（《合成书》）', null], ['document', '[新闻稿] 首发通稿', 'page'], ['new', '+ 新建 / 导入衍生稿件', null]]);
+    expect(switches).toEqual([['primary', '主稿件（《合成书》）', null], ['document', '[新闻稿] 首发通稿', 'page'], ['new', '+ 新建 / 导入衍生稿件', null], ['manage', '管理全部衍生稿件 (1)', null]]);
     // Ordinary mode: no seven phases, no 交付 in the document's lens, and its 批注栏 is offered.
     expect(app.screen.querySelector('.document-lens')?.textContent).not.toContain('交付');
     expect(app.screen.querySelector('[data-edge-entry="comments"]')).not.toBeNull();

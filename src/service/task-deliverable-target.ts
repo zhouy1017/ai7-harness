@@ -20,7 +20,7 @@ export function pinTaskDeliverable(db: DatabaseSync, bookId: string, input: { ma
   const typeId = String(row.type_id);
   return { manuscriptId: input.manuscriptId, branchId: input.branchId, revisionId: input.revisionId,
     revisionDigest: String(row.revision_digest), journalSequence: Number(row.journal_sequence), version: Number(row.version), typeId,
-    label: `交付物 · ${documentTypeLabel(typeId)} · 版本 ${row.version}` };
+    label: `交付物 · ${documentTypeLabel(typeId, db)} · 版本 ${row.version}` };
 }
 
 export function taskDeliverableStale(db: DatabaseSync, bookId: string, pin: TaskIntentDeliverablePin): boolean {

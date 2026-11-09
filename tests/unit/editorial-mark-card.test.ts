@@ -8,7 +8,7 @@ beforeEach(() => { restore = installMiniDom(); });
 afterEach(() => restore());
 
 const card: EditorialMarkCardProjection = {
-  markId: 'mark', kind: 'change-suggestion', status: 'open', anchorState: 'exact', highlightColor: null,
+  categoryKey: 'other', categoryLabel: '校对', markId: 'mark', kind: 'change-suggestion', status: 'open', anchorState: 'exact', highlightColor: null,
   blockId: 'block', fromGrapheme: 0, toGrapheme: 2, pinnedText: '原文', body: '', replies: [], basis: [],
   source: { kind: 'ai7', origin: 'task', label: '校对', taskId: 'task', modelLabel: 'gpt-6-luna@high', modelTechnicalLabel: 'OpenAI 官方 · gpt-6-luna@high' },
   suggestion: { itemId: 'item', changeType: 'replace', currentText: '原文', proposedText: '改后', rationale: '理由', atomicGroupId: null, decision: null, application: null },
@@ -23,6 +23,13 @@ function render(value = card, moreOpen = new Map<string, boolean>()) {
 const blocks = (panel: HTMLElement) => Array.from(panel.querySelectorAll<HTMLElement>('[data-mark-block]')).map((node) => node.dataset['markBlock']);
 
 describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
+  it('shows the semantic category badge before the action kind (#1429)', () => {
+    const { panel } = render({ ...card, categoryKey: 'risk', categoryLabel: '合规与风险提示',
+      source: { ...card.source, label: '出版风险与合规提示' } });
+    expect(panel.dataset['markCategory']).toBe('risk');
+    expect(panel.querySelector('.editorial-mark-category-badge')?.textContent).toBe('【合规风险】');
+    expect(panel.querySelector('header')?.children[0]?.className).toBe('editorial-mark-category-badge');
+  });
   it('puts the author line in the header, then 原文 → 修改后, rationale, collapsed More and core actions (#1413)', () => {
     const { panel, more } = render();
     expect(blocks(panel)).toEqual(['author', 'original', 'proposed', 'rationale', 'more', 'actions']);

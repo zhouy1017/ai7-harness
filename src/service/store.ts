@@ -1,5 +1,7 @@
 import { reviewRunConclusions } from './review/report-evidence.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
+import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
+import type { SaveProductionDocumentTypeInput, DeleteProductionDocumentTypeInput, ReorderProductionDocumentTypesInput, UpdateProductionDocumentMetaInput, ProductionDocumentTypesProjection } from '../shared/protocol.js';
 import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
@@ -3257,6 +3259,7 @@ export class EditorialStore {
       initializeFactualRangeTaskSchema(authority);
       // Revision 111 (Issue #1412): the 🔒 AI edit lock ledger; `initializeTaskAuthorizationSchema` stamps the version.
       initializeAiEditLockSchema(authority);
+      initializeDerivativeWorkspaceSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -14413,7 +14416,7 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.bookId) && (input.sourceVersionId == null || UUID_PATTERN.test(input.sourceVersionId)),
       'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
-    const type = productionDocumentType(input.typeId);
+    const type = productionDocumentType(input.typeId, this.#authority);
     requireStore(type !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
     const plan = this.#documentCall(() => this.#productionDocumentPlan(input));
     const title = input.title === undefined ? undefined : publicationText(input.title, 80);
@@ -14523,6 +14526,27 @@ export class EditorialStore {
     return this.#productionDocumentResult(input.bookId, input.typeId, notCarried === 0 ? null : productionDocumentMarksNotCarried(notCarried), documentId);
   }
 
+  saveProductionDocumentType(input: SaveProductionDocumentTypeInput): ProductionDocumentTypesProjection {
+    this.#assertAvailable();
+    return saveProductionDocumentType(this.#authority, input);
+  }
+
+  deleteProductionDocumentType(input: DeleteProductionDocumentTypeInput): ProductionDocumentTypesProjection {
+    this.#assertAvailable();
+    return deleteProductionDocumentType(this.#authority, input.typeId);
+  }
+
+  reorderProductionDocumentTypes(input: ReorderProductionDocumentTypesInput): ProductionDocumentTypesProjection {
+    this.#assertAvailable();
+    return reorderProductionDocumentTypes(this.#authority, input.typeIds);
+  }
+
+  updateProductionDocumentMeta(input: UpdateProductionDocumentMetaInput): ProductionDocumentsProjection {
+    this.#assertAvailable();
+    this.#documentCall(() => this.#productionDocuments.updateMeta(input));
+    return this.inspectProductionDocuments(input.bookId);
+  }
+
   renameProductionDocument(input: RenameProductionDocumentInput): ProductionDocumentResultProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId), 'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
@@ -14531,6 +14555,7 @@ export class EditorialStore {
     const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
     requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
     this.#authority.prepare('UPDATE manuscript_branches SET name = ? WHERE manuscript_id = ?').run(title, row.documentId);
+    if (productionDocumentType(row.typeId, this.#authority) !== undefined) this.#productionDocuments.updateMeta({ bookId: input.bookId, documentId: row.documentId });
     return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
   }
 

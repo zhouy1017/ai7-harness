@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialCardCache, mountEditorialMarks, stackEditorialComments } from '../../src/renderer/editorial-marks.js';
+import { matchesEditorialMarkFilter } from '../../src/renderer/editorial-mark-filter.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkCardProjection, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
 const card: EditorialMarkCardProjection = {
-  markId: 'comment', kind: 'annotation', status: 'open', anchorState: 'exact', highlightColor: null,
+  categoryKey: 'editor', categoryLabel: '编辑人工修订', markId: 'comment', kind: 'annotation', status: 'open', anchorState: 'exact', highlightColor: null,
   blockId: 'block', fromGrapheme: 0, toGrapheme: 2, pinnedText: '合成', body: '公开合成批注', replies: [], basis: [],
   source: { kind: 'editor', origin: null, label: null, taskId: null, editorName: '责编' }, suggestion: null,
   convertedFrom: null, resolvedFrom: null, changedElsewhere: false, conflict: null, exportDisposition: 'exported-by-default',
@@ -15,6 +16,7 @@ const card: EditorialMarkCardProjection = {
 const anchor = (value = card): EditorialMarkAnchorProjection => ({
   markId: value.markId, kind: value.kind, blockId: value.blockId, fromGrapheme: value.fromGrapheme, toGrapheme: value.toGrapheme,
   anchorState: value.anchorState === 'exact' ? 'exact' : 'drifted', status: value.status, highlightColor: null, sourceKind: value.source.kind,
+  sourceOrigin: value.source.origin, sourceLabel: value.source.label, categoryKey: value.categoryKey, categoryLabel: value.categoryLabel,
   disposition: value.suggestion?.decision?.disposition ?? null, deletedText: null, insertedText: null, conflict: null,
 });
 const windowOf = (): ManuscriptWindowProjection => ({
@@ -23,6 +25,15 @@ const windowOf = (): ManuscriptWindowProjection => ({
 } as unknown as ManuscriptWindowProjection);
 const deferred = <T>() => { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
 const suggestion: EditorialMarkCardProjection = { ...card, kind: 'change-suggestion', suggestion: { itemId: 'item', changeType: 'replace', currentText: '合成', proposedText: '改后', rationale: '理由', atomicGroupId: null, decision: null, application: null } };
+
+it('searches original wording, replacement, rationale and category, case-insensitively (#1429)', () => {
+  const value = { ...suggestion, suggestion: { ...suggestion.suggestion!, proposedText: 'ABC改后' } };
+  const filter = { selectedCategories: new Set<'editor'>(), status: 'all' as const, keyword: '' };
+  for (const keyword of ['合成', 'abc', '理由', '编辑人工修订']) {
+    expect(matchesEditorialMarkFilter(anchor(value), value, { ...filter, keyword })).toBe(true);
+  }
+  expect(matchesEditorialMarkFilter(anchor(value), value, { ...filter, keyword: '未匹配的检索' })).toBe(false);
+});
 
 it('stacks all five measured cards in anchor order with ten pixel gaps, including offscreen buffers', () => {
   const items = [{ desiredTop: 200, measuredHeight: 90 }, { desiredTop: -190, measuredHeight: 40 },
@@ -105,12 +116,12 @@ describe('comments command parity and refresh continuity', () => {
   });
   afterEach(() => { mounted?.destroy(); mounted = undefined; setTechnicalLayerVisible(technicalBefore); vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
   async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
-  function mount(value = card) {
-    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value)] }; let latest = value; let enabled = true; let caret = 10;
+  function mount(value = card, others: EditorialMarkCardProjection[] = []) {
+    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value), ...others.map(anchor)] }; let latest = value; let enabled = true; let caret = 10;
     const host = document.createElement('div'); const scroll = document.createElement('div'); const pane = document.createElement('aside');
     miniDocument.body.append(host as unknown as MiniElement, scroll as unknown as MiniElement, pane as unknown as MiniElement);
     const block = document.createElement('p'); block.dataset['blockId'] = 'block'; host.append(block);
-    const get = vi.fn(async () => latest);
+    const get = vi.fn(async (input: { markId: string }) => others.find((other) => other.markId === input.markId) ?? latest);
     const update = vi.fn(async (input: { action: string; status: 'open' | 'resolved'; body: string }) => {
       latest = input.action === 'reply' ? { ...latest, replies: [{ replyId: 'reply', body: input.body, createdAt: card.createdAt }] } : { ...latest, status: input.status };
       return { markId: latest.markId, card: latest, marks: [anchor(latest)], marksTruncated: false };
@@ -125,8 +136,8 @@ describe('comments command parity and refresh continuity', () => {
     const outcome = vi.fn(async (_input: Record<string, unknown>): Promise<unknown> => { throw new Error('outcome unavailable'); });
     const receipt = vi.fn(async (input: Record<string, unknown>) => ({ state: input['recovery'] === 'confirming' ? 'confirming' : 'unresolved', clientEffectId: input['clientEffectId'], reason: '结果待确认' }));
     const options = { host, scroll, comments: { host: pane, enabled: () => enabled },
-      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, setLinkedMark: linked, captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
-      api: { getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
+      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, setLinkedMark: linked, setVisibleMarkIds: vi.fn(), captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
+      api: { inspectReviewFindingOfMark: async () => null, getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
@@ -137,6 +148,29 @@ describe('comments command parity and refresh continuity', () => {
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
     };
   }
+  it('combines category chips, status and search while keeping selections and search focus across polling (#1429)', async () => {
+    const literary: EditorialMarkCardProjection = { ...card, markId: 'literary', categoryKey: 'literary', categoryLabel: '文学性与表达',
+      source: { ...card.source, kind: 'ai7', origin: 'review-category', label: '文学性与表达改进' }, status: 'applied' };
+    const ui = mount(card, [literary]); await paint();
+    const chip = (key: string) => ui.pane.querySelector<HTMLButtonElement>(`[data-mark-category-filter="${key}"]`)!;
+    const shown = () => Array.from(ui.pane.querySelectorAll<HTMLElement>('[data-comment-card]')).filter((node) => !node.hidden).map((node) => node.dataset['commentCard']);
+    chip('editor').click(); await paint(); expect(shown()).toEqual(['comment']);
+    chip('literary').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="applied"]')!.click(); await paint();
+    expect(shown()).toEqual(['literary']);
+    const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
+    search.value = '文学性'; search.focus(); (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
+    ui.setPage({ journalSequence: 1 }); await paint();
+    expect(ui.pane.querySelector('[data-mark-search-input]')).toBe(search);
+    expect(document.activeElement).toBe(search); expect(search.value).toBe('文学性');
+    expect(chip('editor').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('literary').getAttribute('aria-pressed')).toBe('true'); expect(shown()).toEqual(['literary']);
+    search.value = '不存在的公开检索词'; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint(); expect(shown()).toEqual([]);
+    search.value = ''; (search as unknown as MiniElement).dispatchEvent({ type: 'input' });
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="all"]')!.click();
+    chip('all').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
+    chip('editor').click(); chip('editor').click(); await paint(); expect(chip('all').getAttribute('aria-pressed')).toBe('true');
+  });
   it('reuses reply/resolve commands, keeps the actual reply input and caret across a returned-card refresh, and reads once', async () => {
     const ui = mount(); await paint();
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();

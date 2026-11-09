@@ -132,6 +132,7 @@ interface ManuscriptScreenOptions {
   returnToRecoveryComparison(attentionId: string): Promise<void>;
   /** 本书稿件 (Issue #1403): the Book's manuscript, and one of its derivative documents, opened on this surface. */
   openPrimaryManuscript(bookId: string, bookTitle: string): Promise<void>;
+  openDerivativesWorkspace?(bookId: string, bookTitle: string): void;
   openProductionDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, bookTitle: string, notice?: string | null): Promise<void>;
   openWritingPlan(bookId: string, taskIntentId: string, note?: string): void;
 }
@@ -896,6 +897,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     setStatus,
     errorMessage: rendererErrorMessage,
     awaitServiceJob,
+    ...(options.openDerivativesWorkspace === undefined ? {} : { openWorkspace: () => leaveFor(async () => options.openDerivativesWorkspace!(initialWindow.bookId, bookTitle)) }),
     openPrimary: () => leaveFor(() => options.openPrimaryManuscript(initialWindow.bookId, bookTitle)),
     openDocument: (document, type, notice) => leaveFor(() => options.openProductionDocument(document, type, bookTitle, notice)),
     openWritingPlan: (ref, note) => options.openWritingPlan(initialWindow.bookId, ref, note),

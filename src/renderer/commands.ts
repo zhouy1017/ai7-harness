@@ -39,6 +39,7 @@ const both = (chord: string): Readonly<Record<CommandPlatform, string>> => ({ wi
 /** The Book sections a Book's window can move between; the order is the order of their default digits. */
 export const BOOK_SECTION_COMMANDS = [
   ['nav.book.manuscript', COMMAND_NAMES['nav.book.manuscript'], 'manuscript'],
+  ['nav.book.derivatives', COMMAND_NAMES['nav.book.derivatives'], 'derivatives'],
   ['nav.book.review', COMMAND_NAMES['nav.book.review'], 'review'],
   ['nav.book.evaluation', COMMAND_NAMES['nav.book.evaluation'], 'evaluation'],
   ['nav.book.deliverables', COMMAND_NAMES['nav.book.deliverables'], 'deliverables'],
@@ -63,7 +64,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
   { id: 'nav.quality', name: COMMAND_NAMES['nav.quality'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+5', darwin: 'Mod+Alt+5' } },
   ...BOOK_SECTION_COMMANDS.map(([id, name], index): CommandDefinition => ({
     id, name, group: 'navigation', context: 'book',
-    defaults: { win32: `Alt+Shift+${index + 1}`, darwin: `Mod+Alt+Shift+${index + 1}` },
+    defaults: { win32: `Alt+Shift+${index === 1 ? 0 : index === 0 ? 1 : index}`, darwin: `Mod+Alt+Shift+${index === 1 ? 0 : index === 0 ? 1 : index}` },
   })),
   { id: 'nav.settings', name: COMMAND_NAMES['nav.settings'], group: 'navigation', context: 'application', defaults: both('Mod+Comma') },
   { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Backslash') },
