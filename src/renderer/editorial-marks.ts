@@ -66,7 +66,7 @@ import {
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
-import { READING_REVISION_CLIPBOARD_REASON, type EditorInputMode } from './editor-input-mode.js';
+import { type EditorInputMode } from './editor-input-mode.js';
 import {
   AI_LOCK_SELECTION_LABEL, AI_UNLOCK_SELECTION_LABEL, SCOPED_AI_EDIT_MENU_LABEL, openScopedAiEditComposer, selectionLockTargets, selectionLocked,
   setAiLocks, type ScopedAiEditHost,
@@ -235,10 +235,11 @@ interface MountOptions {
    * settled, the editor locked, the window reloaded from the service and checked against the state the
    * Effect Receipt names. `undefined` when it did not complete; the surface has then said why.
    */
+  writeInlineRevision?(operation: () => Promise<EditorialMarkCommandProjection>): Promise<EditorialMarkCommandProjection | undefined>;
   writeManuscript<T extends ManuscriptApplyCommandProjection>(operation: () => Promise<T>, done: string): Promise<T | undefined>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
-  /** 阅读与修订模式 (Issue #1411): while the text is guarded, the menu's 剪切 and 粘贴 are refused with their reason. */
+  /** The surface's current input mode. Clipboard input remains available in both modes. */
   inputMode?(): EditorInputMode;
   /** Open the 批注栏 for a card it should show; `false` where it cannot show now (专注模式), and the card floats instead. */
   revealComments?(): boolean;
@@ -1375,6 +1376,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     ...extra,
   });
 
+  async function changeInlineRevision(markId: string, action: 'apply-inline-revision' | 'revert-inline-revision'): Promise<void> {
+    if (refuseWhileBusy() || !options.writeInlineRevision) return;
+    working = true;
+    try {
+      const result = await options.writeInlineRevision(() => update(markId, action, {}));
+      if (result) { applyCommand(result); refreshComments(); }
+    } catch (error) { options.setStatus(options.errorMessage(error, '修订未能更新。'), 'error'); }
+    finally { working = false; }
+  }
+
   /** Apply one change to a mark and show what it became: its card, or nothing when it has none now. */
   const change = (
     markId: string,
@@ -1644,7 +1655,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       // An insertion a file's author proposed stands at a point and replaces nothing (Issue #411).
       const inserts = suggestion.changeType === 'insert';
       more.append(
-        el('p', 'muted', applied !== null
+        el('p', 'muted', card.inlineRevision
+          ? card.status === 'applied' ? '这处修改已保存并应用；可撤销本次修改。' : '正文正在显示你的修改；可应用修改或忽略/还原。'
+          : applied !== null
           ? '这处修改已经写入稿件；正文里是应用后的文字。'
           : exact && decision?.disposition !== 'rejected'
             ? inserts
@@ -1674,7 +1687,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }).catch(() => {});
       }
 
-      if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
+      if (card.inlineRevision) {
+        const act = (action: 'apply-inline-revision' | 'revert-inline-revision') => changeInlineRevision(card.markId, action);
+        if (card.status === 'open') disposition.append(cardAction('accept-and-apply', '应用修改', 'primary', () => void act('apply-inline-revision')));
+        disposition.append(exact ? cardAction('reverse-revision', card.status === 'applied' ? REVERSE_REVISION_LABEL : '忽略/还原', 'secondary',
+          () => void act('revert-inline-revision')) : disabledAction('reverse-revision', '这处文字又改过', '请先查看当前稿件。'));
+        yours.append(disposition);
+      } else if (pendingReceipt?.state === 'confirming' || pendingReceipt?.state === 'unresolved') {
         yours.append(el('p', 'muted', '应用结果确认前不能再次应用。'));
         // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
         if (pendingReceipt.state === 'unresolved') yours.append(cardAction('receipt-recheck', '重新核对应用结果', 'secondary', () => void api.inspectApplyReceipt({
@@ -2550,8 +2569,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
-    const guardedText = options.inputMode?.() === 'reading-revision';
-    const writes = (run: () => void): Pick<MenuItem, 'run' | 'disabledReason'> => guardedText ? { disabledReason: READING_REVISION_CLIPBOARD_REASON } : { run };
+    const writes = (run: () => void): Pick<MenuItem, 'run' | 'disabledReason'> => ({ run });
     // 修改此处 (Issue #1411) leads: the selected words, across paragraphs too, revised with a card and applied at once.
     const reviseReason = range.kind === 'range' || range.kind === 'span' ? undefined : range.kind === 'none' ? '先选中文字' : why ?? selectionMenuReason(range.kind);
     showMenu('selection', '稿件右键菜单', [
@@ -2698,7 +2716,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         { action: 'remove', label: '删除', run: () => void change(mark.markId, 'remove', {}, '已删除备注。') },
       ];
     } else {
-      items = [
+      items = mark.inlineRevision ? [
+        { action: 'open-card', label: '打开编辑修订', run: () => void openCard(mark.markId) },
+        ...(mark.status === 'open' ? [{ action: 'accept-and-apply', label: '应用修改', run: () => void changeInlineRevision(mark.markId, 'apply-inline-revision') }] : []),
+        { action: 'reverse-revision', label: mark.status === 'applied' ? REVERSE_REVISION_LABEL : '忽略/还原',
+          ...(exact ? { run: () => void changeInlineRevision(mark.markId, 'revert-inline-revision') } : { disabledReason: '这处文字又改过，请先查看当前稿件。' }) },
+      ] : [
         { action: 'open-card', label: '打开修改建议', run: () => void openCard(mark.markId) },
         mark.status === 'applied'
           // The menu's undo is the card's one click (Issue #1410 item 7); the service refuses it when the words changed again.

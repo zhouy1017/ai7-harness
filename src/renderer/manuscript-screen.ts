@@ -28,7 +28,7 @@ import {
 } from './manuscript-search-labels.js';
 import { replacementRevisionRationale } from '../shared/editor-revision-words.js';
 import { AI_LOCK_SECTION_LABEL, AI_UNLOCK_SECTION_LABEL, setAiLocks, type ScopedAiEditHost } from './scoped-ai-edit.js';
-import { DEFAULT_EDITOR_INPUT_MODE, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
+import { DEFAULT_EDITOR_INPUT_MODE, getAutoApplyEditorRevisions, setAutoApplyEditorRevisions, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
 import { shortcutHint } from './commands.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
 import {
@@ -439,9 +439,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
-  // 阅读与修订模式 (Issue #1411): the text opens guarded; this pill is the one explicit way to type straight into it.
-  const inputModeToggle = button(INPUT_MODE_LABELS[DEFAULT_EDITOR_INPUT_MODE], 'secondary', () =>
-    setInputMode(editor?.inputMode() === 'direct-edit' ? 'reading-revision' : 'direct-edit'));
+  // Revision mode records ordinary input; direct edit is the explicit opt-out from revision cards.
+  const inputModeToggle = button(INPUT_MODE_LABELS[DEFAULT_EDITOR_INPUT_MODE], 'secondary', () => {
+    const mode = editor?.inputMode() === 'direct-edit' ? 'reading-revision' : 'direct-edit';
+    if (!dirty && !saving && !retryRequired) setInputMode(mode);
+    else void editor?.flush().then(() => setInputMode(mode));
+  });
   inputModeToggle.className = `${inputModeToggle.className} editor-input-mode-toggle`;
   inputModeToggle.dataset['editorInputModeToggle'] = 'true';
   const paintInputMode = (mode: EditorInputMode): void => {
@@ -459,9 +462,23 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
   // 让 AI 修改… (Issue #1412): the unlocked parts of this section or of the whole text, on the manuscript and on a document.
+  let autoApplyRevisions = getAutoApplyEditorRevisions();
+  const autoApplyToggle = button('', 'secondary', () => {
+    void editor?.flush().then(() => {
+      autoApplyRevisions = !autoApplyRevisions;
+      setAutoApplyEditorRevisions(autoApplyRevisions);
+      paintAutoApply();
+    });
+  });
+  autoApplyToggle.dataset['editorAutoApplyToggle'] = 'true';
+  const paintAutoApply = (): void => {
+    autoApplyToggle.textContent = `修订模式 · 人工修改自动应用：${autoApplyRevisions ? '开' : '关'}`;
+    autoApplyToggle.setAttribute('aria-pressed', String(autoApplyRevisions));
+  };
+  paintAutoApply();
   const scopedAiEditEntry = button('让 AI 修改…', 'secondary', () => editorialMarks?.composeScopedAiEdit());
   scopedAiEditEntry.dataset['scopedAiEditEntry'] = 'true';
-  toolbarActions.append(inputModeToggle, scopedAiEditEntry, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.append(inputModeToggle, autoApplyToggle, scopedAiEditEntry, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
   // 本书稿件 (Issue #1403): the manuscript and every derivative document of the Book, and 新建 / 导入衍生稿件, above the editor.
   let switcher: ManuscriptSwitcher | undefined;
@@ -2483,8 +2500,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       }
     },
     onAnnouncement: setStatus,
-    // 阅读与修订模式 (Issue #1411): a key over selected words opens 修改此处.
-    onRevisionIntent: () => editorialMarks?.quickRevise() === true,
     onCommand: (command) => {
       if (command === 'search' || command === 'replace') {
         setNavigationOpen(true);
@@ -2687,6 +2702,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     setStatus,
     errorMessage: rendererErrorMessage,
     inputMode: () => editor?.inputMode() ?? DEFAULT_EDITOR_INPUT_MODE,
+    writeInlineRevision: async (operation) => runAuthoritativeMutation(async () => {
+      const result = await operation();
+      if (result.window === undefined) throw new Error('修订保存后无法读取稿件。');
+      return { ...result, revisionId: result.window.revisionId, journalSequence: result.window.journalSequence,
+        workingDigest: result.window.workingDigest, completionLabel: '已更新编辑修订。' };
+    }, async () => { await loadOutline(true); }),
     scopedAiEdit: { host: scopedAiEditHost, sectionOf },
     // ✎ 已改 (Issue #1411): the 批注栏 opens on the revision's card, unless 专注模式 keeps it closed.
     revealComments: () => {

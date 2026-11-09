@@ -1809,6 +1809,10 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--mark-suggestion); outline-offset: 1px; }
 /* 阅读与修订模式 (Issue #1411): the mode pill says which mode the text is in. */
 .editor-input-mode-toggle { white-space: nowrap; }
+.inline-track-del { color: var(--status-blocked); text-decoration: line-through; background: var(--status-blocked-surface); user-select: none; }
+.inline-track-ins { color: var(--status-attention); text-decoration: underline; text-underline-offset: .18em; background: var(--status-attention-surface); }
+.paragraph-revision-bar { border-inline-start: 3px solid var(--status-attention); padding-inline-start: 8px; }
+.inline-track-del[data-mark-filtered-out="true"], .inline-track-ins[data-mark-filtered-out="true"] { opacity: .2; }
 .editor-input-mode-toggle[data-input-mode="direct-edit"] { color: var(--status-blocked); border-color: currentColor; }
 .ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
 /* Where a mark stands on no text — the point an applied deletion left — a thin upright line in the

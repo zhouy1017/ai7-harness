@@ -1936,6 +1936,7 @@ export interface EditorialMarkSourceProjection {
 
 /** One mark as the manuscript surface draws it; the card's content is read on demand. */
 export interface EditorialMarkAnchorProjection {
+  inlineRevision?: { beforeText: string; afterText: string; sessionId: string };
   markId: string;
   kind: EditorialMarkKind;
   blockId: string;
@@ -2002,6 +2003,7 @@ export interface ProposalItemDecisionProjection {
  * from any change to the manuscript.
  */
 export interface EditorialMarkCardProjection {
+  inlineRevision?: boolean;
   markId: string;
   categoryKey: EditorialMarkCategoryKey;
   categoryLabel: string;
@@ -2087,7 +2089,7 @@ export interface CreateEditorialMarkInput extends EditorialMarkBindingInput {
  */
 export interface UpdateEditorialMarkInput extends EditorialMarkBindingInput {
   markId: string;
-  action: 'edit-body' | 'recolor' | 'set-status' | 'reply' | 'remove' | 'convert';
+  action: 'edit-body' | 'recolor' | 'set-status' | 'reply' | 'remove' | 'convert' | 'apply-inline-revision' | 'revert-inline-revision';
   body: string | null;
   highlightColor: PersonalHighlightColor | null;
   status: EditorialMarkStatus | null;
@@ -2136,6 +2138,7 @@ export interface RecordProposalDecisionFeedbackInput extends EditorialMarkBindin
 }
 
 export interface EditorialMarkCommandProjection {
+  window?: ManuscriptWindowProjection;
   markId: string;
   marks: ReadonlyArray<EditorialMarkAnchorProjection>;
   marksTruncated: boolean;

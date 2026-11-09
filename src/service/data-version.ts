@@ -87,6 +87,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 110, class: 'additive' }, // #1401: permit first factual range tasks without rewriting prior records.
   { revision: 111, class: 'additive' }, // #1412: the append-only 🔒 AI edit lock ledger; a store without locks reads as before.
   { revision: 112, class: 'additive' }, // #1427: editable derivative categories and workspace metadata.
+  { revision: 113, class: 'additive' }, // #1428: inline revision journal/card links.
 ];
 
 /**

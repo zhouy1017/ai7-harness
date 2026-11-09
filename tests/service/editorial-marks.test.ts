@@ -711,3 +711,75 @@ describe('Editorial Marks on a manuscript', () => {
     }
   }, 300_000);
 });
+
+
+describe('inline editor revision journal (#1428)', () => {
+  it.each([true, false])('coalesces an edit, follows undo/redo and restores the baseline (auto apply %s)', async (autoApply) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store), initial = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(initial), sessionId = randomUUID();
+      const write = (window: ManuscriptWindowProjection, from: number, to: number, insertText: string) => store.flushJournalEdit({
+        ...book, clientEditId: randomUUID(), baseRevisionId: window.revisionId, blockId: block.blockId,
+        windowStartBlockId: initial.blocks[0]!.blockId, baseBlockDigest: window.blocks.find((b) => b.blockId === block.blockId)!.digest,
+        expectedJournalSequence: window.journalSequence, fromGrapheme: from, toGrapheme: to, insertText,
+        editorRevision: { sessionId, autoApply },
+      }).window;
+      let window = write(initial, 4, 8, '公开修订');
+      const markId = window.marks.find((m) => m.blockId === block.blockId && m.inlineRevision)!.markId;
+      window = write(window, 4, 8, '公开新修订');
+      expect(window.marks.filter((m) => m.inlineRevision).map((m) => m.markId)).toEqual([markId]);
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).status).toBe(autoApply ? 'applied' : 'open');
+      store.undoManuscript(book.manuscriptId, book.branchId, window.workingDigest);
+      window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).suggestion?.proposedText).toBe('公开修订');
+      store.redoManuscript(book.manuscriptId, book.branchId, window.workingDigest);
+      const result = store.updateEditorialMark({ ...book, windowStartBlockId: initial.blocks[0]!.blockId,
+        markId, action: 'revert-inline-revision', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+      expect(result.window?.blocks.find((b) => b.blockId === block.blockId)?.text === block.text).toBe(true);
+      expect(result.window?.marks.some((m) => m.markId === markId)).toBe(false);
+    } finally { store.close(); }
+  });
+
+  it('keeps pending cards across reopen and accepts without writing the edited text twice', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store), initial = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(initial);
+      const input = { ...book, clientEditId: randomUUID(), baseRevisionId: initial.revisionId, blockId: block.blockId,
+        windowStartBlockId: initial.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: initial.journalSequence,
+        fromGrapheme: 4, toGrapheme: 8, insertText: '公开修订', editorRevision: { sessionId: randomUUID(), autoApply: false } };
+      const written = store.flushJournalEdit(input);
+      expect(store.flushJournalEdit(input).sequence).toBe(written.sequence);
+      const markId = written.window.marks.find((m) => m.inlineRevision)!.markId;
+      store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).status).toBe('open');
+      const result = store.updateEditorialMark({ ...book, windowStartBlockId: initial.blocks[0]!.blockId,
+        markId, action: 'apply-inline-revision', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+      expect(result.card?.status).toBe('applied');
+      expect(result.window?.journalSequence).toBe(written.sequence);
+    } finally { store.close(); }
+  });
+});
+
+
+it('keeps disjoint inline spans separate and removes every card when text returns to baseline', async () => {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importBook(store), initial = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const block = markableBlock(initial), parts = graphemesOf(block.text), sessionId = randomUUID();
+    const write = (window: ManuscriptWindowProjection, fromGrapheme: number, toGrapheme: number, insertText: string) => store.flushJournalEdit({
+      ...book, clientEditId: randomUUID(), baseRevisionId: window.revisionId, blockId: block.blockId,
+      windowStartBlockId: initial.blocks[0]!.blockId, baseBlockDigest: window.blocks.find((b) => b.blockId === block.blockId)!.digest,
+      expectedJournalSequence: window.journalSequence, fromGrapheme, toGrapheme, insertText,
+      editorRevision: { sessionId, autoApply: false },
+    }).window;
+    const changed = write(initial, 4, 12, '🟢' + parts.slice(6, 10).join('') + '🟣');
+    expect(changed.marks.filter((mark) => mark.inlineRevision)).toHaveLength(2);
+    const restored = write(changed, 4, 10, parts.slice(4, 12).join(''));
+    expect(restored.marks.filter((mark) => mark.inlineRevision)).toHaveLength(0);
+    expect(restored.blocks.find((b) => b.blockId === block.blockId)?.text === block.text).toBe(true);
+    store.undoManuscript(book.manuscriptId, book.branchId, restored.workingDigest);
+    expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks.filter((mark) => mark.inlineRevision)).toHaveLength(2);
+  } finally { store.close(); }
+});
