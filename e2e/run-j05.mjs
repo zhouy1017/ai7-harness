@@ -333,10 +333,9 @@ async function importAndOpen(renderer, title) {
 
 /** Wait until nothing typed is waiting for the journal, and no mark command is in flight. */
 async function selectInlineRevision(renderer, name) {
-  await assertRenderer(renderer, `window.__j05.place(window.__j05RevBlock,4,8)`, name);
-  try {
-  await waitFor(renderer, `(() => { const value=document.querySelector('[data-testid="manuscript-editor"]')?.dataset.selectionSnapshot; if(!value)return false; const selection=JSON.parse(value); return selection.anchor.blockId===window.__j05RevBlock && selection.head.blockId===window.__j05RevBlock && selection.anchor.grapheme===4 && selection.head.grapheme===8; })()`, `${name}-editor-selection`, localDebugEnabled()?5000:60000);
-  } catch(error) { recordDebugDetail('J-05', '[DEBUG-1428-selection] '+JSON.stringify(await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const selection=getSelection(); const block=(node)=>node?.parentElement?.closest('[data-block-id]')?.dataset.blockId; return {expected:window.__j05RevBlock,snapshot:editor?.dataset.selectionSnapshot,domAnchor:block(selection.anchorNode),domHead:block(selection.focusNode),domFrom:selection.anchorOffset,domTo:selection.focusOffset,activeEditor:document.activeElement===editor,readonly:editor.getAttribute('aria-readonly'),composing:editor.dataset.composing,operationLocked:editor.dataset.operationLocked}; })()`))); throw error; }
+  // A pending window restoration can replace a programmatic range before the editor reads it.
+  // Retry placement until the actual editor selection acknowledges the requested range.
+  await waitFor(renderer, `(() => { const value=document.querySelector('[data-testid="manuscript-editor"]')?.dataset.selectionSnapshot; if(!value)return false; const selection=JSON.parse(value); if(selection.anchor.blockId===window.__j05RevBlock && selection.head.blockId===window.__j05RevBlock && selection.anchor.grapheme===4 && selection.head.grapheme===8)return true; window.__j05.place(window.__j05RevBlock,4,8); return false; })()`, `${name}-editor-selection`);
 }
 
 async function settled(renderer, name) {
