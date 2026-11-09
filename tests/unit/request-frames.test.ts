@@ -878,6 +878,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options, format: 'markdown' } },
       // Issue #500 (S64b part 2): one recorded version of a 审阅报告, in any of the three formats.
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report', reportId: randomUUID() }, options, format: 'markdown' } },
+      // Issue #1430: 导出审阅报告（DOCX） records the Book's report, or one Run's, as it reviews the export.
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'book-review-report' }, options, format: 'docx' } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'book-review-report', reviewRunId: randomUUID() }, options, format: 'docx' } },
       { op: 'prepareManuscriptExport', input: { bookId, revisionId: randomUUID(), target: milestone, options, reviewDigest: 'f'.repeat(64), destination, format: 'docx' } },
       { op: 'stageManuscriptExport', input: { bookId, preparationId: randomUUID() } },
       // Issue #415 (S66b): one saved version of a Production Document, named by the document and its revision.
@@ -1321,6 +1324,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'milestone', milestoneId: 'first' }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report', reportId: 'latest' }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report', reportId: randomUUID(), version: 1 }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'book-review-report', reviewRunId: 'latest' }, options } },
+      { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'book-review-report', reportId: randomUUID() }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'report' }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'document', documentId: randomUUID() }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'document', documentId: randomUUID(), revisionId: '版本 2' }, options } },

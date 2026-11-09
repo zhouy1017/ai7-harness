@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { strFromU8, unzipSync } from 'fflate';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -29,6 +30,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // The Book's title as the import confirms it, and the 审阅报告's exported file (Issue #500, S64b part 2).
 const J04_BOOK_TITLE = 'J-04 sample1 基线稿件分析';
 const REPORT_EXPORT_FILE = '审阅报告.md';
+const BOOK_REPORT_EXPORT_FILE = '书稿_审阅报告.docx';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
@@ -1104,12 +1106,15 @@ async function main() {
     const exportsRoot = resolve(runRoot, 'exports');
     await mkdir(exportsRoot);
     const reportExportPath = resolve(exportsRoot, REPORT_EXPORT_FILE);
+    // Issue #1430: the overlap relaunch answers its Save dialog with the one-step 导出审阅报告（DOCX）'s file instead.
+    const bookReportExportPath = resolve(exportsRoot, BOOK_REPORT_EXPORT_FILE);
+    let saveAnswerPath = reportExportPath;
     const launchArgs = () => [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
-      '--j04-save-path', reportExportPath, '--j10-unit-hold-path', unitHoldPath,
+      '--j04-save-path', saveAnswerPath, '--j10-unit-hold-path', unitHoldPath,
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
@@ -3276,6 +3281,7 @@ async function main() {
     await closeOwnedBrowser();
     cancellation.throwIfRequested();
     modelAdapterIdentity = 'review-overlap-authored';
+    saveAnswerPath = bookReportExportPath;
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'overlap-launch-ready');
     const overlapBook = await importSample1(renderer, cancellation, true);
@@ -3339,6 +3345,20 @@ async function main() {
     // The store commits before the renderer finishes its Apply refresh. As in J-05, wait for the
     // reopened suggestion before closing this browser, so the transition cannot race an active write.
     await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待你处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
+
+    at('review-report-docx-one-step');
+    // Issue #1430: 导出审阅报告（DOCX） in 审阅's header is one click — the Book's report is recorded, this launch's Save
+    // answer is the destination, the file is written and the toast names where. The runner opens the DOCX: the title block,
+    // the four parts, the statistics table and the one finding's banner above its four-row table.
+    await openReviewDestination(renderer, 'docx-report-review');
+    await reviewAction(renderer, '.review-workspace-heading [data-review-action="export-docx-report"]', 'docx-report-export');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('[data-toast]')).some((toast)=>toast.textContent.includes(${JSON.stringify(`审阅报告已导出至 ${bookReportExportPath}`)}))`, 'docx-report-exported-toast', 60_000);
+    const bookReportXml = strFromU8(unzipSync(await readFile(bookReportExportPath))['word/document.xml']);
+    const bookReportTables = bookReportXml.match(/<w:tbl>.*?<\/w:tbl>/gsu) ?? [];
+    requireJourney(bookReportXml.includes('审阅报告</w:t>') && ['一、审阅说明', '二、问题统计', '三、建议优先处理的重点问题', '四、逐项问题清单'].every((part) => bookReportXml.includes(`>${part}</w:t>`)) &&
+      bookReportTables.length === 2 && bookReportTables[0].includes('w:fill="DCE6F1"') && bookReportTables[0].includes('>合计</w:t>') &&
+      bookReportXml.match(/w:fill="F7F7F7"/gu)?.length === 1 && bookReportXml.includes('<w:color w:val="2E86C1"/>') && bookReportTables[1].match(/<w:tr>/gu)?.length === 4,
+    'docx-report-file-reads-as-the-published-report', { bytes: bookReportXml.length, tables: bookReportTables.length });
 
     // ---- 事实核查 at its Evidence Assurance Levels (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ----
     // Synchronized delta with Issue #901: a fresh, unedited sample1 Book on the provider-free `sample1-factual-verified` fixture,

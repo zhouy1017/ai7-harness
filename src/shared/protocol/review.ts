@@ -44,6 +44,10 @@ type FindingCounts = import('../protocol.js').ReviewFindingCountsProjection;
 
 /** What `ai7.review.report/2` adds to the four parts of /1; absent on a /1 record, which reads and exports as it was. */
 export interface ReviewReportDerivedSections {
+  /** The manuscript the report was made over (Issue #1430): its chapters and characters, for 「正文约 X 万字，共 N 章」. */
+  readonly manuscriptExtent?: { readonly chapterCount: number; readonly characterCount: number };
+  /** A Book's report (Issue #1430, 导出审阅报告（DOCX）): the authorized Runs whose findings it lists, each mark once. */
+  readonly compilation?: { readonly runCount: number };
   /** Every finding of the Run by severity and status, each counted once in both. */
   readonly totals?: FindingCounts;
   /** Findings per chapter (by position, never heading words) and category; each finding counts in its own category. */
@@ -63,7 +67,26 @@ export interface ReviewReportDerivedSections {
   };
 }
 
+/**
+ * One 发现详单 row. The optional fields (Issue #1430) are what the published DOCX lays out — 问题 001, its category, its
+ * chapter and 段落, 问题简述 / 问题所对应的原文 / 建议修改后的文本 / 修改建议的原因与理由 and 引用来源; a row recorded
+ * before them exports from the fields below.
+ */
 export interface ReviewReportFindingEntry {
+  readonly index?: string;
+  readonly categoryKey?: import('../editorial-mark-category.js').EditorialMarkCategoryKey;
+  readonly categoryLabel?: string;
+  readonly chapterTitle?: string;
+  readonly chapterOrder?: number;
+  /** The block's place counted from its chapter's heading, 「段落 N」; `null` when the text is no longer in the manuscript. */
+  readonly paragraphOrdinal?: number | null;
+  readonly priority?: 'must' | 'should' | 'consider';
+  readonly summary?: string;
+  /** The finding's quote verbatim, never shortened. */
+  readonly originalText?: string;
+  /** The finding's note; a factual finding with a recorded conclusion opens with 【核查结论：…】. */
+  readonly rationale?: string;
+  readonly citations?: ReadonlyArray<{ readonly urlOrSource: string; readonly snippet: string | null; readonly translation?: string | null; readonly explanation?: string }>;
   readonly findingIds: ReadonlyArray<string>;
   readonly categoryLabels: ReadonlyArray<string>;
   readonly severityLabel: string;

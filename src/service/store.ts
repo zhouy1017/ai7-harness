@@ -484,6 +484,7 @@ import {
 } from './task-authorization.js';
 import {
   initializeLocalStageSchema,
+  reviewRunConclusions,
   reviewRunEvidence,
   initializeReviewRunSchema,
   ReviewRunError,
@@ -4035,7 +4036,8 @@ export class EditorialStore {
   /** The next version of the Run's 审阅报告 (REV-009). */
   generateReviewReport(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(this, bookId, reviewRunId));
+      this.#reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(this, bookId, reviewRunId),
+        { conclusions: () => reviewRunConclusions(this, bookId, reviewRunId) });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
   }
@@ -14813,6 +14815,14 @@ export class EditorialStore {
    * is saved as a revision for the export first.
    */
   async reviewManuscriptExport(input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
+    // 导出审阅报告（DOCX） (Issue #1430): the report is recorded first, then reviewed as any recorded version is.
+    const target = input.target;
+    if (target.kind === 'book-review-report') {
+      await this.#exportCall(async () => this.#manuscriptExport.requireAvailable(available));
+      const reportId = this.#reviewCall(() => this.#reviewRuns.compileBookReport(input.bookId, (runId) => reviewRunEvidence(this, input.bookId, runId),
+        (runId) => reviewRunConclusions(this, input.bookId, runId), target.reviewRunId));
+      return this.#exportCall(() => this.#manuscriptExport.review({ ...input, target: { kind: 'report', reportId } }, available));
+    }
     return this.#exportCall(() => this.#manuscriptExport.review(input, available));
   }
 

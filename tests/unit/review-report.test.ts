@@ -84,8 +84,8 @@ describe('the 审阅报告 record', () => {
 
 // Version /2 (ADR 0095 §5; Issue #1174): a derived view of the cards. Chapters are named by position only.
 const CHAPTERS = [
-  { blockId: 'b1', title: '（不写入报告）', level: 1, position: 1, endPosition: 4 },
-  { blockId: 'b5', title: '（不写入报告）', level: 1, position: 5, endPosition: 9 },
+  { blockId: 'b1', title: '第一章 示例', level: 1, position: 1, endPosition: 4 },
+  { blockId: 'b5', title: '第二章 示例', level: 1, position: 5, endPosition: 9 },
 ];
 const SOURCE = { name: '示例来源', url: 'https://example.org/a', snippet: null, translation: null, note: '候选来源 · 尚未核对 · 支持', evidenceId: null };
 const placed = (finding: ReviewReportFindingInput, position: number | null, from = 0): ReviewReportFindingInput =>
@@ -102,9 +102,11 @@ const V2: ReviewReportInput = {
 
 describe('the 审阅报告 record, version /2', () => {
   it('names a chapter by its order and block positions, and places what is outside or gone after every chapter', () => {
-    expect(reportChapterOf(CHAPTERS, 7)).toEqual({ order: 2, label: '章节 2（内容块 5–9）' });
-    expect(reportChapterOf(CHAPTERS.slice(0, 1), 7)).toEqual({ order: 2, label: '章节之外' });
-    expect(reportChapterOf(CHAPTERS, null)).toEqual({ order: 4, label: '内容块已不在当前稿件中' });
+    // The label stays positional; the published DOCX (Issue #1430) groups under the heading's title and counts 段落 from it.
+    expect(reportChapterOf(CHAPTERS, 7)).toEqual({ order: 2, label: '章节 2（内容块 5–9）', title: '第二章 示例', position: 5 });
+    expect(reportChapterOf(CHAPTERS.slice(0, 1), 7)).toEqual({ order: 2, label: '章节之外', title: '章节之外' });
+    expect(reportChapterOf([], 7)).toEqual({ order: 1, label: '章节之外', title: '全书' });
+    expect(reportChapterOf(CHAPTERS, null)).toEqual({ order: 4, label: '内容块已不在当前稿件中', title: '原文已不在当前稿件中' });
   });
 
   it('counts each finding once per chapter and category, so its totals are the overview\'s', () => {
@@ -126,10 +128,25 @@ describe('the 审阅报告 record, version /2', () => {
     expect(report.findings!.entries[0]).toEqual({
       findingIds: ['rvf_1', 'rvf_4'], categoryLabels: ['错别字与规范用语', '情节逻辑与前后一致'], severityLabel: '必须处理', statusLabel: '已处理；待处理',
       chapterLabel: '章节 1（内容块 1–4）', locationLabel: '内容块 3', quote: '甲乙', suggestedText: '甲丙', reason: '改。；前后不一。', sources: [SOURCE],
+      // The published report's fields (Issue #1430): the first member's category, the chapter's title and 段落 from its heading.
+      index: '001', categoryKey: 'language', categoryLabel: '错别字与规范用语', chapterTitle: '第一章 示例', chapterOrder: 1, paragraphOrdinal: 2,
+      priority: 'must', summary: '改。', originalText: '甲乙', rationale: '改。；前后不一。',
+      citations: [{ urlOrSource: SOURCE.url, snippet: null, translation: null, explanation: SOURCE.note }],
     });
     expect(report.findings!.entries.map((entry) => entry.findingIds)).toEqual([['rvf_1', 'rvf_4'], ['rvf_2'], ['rvf_3']]);
     expect(report.findings!.entries[1]).toMatchObject({ suggestedText: null, sources: [] });
     expect(report.findings!.omitted).toBe(0);
+  });
+
+  it('opens a factual finding\'s reason with its 核查结论, and keeps every quote whole in a Book\'s report (Issue #1430)', () => {
+    const factual = { ...INPUT.categories[0]!, categoryId: 'factual-review', label: '事实核查' };
+    const long = '长'.repeat(120);
+    const finding = placed({ findingId: 'rvf_f', categoryId: 'factual-review', severity: 'should', status: 'pending', quote: long,
+      note: '年份有误。另见史料。', locationLabel: '内容块 6', conclusion: '疑似错误' }, 6);
+    const entry = (complete: boolean) => buildReviewReport({ ...INPUT, categories: [factual], findings: [finding], complete }).findings!.entries[0]!;
+    expect(entry(true)).toMatchObject({ categoryKey: 'factual', summary: '年份有误。', rationale: '【核查结论：疑似错误】年份有误。另见史料。',
+      quote: long, originalText: long, chapterTitle: '第二章 示例', paragraphOrdinal: 1, priority: 'should' });
+    expect(entry(false)).toMatchObject({ quote: reportQuote(long), originalText: long });
   });
 
   it('bounds the 发现详单 by bytes and counts the rows it left out; a long excerpt is shortened like a quotation', () => {

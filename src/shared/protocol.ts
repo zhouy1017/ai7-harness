@@ -5206,7 +5206,9 @@ export type ExportFidelityKey =
   | 'report-overview'
   | 'report-must-items'
   | 'report-summaries' | 'report-statistics' | 'report-findings'
-  | 'report-appendix';
+  | 'report-appendix'
+  // The published DOCX's 审阅说明 and 重点问题 (Issue #1430).
+  | 'report-explanation' | 'report-priorities';
 
 /** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */
 export type ExportFidelityStatus = 'preserved' | 'degraded' | 'unavailable' | 'excluded';
@@ -5372,7 +5374,7 @@ export const MAX_EXPORT_DESTINATION_CODE_UNITS = 1024;
 
 export interface ReviewManuscriptExportInput {
   bookId: string;
-  target: ManuscriptExportTargetInput;
+  target: ManuscriptExportTargetInput | { kind: 'book-review-report'; reviewRunId?: string };
   options: ManuscriptExportOptions;
   /** Absent reads as DOCX, so a request made before S64b (Issue #500) still means what it meant. */
   format?: ManuscriptExportFormat;

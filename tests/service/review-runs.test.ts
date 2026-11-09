@@ -2216,20 +2216,26 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       const docx = await review('docx');
       expect(docx).toMatchObject({
         format: 'docx', savedForExport: false, restoration: 'regenerated', degraded: false,
-        restorationLine: '审阅报告按第 1 版的记录写出：概览表、必须处理的事项、各类别摘要与附录，与审阅中显示的一致。',
+        restorationLine: '审阅报告按第 1 版的记录写出：审阅说明、问题统计、建议优先处理的重点问题与逐项问题清单。',
         formatLine: REPORT_FORMAT_LINES.docx,
         suggestedFileName: 'L2 sample1 审阅记录 · 审阅报告 · 第 1 次审阅 · 第 1 版.docx',
         target: {
           kind: 'report', milestoneId: null, revisionId: run.manuscript.revisionId, revisionLabel: run.manuscript.revisionLabel,
           report: { reportId: report.reportId, version: 1, reviewRunId: run.reviewRunId, runLabel: '第 1 次' },
         },
-        technical: { sourceVersionId: null, writerIdentity: 'ai7-report-docx/1', revisionDigest: report.digest },
+        technical: { sourceVersionId: null, writerIdentity: 'ai7-report-docx/2', revisionDigest: report.digest },
       });
       expect(docx.formats).toEqual(REPORT_EXPORT_FORMATS);
-      const must = report.record.mustItems.items.length;
+      // A /2 record's DOCX is the published report (Issue #1430); PDF and Markdown keep the four parts 审阅 shows.
+      const entries = report.record.findings!.entries;
       expect(docx.fidelity.map((row) => `${row.key}:${row.status}:${row.count}`)).toEqual([
+        'report-explanation:preserved:2', `report-statistics:preserved:${entries.length}`,
+        `report-priorities:preserved:${entries.filter((entry) => entry.priority === 'must').length}`, `report-findings:preserved:${entries.length}`,
+      ]);
+      const must = report.record.mustItems.items.length;
+      expect((await review('pdf')).fidelity.map((row) => `${row.key}:${row.status}:${row.count}`)).toEqual([
         'report-overview:preserved:2', `report-must-items:preserved:${must}`, `report-statistics:preserved:${report.record.statistics!.rows.length + 1}`,
-        `report-findings:preserved:${report.record.findings!.entries.length}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
+        `report-findings:preserved:${entries.length}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
       ]);
       expect((await review('markdown')).fidelity[0]).toMatchObject({ key: 'report-overview', status: 'degraded' });
     });
@@ -2239,9 +2245,10 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
     await withReportBook(async (session, book, run, report, outbox) => {
       const written = await exportReport(session, book, report, outbox, 'docx', '审阅报告.docx');
       const documentXml = strFromU8(unzipSync(written)['word/document.xml']!);
-      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(2);
-      expect(documentXml).toContain('>概览表<');
-      expect(documentXml).toContain('>章节与类别统计<');
+      // The statistics table, then one table per finding (Issue #1430).
+      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1 + report.record.findings!.entries.length);
+      expect(documentXml).toContain('>二、问题统计<');
+      expect(documentXml).toContain('>四、逐项问题清单<');
       const markdown = (await exportReport(session, book, report, outbox, 'markdown', '审阅报告.md')).toString('utf8');
       expect(markdown.startsWith('# L2 sample1 审阅记录 · 审阅报告\n\n第 1 次审阅 · ')).toBe(true);
       expect(markdown).toContain('\n\n## 概览表\n\n| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n');
@@ -2256,6 +2263,43 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, true)))
         .toBe('EXPORT_TARGET_NOT_FOUND');
+      // 导出审阅报告（DOCX） on a Book nothing has reviewed yet (Issue #1430).
+      expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'book-review-report' }, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, format: 'docx' }, true)))
+        .toBe('REVIEW_REPORT_UNAVAILABLE');
+    });
+  }, 300_000);
+
+  it('exports the Book\'s findings as one published DOCX in one step, each quote whole (Issue #1430)', async () => {
+    await withReportBook(async (session, book, run, report, outbox) => {
+      const target = { kind: 'book-review-report' as const };
+      const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
+      // Without the export policy nothing is recorded.
+      expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target, options, format: 'docx' }, false))).toBe('EXPORT_POLICY_UNAVAILABLE');
+      expect(workspace(session, book, run.reviewRunId).run!.report!.version).toBe(report.version);
+      const reviewed = await session.store.reviewManuscriptExport({ bookId: book.bookId, target, options, format: 'docx' }, true);
+      expect(reviewed).toMatchObject({
+        suggestedFileName: `《${reviewed.bookTitle}》_审阅报告.docx`,
+        restorationLine: '审阅报告汇总本书 1 次审阅的发现写出：审阅说明、问题统计、建议优先处理的重点问题与逐项问题清单。',
+        target: { kind: 'report', report: { reviewRunId: run.reviewRunId, version: report.version + 1 } },
+      });
+      const recorded = workspace(session, book, run.reviewRunId).run!.report!.record;
+      const entries = recorded.findings!.entries;
+      expect(recorded.compilation).toEqual({ runCount: 1 });
+      expect(recorded.manuscriptExtent!.chapterCount).toBeGreaterThan(0);
+      expect(entries.map((entry) => entry.index)).toEqual(entries.map((_entry, index) => String(index + 1).padStart(3, '0')));
+      const quotes = new Map(run.findings.map((finding) => [finding.findingId, finding.quote] as const));
+      expect(entries.every((entry) => entry.originalText === quotes.get(entry.findingIds[0]!) && entry.categoryKey !== undefined && entry.chapterTitle !== undefined)).toBe(true);
+      const reportTarget = { kind: 'report' as const, reportId: reviewed.target.report!.reportId };
+      const destination = join(outbox, reviewed.suggestedFileName);
+      const preparation = await session.store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId, target: reportTarget,
+        options, reviewDigest: reviewed.reviewDigest, destination, format: 'docx' }, true);
+      await session.store.stageManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+      const receipt = await session.store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+      expect(receipt).toMatchObject({ format: 'docx', outcome: 'created', destination });
+      const documentXml = strFromU8(unzipSync(await readFile(destination))['word/document.xml']!);
+      expect(documentXml).toContain(`>《${reviewed.bookTitle}》审阅报告<`);
+      expect(documentXml.match(/w:fill="F7F7F7"/gu)?.length).toBe(entries.length);
+      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1 + entries.length);
     });
   }, 300_000);
 

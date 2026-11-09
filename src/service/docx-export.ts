@@ -2362,10 +2362,10 @@ interface FreshParts {
  * A fresh package around one body: A4 with the fresh build's margins, the styles every fresh build carries (Title and
  * Heading 1 to 6), the title as `dc:title`, and the parts beside the document `added` names.
  */
-function assembleFreshPackage(title: string, bodyXml: string, added: FreshParts): Uint8Array {
+function assembleFreshPackage(title: string, bodyXml: string, added: FreshParts, stylesXml = FRESH_STYLES_XML, horizontalMargin = 1800): Uint8Array {
   const documentXml = `${XML_DECLARATION}<w:document xmlns:w="${WORD_MAIN}" xmlns:r="${DOCUMENT_RELATIONSHIPS}"><w:body>` +
     `${bodyXml}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>` +
-    '<w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>' +
+    `<w:pgMar w:top="1440" w:right="${horizontalMargin}" w:bottom="1440" w:left="${horizontalMargin}" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>` +
     '</w:body></w:document>';
   const types: ContentTypes = {
     defaults: [['rels', RELATIONSHIPS_CONTENT_TYPE], ['xml', 'application/xml']],
@@ -2381,7 +2381,7 @@ function assembleFreshPackage(title: string, bodyXml: string, added: FreshParts)
     ['docProps/core.xml', strToU8(`${XML_DECLARATION}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeText(title)}</dc:title></cp:coreProperties>`)],
     ['word/document.xml', strToU8(documentXml)],
     ['word/_rels/document.xml.rels', strToU8(relationshipsXml(relationships))],
-    ['word/styles.xml', strToU8(FRESH_STYLES_XML)],
+    ['word/styles.xml', strToU8(stylesXml)],
     ...added.parts,
   ]);
 }
@@ -2390,8 +2390,8 @@ function assembleFreshPackage(title: string, bodyXml: string, added: FreshParts)
  * A fresh package holding one body and nothing beside it (Issue #500, S64b part 2): the 审阅报告's DOCX, written with
  * the same styles, page and title as a manuscript written fresh.
  */
-export function freshBodyPackage(title: string, bodyXml: string): Uint8Array {
-  return assembleFreshPackage(title, bodyXml, { relationships: [], overrides: [], parts: [] });
+export function freshBodyPackage(title: string, bodyXml: string, stylesXml?: string, horizontalMargin?: number): Uint8Array {
+  return assembleFreshPackage(title, bodyXml, { relationships: [], overrides: [], parts: [] }, stylesXml, horizontalMargin);
 }
 
 // ---- the entry point -------------------------------------------------------------------------------------
