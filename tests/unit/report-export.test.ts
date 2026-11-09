@@ -210,9 +210,9 @@ describe('the 审阅报告 as a file', () => {
       manuscriptExtent: { chapterCount: 2, characterCount: 52_000 },
       compilation: { runCount: 2 },
       overview: { title: '概览表', rows: [
-        { categoryId: 'plot-consistency', label: '情节逻辑与前后一致', state: 'completed', stateLabel: '已完成', counts: NO_COUNTS },
-        { categoryId: 'factual-review', label: '事实核查', state: 'completed', stateLabel: '已完成', counts: NO_COUNTS },
-        { categoryId: 'typos-and-usage', label: '错别字与规范用语', state: 'completed', stateLabel: '已完成', counts: NO_COUNTS },
+        { categoryId: 'plot-consistency', label: '情节逻辑与前后一致', state: 'settled', stateLabel: '已完成', counts: NO_COUNTS },
+        { categoryId: 'factual-review', label: '事实核查', state: 'settled', stateLabel: '已完成', counts: NO_COUNTS },
+        { categoryId: 'typos-and-usage', label: '错别字与规范用语', state: 'settled', stateLabel: '已完成', counts: NO_COUNTS },
       ] },
       findings: { title: '发现详单', omitted: 0, entries: [
         entry({ index: '001', categoryKey: 'consistency', categoryLabel: '情节逻辑与前后一致', chapterTitle: '第一章 示例', chapterOrder: 1, paragraphOrdinal: 2,
@@ -267,7 +267,7 @@ describe('the 审阅报告 as a file', () => {
     expect(rows(tables[1]!)).toEqual([[labels[0], '前后矛盾。'], [labels[1], '示例原文甲'], [labels[2], '示例改文'], [labels[3], '前后矛盾。另见后文。']]);
     expect(rows(tables[2]!).map((row) => row[0])).toEqual([...labels, '引用来源']);
     expect(rows(tables[2]!)[3]![1]).toBe('【核查结论：疑似错误】年份待核。');
-    expect(rows(tables[2]!)[4]![1]).toBe('来源1：https://example.org/a相关片段：示例片段说明：支持结论');
+    expect(rows(tables[2]!)[4]![1]).toBe('来源1：示例资料 · https://example.org/a相关片段：示例片段说明：支持结论');
     expect(tables[2]).toContain('HYPERLINK "https://example.org/a"');
     expect(rows(tables[3]!)[2]).toEqual([labels[2], '（开放性建议，见理由）']);
     for (const table of tables.slice(1)) {

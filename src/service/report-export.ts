@@ -227,8 +227,11 @@ interface PublishedFinding {
   originalText: string;
   suggestedText: string;
   rationale: string;
-  citations: NonNullable<ReviewReportFindingEntry['citations']>;
+  citations: ReadonlyArray<PublishedCitation>;
 }
+
+/** A source as 引用来源 names it: its name (linked when it has an http(s) address), the address, then its words. */
+interface PublishedCitation { name: string; url: string | null; snippet: string | null; translation: string | null; explanation: string }
 
 function publishedFinding(entry: ReviewReportFindingEntry, position: number): PublishedFinding {
   const categoryLabel = entry.categoryLabel ?? entry.categoryLabels[0] ?? '其他';
@@ -244,7 +247,11 @@ function publishedFinding(entry: ReviewReportFindingEntry, position: number): Pu
     // An empty replacement deletes the quoted words; no replacement at all is an open suggestion its reason explains.
     suggestedText: entry.suggestedText === null ? OPEN_SUGGESTION : entry.suggestedText === '' ? '（删去原文）' : entry.suggestedText,
     rationale: entry.rationale ?? entry.reason,
-    citations: entry.citations ?? entry.sources.map((source) => ({ urlOrSource: source.url ?? source.name, snippet: source.snippet, translation: source.translation, explanation: source.note })),
+    // The row's sources name each one; `citations` (Issue #1430) carries the same facts for a reader of the record.
+    citations: entry.sources.length > 0
+      ? entry.sources.map((source) => ({ name: source.name, url: source.url, snippet: source.snippet, translation: source.translation, explanation: source.note }))
+      : (entry.citations ?? []).map((citation) => ({ name: citation.urlOrSource, url: linkTarget(citation.urlOrSource), snippet: citation.snippet,
+        translation: citation.translation ?? null, explanation: citation.explanation ?? '' })),
   };
 }
 
@@ -288,21 +295,21 @@ function publishedStatistics(findings: ReadonlyArray<PublishedFinding>, chapters
   ]);
 }
 
-/** A source in the 引用来源 cell: 来源N with its address a HYPERLINK field when it is an http(s) one, then its words. */
-function publishedCitation(citation: PublishedFinding['citations'][number], position: number): string {
+/** A source in the 引用来源 cell: 来源N, its name a HYPERLINK field to an http(s) address, the address, then its words. */
+function publishedCitation(citation: PublishedCitation, position: number): string {
   const run = size(20);
-  const label = `来源${position + 1}：`;
-  const target = linkTarget(citation.urlOrSource);
-  const source = target === null ? `<w:r><w:rPr>${run}</w:rPr><w:t xml:space="preserve">${escapeWordText(citation.urlOrSource)}</w:t></w:r>`
+  const words = (text: string, properties = run): string => `<w:r><w:rPr>${properties}</w:rPr><w:t xml:space="preserve">${escapeWordText(text)}</w:t></w:r>`;
+  const target = linkTarget(citation.url);
+  const name = target === null ? words(citation.name)
     : `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> HYPERLINK "${escapeWordText(target.replace(/"/gu, '%22'))}" </w:instrText></w:r>` +
-      `<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:rPr><w:color w:val="0563C1"/>${run}<w:u w:val="single"/></w:rPr><w:t xml:space="preserve">${escapeWordText(citation.urlOrSource)}</w:t></w:r>` +
-      '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+      `<w:r><w:fldChar w:fldCharType="separate"/></w:r>${words(citation.name, `<w:color w:val="0563C1"/>${run}<w:u w:val="single"/>`)}<w:r><w:fldChar w:fldCharType="end"/></w:r>`;
+  const address = citation.url === null || citation.url === citation.name ? '' : words(` · ${citation.url}`);
   const lines = [
     ...(citation.snippet === null ? [] : [`相关片段：${citation.snippet}`]),
-    ...(citation.translation === undefined || citation.translation === null ? [] : [`译文：${citation.translation}`]),
-    ...(citation.explanation === undefined || citation.explanation === '' ? [] : [`说明：${citation.explanation}`]),
+    ...(citation.translation === null ? [] : [`译文：${citation.translation}`]),
+    ...(citation.explanation === '' ? [] : [`说明：${citation.explanation}`]),
   ];
-  return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:b/>${run}</w:rPr><w:t xml:space="preserve">${label}</w:t></w:r>${source}</w:p>` +
+  return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>${words(`来源${position + 1}：`, `<w:b/>${run}`)}${name}${address}</w:p>` +
     lines.map((line) => publishedParagraph(line, '<w:spacing w:after="0"/>', run)).join('');
 }
 

@@ -3384,11 +3384,12 @@ export class ReviewRunStore {
     requireReview(bookWide || !view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
     const views = bookWide ? (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
       .map((row) => this.#runView(this.#snapshotOf(row))).filter((candidate) => candidate.authorization !== null) : [view];
-    // Repeated runs referencing the same mark are one issue. Independent issues at one anchor remain separate.
-    const findings = [...new Map(views.flatMap((candidate) => candidate.findings.map((finding) =>
-      [finding.markId ?? finding.findingId, { finding, runId: candidate.snapshot.reviewRunId }] as const)).reverse()).values()];
-    const categories = [...new Map(views.flatMap((candidate) => candidate.categories.map((category) =>
-      [category.category.categoryId, category] as const)).reverse()).values()];
+    // Views run newest first: a mark several Runs found is one finding as its latest Run states it, and a category is the
+    // latest Run's, in that Run's order; a single Run's report reads exactly its own.
+    const newestOf = <T>(values: ReadonlyArray<T>, key: (value: T) => string): T[] =>
+      [...values.reduce((kept, value) => (kept.has(key(value)) ? kept : kept.set(key(value), value)), new Map<string, T>()).values()];
+    const findings = newestOf(views.flatMap((candidate) => candidate.findings), (finding) => finding.markId ?? finding.findingId);
+    const categories = newestOf(views.flatMap((candidate) => candidate.categories), (category) => category.category.categoryId);
     const sources = new Map(views.flatMap((candidate) => candidate.findings.some((finding) => finding.categoryId === 'factual-review')
       ? [...evidence(candidate.snapshot.reviewRunId)] : []));
     const conclusions = new Map(views.flatMap((candidate) => [...readConclusions(candidate.snapshot.reviewRunId)]));
@@ -3440,7 +3441,7 @@ export class ReviewRunStore {
             adapterPin: isRecord(pin) ? pin as { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null } : null,
           };
         }),
-        findings: findings.map(({ finding }) => ({
+        findings: findings.map((finding) => ({
           findingId: finding.findingId,
           categoryId: finding.categoryId,
           severity: finding.severity,

@@ -43,11 +43,13 @@ describe('the /2 审阅报告 as a file', () => {
     expect(findings.filter((block) => block.startsWith('### '))).toHaveLength(2);
   });
 
-  it('writes a DOCX with both tables and each source name as a HYPERLINK field', () => {
+  it('writes a DOCX with the statistics table, a table per finding and each source name as a HYPERLINK field', () => {
+    // The published layout (Issue #1430): 问题统计, then each finding's table, its sources in the 引用来源 row.
     const documentXml = strFromU8(unzipSync(renderReportExport(input(), 'docx', { emit: true }).bytes!)['word/document.xml']!);
-    expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(2);
+    expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(3);
     expect(documentXml).toContain('<w:instrText xml:space="preserve"> HYPERLINK "https://example.org/vessel?a=1&amp;b=%222%22" </w:instrText>');
-    expect(documentXml).toContain('<w:t xml:space="preserve">来源：馆藏说明</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/>');
+    expect(documentXml).toContain('<w:t xml:space="preserve">馆藏说明</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/>');
+    expect(documentXml).toContain('>引用来源</w:t>');
     expect(documentXml.match(/HYPERLINK/gu)?.length).toBe(1);
     const page = text(renderReportExport(input(), 'pdf', { emit: true }).bytes);
     expect(page).toContain('<a href="https://example.org/vessel?a=1&amp;b=&quot;2&quot;">来源：馆藏说明</a>');
@@ -57,10 +59,12 @@ describe('the /2 审阅报告 as a file', () => {
   it('says in its review what each format keeps, and a /1 record keeps its four rows', () => {
     const rows = (format: 'docx' | 'pdf' | 'markdown', record = RECORD) =>
       renderReportExport(input(record), format, { emit: false }).fidelity.map((row) => `${row.key}:${row.status}:${row.count}`);
-    expect(rows('docx')).toEqual(['report-overview:preserved:2', 'report-must-items:preserved:3', 'report-statistics:preserved:3',
+    expect(rows('docx')).toEqual(['report-explanation:preserved:2', 'report-statistics:preserved:2', 'report-priorities:preserved:2', 'report-findings:preserved:2']);
+    expect(rows('pdf')).toEqual(['report-overview:preserved:2', 'report-must-items:preserved:3', 'report-statistics:preserved:3',
       'report-findings:preserved:2', 'report-summaries:preserved:2', 'report-appendix:preserved:3']);
     expect(rows('markdown').filter((row) => row.includes(':degraded:'))).toEqual(['report-overview:degraded:2', 'report-statistics:degraded:3']);
     expect(renderReportExport(input(), 'docx', { emit: false }).fidelity.find((row) => row.key === 'report-findings')?.detail).toContain('写成 Word 超链接');
+    expect(renderReportExport(input(), 'pdf', { emit: false }).fidelity.find((row) => row.key === 'report-findings')?.detail).toContain('在 PDF 中是可点击的链接');
     const { totals: _totals, statistics: _statistics, findings: _findings, ...v1 } = RECORD;
     const legacy = { ...v1, schema: 'ai7.review.report/1' as const };
     expect(rows('docx', legacy)).toEqual(['report-overview:preserved:2', 'report-must-items:preserved:3', 'report-summaries:preserved:2', 'report-appendix:preserved:3']);
