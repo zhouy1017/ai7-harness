@@ -1,8 +1,26 @@
 # Current checkpoint
 
-The `dev` baseline is `80845316e3d0a1c020f5f85bd4e1b76d7398bb07` (**0.6.2 Beta**, [#1400](https://github.com/zhouy1017/ai7-harness/issues/1400), [PR #1425](https://github.com/zhouy1017/ai7-harness/pull/1425); schema 111, protocol 200, Data Version 1). The after-wave-24c wave, [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426) under [Owner intent #1279](https://github.com/zhouy1017/ai7-harness/issues/1279), turns the 0.6.2 human-test findings into #1427–#1431 on `codex/integration-after-wave-24c`, targeting **0.6.3 Beta**. All five slices are integrated there; the last, #1431 ([PR #1440](https://github.com/zhouy1017/ai7-harness/pull/1440)), merged as `c668f8d13382e29502324091696a37b5d2b902b7` (schema 113, protocol 200). The closure candidate `codex/1426-after-wave-24c-closure` raises the version to 0.6.3 and the service protocol to 201; its final full guest ladder, the `dev` merge and the fixed human-test refresh remain pending until the wave pull request records them. Nothing here is delivered to `dev`.
+The `dev` baseline is `1d2487cda357118d4e619e5d2d077ade4ade9f43` (**0.6.3 Beta**, [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426), [PR #1442](https://github.com/zhouy1017/ai7-harness/pull/1442); schema 113, protocol 201, Data Version 1). The fix-only wave [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) under [Owner intent #1279](https://github.com/zhouy1017/ai7-harness/issues/1279) fixes the two known 0.6.3 issues on `codex/integration-0.6.5`, targeting **0.6.5 Beta** (the Owner's explicit number; 0.6.4 is unused). Both slices are integrated there; the last, #1445 ([PR #1448](https://github.com/zhouy1017/ai7-harness/pull/1448)), merged as `c540b535dd8efff4a2add3a31043b146a7e94a25`. The closure candidate `codex/1444-0.6.5-closure` raises the version to 0.6.5; protocol and schema are unchanged. Its final full guest ladder, the `dev` merge and the fixed human-test refresh remain pending until the wave pull request records them. Nothing here is delivered to `dev`.
 
-What the editor can newly do on the integration line:
+What is fixed for the editor on the integration line:
+
+- **Leaving 模型服务 stays left.** A model-list refresh that answers after the editor has moved to another page no longer brings 模型服务 back; the refreshed list is there on return ([#1445](https://github.com/zhouy1017/ai7-harness/issues/1445)).
+- **One review report per change.** 「导出审阅报告（DOCX）」 records nothing when the Save dialog is cancelled, reuses the recorded report when the findings have not changed, and records one new 审阅报告 version only when they have; the exported file is as before ([#1446](https://github.com/zhouy1017/ai7-harness/issues/1446)).
+
+Version: the [version ledger](docs/development/versioning.md) reads candidate **0.6.5** and `package.json` is 0.6.5 — the Owner's explicit #1444 number under [ADR 0098](docs/adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md); 0.6.3 is recorded as delivered at `dev@1d2487cd` (PR #1442). Schema 113, protocol 201, Data Version 1 and policy v35 / set v26 are unchanged; no tag or release.
+
+| Slice | PR | Integration commit | Slice evidence |
+| --- | --- | --- | --- |
+| #1446 one review-report version per change | [PR #1447](https://github.com/zhouy1017/ai7-harness/pull/1447) | `62f95e35` | recorded in the PR |
+| #1445 late model-list refresh stays on its page | [PR #1448](https://github.com/zhouy1017/ai7-harness/pull/1448) | `c540b535` | recorded in the PR |
+
+Slice heads are not the wave candidate: the closure candidate records its own final head and full guest ladder (service and all 15 Journeys), and the wave pull request records the resulting dev commit.
+
+Wave 23 remains integrated at `dev@41036654` through [PR #1302](https://github.com/zhouy1017/ai7-harness/pull/1302); its evidence stays in [the S10 evidence record](docs/development/wave23-beta-evidence.md). The [development plan](docs/development/development-plan.md) owns delivery order.
+
+## Delivered #1426 (0.6.3 Beta)
+
+#1426 (#1427–#1431) is delivered as `dev@1d2487cd` through [PR #1442](https://github.com/zhouy1017/ai7-harness/pull/1442) (schema 113, protocol 201):
 
 - **Manage derivative documents in their own workspace.** 主稿件 and 衍生稿件 sit side by side under 工作; the 衍生稿件 page counts, filters and searches every document, renames, recategorizes, finalizes, deletes (with 撤销) and exports in place, and opens any document in the editor. Categories can be added, renamed, reordered and deleted, and survive Book merge and database backup ([#1427](https://github.com/zhouy1017/ai7-harness/issues/1427), schema 112).
 - **Edit directly, with Word-style revisions.** Typing, deletion, paste and IME work in place in revision mode; settled changes become 【编辑修订】 cards. With 「人工修改自动应用」 on (the default) the edit is applied with `✎ 已改` and one-click undo; off, it stays a pending card shown as inline deletion/insertion with a margin bar ([#1428](https://github.com/zhouy1017/ai7-harness/issues/1428), schema 113).
@@ -10,13 +28,7 @@ What the editor can newly do on the integration line:
 - **Export the review report in one click.** 「导出审阅报告（DOCX）」 compiles the Book's 审阅报告 and writes one publication-layout DOCX (审阅说明, chapter × category statistics, priority issues, the per-chapter finding list) on the Save choice ([#1430](https://github.com/zhouy1017/ai7-harness/issues/1430)).
 - **A plainer ordinary mode.** The nine audited surfaces read editorial Chinese with no technical words, and the remaining ceremonies (derivative delete, writing generation, Agent 工作区 rounds, plan restart, Series knowledge, delivery-package export, procedure stop) are one step; developer mode keeps every diagnostic ([#1431](https://github.com/zhouy1017/ai7-harness/issues/1431)).
 
-Version: the [version ledger](docs/development/versioning.md) reads candidate **0.6.3** and `package.json` is 0.6.3 — the Owner's explicit #1426 target, one `z` raise for the wave under [ADR 0098](docs/adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md); 0.6.2 is recorded as delivered at `dev@80845316` (PR #1425). Schema 113 (from the slices), protocol 201 (raised once at closure), Data Version 1, policy v35 / set v26; no tag or release.
-
 Design owners: [ADR 0096](docs/adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) and the editor-surface owner record #1428's direct revision editing; [E2E journeys](docs/development/e2e-journeys.md) records what each runner proves.
-
-Wave 23 remains integrated at `dev@41036654` through [PR #1302](https://github.com/zhouy1017/ai7-harness/pull/1302); its evidence stays in [the S10 evidence record](docs/development/wave23-beta-evidence.md). The [development plan](docs/development/development-plan.md) owns delivery order.
-
-## #1426 slices on `codex/integration-after-wave-24c`
 
 | Slice | PR | Integration commit | Slice evidence |
 | --- | --- | --- | --- |
@@ -25,8 +37,6 @@ Wave 23 remains integrated at `dev@41036654` through [PR #1302](https://github.c
 | #1428 direct in-place revision editing | [PR #1438](https://github.com/zhouy1017/ai7-harness/pull/1438) | `3121cb7c` | guest ladder + all 15 Journeys, recorded in the PR |
 | #1430 one-click review-report DOCX | [PR #1439](https://github.com/zhouy1017/ai7-harness/pull/1439) | `3e0d0b38` | guest ladder + all 15 Journeys, recorded in the PR |
 | #1431 ordinary-mode wording and ceremony purge | [PR #1440](https://github.com/zhouy1017/ai7-harness/pull/1440) | `c668f8d1` | guest ladder + all 15 Journeys, recorded in the PR |
-
-Slice heads are not the wave candidate: the closure candidate `codex/1426-after-wave-24c-closure` records its own final head and full guest ladder (service and all 15 Journeys), and the wave pull request records the resulting dev commit.
 
 ## Delivered #1400 (0.6.2 Beta)
 
@@ -50,7 +60,7 @@ Slice heads are not the wave candidate: the closure candidate `codex/1426-after-
 
 ## Capabilities through this candidate
 
-The rows below are delivered on `dev` through Wave 24b (0.6.1); the #1400 additions (0.6.2) are listed under Delivered #1400 above, and the #1426 additions are summarized in the checkpoint and await Commander integration.
+The rows below are delivered on `dev` through Wave 24b (0.6.1); the #1400 (0.6.2) and #1426 (0.6.3) additions are listed under their Delivered sections above, and the #1444 fixes are summarized in the checkpoint and await Commander integration.
 
 | Area | Available behavior and boundary |
 | --- | --- |
@@ -141,12 +151,12 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 
 ## In flight and remaining risks
 
-Known limitations carried by the slices: the manuscript export menu's 「导出审阅报告（.docx）」 is unit-checked only (J-04 drives the 审阅 header button, which calls the same function, #1430); J-12 waits for a late model-list refresh that can bring 模型服务 back after the editor has navigated away — a real product race not fixed in this wave (#1431).
+Known limitation: the manuscript export menu's 「导出审阅报告（.docx）」 is unit-checked only (J-04 drives the 审阅 header button, which calls the same function, #1430). The two known 0.6.3 issues — the late model-list refresh that brought 模型服务 back and a new report version on every export click — are fixed by #1445 and #1446.
 
-Next: the 0.6.3 closure candidate runs the full guest ladder (`C:/HyperV/scripts/Invoke-Ai7VmE2E.ps1`) on its final head; the Commander then opens and merges the wave pull request into `dev`, closes #1426–#1431 and refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1`, recording the dev commit and data-preservation check. Owner human testing follows; `1.0.0`, tags, publication and `main` promotion remain separate Owner decisions.
+Next: the 0.6.5 closure candidate runs the full guest ladder (`C:/HyperV/scripts/Invoke-Ai7VmE2E.ps1`) on its final head; the Commander then opens and merges the wave pull request into `dev`, closes #1444–#1446 and refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1`, recording the dev commit and data-preservation check. Owner human testing follows; `1.0.0`, tags, publication and `main` promotion remain separate Owner decisions.
 
 Live native-search measurement, packaged direct/proxy/discovery acceptance and editorial usefulness remain human-phase work; provider-free tests establish neither live provider access nor human-gold precision/recall. Existing manuscript-fidelity, evidence-integrity and reliability follow-ups retain their Issue owners. Windows remains the delivery platform; macOS is deferred indefinitely under [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md). Human acceptance and release authority remain with the Owner.
 
 ## Resume
 
-Read this checkpoint, the [development plan](docs/development/development-plan.md), [Orca dispatch](docs/agents/orca-dispatch.md), [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426). Record the actual head, target, workspace and current writer. Continue the Commander's #1426 closure — the 0.6.3 closure candidate's ladder → wave PR `dev` merge → fixed human-test refresh — without claiming slice-head results for a later head. Keep CI provider-free and report fixture, live, guest, hosted and packaged evidence separately; keep attempt chronology in Orca and the Issue/PR.
+Read this checkpoint, the [development plan](docs/development/development-plan.md), [Orca dispatch](docs/agents/orca-dispatch.md), [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444). Record the actual head, target, workspace and current writer. Continue the Commander's #1444 closure — the 0.6.5 closure candidate's ladder → wave PR `dev` merge → fixed human-test refresh — without claiming slice-head results for a later head. Keep CI provider-free and report fixture, live, guest, hosted and packaged evidence separately; keep attempt chronology in Orca and the Issue/PR.

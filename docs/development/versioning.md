@@ -23,24 +23,27 @@ Wave 23 targets **0.5.0 Beta** under [#1279](https://github.com/zhouy1017/ai7-ha
 | 0.6.0 | integrated | Wave 24 — UI 对齐 and Wave 23 human-feedback fixes ([#1313](https://github.com/zhouy1017/ai7-harness/issues/1313), [#1303](https://github.com/zhouy1017/ai7-harness/issues/1303)); human acceptance pending | the dev squash commit recorded in [PR #1367](https://github.com/zhouy1017/ai7-harness/pull/1367); this row is raised by that integration candidate under orca-dispatch §5 | none |
 | 0.6.1 | integrated | Wave 24b — Owner-authorized Beta feedback closure ([#1373](https://github.com/zhouy1017/ai7-harness/issues/1373), all 13 child Issues); human acceptance pending | `b3fe090d3ba41a841bd0b1485bb5d4835018d25c` ([PR #1398](https://github.com/zhouy1017/ai7-harness/pull/1398)) | none |
 | 0.6.2 | integrated | Owner [#1400](https://github.com/zhouy1017/ai7-harness/issues/1400) five-batch Beta closure (#1401–#1414; batch PRs #1417, #1418, #1421, #1422, #1424); human acceptance pending | `80845316e3d0a1c020f5f85bd4e1b76d7398bb07` ([PR #1425](https://github.com/zhouy1017/ai7-harness/pull/1425)) | none |
-| 0.6.3 | candidate | Owner [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426) after-wave-24c Beta closure (#1427–#1431; slice PRs #1436–#1440); final validation, dev integration and human acceptance pending | the dev commit named in the closure record of the wave pull request; baseline `80845316e3d0a1c020f5f85bd4e1b76d7398bb07` remains 0.6.2 | none |
+| 0.6.3 | integrated | Owner [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426) after-wave-24c Beta closure (#1427–#1431; slice PRs #1436–#1440); human acceptance pending | `1d2487cda357118d4e619e5d2d077ade4ade9f43` ([PR #1442](https://github.com/zhouy1017/ai7-harness/pull/1442)) | none |
+| 0.6.5 | candidate | Owner [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) fix-only Beta closure of the two known 0.6.3 issues (#1445, #1446; slice PRs #1447, #1448); final validation, dev integration and human acceptance pending | the dev commit named in the closure record of the wave pull request; baseline `1d2487cda357118d4e619e5d2d077ade4ade9f43` remains 0.6.3 | none |
 
 Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev` at `b3fe090d` through PR #1398 with schema 109, protocol 198 and Data Version 1.
 
 #1400 → 0.6.2 Beta (the Owner's explicit #1400 target) is delivered on `dev` at `80845316` through PR #1425 with schema 111, protocol 200 and Data Version 1.
 
-#1426 → **0.6.3 Beta** is the Owner's explicit target for the after-wave-24c wave; the whole wave raises `z` once, and ADR 0098 itself is unchanged. Schema 112/113 were delivered by #1427 and #1428 before closure; the closure raises protocol 200 → 201 once for the wave's accumulated IPC surface, and Data Version 1 and policy v35 / set v26 stay unchanged. This candidate row claims no dev delivery, human acceptance, tag or release. A commit cannot name its own merge, so the wave pull request records the final candidate head, its checks and the resulting dev commit; the fixed human-test refresh follows under the Commander.
+#1426 → 0.6.3 Beta (the Owner's explicit #1426 target) is delivered on `dev` at `1d2487cd` through PR #1442 with schema 113, protocol 201 and Data Version 1.
+
+#1444 → **0.6.5 Beta** is the Owner's explicit number (「标记为版本0.6.5beta」); 0.6.4 is intentionally unused, and ADR 0098 itself is unchanged. The two fixes change neither IPC nor persistence, so protocol 201, schema 113, Data Version 1 and policy v35 / set v26 stay unchanged. This candidate row claims no dev delivery, human acceptance, tag or release. A commit cannot name its own merge, so the wave pull request records the final candidate head, its checks and the resulting dev commit; the fixed human-test refresh follows under the Commander.
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.6.3`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**113** at this head) and service protocol (**201**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.6.5`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**113** at this head) and service protocol (**201**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.5.0",
+  "softwareVersion": "0.6.5",
   "dataVersion": 1,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
