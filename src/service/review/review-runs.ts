@@ -124,7 +124,7 @@ import {
 } from './category-configuration.js';
 import { reviewBaselineSource, reviewLeadBody, reviewLeadsOf } from './review-leads.js';
 import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent, freezeSeriesScope, seriesKnowledgeAllowed, frozenSeriesScopes, seriesScopeMaterials, seriesScopeChanged, SERIES_POLICY_CLOSED, type SeriesKnowledgeReadings } from './series-consistency.js';
-import { MAX_REPORT_FINDING_BYTES, REVIEW_REPORT_SCHEMAS, buildReviewReport, reportChapterOf, reportQuote, reviewFindingCounts } from './review-report.js';
+import { MAX_REPORT_FINDING_BYTES, REVIEW_REPORT_SCHEMAS, buildReviewReport, reportChapterOf, reportContentDigest, reportQuote, reviewFindingCounts } from './review-report.js';
 export { reviewRunConclusions, reviewRunEvidence } from './report-evidence.js';
 import {
   REVIEW_CATEGORY_PLACE_WAIT_DETAIL,
@@ -1166,8 +1166,32 @@ const SETTLE: ReviewRunDriveStep = { kind: 'settle' };
  * The Runs being driven in this service lifetime are held in memory. That is the one fact a restart
  * must lose: a Run nobody drives any more reads `partial`, and 继续审阅 drives it again.
  */
+/** A 审阅报告 version composed and not yet recorded (Issue #1446), with the digest of what it says apart from its number and time. */
+interface ComposedReport {
+  readonly reportId: string;
+  readonly bookId: string;
+  readonly reviewRunId: string;
+  readonly version: number;
+  readonly generatedAt: string;
+  readonly json: string;
+  readonly digest: string;
+  readonly content: string;
+}
+
+/** A held 审阅报告 version as the export reads a recorded one (Issue #1446). */
+export interface PendingReviewReport {
+  readonly bookId: string;
+  readonly reviewRunId: string;
+  readonly version: number;
+  readonly generatedAt: string;
+  readonly canonicalJson: string;
+  readonly digest: string;
+}
+
 export class ReviewRunStore {
   readonly #db: DatabaseSync;
+  /** Each Book's compiled 审阅报告 awaiting its save destination (Issue #1446); never written until `recordPendingReport`. */
+  readonly #pendingReports = new Map<string, ComposedReport>();
   readonly #marks: EditorialMarkStore;
   readonly #ledgers: ReviewRunLedgers;
   /** The configuration as it applies now (Issue #427, S79a): each guideline document at its latest version. */
@@ -3376,6 +3400,14 @@ export class ReviewRunStore {
    */
   generateReport(bookId: string, reviewRunId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>> = () => new Map(),
     options: { readonly bookWide?: boolean; readonly conclusions?: (runId: string) => ReadonlyMap<string, string> } = {}): string {
+    const composed = this.#composeReport(bookId, reviewRunId, evidence, options);
+    transact(this.#db, () => this.#insertReport(composed));
+    return composed.reportId;
+  }
+
+  /** The next version of the Run's 审阅报告 as it would be recorded now; nothing is written. */
+  #composeReport(bookId: string, reviewRunId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>>,
+    options: { readonly bookWide?: boolean; readonly conclusions?: (runId: string) => ReadonlyMap<string, string> }): ComposedReport {
     const bookWide = options.bookWide ?? false;
     const readConclusions = options.conclusions ?? (() => new Map<string, string>());
     const snapshot = this.#runOfBook(bookId, reviewRunId);
@@ -3396,7 +3428,7 @@ export class ReviewRunStore {
     const reportId = randomUUID();
     const head = this.#head(bookId);
     const chapters = head === null ? [] : this.#chapterOptions(bookId, head).chapters;
-    transact(this.#db, () => {
+    {
       const last = this.#db.prepare('SELECT max(version) last FROM review_reports WHERE review_run_id = ?').get(reviewRunId) as SqlRow;
       const version = last.last === null ? 1 : integer(last.last) + 1;
       const generatedAt = new Date().toISOString();
@@ -3463,15 +3495,23 @@ export class ReviewRunStore {
           locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`, rules: finding.referencedRuleVersions }));
       if (referencedRules.length > 0) record.appendix.referencedRules = referencedRules;
       const canonical = canonicalRecord(record);
-      this.#db.prepare('INSERT INTO review_reports(report_id, review_run_id, version, generated_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(reportId, reviewRunId, version, generatedAt, canonical.json, canonical.digest);
-    });
-    return reportId;
+      return { reportId, bookId, reviewRunId, version, generatedAt, json: canonical.json, digest: canonical.digest, content: reportContentDigest(record) };
+    }
+  }
+
+  /** Record one composed version, refusing when another version took its number since it was composed. */
+  #insertReport(report: ComposedReport): void {
+    const last = this.#db.prepare('SELECT max(version) last FROM review_reports WHERE review_run_id = ?').get(report.reviewRunId) as SqlRow;
+    requireReview((last.last === null ? 1 : integer(last.last) + 1) === report.version, 'REVIEW_REPORT_CHANGED', '审阅报告在整理后有了新的版本，请重新导出。');
+    this.#db.prepare('INSERT INTO review_reports(report_id, review_run_id, version, generated_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(report.reportId, report.reviewRunId, report.version, report.generatedAt, report.json, report.digest);
   }
 
   /**
-   * 导出审阅报告（DOCX） (Issue #1430): records the report the export writes and answers its id, so the existing export
-   * ledger reviews, prepares and writes it. Without a Run it is the Book's report, recorded on its latest Run with findings.
+   * 导出审阅报告（DOCX） (Issue #1430): the report the export writes, answered by id so the existing export ledger reviews,
+   * prepares and writes it. Without a Run it is the Book's report, on its latest Run with findings. Issue #1446: when its
+   * content is the latest recorded version's, that version is answered and nothing is recorded; otherwise the new version is
+   * held here, readable by `pendingReport`, and recorded only by `recordPendingReport` once the save destination is chosen.
    */
   compileBookReport(bookId: string, evidence: (runId: string) => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>>,
     conclusions: (runId: string) => ReadonlyMap<string, string>, runId?: string): string {
@@ -3480,7 +3520,27 @@ export class ReviewRunStore {
       ? rows.map((row) => this.#snapshotOf(row)).find((candidate) => { const view = this.#runView(candidate); return view.authorization !== null && view.findings.length > 0; })
       : this.#runOfBook(bookId, runId);
     requireReview(snapshot !== undefined, 'REVIEW_REPORT_UNAVAILABLE', '这本书还没有审阅发现。');
-    return this.generateReport(bookId, snapshot.reviewRunId, evidence, { bookWide: runId === undefined, conclusions });
+    const composed = this.#composeReport(bookId, snapshot.reviewRunId, evidence, { bookWide: runId === undefined, conclusions });
+    const latest = this.#db.prepare('SELECT report_id, canonical_json FROM review_reports WHERE review_run_id = ? ORDER BY version DESC LIMIT 1')
+      .get(snapshot.reviewRunId) as SqlRow | undefined;
+    this.#pendingReports.delete(bookId);
+    if (latest !== undefined && reportContentDigest(parseCanonicalJson(text(latest.canonical_json)) as ReviewReportRecord) === composed.content) return text(latest.report_id);
+    this.#pendingReports.set(bookId, composed);
+    return composed.reportId;
+  }
+
+  /** The version `compileBookReport` holds unrecorded under this id, as its row would read; `null` when none is held. */
+  pendingReport(reportId: string): PendingReviewReport | null {
+    const held = [...this.#pendingReports.values()].find((report) => report.reportId === reportId);
+    return held === undefined ? null : { bookId: held.bookId, reviewRunId: held.reviewRunId, version: held.version, generatedAt: held.generatedAt, canonicalJson: held.json, digest: held.digest };
+  }
+
+  /** Record the held version under this id, inside the caller's transaction (the export's preparation); a recorded one is left as it is. */
+  recordPendingReport(reportId: string): void {
+    const held = [...this.#pendingReports.values()].find((report) => report.reportId === reportId);
+    if (held === undefined) return;
+    transact(this.#db, () => this.#insertReport(held));
+    this.#pendingReports.delete(held.bookId);
   }
 
   #reports(reviewRunId: string): ReviewReportProjection[] {

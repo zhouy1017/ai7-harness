@@ -12,6 +12,7 @@ import {
   type ReviewReportSchema,
   type ReviewRunCategoryState,
 } from '../../shared/protocol.js';
+import { canonicalRecord } from '../analysis/canonical.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { chapterOfPosition } from './review-scope.js';
 import { resolveEditorialMarkCategory } from '../../shared/editorial-mark-category.js';
@@ -215,6 +216,12 @@ function reportFindings(input: ReviewReportInput): NonNullable<ReviewReportRecor
     entries.push(entry);
   }
   return { title: '发现详单', entries, omitted: ordered.length - entries.length };
+}
+
+/** What a recorded version says apart from its number and time (Issue #1446): two versions with one digest are the same report. */
+export function reportContentDigest(record: ReviewReportRecord): string {
+  const { version: _version, generatedAt: _generatedAt, ...content } = record;
+  return canonicalRecord(content).digest;
 }
 
 export function buildReviewReport(input: ReviewReportInput): ReviewReportRecord {
