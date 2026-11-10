@@ -2924,6 +2924,16 @@ export class EditorialStore {
       // A package export's 交付包清单 (Issue #416, S67b), written by the package's export from the version's own record.
       packageManifest: (bookId, packageVersionId, member) => this.#packageExports.manifest(bookId, packageVersionId, member),
       packageVersion: (bookId, packageVersionId) => this.#packageExports.version(bookId, packageVersionId),
+      // 导出审阅报告（DOCX） (Issue #1446): a changed report is held until the save destination is chosen, then recorded.
+      pendingReport: (reportId) => this.#reviewRuns.pendingReport(reportId),
+      recordPendingReport: (reportId) => {
+        try {
+          this.#reviewRuns.recordPendingReport(reportId);
+        } catch (error) {
+          if (error instanceof ReviewRunError) throw new ExportLedgerError('EXPORT_REVIEW_CHANGED', error.message);
+          throw error;
+        }
+      },
     });
     // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger. Its Production
     // Documents (Issue #415) are a read of their own, each Delivery Record with what its export came to.
@@ -14815,7 +14825,8 @@ export class EditorialStore {
    * is saved as a revision for the export first.
    */
   async reviewManuscriptExport(input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
-    // 导出审阅报告（DOCX） (Issue #1430): the report is recorded first, then reviewed as any recorded version is.
+    // 导出审阅报告（DOCX） (Issue #1430): the report is compiled first, then reviewed as any recorded version is. Issue #1446:
+    // an unchanged report is its latest recorded version; a changed one is recorded only by the preparation of its destination.
     const target = input.target;
     if (target.kind === 'book-review-report') {
       await this.#exportCall(async () => this.#manuscriptExport.requireAvailable(available));
