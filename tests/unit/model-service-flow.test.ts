@@ -214,6 +214,7 @@ describe('the one model-service flow', () => {
           const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
         };
         const root = element('main');
+        document.body.replaceChildren(root); // the shell's screen is in the document; a page off screen takes no late repaint (#1445)
         const page = root as unknown as MiniElement;
         const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
           button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
