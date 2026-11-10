@@ -1991,10 +1991,13 @@ async function main() {
     await assertRenderer(primary, `(() => { const star=document.querySelector('[data-favorite-model="deepseek-flash"]'); if(!(star instanceof HTMLButtonElement)||star.disabled)return false; star.click(); return true; })()`, 'ordinary-catalogue-favourite');
     await waitFor(primary, `document.querySelector('[data-favorite-model="deepseek-flash"]')?.getAttribute('aria-pressed')==='true'`, 'ordinary-catalogue-favourite-saved');
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(refresh.disabled)return false; refresh.click(); return true; })()`, 'ordinary-catalogue-refresh');
-    // The refresh's own re-render settles (its button enabled again) before the Journey leaves the page (#1431: no later step masks it).
-    await waitFor(primary, `document.querySelector('[data-action="retry-model-list"]')?.disabled===false && document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash' && document.querySelector('[data-favorite-model="deepseek-flash"]')?.getAttribute('aria-pressed')==='true'`, 'ordinary-catalogue-refresh-keeps-choice');
+    // #1445: the editor leaves 模型服务 while its refresh is still answering. Effects run one at a time, so a second refresh answers
+    // only after the editor's; once it has, the editor's late answer has landed and must not have brought 模型服务 back.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'catalogue-restore-settings-ready');
+    requireJourney(await primary.evaluate(`window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'})
+      .then(()=>new Promise((resolve)=>setTimeout(resolve,250)))
+      .then(()=>document.querySelector('#screen')?.dataset.screen==='settings' && document.querySelector('.model-service-settings')===null)`), 'late-refresh-stays-away');
     await click(primary, '帮助', 'catalogue-restore-help');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; toggle.click(); return true; })()`, 'catalogue-restore-developer');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'catalogue-developer-ready');

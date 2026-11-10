@@ -117,7 +117,19 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     heading?.focus({ preventScroll: true });
   }
 
+  /** The 模型服务 page last mounted; it leaves the document when the editor navigates elsewhere. */
+  let mounted: HTMLElement | null = null;
+
+  /**
+   * Repaints 模型服务 with an answer that arrived after an action on it (refresh, save, select, test, proxy, search): only while the
+   * page is still on screen (Issue #1445). A late answer never brings the page back after the editor left; its data stays in the
+   * service and the next opening reads it.
+   */
   function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection, passive = false): void {
+    if (mounted?.isConnected) paintModelServiceSettings(projection, passive);
+  }
+
+  function paintModelServiceSettings(projection: ModelServiceSettingsProjection, passive = false): void {
     const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
     const previous = document.querySelector<HTMLElement>('.model-service-settings');
     const restoreInteraction = previous ? retainPollInteraction(previous, passive) : () => {};
@@ -213,6 +225,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const ordinaryPolicy = projection.launchPolicy.integrityState !== 'verified' || label.endsWith('零次实时传输') || label.endsWith('当前不会传输');
     content.append(...(technicalLayerVisible ? [] : [...(ordinaryPolicy ? [policyIntegrity] : []), ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
+    mounted = content;
     restoreInteraction(content);
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
@@ -255,7 +268,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     try {
       const [projection, preferences] = await Promise.all([window.ai7.getModelServiceSettings(), window.ai7.getPreferences()]);
       favourites = preferences.values['model.favourites'];
-      renderModelServiceSettingsProjection(projection);
+      paintModelServiceSettings(projection);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {
