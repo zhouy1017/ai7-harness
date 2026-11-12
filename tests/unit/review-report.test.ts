@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_REPORT_FINDING_BYTES, buildReviewReport, reportChapterOf, reportQuote, reviewFindingCounts, type ReviewReportFindingInput, type ReviewReportInput } from '../../src/service/review/review-report.js';
+import { MAX_REPORT_FINDING_BYTES, buildReviewReport, reportChapterOf, reportContentDigest, reportQuote, reviewFindingCounts, type ReviewReportFindingInput, type ReviewReportInput } from '../../src/service/review/review-report.js';
 
 // Unit suite for the 审阅报告 record (Issue #417, REV-009). Public synthetic text only.
 
@@ -147,6 +147,13 @@ describe('the 审阅报告 record, version /2', () => {
     expect(entry(true)).toMatchObject({ categoryKey: 'factual', summary: '年份有误。', rationale: '【核查结论：疑似错误】年份有误。另见史料。',
       quote: long, originalText: long, chapterTitle: '第二章 示例', paragraphOrdinal: 1, priority: 'should' });
     expect(entry(false)).toMatchObject({ quote: reportQuote(long), originalText: long });
+  });
+
+  it('digests what a version says apart from its number and time, so an unchanged export reuses it (Issue #1446)', () => {
+    const digest = reportContentDigest(buildReviewReport(INPUT));
+    expect(reportContentDigest(buildReviewReport({ ...INPUT, version: INPUT.version + 1, generatedAt: '2030-01-01T00:00:00.000Z' }))).toBe(digest);
+    const changed = INPUT.findings.map((finding, index) => index === 1 ? { ...finding, status: 'ignored' as const } : finding);
+    expect(reportContentDigest(buildReviewReport({ ...INPUT, findings: changed }))).not.toBe(digest);
   });
 
   it('bounds the 发现详单 by bytes and counts the rows it left out; a long excerpt is shortened like a quotation', () => {

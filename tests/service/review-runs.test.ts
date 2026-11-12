@@ -2282,17 +2282,20 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
         restorationLine: '审阅报告汇总本书 1 次审阅的发现写出：审阅说明、问题统计、建议优先处理的重点问题与逐项问题清单。',
         target: { kind: 'report', report: { reviewRunId: run.reviewRunId, version: report.version + 1 } },
       });
+      // Issue #1446: nothing is recorded until the save destination is chosen; a cancelled dialog leaves it so.
+      expect(workspace(session, book, run.reviewRunId).run!.report!.version).toBe(report.version);
+      const reportTarget = { kind: 'report' as const, reportId: reviewed.target.report!.reportId };
+      const destination = join(outbox, reviewed.suggestedFileName);
+      const preparation = await session.store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId, target: reportTarget,
+        options, reviewDigest: reviewed.reviewDigest, destination, format: 'docx' }, true);
       const recorded = workspace(session, book, run.reviewRunId).run!.report!.record;
+      expect(recorded.version).toBe(report.version + 1);
       const entries = recorded.findings!.entries;
       expect(recorded.compilation).toEqual({ runCount: 1 });
       expect(recorded.manuscriptExtent!.chapterCount).toBeGreaterThan(0);
       expect(entries.map((entry) => entry.index)).toEqual(entries.map((_entry, index) => String(index + 1).padStart(3, '0')));
       const quotes = new Map(run.findings.map((finding) => [finding.findingId, finding.quote] as const));
       expect(entries.every((entry) => entry.originalText === quotes.get(entry.findingIds[0]!) && entry.categoryKey !== undefined && entry.chapterTitle !== undefined)).toBe(true);
-      const reportTarget = { kind: 'report' as const, reportId: reviewed.target.report!.reportId };
-      const destination = join(outbox, reviewed.suggestedFileName);
-      const preparation = await session.store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId, target: reportTarget,
-        options, reviewDigest: reviewed.reviewDigest, destination, format: 'docx' }, true);
       await session.store.stageManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
       const receipt = await session.store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
       expect(receipt).toMatchObject({ format: 'docx', outcome: 'created', destination });
@@ -2300,6 +2303,40 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       expect(documentXml).toContain(`>《${reviewed.bookTitle}》审阅报告<`);
       expect(documentXml.match(/w:fill="F7F7F7"/gu)?.length).toBe(entries.length);
       expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1 + entries.length);
+    });
+  }, 300_000);
+
+  it('records a one-step report version only for a chosen destination and only when the findings changed (Issue #1446)', async () => {
+    await withReportBook(async (session, book, run, report, outbox) => {
+      const target = { kind: 'book-review-report' as const };
+      const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
+      const versions = (): number[] => workspace(session, book, run.reviewRunId).run!.reportVersions.map((recorded) => recorded.version);
+      const exportOnce = async (fileName: string | null): Promise<string> => {
+        const reviewed = await session.store.reviewManuscriptExport({ bookId: book.bookId, target, options, format: 'docx' }, true);
+        const reportId = reviewed.target.report!.reportId;
+        // `null` is the Save dialog cancelled: the main process prepares nothing.
+        if (fileName === null) return reportId;
+        const preparation = await session.store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId,
+          target: { kind: 'report', reportId }, options, reviewDigest: reviewed.reviewDigest, destination: join(outbox, fileName), format: 'docx' }, true);
+        await session.store.stageManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+        expect(await session.store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true)).toMatchObject({ outcome: 'created' });
+        return reportId;
+      };
+      await exportOnce(null);
+      expect(versions()).toEqual([report.version]);
+      const first = await exportOnce('一.docx');
+      expect(versions()).toEqual([report.version, report.version + 1]);
+      // Unchanged findings: the recorded version is exported again, cancelled or saved, and nothing new is recorded.
+      expect(await exportOnce(null)).toBe(first);
+      expect(await exportOnce('二.docx')).toBe(first);
+      expect(versions()).toEqual([report.version, report.version + 1]);
+      expect((await readFile(join(outbox, '二.docx'))).equals(await readFile(join(outbox, '一.docx')))).toBe(true);
+      // A changed finding is one new version.
+      session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, run.findings[0]!.findingId, '不是错误');
+      expect(await exportOnce('三.docx')).not.toBe(first);
+      expect(versions()).toEqual([report.version, report.version + 1, report.version + 2]);
+      expect(session.store.inspectDeliverables(book.bookId).exports.map((record) => record.target.report?.version))
+        .toEqual([report.version + 2, report.version + 1, report.version + 1]);
     });
   }, 300_000);
 

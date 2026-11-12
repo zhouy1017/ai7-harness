@@ -152,3 +152,28 @@ it('keeps the ordinary search-source choice across a settings round trip (#1370)
   root.replaceChildren(); await page.renderModelServiceSettings();
   expect(root.querySelector('[data-action="always-use-selected-search-backend"]')!.checked).toBe(true);
 });
+
+it('a model-list refresh that lands after the editor left never brings 模型服务 back; its catalogue shows on return (#1445)', async () => {
+  const { root, page, api, settings } = mount();
+  Object.assign(settings.routeChoice, { routes: [{ route: 'opencode-go', inUse: true, status: 'ready', statusLabel: '可用',
+    connection: { connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null } }] });
+  let land: (next: ModelServiceSettingsProjection) => void = () => undefined;
+  const refreshModelServiceModels = vi.fn(() => new Promise<ModelServiceSettingsProjection>((resolve) => { land = resolve; }));
+  Object.assign(api, { refreshModelServiceModels });
+  await page.renderModelServiceSettings();
+  const refresh = root.querySelector('[data-action="retry-model-list"]')!;
+  expect(refresh.disabled).toBe(false);
+  refresh.click();
+  expect(refreshModelServiceModels).toHaveBeenCalledWith({ route: 'opencode-go' });
+  const elsewhere = document.createElement('section') as unknown as MiniElement;
+  root.replaceChildren(elsewhere);
+  // The service keeps the refreshed catalogue; the late answer arrives after the editor went elsewhere.
+  const modelId = settings.channels.find((channel) => channel.channelId === 'opencode-go')!.models[0]!.modelId;
+  settings.channels = modelServiceChannels((route) => route === 'opencode-go' ? [{ modelId, modelLabel: '刷新后的合成模型' }] : []);
+  land({ ...settings, modelDiscovery: { status: 'success', modelCount: 1 } } as ModelServiceSettingsProjection);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(root.children.length === 1 && root.children[0] === elsewhere).toBe(true);
+  expect(root.querySelector('.model-service-settings')).toBeNull();
+  await page.renderModelServiceSettings();
+  expect(root.querySelector('.model-service-settings')!.textContent).toContain('刷新后的合成模型');
+});

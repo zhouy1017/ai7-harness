@@ -1,9 +1,10 @@
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type RendererApi } from '../shared/protocol.js';
 
 /**
- * 导出审阅报告（DOCX） (Issue #1430): one click records the Book's 审阅报告, opens the system Save dialog on
+ * 导出审阅报告（DOCX） (Issue #1430): one click compiles the Book's 审阅报告, opens the system Save dialog on
  * 「《书名》_审阅报告.docx」 and writes it through the export ledger every export uses, ending on 「审阅报告已导出至 <path>」.
- * The dialog's Save is the editor's one decision; nothing else is asked.
+ * The dialog's Save is the editor's one decision; nothing else is asked. A new report version is recorded only once a
+ * destination is chosen and only when the findings changed since the latest one (Issue #1446).
  */
 type ReportExportApi = Pick<RendererApi, 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport'>;
 type SetStatus = (message: string, tone?: 'busy' | 'success' | 'error') => void;

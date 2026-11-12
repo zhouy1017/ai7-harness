@@ -1,12 +1,27 @@
-# AI7 development plan — #1426 · 0.6.3 Beta candidate
+# AI7 development plan — #1444 · 0.6.5 Beta candidate
 
-This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `80845316e3d0a1c020f5f85bd4e1b76d7398bb07` (0.6.2 Beta, #1400). The after-wave-24c wave, [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426), has all five slices integrated on `codex/integration-after-wave-24c` (`c668f8d1`) and targets 0.6.3 Beta; final validation, dev delivery and human acceptance remain pending. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
+This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `1d2487cda357118d4e619e5d2d077ade4ade9f43` (0.6.3 Beta, #1426). The fix-only wave [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) has both slices integrated on `codex/integration-0.6.5` (`c540b535`) and targets 0.6.5 Beta; final validation, dev delivery and human acceptance remain pending. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
 
 The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) (procedures as the central object, the execution governor and idle lane, DSH as the complex-task harness, review contract v2 with evidence on cards, one production policy with a runtime model table, the learning agent's reason asks) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (structural editing, structure recognition, import fidelity, less ceremony). They build on [ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md); F-05 and F-06 keep their design and their core priority. The plan was revised through [#1065](https://github.com/zhouy1017/ai7-harness/issues/1065). The Owner's 2026-10-24 platform decision is [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): Windows is the only delivery platform, and every macOS gate and target is deferred indefinitely (revised through [#1098](https://github.com/zhouy1017/ai7-harness/issues/1098)). The programme is versioned under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md): one `x.y.z` in `package.json` names the software in releases and in this plan — Wave 21 → 0.2.0, Wave 22 → 0.3.0, its follow-up integration Wave 22b → 0.4.0 (the Owner's 2026-10-31 maintenance sub-wave carrying the policy successor and the admitted channels), Wave 23 → 0.5.0 — and the former "v3.2" planning name is retired (revised through [#1100](https://github.com/zhouy1017/ai7-harness/issues/1100)).
 
-## Current #1426 → 0.6.3
+## Current #1444 → 0.6.5
 
-The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [wave Issue #1426](https://github.com/zhouy1017/ai7-harness/issues/1426) turn the 0.6.2 human-test findings into #1427–#1431, delivered on `codex/integration-after-wave-24c` from `dev@80845316`:
+The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [wave Issue #1444](https://github.com/zhouy1017/ai7-harness/issues/1444) fix the two known 0.6.3 issues on `codex/integration-0.6.5` from `dev@1d2487cd`. 0.6.5 is the Owner's explicit number; 0.6.4 is unused. Neither fix changes IPC or persistence (protocol 201, schema 113):
+
+| Slice | Outcome | Integration commit |
+| --- | --- | --- |
+| #1446 | 「导出审阅报告（DOCX）」 records nothing on a cancelled Save, reuses the recorded report when findings are unchanged and records one new version only when they change | `62f95e35` (PR #1447) |
+| #1445 | A late model-list refresh no longer brings 模型服务 back after the editor has left it | `c540b535` (PR #1448) |
+
+Remaining delivery order:
+
+1. The closure candidate `codex/1444-0.6.5-closure` raises `package.json` 0.6.3 → 0.6.5 with its version-ledger row; its final head runs the full background-guest ladder.
+2. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes #1444–#1446, then refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1` and records the built commit and preservation check ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
+3. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
+
+## Delivered #1426 (0.6.3 Beta)
+
+#1426 (#1427–#1431, slice PRs #1436–#1440) is delivered as `dev@1d2487cd` through [PR #1442](https://github.com/zhouy1017/ai7-harness/pull/1442): schema 113, protocol 201, policy v35 / set v26.
 
 | Slice | Outcome | Integration commit |
 | --- | --- | --- |
@@ -15,12 +30,6 @@ The Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [w
 | #1428 | Direct in-place revision editing with Word-style inline revisions, automatic 【编辑修订】 cards and the 「人工修改自动应用」 toggle (schema 113) | `3121cb7c` (PR #1438) |
 | #1430 | One-click 「导出审阅报告（DOCX）」 in the published report layout | `3e0d0b38` (PR #1439) |
 | #1431 | Ordinary-mode technical wording and remaining ceremonies removed on the nine audited surfaces | `c668f8d1` (PR #1440) |
-
-Remaining delivery order:
-
-1. The closure candidate `codex/1426-after-wave-24c-closure` raises `package.json` 0.6.2 → 0.6.3 and protocol 200 → 201 with its version-ledger row; its final head runs the full background-guest ladder.
-2. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes #1426–#1431, then refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1` and records the built commit and preservation check ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
-3. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
 
 ## Delivered #1400 (0.6.2 Beta)
 

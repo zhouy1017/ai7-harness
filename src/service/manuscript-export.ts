@@ -489,6 +489,12 @@ export interface ManuscriptExportEnvironment {
   packageManifest?(bookId: string, packageVersionId: string, member: PackageMemberKind): PackageManifest | null;
   /** One frozen package version's label and the revision it binds, from its record alone; `null` when it is none of the Book's. */
   packageVersion?(bookId: string, packageVersionId: string): { versionLabel: string; revisionId: string } | null;
+  /**
+   * The Book's compiled 审阅报告 held unrecorded under this id (Issue #1446), read as a recorded version is; `null` when none
+   * is held. A preparation of it records it first, in the preparation's own transaction, through `recordPendingReport`.
+   */
+  pendingReport?(reportId: string): { bookId: string; reviewRunId: string; version: number; generatedAt: string; canonicalJson: string; digest: string } | null;
+  recordPendingReport?(reportId: string): void;
 }
 
 /**
@@ -1233,6 +1239,8 @@ export class ManuscriptExportStore {
       createdAt,
     });
     transact(this.#db, () => {
+      // A held 审阅报告 version is recorded only now, once its save destination is chosen (Issue #1446).
+      if (resolved.report !== null) this.#environment.recordPendingReport?.(resolved.report.reportId);
       this.#db.prepare(
         `INSERT INTO export_preparations(
            preparation_id, effect_intent_id, book_id, target_kind, target_id, revision_id, revision_digest, format,
@@ -1561,10 +1569,10 @@ export class ManuscriptExportStore {
    * was recorded with. A version is never rewritten, so nothing is saved first and a preparation's version stays exact.
    */
   #reportTarget(bookId: string, reportId: string): ResolvedTarget {
-    const row = this.#db.prepare(
+    const row = (this.#db.prepare(
       `SELECT rr.review_run_id, rr.version, rr.generated_at, rr.canonical_json, rr.sha256, r.book_id
        FROM review_reports rr JOIN review_runs r ON r.review_run_id = rr.review_run_id WHERE rr.report_id = ?`,
-    ).get(reportId) as SqlRow | undefined;
+    ).get(reportId) as SqlRow | undefined) ?? this.#pendingReportRow(reportId);
     requireExport(row !== undefined && text(row.book_id) === bookId, 'EXPORT_TARGET_NOT_FOUND', '所选审阅报告不属于这本书。');
     const json = text(row.canonical_json);
     const digest = text(row.sha256);
@@ -1585,6 +1593,13 @@ export class ManuscriptExportStore {
       document: null,
       manifest: null,
     };
+  }
+
+  /** A held 审阅报告 version (Issue #1446) in the columns `#reportTarget` reads. */
+  #pendingReportRow(reportId: string): SqlRow | undefined {
+    const held = this.#environment.pendingReport?.(reportId) ?? null;
+    return held === null ? undefined : { review_run_id: held.reviewRunId, version: held.version, generated_at: held.generatedAt,
+      canonical_json: held.canonicalJson, sha256: held.digest, book_id: held.bookId };
   }
 
   /** Whether a document's words began as AI7's writing draft (Issue #432, S84a), as its record's parser identity says. */
