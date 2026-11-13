@@ -1585,7 +1585,7 @@ async function main() {
     await clickBook(primary, bookA, 'model-author-book');
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]')`, 'model-author-anchor');
     await assertRenderer(primary, `(() => { document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${modelAuthorMark}"]').scrollIntoView({block:'center'}); const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`, 'model-author-comments');
-    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ')`, 'model-author-comments-label');
+    await waitFor(primary, `document.querySelector('[data-comment-card="${modelAuthorMark}"] [data-mark-source]')?.textContent==='gpt-6-luna@high'`, 'model-author-comments-label');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-comment-card="${modelAuthorMark}"]'); card.focus(); card.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`, 'model-author-open-full-card');
     await waitFor(primary, `document.querySelector('.editorial-mark-layer [data-mark-card="${modelAuthorMark}"] [data-mark-source]')?.textContent.startsWith('gpt-6-luna@high · ') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-full-card-label');
     await assertRenderer(primary, `(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); document.querySelector('[data-edge-entry="comments"]').click(); return true; })()`, 'model-author-close-cards');
