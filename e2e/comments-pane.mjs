@@ -153,14 +153,23 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
     const w=words.getBoundingClientRect(),v=document.querySelector('.editor-window').getBoundingClientRect();return w.bottom>v.top&&w.top<v.bottom;
   })()`, 'comments-card-words-listed', remaining());
   await renderer.evaluate(`(() => {globalThis.__commentsPoint=null;globalThis.__commentsPointPrevious=null;document.querySelector('[data-comment-card="'+${id}+'"]')?.scrollIntoView({block:'start',behavior:'instant'});return true;})()`);
-  await waitFor(renderer, `(() => {
+  try { await waitFor(renderer, `(() => {
     const node=document.querySelector('[data-comment-card="'+${id}+'"]');if(!node)return false;
     const r=node.getBoundingClientRect(),pane=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(),x=r.left+12,y=r.top+10;
     const before=__commentsPointPrevious;__commentsPointPrevious={x,y};
     if(node.hidden||y<pane.top||y>pane.bottom||!node.contains(document.elementFromPoint(x,y))){node.scrollIntoView({block:'start',behavior:'instant'});return false;}
     if(!before||before.x!==x||before.y!==y)return false;
     __commentsPoint={x,y,hit:true,top:r.top,selected:node.dataset.selected,expanded:node.dataset.expanded};return true;
-  })()`, 'comments-card-hit-ready', remaining());
+  })()`, 'comments-card-hit-ready', remaining()); } catch {
+    const reason=await renderer.evaluate(`(() => {
+      const node=document.querySelector('[data-comment-card="'+${id}+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
+      if(!node)return 'missing';if(!pane||pane.getClientRects().length===0)return 'pane-hidden';if(node.hidden)return 'not-listed';
+      const r=node.getBoundingClientRect(),p=pane.getBoundingClientRect(),x=r.left+12,y=r.top+10;
+      if(y<p.top||y>p.bottom)return 'outside-pane';if(!node.contains(document.elementFromPoint(x,y)))return 'covered';return 'moving';
+    })()`);
+    const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving'};
+    check(false,names[reason]??'comments-card-hit-ready');
+  }
   const point=await renderer.evaluate(`__commentsPoint`);
   if(requireCompact)check(point.expanded==='false'&&point.selected!=='true','comments-card-compact-before-click',point);
   const click=await commentsNativeClick(renderer,point);
