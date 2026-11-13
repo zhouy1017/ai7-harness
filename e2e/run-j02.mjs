@@ -548,7 +548,7 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
       const block = editor?.lastElementChild;
       const save = document.querySelector('[data-editor-persistence]');
       const actionLabels = ${JSON.stringify(actionLabels)};
-      const actions = actionLabels.filter((label) => label !== '保存').map((label) => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label));
+      const actions = actionLabels.filter((label) => label !== '保存').map((label) => Array.from(document.querySelectorAll('button')).find((button) => (button.getAttribute('aria-label') ?? button.textContent) === label));
       if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLElement) ||
           actions.some((action) => !(action instanceof HTMLButtonElement)) || !(save.dataset.editorPersistence === 'confirmed') ||
           actions.some((action) => action !== save && action.disabled)) return false;
@@ -1271,7 +1271,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await editThenInvokeOnDirty(renderer, '稳', ['保存', '撤销'], 'dirty-saving-undo-start');
   await waitForChecks(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: journal === 5, operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.getAttribute('aria-label') === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: journal === 5, operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
     'dirty-saving-undo-drained-and-unlocked',
     120_000,
   );
@@ -1459,7 +1459,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('milestone-authoritative-ready');
   await waitForChecks(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); return { authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', undoReady: undo instanceof HTMLButtonElement && !undo.disabled }; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.getAttribute('aria-label') === '撤销'); return { authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', undoReady: undo instanceof HTMLButtonElement && !undo.disabled }; })()`,
     'milestone-authoritative-ready',
   );
   at('milestone-undo-drain');
@@ -1796,7 +1796,7 @@ async function runEditorModesJourney(renderer) {
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   discloseJ02Viewport(await renderer.evaluate(`({width:innerWidth,height:innerHeight,overlay:matchMedia('(max-width: 1119.98px)').matches})`));
   // #1287 owns viewport height; A5 #1319 overlays supporting panes below 1120px.
-  await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelectorAll('button')).filter(button=>!button.hidden); const notice=document.querySelector('[data-toast]'); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=innerHeight+1, singletonNotice:document.querySelectorAll('[data-toast]').length===1, statusOnScreen:notice.hidden || notice.getBoundingClientRect().bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
+  await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(control=>!control.hidden && !control.classList.contains('ui-select-native') && getComputedStyle(control).display!=='none'); const notice=document.querySelector('[data-toast]'); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=innerHeight+1, singletonNotice:document.querySelectorAll('[data-toast]').length===1, statusOnScreen:notice.hidden || notice.getBoundingClientRect().bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
   await assertRenderer(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); if(panel.hidden)document.querySelector('[data-edge-entry="navigation"]').click(); return !panel.hidden; })()`, 'editor-navigation-layout-open');
   await waitForChecks(renderer, `(() => {
     const panel=document.querySelector('#manuscript-navigation-panel'), box=panel.getBoundingClientRect();
@@ -1960,7 +1960,7 @@ const MAX_RENDERER_BLOCKS = 32;
 const MANUSCRIPT_TAIL_PROBE = `(async () => { const work = (await window.ai7.listPriorWork())[0]; const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'proportion', proportion: 1 } }); const last = page.blocks.at(-1); return { blockId: last.blockId, position: last.position, totalBlocks: page.position.totalBlocks }; })()`;
 
 /** What the window shows of the structure paragraph: its text and the paragraph after it, the window size, and the journal. */
-const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk, unlocked: editor?.parentElement?.dataset.authoritativeMutation === 'false', redoReady: Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '重做' && !button.disabled) }; })()`;
+const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk, unlocked: editor?.parentElement?.dataset.authoritativeMutation === 'false', redoReady: Array.from(document.querySelectorAll('button')).some((button) => button.getAttribute('aria-label') === '重做' && !button.disabled) }; })()`;
 
 async function pressStructureKey(renderer, key) {
   const descriptor = key === 'Enter'
@@ -2030,7 +2030,7 @@ async function runStructureJourney(renderer) {
   await pressStructureKey(renderer, 'Enter');
   await waitForChecks(renderer, `(() => { const block = document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]'); return { heading: block?.tagName === 'H3', body: block?.nextElementSibling?.tagName === 'P', empty: block?.nextElementSibling?.textContent === '', settled: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'structure-heading-new-body');
   await clickButton(renderer, '撤销', 'structure-heading-undo-new-body');
-  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '撤销' && !button.disabled)`, 'structure-heading-undo-body-settled');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && Array.from(document.querySelectorAll('button')).some((button) => button.getAttribute('aria-label') === '撤销' && !button.disabled)`, 'structure-heading-undo-body-settled');
   await clickButton(renderer, '撤销', 'structure-heading-undo-style');
   await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]')?.tagName === 'P'`, 'structure-heading-back-to-body');
 }
@@ -2117,6 +2117,37 @@ async function main() {
     at('comments-responsive-pane');
     await commentsOrdinaryForEditor(renderer, requireJourney, waitFor);
     await commentsLayouts(renderer, requireJourney, waitFor);
+    for (const selector of ['.edit-method-menu', '.derivative-menu']) {
+      requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); menu.open=false; menu.querySelector('summary').focus(); return true; })()`) === true, 'toolbar-menu-focus');
+      await pressStructureKey(renderer, 'Enter');
+      requireJourney(await renderer.evaluate(`document.querySelector('${selector}').open`) === true, 'toolbar-menu-enter-open');
+      for (const key of ['ArrowDown', 'ArrowDown', 'Escape']) {
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
+        requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); return ${key==='Escape'?"!menu.open && document.activeElement===menu.querySelector('summary')":"menu.open && menu.querySelector('.ui-menu-panel').contains(document.activeElement)"}; })()`) === true, 'toolbar-menu-keyboard');
+      }
+    }
+    // #1452: toolbar geometry at both Owner viewport sizes, in the existing layouts stage.
+    for (const size of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
+      requireJourney(await renderer.evaluate(`(async () => {
+        if(innerWidth!==${size.width} || innerHeight!==${size.height})return false;
+        const mode=document.querySelector('[data-editor-input-mode-toggle]');
+        if(mode.dataset.inputMode!=='direct-edit'){mode.click();document.querySelector('[data-edit-method="direct"]').click();}
+        const entry=document.querySelector('[data-edge-entry="comments"]');
+        if(entry.getAttribute('aria-expanded')!=='true')entry.click();
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const toolbar=document.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
+        const actions=toolbar.querySelector('.editor-edit-actions');
+        const controls=Array.from(actions.children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
+        const rects=controls.map(el=>el.getBoundingClientRect());
+        const pane=document.querySelector('.manuscript-comments-pane'), paneBox=pane.getBoundingClientRect();
+        const commentsVisible=!pane.hidden && getComputedStyle(pane).display!=='none' && paneBox.width>0 && paneBox.height>0 && paneBox.left>=0 && paneBox.right<=innerWidth && paneBox.bottom<=innerHeight;
+        return innerWidth===${size.width} && innerHeight===${size.height} && (${size.width}!==1280 || commentsVisible) && mode.dataset.inputMode==='direct-edit' && rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs((r.top+r.height/2)-(rects[0].top+rects[0].height/2))<2 && r.bottom<=box.bottom)
+          && controls.every(el=>el.scrollWidth<=el.clientWidth+1);
+      })()`) === true, 'toolbar-one-row');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to
     // shut the product down or to clear the run root would read as an accessibility failure (#474).
     at('completion-browser-close');

@@ -1020,7 +1020,7 @@ async function main() {
     await press(renderer, 'Escape');
     // 撤销 steps over the Apply to the split before it; the applied words stay, and 重做 splits again.
     await click(renderer, '撤销', 'undo-over-apply');
-    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '重做' && !button.disabled)`, 'undo-steps-over-apply', 15_000);
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && Array.from(document.querySelectorAll('button')).some((button) => button.getAttribute('aria-label') === '重做' && !button.disabled)`, 'undo-steps-over-apply', 15_000);
     await click(renderer, '重做', 'redo-split');
     await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-splits-again', 15_000);
 
@@ -1118,7 +1118,8 @@ async function main() {
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
-    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') toggle.click(); return ${READING_REVISION} && toggle.textContent==='修订模式' && document.querySelector('[data-editor-auto-apply-toggle]')?.getAttribute('aria-pressed')==='true'; })()`, 'revision-reading-mode');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') { toggle.click(); document.querySelector('[data-edit-method="auto"]').click(); } return true; })()`, 'revision-reading-mode');
+    await waitFor(renderer, `${READING_REVISION} && document.querySelector('[data-editor-input-mode-toggle]').textContent==='修订 · 自动应用 ▾' && document.querySelector('[data-editor-input-mode-toggle]').dataset.autoApply==='true'`, 'revision-reading-mode-ready');
     await assertRenderer(renderer, `(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return false; window.__j05RevBlock=block.dataset.blockId; window.__j05RevOriginal=window.__j05.text(block.dataset.blockId); return typeof window.__j05RevOriginal==='string'; })()`, 'revision-block');
     // Typing over a selection writes in place; its settle creates an applied editor card without a composer.
     await selectInlineRevision(renderer, 'revision-select');
@@ -1131,8 +1132,8 @@ async function main() {
     await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')===null`, 'revision-undo-restores', 30_000);
     await settled(renderer, 'revision-settled');
 
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-editor-auto-apply-toggle]').click(); return true; })()`, 'revision-toggle-off');
-    await waitFor(renderer, `document.querySelector('[data-editor-auto-apply-toggle]')?.getAttribute('aria-pressed')==='false'`, 'revision-toggle-off-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-editor-input-mode-toggle]').click(); document.querySelector('[data-edit-method="confirm"]').click(); return true; })()`, 'revision-toggle-off');
+    await waitFor(renderer, `document.querySelector('[data-editor-input-mode-toggle]')?.dataset.autoApply==='false'`, 'revision-toggle-off-ready');
     await selectInlineRevision(renderer, 'revision-pending-select');
     await renderer.send('Input.insertText', { text: REVISED_TEXT });
     await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const mark=block?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence==='confirmed' && block.querySelector('.inline-track-del')!==null && block.querySelector('.inline-track-ins')!==null && block.classList.contains('paragraph-revision-bar'); })()`, 'revision-pending-redline', 30_000);
