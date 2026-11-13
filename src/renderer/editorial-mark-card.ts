@@ -38,6 +38,7 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
 }): { panel: HTMLElement; more: HTMLDetailsElement; actions: HTMLElement } {
   const panel = node('section', 'editorial-mark-card');
   panel.dataset['markCard'] = card.markId;
+  panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}${options.pane ? '卡片' : '浮卡'}`);
   panel.dataset['learningDecisionId'] = card.suggestion?.decision?.decisionId ?? '';
   panel.dataset['markKind'] = card.kind;
   panel.dataset['markCategory'] = card.categoryKey;

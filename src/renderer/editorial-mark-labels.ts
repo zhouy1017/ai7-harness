@@ -7,7 +7,7 @@ import type {
 } from '../shared/protocol.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
-import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
+import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 
 /** The frozen source mark is ordinary editorial information, independent of its task/category. */
 export function markSourceMark(source: EditorialMarkCardProjection['source'], technical = false): string {
@@ -30,7 +30,7 @@ export function markDisplayNote(note: string): { text: string; unchecked: boolea
   while (text.startsWith(REVIEW_UNCHECKED_DISCLOSURE)) text = text.slice(REVIEW_UNCHECKED_DISCLOSURE.length);
   if (guessedAnchor) {
     text = text.slice(REVIEW_GUESSED_ANCHOR_NOTE_PREFIX.length);
-    text = text.replace(/^（标点已与原稿对齐）/u, '');
+    if (text.startsWith(REVIEW_PUNCTUATION_ALIGNED_NOTE)) text = text.slice(REVIEW_PUNCTUATION_ALIGNED_NOTE.length);
   }
   return { text: text.trimStart(), unchecked, guessedAnchor };
 }

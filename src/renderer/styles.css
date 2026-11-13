@@ -3069,7 +3069,7 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editorial-mark-card[data-pane-card] .editorial-mark-category-badge { padding: 0 .25rem; font-size: .68rem; line-height: 18px; white-space: nowrap; }
 .editorial-mark-card[data-pane-card] .editorial-mark-kind { font-size: .68rem; font-weight: 500; white-space: nowrap; }
 .editorial-mark-card[data-pane-card] .editorial-mark-source { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; }
-.editorial-mark-card[data-pane-card] .status-pill { flex: none; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .65rem; padding: 0 .2rem; font-weight: 400; }
+.editorial-mark-card[data-pane-card] .status-pill { display: block; line-height: 18px; flex: none; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .65rem; padding: 0 .2rem; font-weight: 400; }
 .editorial-mark-compact-preview { margin: .2rem 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; line-height: 20px; }
 .editorial-mark-card[data-pane-card][data-expanded="false"][data-handled="true"] { color: var(--text-subdued); font-weight: 400; background: var(--surface-subdued); box-shadow: none; }
 .editorial-mark-card[data-pane-card][data-expanded="false"][data-handled="true"] .editorial-mark-category-badge { color: inherit; background: transparent; font-weight: 400; }
@@ -3078,3 +3078,7 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editorial-mark-note-tag { border: 1px solid var(--boundary); border-radius: 4px; padding: .1rem .3rem; font-size: .7rem; color: var(--text-subdued); }
 
 .manuscript-comments-read { padding: .6rem; box-sizing: border-box; background: var(--surface); border: 1px solid var(--boundary); }
+
+.manuscript-comments-heading button[aria-label="关闭批注栏"] { min-width: 24px; width: 24px; padding: 0; }
+.editorial-mark-card[data-expanded="false"]:has(> .manuscript-comments-refresh) .editorial-mark-compact-preview { display: none; }
+.editorial-mark-card[data-expanded="false"] > .manuscript-comments-refresh { margin: .2rem 0 0; font-size: .8rem; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -1,4 +1,4 @@
-import { REVIEW_GUESSED_ANCHOR_NOTE_PREFIX } from '../../shared/review-basis.js';
+import { REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, REVIEW_PUNCTUATION_ALIGNED_NOTE } from '../../shared/review-basis.js';
 import { notExactFetched } from '../retrieval/result-validator.js';
 import {
   REVIEW_CATEGORY_ASSURANCE_STATEMENT,
@@ -168,7 +168,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
               replacement: replacement === sliceGraphemes(block.text, previousLocation.fromGrapheme, previousLocation.toGrapheme) ? null : replacement };
           }
         }
-        if (guessed) note = `${REVIEW_GUESSED_ANCHOR_NOTE_PREFIX}${locate === locateQuotation ? '（标点已与原稿对齐）' : ''}${note}`;
+        if (guessed) note = `${REVIEW_GUESSED_ANCHOR_NOTE_PREFIX}${locate === locateQuotation ? REVIEW_PUNCTUATION_ALIGNED_NOTE : ''}${note}`;
         break;
       }
       const partialGrapheme = location.state === 'not-found' && distinctBlockIds.some((id) => {

@@ -1,5 +1,6 @@
 /** Located for individual review, excluded from automatic batch application. */
 export const REVIEW_GUESSED_ANCHOR_NOTE_PREFIX = '【锚点不唯一】';
+export const REVIEW_PUNCTUATION_ALIGNED_NOTE = '（标点已与原稿对齐）';
 
 /** Production disclosure is prepended without changing the reducer's note bytes. */
 export const REVIEW_UNCHECKED_DISCLOSURE = '【未联网核查】';

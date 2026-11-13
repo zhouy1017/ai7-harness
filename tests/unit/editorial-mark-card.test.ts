@@ -135,6 +135,7 @@ describe('pane compact and expanded cards (#1454)', () => {
     expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(value.source.modelLabel);
     expect(panel.querySelector('[data-mark-source]')?.getAttribute('title') ?? panel.querySelector<HTMLElement>('[data-mark-source]')?.title).toBe(value.source.modelLabel);
     expect(panel.querySelector('header')?.textContent).not.toContain('修改建议');
+    if (kind === 'change-suggestion') expect(panel.getAttribute('aria-label')).toContain('修改建议');
     expect(panel.querySelector('header button')).toBeNull();
     expect(panel.querySelector('.editorial-mark-category-badge')?.textContent).not.toMatch(/[【】]/u);
     setEditorialMarkCardExpanded(panel, true);
@@ -158,6 +159,15 @@ describe('pane compact and expanded cards (#1454)', () => {
       expect(panel.querySelector<HTMLElement>('.editorial-mark-expanded-content')?.hidden).toBe(false);
       expect(panel.querySelector(kind === 'change-suggestion' ? 'ins' : '[data-mark-body]')?.textContent).toBe(kind === 'change-suggestion' ? '改后' : '公开合成内容');
     }
+  });
+
+  it('subdues a rejected suggestion but keeps an open conflict at full contrast', () => {
+    const decision = { decisionId: 'd', disposition: 'rejected' as const, editedText: null, reason: null, reasonSource: null, reasonState: 'none' as const, feedbackEntries: 0, reasonRevisedAt: null, recordedAt: card.createdAt };
+    const rejected = { ...card, status: 'resolved' as const, suggestion: { ...card.suggestion!, decision } };
+    const renderPane = (value: EditorialMarkCardProjection) => renderEditorialMarkCard(value, { pane: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') }).panel;
+    const handled = renderPane(rejected); expect(handled.dataset['handled']).toBe('true'); expect(handled.querySelector('[data-mark-state]')?.textContent).toContain('✓ 已拒绝');
+    const conflict = renderPane({ ...card, status: 'applied', conflict: { kind: 'reversal', state: 'unresolved', deferredAt: null, outcome: null, newMarkId: null, resolvedAt: null } });
+    expect(conflict.dataset['handled']).toBe('false'); expect(conflict.querySelector('[data-mark-state]')?.textContent).toMatch(/^○ /u);
   });
 
   it('extracts leading disclosure and guessed-position tags without mutating stored reasons or bodies', () => {

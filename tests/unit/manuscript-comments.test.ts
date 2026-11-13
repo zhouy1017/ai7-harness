@@ -220,10 +220,50 @@ describe('comments command parity and refresh continuity', () => {
     setTechnicalLayerVisible(true); ui.setPage({ journalSequence: 1 }); await paint();
     expect(text()).toContain('policy-document'); expect(text()).toContain('第 42 版');
   });
-  it('keeps an initial failed read expanded with an explicit retry, then uses the returned card (#1454)', async () => {
+  it('keeps every unselected row compact during command-triggered deferred reads and failures', async () => {
+    const other = { ...card, markId: 'other' }, third = { ...card, markId: 'third' };
+    const ui = mount(card, [other, third]); await paint(); await ui.open(); await paint();
+    const secondRead = deferred<EditorialMarkCardProjection>(), thirdRead = deferred<EditorialMarkCardProjection>();
+    ui.get.mockImplementation(input => input.markId === 'other' ? secondRead.promise : thirdRead.promise);
+    const handled = { ...card, status: 'resolved' as const };
+    ui.update.mockResolvedValueOnce({ markId: card.markId, card: handled, marks: [anchor(handled), anchor(other), anchor(third)], marksTruncated: false });
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="resolve"]')!.click(); await paint();
+    const row = (id: string) => ui.pane.querySelector<HTMLElement>(`[data-comment-card="${id}"]`)!;
+    expect(row('comment').dataset['expanded']).toBe('true');
+    for (const id of ['other', 'third']) { expect(row(id).dataset['expanded']).toBe('false'); expect(row(id).dataset['revalidating']).toBe('true'); }
+    secondRead.resolve(other); thirdRead.reject(new Error('read unavailable')); await paint();
+    expect(row('other').dataset['expanded']).toBe('false'); expect(row('third').dataset['expanded']).toBe('false');
+    expect(row('third').querySelector('[data-comment-retry]')).not.toBeNull();
+  });
+  it('removes an empty abandoned or sent reply form so an unselected card becomes compact', async () => {
+    const other = { ...card, markId: 'other' }, ui = mount(card, [other]); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    const next = ui.pane.querySelector<HTMLElement>('[data-comment-card="other"]')!;
+    node.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint();
+    next.focus(); next.click(); await paint();
+    expect(node.querySelector('[data-comment-reply]')).toBeNull(); expect(node.dataset['expanded']).toBe('false');
+    node.click(); await paint(); node.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
+    const input = node.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '公开答复';
+    const sent = { ...card, replies: [{ replyId: 'r', body: input.value, createdAt: card.createdAt }] };
+    ui.update.mockResolvedValueOnce({ markId: card.markId, card: sent, marks: [anchor(sent), anchor(other)], marksTruncated: false });
+    (node.querySelector('form') as unknown as MiniElement).dispatchEvent({ type: 'submit' }); await paint();
+    expect(input.value).toBe(''); next.focus(); next.click(); await paint();
+    expect(node.querySelector('[data-comment-reply]')).toBeNull(); expect(node.dataset['expanded']).toBe('false');
+  });
+  it('shows the unchecked line only for listed matches and retains the empty-filter hint', async () => {
+    const ui = mount({ ...card, body: '【未联网核查】公开合成说明' }); await paint();
+    const line = ui.pane.querySelector<HTMLElement>('.editorial-mark-disclosure')!;
+    expect(line.hidden).toBe(false);
+    const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
+    search.value = '没有这个词'; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
+    expect(line.hidden).toBe(true); expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toContain('没有匹配的批注');
+    search.value = ''; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
+    Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 3000, bottom: 3100 }) }); ui.refresh(); await paint(); expect(line.hidden).toBe(true);
+  });
+  it('keeps an initial failed read compact with an explicit retry, then uses the returned card (#1454)', async () => {
     const ui = mount(); ui.get.mockRejectedValueOnce(new Error('read unavailable')); await paint();
     const failed = ui.pane.querySelector<HTMLElement>('[data-comment-pending]')!;
-    expect(failed.dataset['expanded']).toBe('true'); expect(failed.textContent).toContain('批注读取失败');
+    expect(failed.dataset['expanded']).toBe('false'); expect(failed.textContent).toContain('批注读取失败');
     expect(ui.get).toHaveBeenCalledTimes(1); ui.refresh(); await paint(); expect(ui.get).toHaveBeenCalledTimes(1);
     failed.querySelector<HTMLButtonElement>('[data-comment-retry]')!.click(); await paint();
     expect(ui.pane.querySelector('[data-comment-pending]')).toBeNull();
@@ -252,7 +292,7 @@ describe('comments command parity and refresh continuity', () => {
     expect(node.dataset['expanded']).toBe('false');
     node.click(); await paint(); expect(node.dataset['expanded']).toBe('true'); expect(ui.get).toHaveBeenCalledTimes(2);
     node.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint();
-    const input = node.querySelector('[data-comment-reply]'); other.click(); await paint();
+    const input = node.querySelector<HTMLTextAreaElement>('[data-comment-reply]')!; input.value = '保留草稿'; other.focus(); other.click(); await paint();
     expect(node.dataset['selected']).toBe('false'); expect(node.dataset['expanded']).toBe('true'); expect(node.querySelector('[data-comment-reply]')).toBe(input);
   });
   it('flushes layout dropped during an auto-scrolling text drag and releases a press on window blur (#1454)', async () => {
