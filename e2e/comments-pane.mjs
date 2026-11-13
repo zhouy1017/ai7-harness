@@ -201,18 +201,25 @@ async function commentsFilterMouse(renderer, check, waitFor) {
 }
 
 const commentsUnmarkedPoint = `(() => {
-  const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'), block=words.closest('[data-block-id]');
-  const walk=document.createTreeWalker(block,NodeFilter.SHOW_TEXT); let node, last;
-  while(node=walk.nextNode()) if(node.textContent.trim() && !node.parentElement.closest('[data-mark-id]'))last=node;
-  if(!last)return null;
-  const range=document.createRange(); range.selectNodeContents(last); const rects=range.getClientRects(), r=rects[rects.length-1];
-  const x=r.right-3,y=r.top+r.height/2; return document.elementFromPoint(x,y)?.closest('[data-mark-id]')?null:{x,y};
+  const editor=document.querySelector('[data-testid="manuscript-editor"]'),words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]');
+  const target=words.closest('[data-block-id]'),viewport=document.querySelector('.editor-window').getBoundingClientRect();
+  const blocks=[target,...Array.from(editor.querySelectorAll('[data-block-id]')).filter(node=>node!==target)];
+  for(const block of blocks){const walk=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let node;
+    while(node=walk.nextNode())if(node.textContent.trim()&&!node.parentElement.closest('[data-mark-id]')){
+      const range=document.createRange();range.selectNodeContents(node);
+      for(const r of range.getClientRects()){
+        const x=r.left+Math.min(3,r.width/2),y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
+        if(y>viewport.top&&y<viewport.bottom&&editor.contains(hit)&&!hit.closest('[data-mark-id]'))return {x,y};
+      }
+    }
+  }
+  return null;
 })()`;
 
 export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   await renderer.send('Page.bringToFront');
   await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-  const coordinates = await renderer.evaluate(`(async () => {
+  const readCoordinates = () => renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
     const search=document.querySelector('[data-mark-search-input]'); document.querySelector('[data-mark-filter-toggle]').focus({preventScroll:true}); getSelection().removeAllRanges();
     search.value='公开合成不匹配筛选'; search.dispatchEvent(new Event('input',{bubbles:true}));
@@ -236,11 +243,14 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
     return {pass:reachable && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
+  const assertCoordinates = coordinates => {
   check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
   check(!coordinates.selected, 'comments-scrolled-canvas-unselected', coordinates);
   check(coordinates.scrollTop===0, 'comments-scrolled-canvas-text-scroll-reset', coordinates);
   check(Math.abs(coordinates.cardTop-coordinates.wordsTop)<=4, 'comments-scrolled-canvas-word-level', coordinates);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
+  };
+  assertCoordinates(await readCoordinates());
   const compact = await renderer.evaluate(`(() => {
     const pane=document.querySelector('.manuscript-comments-scroll'), p=pane.getBoundingClientRect();
     const rows=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
@@ -251,6 +261,12 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     return {width:innerWidth,height:innerHeight,visible:visible.length,header,compact:rows.every(node=>node.dataset.expanded==='false'&&node.getBoundingClientRect().height<=76&&!node.querySelector('.editorial-mark-expanded-content')?.checkVisibility())};
   })()`);
   check(compact.width===1280 && compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
+  // The hosted desktop's client viewport is smaller than the guests' native window. Exercise actual
+  // pane input in that overlay form after keeping the 1280x800 density proof above.
+  await renderer.send('Emulation.setDeviceMetricsOverride',{width:1008,height:681,deviceScaleFactor:1,mobile:false});
+  await waitFor(renderer,`(() => {const pane=document.querySelector('.manuscript-comments-pane'),p=pane.getBoundingClientRect(),edge=document.querySelector('.editor-edge').getBoundingClientRect();return innerWidth===1008&&innerHeight===681&&getComputedStyle(pane).position==='absolute'&&p.width>=300&&p.right<=edge.left+1&&document.querySelector('.manuscript-comments-scroll').clientHeight>0;})()`,'comments-overlay-viewport');
+  assertCoordinates(await readCoordinates());
+  await commentsFilterMouse(renderer,check,waitFor);
   check(await renderer.evaluate(`(async () => {
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
     words.scrollIntoView({block:'center',behavior:'instant'}); document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
@@ -365,7 +381,7 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[1]+'"] [data-mark-state]').textContent.includes('已拒绝')`, 'comments-rejected-pane-updated');
   check(await renderer.evaluate(`(async () => { const page=await window.ai7.getManuscriptWindowAt({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,target:{kind:'window-start',blockId:__comments.start}}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:__comments.ids[1]}); return page.journalSequence===__comments.journal+1 && card.suggestion.decision.disposition==='rejected'; })()`), 'comments-reject-retains-text');
   await commentsHandledFilter(renderer, check, waitFor, [0, 1]);
-  await renderer.send('Emulation.clearDeviceMetricsOverride');
+  await renderer.send('Emulation.setDeviceMetricsOverride',{width:1008,height:681,deviceScaleFactor:1,mobile:false});
 }
 
 export async function commentsReplyAndResolve(renderer, check, waitFor) {
@@ -399,7 +415,7 @@ export async function commentsReplyAndResolve(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复')`, 'comments-existing-full-card');
   check(await renderer.evaluate(`(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); return true; })()`), 'comments-full-card-close');
   await commentsHandledFilter(renderer, check, waitFor, [2]);
-  await renderer.send('Emulation.clearDeviceMetricsOverride');
+  await renderer.send('Emulation.setDeviceMetricsOverride',{width:1008,height:681,deviceScaleFactor:1,mobile:false});
 }
 
 export async function commentsBookMemory(renderer, check, waitFor) {
