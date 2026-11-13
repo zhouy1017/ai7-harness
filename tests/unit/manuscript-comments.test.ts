@@ -210,9 +210,11 @@ describe('comments command parity and refresh continuity', () => {
     expect(selected.dataset['selected']).toBe('false');
   });
   it('selects from the caret when decoration replacement retargets the click to its paragraph (#1451)', async () => {
-    const ui = mount(); await paint(); ui.setCaret(1); ui.block.click(); await paint();
+    const ui = mount(); await paint();
+    const click = () => (ui.block as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, button: 0 } });
+    ui.setCaret(1); click(); await paint();
     expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
-    ui.setCaret(8); ui.block.click(); await paint();
+    ui.setCaret(8); click(); await paint();
     expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('false');
   });
   it('reuses reply/resolve commands, keeps the actual reply input and caret across a returned-card refresh, and reads once', async () => {
