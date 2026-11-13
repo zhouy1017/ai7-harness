@@ -3023,3 +3023,24 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .manuscript-switcher-list { min-width: 0; }
 .manuscript-switcher-list .manuscript-switch { max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* END #1427 derivative manuscripts workspace */
+
+/* #1452: compact controls using shared disclosure keyboard and popup behavior. */
+.edit-method-menu, .derivative-menu { position: relative; flex: 0 0 auto; }
+.edit-method-menu > summary, .derivative-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; }
+.edit-method-menu > summary::-webkit-details-marker, .derivative-menu > summary::-webkit-details-marker { display: none; }
+.edit-method-menu:not([open]) > .ui-menu-panel, .derivative-menu:not([open]) > .ui-menu-panel { display: none; }
+.edit-method-menu .ui-menu-panel { width: 23rem; white-space: normal; }
+.edit-method-menu .ui-menu-panel button { display: grid; gap: .25rem; text-align: left; white-space: normal; }
+.edit-method-menu .ui-menu-panel span { font-size: .85rem; color: var(--text-subdued); }
+.edit-method-menu [aria-checked="true"] { background: var(--surface-subdued); }
+.edit-method-menu [data-edit-method="direct"] { color: var(--status-blocked); }
+.derivative-menu .ui-menu-panel { min-width: 15rem; }
+.editor-toolbar .editor-history-icon { padding: .1rem .3rem; flex: 0 0 28px; }
+.editor-toolbar .editor-edit-actions { flex: 1 0 auto; }
+.editor-history-undo { margin-left: auto; }
+@container (max-width: 600px) {
+  .editor-toolbar { flex-wrap: wrap; }
+  .editor-toolbar .editor-edit-actions { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
+  .editor-toolbar .editor-edit-actions > * { max-width: 100%; }
+  .editor-toolbar .btn { white-space: normal; }
+}
