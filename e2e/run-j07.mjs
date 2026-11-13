@@ -1883,9 +1883,11 @@ async function main() {
     await assertRenderer(renderer, DIRECT_EDIT, 'document-toolbar-direct');
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
+    await waitFor(renderer, `Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1`, 'document-toolbar-dock-settled');
+    const widerToolbarViewport = await renderer.evaluate(`Math.round(innerWidth + 620 - document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width)`);
     // Exercise the widest style label without changing the document version fixed for this task.
     await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
-    for (const width of [1280, 1368]) {
+    for (const width of [1280, widerToolbarViewport]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
       let geometry;
       const geometryDeadline = Date.now() + 5_000;
