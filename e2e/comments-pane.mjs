@@ -95,7 +95,7 @@ export async function seedCommentsPane(renderer, check, waitFor) {
 }
 
 // Native input is intentional: focus and pointer-down must take the same path as an editor's first click.
-async function commentsNativeClick(renderer, point) {
+export async function commentsNativeClick(renderer, point) {
   if (!point) return { target: false };
   await renderer.evaluate(`(() => { globalThis.__commentsClickTrace={}; for(const type of ['mousedown','mouseup','click']) document.addEventListener(type,()=>{__commentsClickTrace[type]=true;},{capture:true,once:true}); return true; })()`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, buttons: 0 });
