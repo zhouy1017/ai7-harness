@@ -330,6 +330,45 @@ describe('comments command parity and refresh continuity', () => {
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="handled"]')!.click(); await paint();
     expect(selected.dataset['selected']).toBe('false');
   });
+  it.each([true, false])('settles a retained range before activating a clicked mark (pane=%s, #1459)', async enabled => {
+    vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); ui.setEnabled(enabled); await paint();
+    const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);
+    const native = { isCollapsed: false, anchorNode: words };
+    vi.spyOn(window, 'getSelection').mockReturnValue(native as unknown as Selection);
+    ui.setRange('range');
+    (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, button: 0 } });
+    expect(ui.scroll.querySelector('[data-mark-card]')).toBeNull();
+    native.isCollapsed = true; ui.setRange('none');
+    miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    if(enabled)expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
+    else expect(ui.scroll.querySelector('[data-mark-card]')).not.toBeNull();
+  });
+  it('expires a drag decision after one frame, so a later caret cannot activate it (#1459)', async () => {
+    vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); ui.setEnabled(false); await paint();
+    const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);
+    const native = { isCollapsed: false, anchorNode: words };
+    vi.spyOn(window, 'getSelection').mockReturnValue(native as unknown as Selection);
+    ui.setRange('range');
+    (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, button: 0 } }); await paint();
+    native.isCollapsed = true; ui.setRange('none');
+    miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    expect(ui.scroll.querySelector('[data-mark-card]')).toBeNull();
+  });
+  it.each(['key', 'press', 'input', 'blur', 'destroy'])('cancels a pending mark decision on %s (#1459)', async cause => {
+    vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); ui.setEnabled(false); await paint();
+    const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);
+    (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, button: 0 } });
+    if(cause==='key')miniDocument.body.dispatchEvent({type:'keydown',key:'a'});
+    if(cause==='press')miniDocument.body.dispatchEvent({...{type:'pointerdown',button:0}});
+    if(cause==='input')miniDocument.body.dispatchEvent({type:'beforeinput'});
+    if(cause==='blur')for(const [,listener] of vi.mocked(window.addEventListener).mock.calls.filter(call=>call[0]==='blur'))(listener as () => void)();
+    if(cause==='destroy'){mounted!.destroy();mounted=undefined;}
+    await paint();
+    expect(ui.scroll.querySelector('[data-mark-card]')).toBeNull();
+  });
   it('selects from the caret when decoration replacement retargets the click to its paragraph (#1451)', async () => {
     vi.stubGlobal('Element', MiniElement);
     const ui = mount(); await paint();

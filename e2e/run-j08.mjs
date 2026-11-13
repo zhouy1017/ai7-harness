@@ -1,4 +1,4 @@
-import { commentsNativeClick, seedCommentsPane, commentsGeometryAndScroll, commentsReplyAndResolve, commentsBookMemory } from './comments-pane.mjs';
+import { commentsRangeElsewhere, commentsNativeClick, seedCommentsPane, commentsGeometryAndScroll, commentsReplyAndResolve, commentsBookMemory } from './comments-pane.mjs';
 import { existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -610,6 +610,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-mark-kind="editor-note"].editorial-mark') && !document.querySelector('[data-mark-composer]')`, 'recovered-card-note-drawn');
     // A mark can decorate before the authoritative refresh restores its selection. Finish that refresh before input.
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.parentElement.dataset.authoritativeMutation !== 'true' && document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed'`, 'recovered-card-refresh-settled');
+    await commentsRangeElsewhere(renderer,requireJourney,waitFor,'.editorial-mark[data-mark-kind="editor-note"]');
     await renderer.evaluate(`(() => { globalThis.__j08RecoveredPoint=null; document.querySelector('.editorial-mark[data-mark-kind="editor-note"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`);
     await waitFor(renderer, `(() => {
       const mark=document.querySelector('.editorial-mark[data-mark-kind="editor-note"]'),r=mark.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;

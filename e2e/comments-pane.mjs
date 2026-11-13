@@ -100,6 +100,22 @@ export async function seedCommentsPane(renderer, check, waitFor) {
 }
 
 // Native input is intentional: focus and pointer-down must take the same path as an editor's first click.
+export async function commentsRangeElsewhere(renderer, check, waitFor, selector) {
+  check(await renderer.evaluate(`(() => {
+    const words=document.querySelector(${JSON.stringify(selector)}),editor=document.querySelector('[data-testid="manuscript-editor"]'),target=words.closest('[data-block-id]');
+    const paragraphs=Array.from(editor.querySelectorAll('p[data-block-id]')).filter(node=>node!==target);
+    for(const paragraph of paragraphs){
+      const walk=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);let text;
+      while(text=walk.nextNode())if(text.length>=4&&!text.parentElement.closest('[data-mark-id]')){
+        editor.focus({preventScroll:true});const range=document.createRange();range.setStart(text,0);range.setEnd(text,4);
+        const selection=getSelection();selection.removeAllRanges();selection.addRange(range);globalThis.__commentsRangeBlock=paragraph.dataset.blockId;return !selection.isCollapsed;
+      }
+    }
+    return false;
+  })()`), 'comments-existing-range-elsewhere');
+  await waitFor(renderer, `(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot);return !getSelection().isCollapsed && model.from!==model.to && model.anchor.blockId===__commentsRangeBlock && model.head.blockId===__commentsRangeBlock;})()`, 'comments-existing-range-ready');
+}
+
 export async function commentsNativeClick(renderer, point) {
   if (!point) return { target: false };
   await renderer.evaluate(`(() => { globalThis.__commentsClickTrace={}; for(const type of ['mousedown','mouseup','click']) document.addEventListener(type,()=>{__commentsClickTrace[type]=true;},{capture:true,once:true}); return true; })()`);
@@ -226,6 +242,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   })()`), 'comments-overflow-position');
   const elsewhere = await commentsNativeClick(renderer, await renderer.evaluate(commentsUnmarkedPoint));
   check(elsewhere.real, 'comments-real-unmarked-caret', elsewhere);
+  await commentsRangeElsewhere(renderer, check, waitFor, '.editor-window [data-mark-id="'+await renderer.evaluate('__comments.ids[11]')+'"]');
   const wordPoint = await renderer.evaluate(`(async () => {
     const id=__comments.ids[11],words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
     words.scrollIntoView({block:'center',behavior:'instant'}); document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;

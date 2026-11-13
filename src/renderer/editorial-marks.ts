@@ -636,6 +636,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let activeComment: string | undefined;
   let hoveredComment: string | undefined;
   let suppressCommentSelection = false;
+  let pendingMarkClick: { hitId: string | undefined; frame: number } | undefined;
+  let markClickGeneration = 0;
   /** The card an applied revision's badge brought forward (Issue #1411), and whether it is still to be scrolled to. */
   let revealed: { readonly markId: string; readonly pending: boolean } | undefined;
   /** The pane position a reveal scrolled the text to: this surface's own movement, which never pages the window. */
@@ -1068,6 +1070,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   commentsResize.observe(options.host);
   if (options.comments) commentsResize.observe(commentsScroll);
   const commentSelection = (): void => {
+    settleMarkClick(false);
     if (!options.comments?.enabled()) return;
     if (textPointerDown) return;
     scheduleCommentsLayout();
@@ -2305,13 +2308,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
   }
 
-  const openCard = async (markId: string, form?: (card: EditorialMarkCardProjection, cancel: () => void) => FormConfig): Promise<void> => {
+  const openCard = async (markId: string, form?: (card: EditorialMarkCardProjection, cancel: () => void) => FormConfig,
+    stillRequested: () => boolean = () => true): Promise<void> => {
     if (destroyed) return;
     try {
       const current = editor.currentWindow();
       cardCache.sync(current);
       const card = await cardCache.read(markId, () => api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId }), true);
-      if (destroyed || !card || editor.currentWindow() !== current) return;
+      if (destroyed || !card || editor.currentWindow() !== current || !stillRequested()) return;
       scheduleCommentsLayout();
       showCard(card, form ? (cancel) => form(card, cancel) : undefined);
     } catch (error) {
@@ -3024,6 +3028,36 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (mark) showMarkMenu(mark, at);
     else showSelectionMenu(at);
   };
+  function cancelPendingMarkClick(): void {
+    markClickGeneration++;
+    if (pendingMarkClick) cancelAnimationFrame(pendingMarkClick.frame);
+    pendingMarkClick = undefined;
+  }
+  function settleMarkClick(final: boolean): void {
+    const pending = pendingMarkClick;
+    if (!pending || destroyed) return;
+    const native = window.getSelection();
+    const collapsed = editor.selectedRange().kind === 'none' && native?.isCollapsed !== false &&
+      (!native?.anchorNode || options.host.contains(native.anchorNode));
+    if (!collapsed && !final) return;
+    cancelPendingMarkClick();
+    if (!collapsed) return;
+    const generation = markClickGeneration;
+    suppressCommentSelection = false;
+    const hit = pending.hitId === undefined ? undefined : editor.currentWindow().marks.find(mark => mark.markId === pending.hitId);
+    if (pending.hitId !== undefined && !hit) return;
+    const point = editor.captureContinuity().head;
+    // Updating linked decorations can replace the down-target before click and retarget it to the paragraph.
+    const mark = hit ? hit
+      : options.comments?.enabled() ? pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme) : undefined;
+    if (options.comments?.enabled()) {
+      if (!mark) { activateComment(undefined); return; }
+      if (mark.anchorState === 'exact') { closeFloating(); activateComment(mark.markId); suppressCommentSelection = hit !== undefined; return; }
+    }
+    // A drifted one still opens its floating card, where its conflict is resolved.
+    if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied' && mark.anchorState === 'exact') { void revealRevision(mark.markId); return; }
+    if (mark !== undefined && mark.markId !== openCardId) void openCard(mark.markId, undefined, () => markClickGeneration === generation);
+  }
   const onClick = (event: MouseEvent): void => {
     if (event.button !== 0) return;
     textPointerDown = false;
@@ -3040,27 +3074,19 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       void setAiLocks(options.scopedAiEdit.host, [{ kind: 'block', blockId: lock.dataset['aiLockBlock']! }], false);
       return;
     }
-    if (editor.selectedRange().kind !== 'none') return;
-    suppressCommentSelection = false;
     const hit = markAt(event.target, false) ?? downMark;
-    const point = editor.captureContinuity().head;
-    // Updating linked decorations can replace the down-target before click and retarget it to the paragraph.
-    const mark = hit ? hit
-      : options.comments?.enabled() ? pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme) : undefined;
-    if (options.comments?.enabled()) {
-      if (!mark) { activateComment(undefined); return; }
-      if (mark.anchorState === 'exact') { closeFloating(); activateComment(mark.markId); suppressCommentSelection = hit !== undefined; return; }
-    }
-    // A drifted one still opens its floating card, where its conflict is resolved.
-    if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied' && mark.anchorState === 'exact') { void revealRevision(mark.markId); return; }
-    if (mark !== undefined && mark.markId !== openCardId) void openCard(mark.markId);
+    cancelPendingMarkClick();
+    // A click inside a retained range may collapse it only after click dispatch. A drag keeps its range.
+    pendingMarkClick = { hitId: hit?.markId, frame: requestAnimationFrame(() => settleMarkClick(true)) };
   };
   const onDocumentMouseDown = (event: MouseEvent): void => {
+    cancelPendingMarkClick();
     if (event.target instanceof Node && (layer.contains(event.target) || menuLayer.contains(event.target))) return;
     closeMenu();
     if (floating !== undefined && !(event.target instanceof Element && event.target.closest('[data-mark-id]'))) closeFloating();
   };
   const onDocumentKeyDown = (event: KeyboardEvent): void => {
+    cancelPendingMarkClick();
     // An Escape that ends an input method's composition belongs to the composition (J-14): the composer stays open.
     if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || (menu === undefined && floating === undefined)) return;
     event.preventDefault();
@@ -3086,6 +3112,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   reflow.observe(options.scroll);
   reflow.observe(options.host);
 
+  document.addEventListener('pointerdown', cancelPendingMarkClick, true);
+  document.addEventListener('beforeinput', cancelPendingMarkClick, true);
+  window.addEventListener('blur', cancelPendingMarkClick);
+  options.host.addEventListener('blur', cancelPendingMarkClick, true);
   options.host.addEventListener('mousedown', onMouseDown);
   options.host.addEventListener('pointerdown', onTextPointerDown, { capture: true });
   options.host.addEventListener('pointerover', onMarkHover);
@@ -3175,6 +3205,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       options.scroll.removeEventListener('touchmove', onReaderScroll);
       window.removeEventListener('resize', onWindowResize);
       close();
+      cancelPendingMarkClick();
+      document.removeEventListener('pointerdown', cancelPendingMarkClick, true);
+      document.removeEventListener('beforeinput', cancelPendingMarkClick, true);
+      window.removeEventListener('blur', cancelPendingMarkClick);
+      options.host.removeEventListener('blur', cancelPendingMarkClick, true);
       options.host.removeEventListener('mousedown', onMouseDown);
       options.host.removeEventListener('contextmenu', onContextMenu);
       options.host.removeEventListener('keydown', onKeyDown);
