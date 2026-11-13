@@ -597,6 +597,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let commentsFrameScroll = 0;
   let pressedComment: string | undefined;
   let pressedTextMark: EditorialMarkAnchorProjection | undefined;
+  let textPointerDown = false;
   let activeComment: string | undefined;
   let hoveredComment: string | undefined;
   let suppressCommentSelection = false;
@@ -707,6 +708,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const id = pressedComment;
     pressedComment = undefined;
     if (!destroyed && id !== undefined) activateComment(id);
+    if (!destroyed && textPointerDown) {
+      textPointerDown = false;
+      pressedTextMark = undefined;
+      commentSelection();
+    }
   }
   const finishCommentPress = (): void => {
     const id = pressedComment;
@@ -851,8 +857,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
-    const placed = preservePanePositions ? items.map(item => ({ ...item, top: Number.parseFloat(item.node.style.top) || 0 }))
-      : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
+    const holdingFrame = preservePanePositions || (activeComment === undefined && paneTop > 0);
+    const placed = holdingFrame ? (() => {
+      const existing = items.filter(item => Number.isFinite(Number.parseFloat(item.node.style.top)))
+        .sort((a, b) => Number.parseFloat(a.node.style.top) - Number.parseFloat(b.node.style.top));
+      let bottom = 8;
+      const held = existing.map(item => {
+        const top = Math.max(Number.parseFloat(item.node.style.top), bottom);
+        bottom = top + item.measuredHeight + 10;
+        return { ...item, top };
+      });
+      for (const item of items) if (!existing.includes(item)) {
+        held.push({ ...item, top: bottom }); bottom += item.measuredHeight + 10;
+      }
+      return held;
+    })() : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
     // Shift canvas and scroll together: cards above the selection remain reachable.
     const shift = selectedIndex < 0 || preservePanePositions ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
     for (const item of placed) item.top += shift;
@@ -872,7 +891,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     // The final card may align near the viewport's top: retain blank space below it so the browser does not clamp
     // the requested scroll offset and push the pair apart. Manual pane reading keeps that existing canvas extent.
-    const scrollFloor = preservePanePositions ? Number.parseFloat(commentsCanvas.style.height) || 0
+    const scrollFloor = holdingFrame ? Number.parseFloat(commentsCanvas.style.height) || 0
       : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
@@ -930,6 +949,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   if (options.comments) commentsResize.observe(commentsScroll);
   const commentSelection = (): void => {
     if (!options.comments?.enabled()) return;
+    if (textPointerDown) return;
     scheduleCommentsLayout();
     // Focusing a card leaves the editor's native selection in place; that retained selection does not own activation.
     if (!options.host.contains(document.activeElement) || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
@@ -2843,7 +2863,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const onMouseDown = (event: MouseEvent): void => {
-    if (event.button === 0) { suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
+    if (event.button === 0) { textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
     // Some platforms select the word under a context click before the menu opens; what decides the
     // menu is what was selected before that.
     if (event.button === 2) collapsedBeforeContextClick = editor.selectedRange().kind === 'none';
@@ -2875,6 +2895,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   const onClick = (event: MouseEvent): void => {
     if (event.button !== 0) return;
+    textPointerDown = false;
     const downMark = pressedTextMark;
     pressedTextMark = undefined;
     // ✎ 已改 (Issue #1411): the badge, or the applied words themselves, bring the revision's card forward in the 批注栏.
