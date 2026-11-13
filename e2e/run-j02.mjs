@@ -548,7 +548,7 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
       const block = editor?.lastElementChild;
       const save = document.querySelector('[data-editor-persistence]');
       const actionLabels = ${JSON.stringify(actionLabels)};
-      const actions = actionLabels.filter((label) => label !== '保存').map((label) => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label));
+      const actions = actionLabels.filter((label) => label !== '保存').map((label) => Array.from(document.querySelectorAll('button')).find((button) => (button.getAttribute('aria-label') ?? button.textContent) === label));
       if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLElement) ||
           actions.some((action) => !(action instanceof HTMLButtonElement)) || !(save.dataset.editorPersistence === 'confirmed') ||
           actions.some((action) => action !== save && action.disabled)) return false;
@@ -1271,7 +1271,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await editThenInvokeOnDirty(renderer, '稳', ['保存', '撤销'], 'dirty-saving-undo-start');
   await waitForChecks(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: journal === 5, operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = ${MANUSCRIPT_JOURNAL_SEQUENCE}; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.getAttribute('aria-label') === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: journal === 5, operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
     'dirty-saving-undo-drained-and-unlocked',
     120_000,
   );
@@ -1459,7 +1459,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('milestone-authoritative-ready');
   await waitForChecks(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); return { authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', undoReady: undo instanceof HTMLButtonElement && !undo.disabled }; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.getAttribute('aria-label') === '撤销'); return { authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', undoReady: undo instanceof HTMLButtonElement && !undo.disabled }; })()`,
     'milestone-authoritative-ready',
   );
   at('milestone-undo-drain');
@@ -1960,7 +1960,7 @@ const MAX_RENDERER_BLOCKS = 32;
 const MANUSCRIPT_TAIL_PROBE = `(async () => { const work = (await window.ai7.listPriorWork())[0]; const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'proportion', proportion: 1 } }); const last = page.blocks.at(-1); return { blockId: last.blockId, position: last.position, totalBlocks: page.position.totalBlocks }; })()`;
 
 /** What the window shows of the structure paragraph: its text and the paragraph after it, the window size, and the journal. */
-const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk, unlocked: editor?.parentElement?.dataset.authoritativeMutation === 'false', redoReady: Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '重做' && !button.disabled) }; })()`;
+const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk, unlocked: editor?.parentElement?.dataset.authoritativeMutation === 'false', redoReady: Array.from(document.querySelectorAll('button')).some((button) => button.getAttribute('aria-label') === '重做' && !button.disabled) }; })()`;
 
 async function pressStructureKey(renderer, key) {
   const descriptor = key === 'Enter'
@@ -2030,7 +2030,7 @@ async function runStructureJourney(renderer) {
   await pressStructureKey(renderer, 'Enter');
   await waitForChecks(renderer, `(() => { const block = document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]'); return { heading: block?.tagName === 'H3', body: block?.nextElementSibling?.tagName === 'P', empty: block?.nextElementSibling?.textContent === '', settled: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'structure-heading-new-body');
   await clickButton(renderer, '撤销', 'structure-heading-undo-new-body');
-  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '撤销' && !button.disabled)`, 'structure-heading-undo-body-settled');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && Array.from(document.querySelectorAll('button')).some((button) => button.getAttribute('aria-label') === '撤销' && !button.disabled)`, 'structure-heading-undo-body-settled');
   await clickButton(renderer, '撤销', 'structure-heading-undo-style');
   await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]')?.tagName === 'P'`, 'structure-heading-back-to-body');
 }
