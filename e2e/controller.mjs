@@ -2066,6 +2066,18 @@ export function localDebugEnabled() {
   return process.env[LOCAL_DEBUG_ENV] === '1' && !localDebugRefused();
 }
 
+/** Slow-renderer reproduction only: debug/repeat opt in; ordinary Journeys and CI ignore it. */
+export async function applyRendererDiagnostics(journey, send) {
+  const value = process.env.AI7_E2E_CPU_THROTTLE;
+  if (!localDebugEnabled() || value === undefined) return;
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate < 1 || rate > 20) {
+    throw new Error('AI7_E2E_CPU_THROTTLE must be a number from 1 to 20');
+  }
+  await send('Emulation.setCPUThrottlingRate', { rate });
+  recordDebugDetail(journey, `renderer CPU throttling rate ${rate}`);
+}
+
 /** The ignored per-run artifact directory under test-results/; created lazily, shared with a launching controller. */
 export function localDebugArtifactRoot(journey) {
   if (debugArtifactRoot === undefined) {
