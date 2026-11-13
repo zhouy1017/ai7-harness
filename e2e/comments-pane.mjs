@@ -328,8 +328,10 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     words.scrollIntoView({block:'center',behavior:'instant'}); document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await Promise.all(document.body.getAnimations().map(a=>a.finished));
     const fresh=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), r=fresh.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;
+    pane.scrollTop=0;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const c=document.querySelector('[data-comment-card="'+id+'"]')?.getBoundingClientRect(),p=pane.getBoundingClientRect();
-    return {x,y,outside:!!c && (c.top>=p.bottom || c.bottom<=p.top),hit:fresh.contains(document.elementFromPoint(x,y)),elsewhere:!fresh.contains(getSelection()?.anchorNode)};
+    return {cardTop:c?.top,cardBottom:c?.bottom,paneTop:p.top,paneBottom:p.bottom,paneScroll:pane.scrollTop,x,y,outside:!!c && (c.top>=p.bottom || c.bottom<=p.top),hit:fresh.contains(document.elementFromPoint(x,y)),elsewhere:!fresh.contains(getSelection()?.anchorNode)};
   })()`);
   check(wordPoint.outside && wordPoint.hit && wordPoint.elsewhere, 'comments-overflow-card-outside-before-click', wordPoint);
   const wordClick = await commentsNativeClick(renderer, wordPoint);
