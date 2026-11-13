@@ -24,7 +24,7 @@ Wave 23 targets **0.5.0 Beta** under [#1279](https://github.com/zhouy1017/ai7-ha
 | 0.6.1 | integrated | Wave 24b — Owner-authorized Beta feedback closure ([#1373](https://github.com/zhouy1017/ai7-harness/issues/1373), all 13 child Issues); human acceptance pending | `b3fe090d3ba41a841bd0b1485bb5d4835018d25c` ([PR #1398](https://github.com/zhouy1017/ai7-harness/pull/1398)) | none |
 | 0.6.2 | integrated | Owner [#1400](https://github.com/zhouy1017/ai7-harness/issues/1400) five-batch Beta closure (#1401–#1414; batch PRs #1417, #1418, #1421, #1422, #1424); human acceptance pending | `80845316e3d0a1c020f5f85bd4e1b76d7398bb07` ([PR #1425](https://github.com/zhouy1017/ai7-harness/pull/1425)) | none |
 | 0.6.3 | integrated | Owner [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426) after-wave-24c Beta closure (#1427–#1431; slice PRs #1436–#1440); human acceptance pending | `1d2487cda357118d4e619e5d2d077ade4ade9f43` ([PR #1442](https://github.com/zhouy1017/ai7-harness/pull/1442)) | none |
-| 0.6.5 | candidate | Owner [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) fix-only Beta closure of the two known 0.6.3 issues (#1445, #1446; slice PRs #1447, #1448); final validation, dev integration and human acceptance pending | the dev commit named in the closure record of the wave pull request; baseline `1d2487cda357118d4e619e5d2d077ade4ade9f43` remains 0.6.3 | none |
+| 0.6.5 | integrated | Owner [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) fix-only Beta closure of the two known 0.6.3 issues (#1445, #1446; slice PRs #1447, #1448); human acceptance pending | `6fdb6a8bcadb6be58c82d10c22788faa16bf186d` ([PR #1457](https://github.com/zhouy1017/ai7-harness/pull/1457)) | none |
 
 Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev` at `b3fe090d` through PR #1398 with schema 109, protocol 198 and Data Version 1.
 
@@ -32,7 +32,7 @@ Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev
 
 #1426 → 0.6.3 Beta (the Owner's explicit #1426 target) is delivered on `dev` at `1d2487cd` through PR #1442 with schema 113, protocol 201 and Data Version 1.
 
-#1444 → **0.6.5 Beta** is the Owner's explicit number (「标记为版本0.6.5beta」); 0.6.4 is intentionally unused, and ADR 0098 itself is unchanged. The two fixes change neither IPC nor persistence, so protocol 201, schema 113, Data Version 1 and policy v35 / set v26 stay unchanged. This candidate row claims no dev delivery, human acceptance, tag or release. A commit cannot name its own merge, so the wave pull request records the final candidate head, its checks and the resulting dev commit; the fixed human-test refresh follows under the Commander.
+#1444 → **0.6.5 Beta** (the Owner's explicit number, 「标记为版本0.6.5beta」; 0.6.4 is intentionally unused) is delivered on `dev` at `6fdb6a8b` through PR #1457 with schema 113, protocol 201 and Data Version 1.
 
 ## Canonical inputs
 
