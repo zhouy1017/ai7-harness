@@ -2027,8 +2027,8 @@ async function runStructureJourney(renderer) {
   requireJourney(merged.blockId === tail.blockId && merged.position === tail.position && merged.totalBlocks === tail.totalBlocks, 'structure-tail-restored');
 
   at('structure-rapid-queue');
-  await placeStructureCaret(renderer, blockId, 12, 'structure-burst-caret');
   renderer.burstObservationStart = (await renderer.observeIpc()).events.at(-1)?.ordinal ?? 0;
+  await placeStructureCaret(renderer, blockId, 12, 'structure-burst-caret');
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02BurstSequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Enter','Enter','Backspace','Backspace','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return !document.querySelector('#persistence-status')?.textContent.includes('上一处分段或合并'); })()`, 'structure-all-keys-accepted-before-ipc');
   await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const whole = p.text === window.__j02Structure.text; const bounded = p.blocks <= ${MAX_RENDERER_BLOCKS}; return { whole, ordered: p.journal === window.__j02BurstSequence + 8, settled: p.closeRisk === 'false', bounded,
     _observed: { text: whole ? 'whole' : p.text === null ? 'absent' : 'changed', delta: typeof p.journal === 'number' && typeof window.__j02BurstSequence === 'number' ? p.journal - window.__j02BurstSequence : null, risk: p.closeRisk, bounded } }; })()`, 'structure-burst-durable', 60_000, 'burst');
