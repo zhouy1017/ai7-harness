@@ -30,7 +30,7 @@ import {
   type CustomAnalysisContractInput,
   type CustomAnalysisUnitResult,
 } from './custom-analysis-contract.js';
-import { locateQuotation, normalizedQuotation, sliceGraphemes } from './factual-review-contract.js';
+import { locateQuotation, normalizedQuotation, quotationForLocation } from './factual-review-contract.js';
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition } from './kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE, coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from './reducers.js';
 import { carryPositionalResult } from './reused-result.js';
@@ -142,7 +142,7 @@ export function reduceCustomAnalysis(input: {
         answer: row.answer,
         confidenceNote: row.confidenceNote,
         blockOrdinal: row.blockOrdinal,
-        quote: location.state === 'verified' ? sliceGraphemes(block!.text, location.fromGrapheme, location.toGrapheme) : row.quote,
+        quote: block === undefined ? row.quote : quotationForLocation(block.text, row.quote, location),
         sourceRange: location.state === 'verified' ? { blockId: blockId!, fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme } : null,
         anchorState: location.state === 'verified' ? 'located' : location.state === 'ambiguous' ? 'ambiguous' : 'not-found',
       });

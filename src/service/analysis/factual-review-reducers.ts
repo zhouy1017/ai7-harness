@@ -27,7 +27,7 @@ import { canonicalJson, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   factualReviewMessageBlockIds,
-  locateQuotation, sliceGraphemes,
+  locateQuotation, quotationForLocation,
   normalizedQuotation,
   type FactualReviewUnitResult,
   type FactualUnitAssertion,
@@ -160,7 +160,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
   let verified = 0;
   const questions: ResearchOutcome[] = [];
   for (const entry of located) {
-    const assertion = entry.location.state === 'verified' ? { ...entry.assertion, quote: sliceGraphemes(blocks.get(entry.blockId)!.text, entry.location.fromGrapheme, entry.location.toGrapheme) } : entry.assertion;
+    const assertion = entry.location.state === 'verified' ? { ...entry.assertion, quote: quotationForLocation(blocks.get(entry.blockId)!.text, entry.assertion.quote, entry.location) } : entry.assertion;
     if (notExactFetched(assertion) || entry.location.state !== 'verified') {
       const reason = notExactFetched(assertion) ? 'not-exact-fetched' as const : entry.location.state === 'ambiguous' ? 'quote-ambiguous' as const : 'quote-not-found' as const;
       excluded.push({
@@ -316,7 +316,7 @@ export function locatedUnitFindings(
     const requested = locateQuotation(block.text, assertion.quote, assertion.occurrence);
     const location = requested.state === 'ambiguous' ? locateQuotation(block.text, assertion.quote, 1) : requested;
     if (location.state !== 'verified') continue;
-    const quote = sliceGraphemes(block.text, location.fromGrapheme, location.toGrapheme);
+    const quote = quotationForLocation(block.text, assertion.quote, location);
     const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote) });
     if (seen.has(findingIdentity)) continue;
     seen.add(findingIdentity);

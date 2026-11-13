@@ -19,7 +19,7 @@ import {
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex, graphemeCount } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
-import { locateQuotation, normalizedQuotation, sliceGraphemes } from '../analysis/factual-review-contract.js';
+import { locateQuotation, quotationForLocation, normalizedQuotation, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from '../analysis/reducers.js';
 import { reviewCategoryMessageBlockIds, REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, type ReviewCrossChapterResult, type ReviewCategoryUnitResult, type ReviewUnitFinding } from './review-category-contract.js';
 import type { CrossUnitOutcome } from '../analysis/reducers.js';
@@ -130,6 +130,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let block = blockId === undefined ? undefined : blocks.get(blockId);
       let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote, finding.occurrence);
       let annotation = false;
+      let wholeParagraphFallback = false;
       let note = finding.note;
       if (location.state === 'not-found') {
         let matchingBlocks = 0;
@@ -157,11 +158,12 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       if (location.state === 'not-found' && block !== undefined && graphemeCount(block.text) > 0 && !partialGrapheme) {
         location = { state: 'verified', fromGrapheme: 0, toGrapheme: graphemeCount(block.text) };
         annotation = true;
+        wholeParagraphFallback = true;
         note = `【引文未逐字匹配】${note}`;
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
-      const retainedFinding = { ...finding, note, ...(location.state === 'verified' && block !== undefined ? { quote: sliceGraphemes(block.text, location.fromGrapheme, location.toGrapheme) } : {}) };
+      const retainedFinding = { ...finding, note, ...(!wholeParagraphFallback && location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
       if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,

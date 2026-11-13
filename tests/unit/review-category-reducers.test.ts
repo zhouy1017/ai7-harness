@@ -140,6 +140,7 @@ describe('a review category reduction', () => {
     for (const result of results) {
       expect(result.excluded).toEqual([]);
       expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.quote).toBe('A B'); // Existing replay requests retain the model's already-verifiable quote.
       expect(result.findings[0]!.sourceRange).toEqual({ blockId: paragraphs[1]!.blockId, fromGrapheme: 3, toGrapheme: 6 });
       expect(sliceGraphemes(paragraphs[1]!.text, 3, 6)).toBe('Ａ　Ｂ');
     }

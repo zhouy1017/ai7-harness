@@ -388,6 +388,15 @@ function locateFoldedQuotation(blockText: string, quote: string, occurrence: num
   return { state: 'verified', fromGrapheme, toGrapheme };
 }
 
+/**
+ * Keep previously verified quote text stable: authored replay requests bind those bytes. Newly
+ * located quotations use their exact source slice; legacy width/space alignment follows R2/R3.
+ */
+export function quotationForLocation(blockText: string, quote: string, location: QuotationLocation): string {
+  if (location.state !== 'verified' || locateFoldedQuotation(blockText, quote, undefined, false).state === 'verified') return quote;
+  return sliceGraphemes(blockText, location.fromGrapheme, location.toGrapheme);
+}
+
 /** The comparison key duplicates are merged by: the folded form of the quotation (decision 5). */
 export function normalizedQuotation(quote: string): string {
   return fold(quote).text;
