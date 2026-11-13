@@ -106,6 +106,8 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     return {pass:!selected && pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected};
   })()`);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
+  check(await renderer.evaluate(`(() => { document.querySelector('[data-testid="manuscript-editor"]').focus(); return true; })()`), 'comments-overflow-editor-focus');
+  await new Promise(resolve => setTimeout(resolve, 80));
   check(await renderer.evaluate(`(() => {
     const id=__comments.ids[11], words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
     const pane=document.querySelector('.manuscript-comments-scroll'), card=document.querySelector('[data-comment-card="'+id+'"]');
@@ -119,7 +121,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     },{capture:true,once:true});
     return true;
   })()`), 'comments-overflow-pick');
-  check(await renderer.evaluate(`(() => { const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'); document.querySelector('[data-testid="manuscript-editor"]').focus(); const range=document.createRange(); range.selectNodeContents(words); range.collapse(true); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); return selection.isCollapsed; })()`), 'comments-overflow-caret');
+  check(await renderer.evaluate(`(() => { const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'); const range=document.createRange(); range.selectNodeContents(words); range.collapse(true); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); return selection.isCollapsed; })()`), 'comments-overflow-caret');
   // Match J-08's existing caret-first mark click: native selection reaches ProseMirror asynchronously.
   await new Promise(resolve => setTimeout(resolve, 80));
   check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]' ).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`), 'comments-overflow-click');
