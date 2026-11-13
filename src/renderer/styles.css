@@ -1626,8 +1626,11 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .editor-workspace { position: relative; display: grid; flex: 1 1 0; grid-template-columns: minmax(0, 1fr) 4.75rem; grid-template-rows: minmax(0, 1fr); min-height: 0; overflow: hidden; }
 .manuscript-comments-pane { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface-subdued); border-left: 1px solid var(--boundary); }
 .manuscript-comments-pane[hidden] { display: none; }
-.manuscript-comments-heading { display: flex; align-items: center; justify-content: space-between; padding: .4rem .6rem; border-bottom: 1px solid var(--boundary); }
-.manuscript-comments-heading button { font-size: .8rem; }
+.manuscript-comments-heading { display: flex; align-items: center; gap: .2rem; padding: .3rem .4rem; border-bottom: 1px solid var(--boundary); }
+.manuscript-comments-heading button { min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
+.manuscript-comments-heading > strong { font-size: .8rem; white-space: nowrap; }
+.manuscript-comments-heading .editorial-mark-filter-chips { flex: 1; flex-wrap: nowrap; gap: .1rem; margin: 0; }
+.manuscript-comments-heading .editorial-mark-filter-chips button { border: 0; border-radius: 4px; padding: .15rem .2rem; }
 .manuscript-comments-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
 .manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
@@ -2999,7 +3002,12 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .ProseMirror .editorial-mark-applied-badge[data-mark-category] { color: var(--category-text); background: var(--category-fill); }
 .ProseMirror .editorial-mark[data-mark-filtered-out="true"] { background-color: transparent; border-bottom-color: color-mix(in srgb, var(--category-accent) 20%, transparent); outline: none; }
 .ProseMirror :is(.editorial-mark-point, .editorial-mark-applied-badge)[data-mark-filtered-out="true"] { opacity: .25; }
-.editorial-mark-filters { position: sticky; top: 0; z-index: 2; flex: none; padding: .45rem .55rem; border-bottom: 1px solid var(--boundary); background: var(--surface); max-height: 45%; overflow: auto; }
+.editorial-mark-filters { flex: none; background: var(--surface); }
+.editorial-mark-filter-popover { position: fixed; margin: 0; width: 280px; max-height: min(440px, 65vh); overflow: auto; box-sizing: border-box; padding: .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); }
+.editorial-mark-filter-popover > strong { display: block; margin-bottom: .4rem; font-size: .8rem; }
+.editorial-mark-filter-popover .editorial-mark-search { width: 100%; box-sizing: border-box; }
+.editorial-mark-disclosure { margin: 0; padding: .15rem .55rem; font-size: .7rem; color: var(--text-subdued); }
+.editorial-mark-filter-summary { padding-inline: .55rem; }
 .editorial-mark-filter-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .4rem; }
 .editorial-mark-filter-chips button { min-height: 28px; padding: .15rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .76rem; }
 .editorial-mark-filter-chips button[aria-pressed="true"] { background: var(--category-fill, var(--surface-subdued)); color: var(--category-text, var(--text)); border-color: var(--category-accent, var(--focus)); box-shadow: inset 0 0 0 1px var(--category-accent, var(--focus)); font-weight: 700; }
@@ -3054,3 +3062,17 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
   .editor-toolbar .editor-edit-actions > * { max-width: 100%; }
   .editor-toolbar .btn { white-space: normal; }
 }
+
+/* Pane cards retain their cached controls; only the selected/in-progress card reveals them. */
+.manuscript-comments-card > .editorial-mark-card { padding: .45rem .55rem; }
+.editorial-mark-card[data-pane-card] .editorial-mark-card-header { flex-wrap: nowrap; gap: .3rem; min-width: 0; height: 20px; }
+.editorial-mark-card[data-pane-card] .editorial-mark-category-badge { padding: 0 .25rem; font-size: .68rem; line-height: 18px; white-space: nowrap; }
+.editorial-mark-card[data-pane-card] .editorial-mark-kind { font-size: .68rem; font-weight: 500; white-space: nowrap; }
+.editorial-mark-card[data-pane-card] .editorial-mark-source { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; }
+.editorial-mark-card[data-pane-card] .status-pill { flex: none; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .65rem; padding: 0 .2rem; font-weight: 400; }
+.editorial-mark-compact-preview { margin: .2rem 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; line-height: 20px; }
+.editorial-mark-card[data-pane-card][data-expanded="false"][data-handled="true"] { color: var(--text-subdued); font-weight: 400; background: var(--surface-subdued); box-shadow: none; }
+.editorial-mark-card[data-pane-card][data-expanded="false"][data-handled="true"] .editorial-mark-category-badge { color: inherit; background: transparent; font-weight: 400; }
+.editorial-mark-footer { margin: .5rem 0 0; font-size: .7rem; line-height: 1.4; color: var(--text-subdued); }
+.editorial-mark-note-tags { display: flex; gap: .3rem; margin-top: .4rem; flex-wrap: wrap; }
+.editorial-mark-note-tag { border: 1px solid var(--boundary); border-radius: 4px; padding: .1rem .3rem; font-size: .7rem; color: var(--text-subdued); }

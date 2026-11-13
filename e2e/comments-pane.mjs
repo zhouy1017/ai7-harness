@@ -21,7 +21,7 @@ export async function commentsLayouts(renderer, check, waitFor) {
     await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1120 ? p.width>=300 && p.width<=340 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute' && p.left>=document.querySelector('.editor-workspace').getBoundingClientRect().left-1); })()`, 'comments-responsive-geometry');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='on' && getComputedStyle(document.querySelector('.manuscript-comments-pane')).display==='none'; })()`), 'comments-focus-hidden');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='off' && !document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-focus-restored');
-    check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading button').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
+    check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
   }
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await waitFor(renderer, `innerWidth===${native.width} && innerHeight===${native.height}`, 'comments-native-viewport-restored');
@@ -32,6 +32,7 @@ export async function commentsLayouts(renderer, check, waitFor) {
 }
 
 export async function seedCommentsPane(renderer, check, waitFor) {
+  await renderer.send('Emulation.setDeviceMetricsOverride', { width:1280, height:800, deviceScaleFactor:1, mobile:false });
   check(await renderer.evaluate(`(async () => {
     const editor=document.querySelector('[data-testid="manuscript-editor"]');
     const bookId=document.querySelector('.editor-shell').dataset.bookId;
@@ -61,7 +62,7 @@ export async function seedCommentsPane(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'comments-overview-ready');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('manuscript'))), 'comments-reload-manuscript');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'comments-editor-ready');
-  check(await renderer.evaluate(`(async () => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); document.querySelector('[data-mark-search-input]').focus({preventScroll:true}); await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); const editor=document.querySelector('[data-testid="manuscript-editor"]'); editor.querySelector('[data-block-id="'+__comments.blockId+'"]').scrollIntoView({block:'center',behavior:'instant'}); await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); return true; })()`), 'comments-open');
+  check(await renderer.evaluate(`(async () => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(entry.getAttribute('aria-expanded')!=='true')entry.click(); document.querySelector('[data-mark-filter-toggle]').focus({preventScroll:true}); await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); const editor=document.querySelector('[data-testid="manuscript-editor"]'); editor.querySelector('[data-block-id="'+__comments.blockId+'"]').scrollIntoView({block:'center',behavior:'instant'}); await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); return true; })()`), 'comments-open');
   try { await waitFor(renderer, `(() => { const scroll=document.querySelector('.editor-window'),v=scroll.getBoundingClientRect(),first=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]'),last=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'); if(first&&last&&(first.getBoundingClientRect().top<v.top||last.getBoundingClientRect().bottom>v.bottom)){scroll.scrollTop+=first.getBoundingClientRect().top-v.top-100;return false;} return __comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false) && document.querySelector('.manuscript-comments-canvas').dataset.loading==='false'; })()`, 'comments-five-visible'); } catch {
     const geometry=await renderer.evaluate(`(() => { const scroll=document.querySelector('.editor-window'),pane=document.querySelector('.manuscript-comments-scroll'),canvas=document.querySelector('.manuscript-comments-canvas'),v=scroll.getBoundingClientRect(); return {viewportTop:v.top,viewportBottom:v.bottom,textScroll:scroll.scrollTop,paneScroll:pane.scrollTop,loading:canvas.dataset.loading,reads:canvas.dataset.cardReads,seeds:__comments.ids.map(id=>{const a=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),c=document.querySelector('[data-comment-card="'+id+'"]'),r=a?.getBoundingClientRect();return {anchor:!!a,top:r?.top,bottom:r?.bottom,card:!!c,hidden:c?.hidden,read:c?.dataset.revalidating};})}; })()`);
     check(false,'comments-five-visible',geometry);
@@ -71,7 +72,8 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     const pane=document.querySelector('.manuscript-comments-pane');
     const cards=__comments.ids.map(id=>pane.querySelector('[data-mark-card="'+id+'"]'));
     const inline=__comments.ids.map(id=>document.querySelector('.editor-window [data-mark-id="'+id+'"]'));
-    if(!cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='【编辑修订】') || !inline.every(mark=>mark?.dataset.markCategory==='editor'))return false;
+    if(!cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='编辑修订') || !inline.every(mark=>mark?.dataset.markCategory==='editor'))return false;
+    pane.querySelector('[data-mark-filter-toggle]').click();
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
     globalThis.__commentsSearch=input; return true;
@@ -82,10 +84,11 @@ export async function seedCommentsPane(renderer, check, waitFor) {
       __comments.ids.every((id,index)=>document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(index===2?undefined:'true'));
   })()`, 'comments-search-cards-and-highlights');
   check(await renderer.evaluate(`(() => { window.dispatchEvent(new Event('resize')); return document.querySelector('[data-mark-search-input]')===__commentsSearch && __commentsSearch.value==='公开合成批注 2' && document.querySelector('[data-mark-category-filter="editor"]').getAttribute('aria-pressed')==='true'; })()`), 'comments-filter-controls-survive-redraw');
-  check(await renderer.evaluate(`(() => { document.querySelector('[data-mark-status-filter="applied"]').click(); return true; })()`), 'comments-status-applied');
+  check(await renderer.evaluate(`(() => { document.querySelector('[data-mark-status-filter="handled"]').click(); return true; })()`), 'comments-status-handled');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===true)`, 'comments-status-no-match');
   check(await renderer.evaluate(`(() => { __commentsSearch.value=''; __commentsSearch.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-mark-status-filter="all"]').click(); document.querySelector('[data-mark-category-filter="all"]').click(); return true; })()`), 'comments-filter-reset');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false && !document.querySelector('.editor-window [data-mark-id="'+id+'"][data-mark-filtered-out]'))`, 'comments-filter-all-restored');
+  await renderer.evaluate(`(() => { const popover=document.querySelector('.editorial-mark-filter-popover'); if(popover.matches(':popover-open'))popover.hidePopover(); return true; })()`);
 }
 
 // Native input is intentional: focus and pointer-down must take the same path as an editor's first click.
@@ -94,10 +97,33 @@ async function commentsNativeClick(renderer, point) {
   await renderer.evaluate(`(() => { globalThis.__commentsClickTrace={}; for(const type of ['mousedown','mouseup','click']) document.addEventListener(type,()=>{__commentsClickTrace[type]=true;},{capture:true,once:true}); return true; })()`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, buttons: 0 });
   await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 });
-  const held = await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); const node=document.elementFromPoint(${point.x},${point.y})?.closest('[data-comment-card]'); return {top:node?.getBoundingClientRect().top,selected:node?.dataset.selected}; })()`);
+  const held = await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); const node=document.elementFromPoint(${point.x},${point.y})?.closest('[data-comment-card]'); return {top:node?.getBoundingClientRect().top,selected:node?.dataset.selected,expanded:node?.dataset.expanded}; })()`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 });
   const events = await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done(__commentsClickTrace))))`);
   return { target: true, held, events, real:events.mousedown===true && events.mouseup===true && events.click===true };
+}
+
+async function commentsControlPoint(renderer, index, action) {
+  return renderer.evaluate(`(async () => {
+    const node=document.querySelector('[data-comment-card="'+__comments.ids[${index}]+'"]'), button=node.querySelector('[data-mark-action="${action}"]');
+    button.scrollIntoView({block:'nearest',behavior:'instant'});
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const r=button.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    return {x,y,hit:button.contains(document.elementFromPoint(x,y))};
+  })()`);
+}
+
+async function commentsSelectCard(renderer, check, waitFor, index) {
+  const point=await renderer.evaluate(`(async () => {
+    const node=document.querySelector('[data-comment-card="'+__comments.ids[${index}]+'"]'), pane=document.querySelector('.manuscript-comments-scroll');
+    pane.scrollTop+=node.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const r=node.getBoundingClientRect();return {x:r.left+12,y:r.top+10};
+  })()`);
+  const click=await commentsNativeClick(renderer,point);
+  check(click.real,'comments-compact-card-real-click',click);
+  await waitFor(renderer, `(() => {const node=document.querySelector('[data-comment-card="'+__comments.ids[${index}]+'"]');return node.dataset.selected==='true'&&node.dataset.expanded==='true'&&!node.querySelector('.editorial-mark-expanded-content').hidden;})()`, 'comments-selected-expanded');
+  return click;
 }
 
 const commentsUnmarkedPoint = `(() => {
@@ -114,20 +140,21 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   const coordinates = await renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
-    const search=document.querySelector('[data-mark-search-input]'); search.focus({preventScroll:true}); getSelection().removeAllRanges();
+    const search=document.querySelector('[data-mark-search-input]'); document.querySelector('[data-mark-filter-toggle]').focus({preventScroll:true}); getSelection().removeAllRanges();
     search.value='公开合成不匹配筛选'; search.dispatchEvent(new Event('input',{bubbles:true}));
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     search.value=''; search.dispatchEvent(new Event('input',{bubbles:true}));
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
-    words.scrollIntoView({block:'center',behavior:'instant'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-80;
+    words.scrollIntoView({block:'center',behavior:'instant'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-40;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const cards=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top));
     const first=cards[0],last=cards[cards.length-1], before=first.getBoundingClientRect().top, oldScroll=pane.scrollTop, height=pane.scrollHeight;
     pane.scrollTop=pane.scrollHeight;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const p=pane.getBoundingClientRect(), l=last.getBoundingClientRect();
-    const reachable=l.top>=p.top-1 && l.bottom<=p.bottom+1 && Math.abs(first.getBoundingClientRect().top-before+pane.scrollTop-oldScroll)<=4 && pane.scrollHeight===height;
+    const moved=pane.scrollTop>oldScroll && pane.scrollTop>0 && first.getBoundingClientRect().top<before-1;
+    const reachable=moved && l.top>=p.top-1 && l.bottom<=p.bottom+1 && Math.abs(first.getBoundingClientRect().top-before+pane.scrollTop-oldScroll)<=4 && pane.scrollHeight===height;
     scroll.scrollTop+=24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
@@ -136,6 +163,14 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     return {pass:reachable && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
+  const compact = await renderer.evaluate(`(() => {
+    const pane=document.querySelector('.manuscript-comments-scroll'), p=pane.getBoundingClientRect();
+    const rows=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
+    const visible=rows.filter(node=>{const r=node.getBoundingClientRect();return !node.hidden&&r.top>=p.top-1&&r.bottom<=p.bottom+1;});
+    const header=document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height;
+    return {width:innerWidth,height:innerHeight,visible:visible.length,header,compact:rows.every(node=>node.dataset.expanded==='false'&&node.getBoundingClientRect().height<=76&&!node.querySelector('.editorial-mark-expanded-content')?.checkVisibility())};
+  })()`);
+  check(compact.width===1280 && compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
   check(await renderer.evaluate(`(async () => {
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
     words.scrollIntoView({block:'center',behavior:'instant'}); document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
@@ -173,19 +208,14 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   check(unmarkedClick.real, 'comments-real-unmarked-clear', unmarkedClick);
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
 
-  const controlPoint = await renderer.evaluate(`(async () => {
-    const node=document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
-    pane.scrollTop+=node.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
-    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    const button=node.querySelector('[data-mark-action="reply"]'),r=button.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
-    const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[2]+'"]');
-    return {x,y,top:node.getBoundingClientRect().top,unselected:node.dataset.selected!=='true',pushed:Math.abs(node.getBoundingClientRect().top-words.getBoundingClientRect().top)>20,hit:button.contains(document.elementFromPoint(x,y))};
-  })()`);
-  check(controlPoint.unselected && controlPoint.pushed && controlPoint.hit, 'comments-pushed-control-before-click', controlPoint);
+  const compactClick = await commentsSelectCard(renderer, check, waitFor, 2);
+  check(compactClick.held.selected!=='true' && compactClick.held.expanded==='false', 'comments-pushed-control-held-still', compactClick);
+  const controlPoint = await commentsControlPoint(renderer, 2, 'reply');
+  check(controlPoint.hit, 'comments-pushed-control-before-click', controlPoint);
   const controlClick = await commentsNativeClick(renderer, controlPoint);
-  check(controlClick.real && Math.abs(controlClick.held.top-controlPoint.top)<=1 && controlClick.held.selected!=='true', 'comments-pushed-control-held-still', controlClick);
+  check(controlClick.real, 'comments-expanded-reply-real-click', controlClick);
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]').dataset.selected==='true' && document.querySelector('[data-comment-reply="'+__comments.ids[2]+'"]')`, 'comments-pushed-control-first-click');
-  await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done(true))))`);
+  await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))`);
 
   check(await renderer.evaluate(`(() => {
     const cards=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
@@ -226,16 +256,22 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
 }
 
 export async function commentsApplyAndReject(renderer, check, waitFor) {
-  check(await renderer.evaluate(`(() => { const card=document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]'); card.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); const accept=card.querySelector('[data-mark-action="accept-and-apply"]'); if(!accept||accept.disabled)return false; accept.click(); accept.click(); return true; })()`), 'comments-accept-once');
-  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-application]') && document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-state]').textContent==='已应用'`, 'comments-applied-pane-updated');
+  await commentsSelectCard(renderer, check, waitFor, 0);
+  const accept = await commentsNativeClick(renderer, await commentsControlPoint(renderer, 0, 'accept-and-apply'));
+  check(accept.real, 'comments-expanded-accept-real-click', accept);
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-application]') && document.querySelector('[data-comment-card="'+__comments.ids[0]+'"] [data-mark-state]').textContent.includes('已应用')`, 'comments-applied-pane-updated');
   check(await renderer.evaluate(`(async () => { const page=await window.ai7.getManuscriptWindowAt({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,target:{kind:'window-start',blockId:__comments.start}}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:__comments.ids[0]}); return page.journalSequence===__comments.journal+1 && page.blocks.find(block=>block.blockId===__comments.blockId).text.startsWith('合成') && card.suggestion.application!==null && !document.querySelector('[data-mark-preview="'+__comments.ids[0]+'"]') && document.querySelector('[data-testid="manuscript-editor"] [data-block-id="'+__comments.blockId+'"]').textContent.startsWith('合成'); })()`), 'comments-one-real-apply-and-text');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[1]+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__comments.ids[1]+'"] [data-mark-action="reject"]')?.disabled===false`, 'comments-reject-card-ready');
+  await commentsSelectCard(renderer, check, waitFor, 1);
   check(await renderer.evaluate(`(() => { const reject=document.querySelector('[data-comment-card="'+__comments.ids[1]+'"] [data-mark-action="reject"]'); if(!reject||reject.disabled)return false; reject.click(); return true; })()`), 'comments-reject');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[1]+'"] [data-mark-state]').textContent.includes('已拒绝')`, 'comments-rejected-pane-updated');
   check(await renderer.evaluate(`(async () => { const page=await window.ai7.getManuscriptWindowAt({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,target:{kind:'window-start',blockId:__comments.start}}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:__comments.ids[1]}); return page.journalSequence===__comments.journal+1 && card.suggestion.decision.disposition==='rejected'; })()`), 'comments-reject-retains-text');
+  await commentsHandledFilter(renderer, check, waitFor, [0, 1]);
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
 
 export async function commentsReplyAndResolve(renderer, check, waitFor) {
+  await commentsSelectCard(renderer, check, waitFor, 2);
   check(await renderer.evaluate(`(() => { const node=document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]'); node.querySelector('[data-mark-action="reply"]').click(); const input=node.querySelector('[data-comment-reply]'); input.value='公开合成待发回复'; input.focus(); input.setSelectionRange(3,5); globalThis.__commentsReply=input; node.querySelector('[data-mark-action="resolve"]').click(); return true; })()`), 'comments-inline-reply-draft-and-resolve');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]').textContent.includes('已处理')`, 'comments-resolved');
   check(await renderer.evaluate(`(() => { const input=document.querySelector('[data-comment-reply="'+__comments.ids[2]+'"]'); return input===__commentsReply && input.value==='公开合成待发回复' && input.selectionStart===3 && input.selectionEnd===5 && document.activeElement===input; })()`), 'comments-reply-caret-survives-refresh');
@@ -246,6 +282,8 @@ export async function commentsReplyAndResolve(renderer, check, waitFor) {
   check(await renderer.evaluate(`(() => { const node=document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]'); node.focus(); node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); return true; })()`), 'comments-expand-enter');
   await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复')`, 'comments-existing-full-card');
   check(await renderer.evaluate(`(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); return true; })()`), 'comments-full-card-close');
+  await commentsHandledFilter(renderer, check, waitFor, [2]);
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
 
 export async function commentsBookMemory(renderer, check, waitFor) {
@@ -269,4 +307,41 @@ export async function commentsOrdinaryForEditor(renderer, check, waitFor) {
   await commentsOrdinaryMode(renderer, check, waitFor);
   check(await renderer.evaluate(`(() => { const button=document.querySelector('.recent-work-item button[data-manuscript-id="'+__commentsOriginalManuscript+'"]'); if(!button)return false; button.click(); return true; })()`), 'comments-ordinary-open-original');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'comments-ordinary-editor');
+}
+
+
+// A producing local route supplies its real frozen source; an editor note supplies a different source.
+export async function commentsModelFilter(renderer, check, waitFor, markId) {
+  check(await renderer.evaluate(`(async () => {
+    const bookId=document.querySelector('.editor-shell').dataset.bookId,work=(await window.ai7.listPriorWork()).find(item=>item.bookId===bookId);
+    const binding={manuscriptId:work.manuscriptId,branchId:work.branchId},card=await window.ai7.getEditorialMarkCard({...binding,markId:${JSON.stringify(markId)}});
+    const page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'block',blockId:card.blockId}}),block=page.blocks.find(item=>item.blockId===card.blockId);
+    const text=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(block.text),item=>item.segment).slice(0,2).join('');
+    const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:0,toGrapheme:2,selectedText:text,kind:'annotation',highlightColor:null,body:'公开合成模型筛选对照',proposedText:null,rationale:null});
+    globalThis.__commentsModel={mark:${JSON.stringify(markId)},other:result.markId,block:block.blockId,source:card.source.modelLabel};return card.source.modelLabel==='AI7 本地检查';
+  })()`), 'comments-model-frozen-local-source');
+  check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-model-reload-overview');
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'comments-model-overview-ready');
+  check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('manuscript'))), 'comments-model-reload-manuscript');
+  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'comments-model-editor-ready');
+  check(await renderer.evaluate(`(() => {
+    const entry=document.querySelector('[data-edge-entry="comments"]');if(entry.getAttribute('aria-expanded')!=='true')entry.click();
+    document.querySelector('.editor-window [data-block-id="'+__commentsModel.block+'"]').scrollIntoView({block:'center',behavior:'instant'});return true;
+  })()`), 'comments-model-open');
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.mark+'"] [data-mark-source]')?.textContent===__commentsModel.source && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false`, 'comments-model-cards-ready');
+  check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-filter-toggle]').click();const chip=document.querySelector('[data-mark-model-filter="'+__commentsModel.source+'"]');if(!chip)return false;chip.click();return true;})()`), 'comments-model-chip');
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===true && document.querySelector('.editor-window [data-mark-id="'+__commentsModel.other+'"]')?.dataset.markFilteredOut==='true' && !document.querySelector('.editor-window [data-mark-id="'+__commentsModel.mark+'"][data-mark-filtered-out]')`, 'comments-model-cards-and-highlights');
+  check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-model-filter="'+__commentsModel.source+'"]' ).click();document.querySelector('.editorial-mark-filter-popover').hidePopover();return true;})()`), 'comments-model-reset');
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false`, 'comments-model-all-restored');
+  check(await renderer.evaluate(`(() => {const node=document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]');node.focus();node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true;})()`), 'comments-model-full-card');
+  await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__commentsModel.mark+'"]')`, 'comments-model-full-card-ready');
+  check(await renderer.evaluate(`(() => {document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click();return true;})()`), 'comments-model-close-pane');
+}
+
+
+async function commentsHandledFilter(renderer, check, waitFor, indexes) {
+  check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-status-filter="handled"]').click();return true;})()`), 'comments-handled-filter');
+  await waitFor(renderer, `__comments.ids.every((id,index)=>{const handled=${JSON.stringify(indexes)}.includes(index);return document.querySelector('[data-comment-card="'+id+'"]')?.hidden===!handled && document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(handled?undefined:'true');})`, 'comments-handled-cards-and-highlights');
+  check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-status-filter="all"]').click();return true;})()`), 'comments-handled-reset');
+  await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false)`, 'comments-handled-all-restored');
 }

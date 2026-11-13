@@ -1138,6 +1138,7 @@ async function main() {
     await renderer.send('Input.insertText', { text: REVISED_TEXT });
     await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const mark=block?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence==='confirmed' && block.querySelector('.inline-track-del')!==null && block.querySelector('.inline-track-ins')!==null && block.classList.contains('paragraph-revision-bar'); })()`, 'revision-pending-redline', 30_000);
     await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'`, 'revision-pending-card');
+    await waitFor(renderer, `(() => {const card=document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"]');if(!card)return false;if(card.dataset.selected!=='true'){card.click();return false;}return card.dataset.expanded==='true';})()`, 'revision-pending-ignore-expanded');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-pending-ignore');
     await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-ignore-restores', 30_000);
     await settled(renderer, 'revision-ignore-settled');
@@ -1147,6 +1148,7 @@ async function main() {
     await assertRenderer(renderer, `(async () => { await new Promise((resolve)=>setTimeout(resolve,900)); const editor=document.querySelector('[data-testid="manuscript-editor"]'); return editor.dataset.composing==='true' && Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence)===window.__j05ImeJournal && !window.__j05.block(window.__j05RevBlock).querySelector('[data-mark-status="open"][data-mark-source="editor"]'); })()`, 'revision-ime-no-card-before-end');
     await renderer.send('Input.insertText', { text: REVISED_TEXT });
     await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'; })()`, 'revision-ime-card-after-end', 30_000);
+    await waitFor(renderer, `(() => {const card=document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"]');if(!card)return false;if(card.dataset.selected!=='true'){card.click();return false;}return card.dataset.expanded==='true';})()`, 'revision-ime-ignore-expanded');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-ime-ignore');
     await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal`, 'revision-ime-restores', 30_000);
     await settled(renderer, 'revision-ime-settled');
@@ -1161,6 +1163,7 @@ async function main() {
     await press(renderer, 'z', 10);
     await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改' && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')!==null`, 'revision-history-redo', 30_000);
     await settled(renderer, 'revision-history-redo-settled');
+    await waitFor(renderer, `(() => {const card=document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"]');if(!card)return false;if(card.dataset.selected!=='true'){card.click();return false;}return card.dataset.expanded==='true';})()`, 'revision-pending-apply-expanded');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]').click(); return true; })()`, 'revision-pending-apply');
     await waitFor(renderer, `window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')!==null && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-pending-applied');
     await settled(renderer, 'revision-pending-settled');

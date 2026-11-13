@@ -7,6 +7,33 @@ import type {
 } from '../shared/protocol.js';
 import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 import { technicalWords } from './technical-layer.js';
+import { REVIEW_UNCHECKED_DISCLOSURE, REVIEW_GUESSED_ANCHOR_NOTE_PREFIX, reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
+
+/** The frozen source mark is ordinary editorial information, independent of its task/category. */
+export function markSourceMark(source: EditorialMarkCardProjection['source'], technical = false): string {
+  if (source.kind === 'editor') return source.editorName?.trim() || '你';
+  if (source.kind === 'imported-author') return source.label ?? '作者';
+  return (technical ? source.modelTechnicalLabel ?? source.modelLabel : source.modelLabel) ?? 'AI7';
+}
+
+export function markIsHandled(mark: { status: string; disposition?: string | null; conflict?: EditorialMarkCardProjection['conflict'] | EditorialMarkAnchorProjection['conflict'] }): boolean {
+  const conflict = mark.conflict;
+  if (conflict === 'unresolved' || conflict === 'deferred' || (typeof conflict === 'object' && conflict !== null && (conflict.state === 'unresolved' || conflict.state === 'deferred'))) return false;
+  return mark.status === 'applied' || mark.status === 'resolved' || mark.disposition === 'rejected';
+}
+
+/** Display only: stored notes, bodies and exports retain their original bytes. */
+export function markDisplayNote(note: string): { text: string; unchecked: boolean; guessedAnchor: boolean } {
+  let text = note;
+  const unchecked = text.startsWith(REVIEW_UNCHECKED_DISCLOSURE);
+  const guessedAnchor = reviewFindingHasGuessedAnchor(text);
+  while (text.startsWith(REVIEW_UNCHECKED_DISCLOSURE)) text = text.slice(REVIEW_UNCHECKED_DISCLOSURE.length);
+  if (guessedAnchor) {
+    text = text.slice(REVIEW_GUESSED_ANCHOR_NOTE_PREFIX.length);
+    text = text.replace(/^（标点已与原稿对齐）/u, '');
+  }
+  return { text: text.trimStart(), unchecked, guessedAnchor };
+}
 
 /**
  * The editorial wording of the Mark surface (Issue #407): kind names, who a mark comes from

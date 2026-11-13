@@ -28,11 +28,23 @@ const suggestion: EditorialMarkCardProjection = { ...card, kind: 'change-suggest
 
 it('searches original wording, replacement, rationale and category, case-insensitively (#1429)', () => {
   const value = { ...suggestion, suggestion: { ...suggestion.suggestion!, proposedText: 'ABC改后' } };
-  const filter = { selectedCategories: new Set<'editor'>(), status: 'all' as const, keyword: '' };
+  const filter = { selectedCategories: new Set<'editor'>(), selectedModels: new Set<string>(), status: 'all' as const, keyword: '' };
   for (const keyword of ['合成', 'abc', '理由', '编辑人工修订']) {
     expect(matchesEditorialMarkFilter(anchor(value), value, { ...filter, keyword })).toBe(true);
   }
   expect(matchesEditorialMarkFilter(anchor(value), value, { ...filter, keyword: '未匹配的检索' })).toBe(false);
+});
+
+it('filters handled states and frozen models without treating an open conflict as handled (#1454)', () => {
+  const filter = { selectedCategories: new Set<'editor'>(), selectedModels: new Set<string>(), status: 'handled' as const, keyword: '' };
+  for (const status of ['applied', 'resolved'] as const) expect(matchesEditorialMarkFilter({ ...anchor(), status }, card, filter)).toBe(true);
+  expect(matchesEditorialMarkFilter({ ...anchor(), disposition: 'rejected' }, card, filter)).toBe(true);
+  expect(matchesEditorialMarkFilter({ ...anchor(), status: 'applied', conflict: 'unresolved' }, card, filter)).toBe(false);
+  const ai = { ...card, source: { ...card.source, kind: 'ai7' as const, modelLabel: '模型甲@high' } };
+  const modelFilter = { ...filter, status: 'all' as const, selectedModels: new Set(['模型甲@high']) };
+  expect(matchesEditorialMarkFilter(anchor(ai), ai, modelFilter)).toBe(true);
+  expect(matchesEditorialMarkFilter(anchor(), card, modelFilter)).toBe(false);
+  expect(matchesEditorialMarkFilter(anchor(ai), { ...ai, source: { ...ai.source, modelLabel: '模型乙' } }, modelFilter)).toBe(false);
 });
 
 it('stacks all five measured cards in anchor order with ten pixel gaps, including offscreen buffers', () => {
@@ -139,7 +151,7 @@ describe('comments command parity and refresh continuity', () => {
   afterEach(() => { mounted?.destroy(); mounted = undefined; setTechnicalLayerVisible(technicalBefore); vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
   async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
   function mount(value = card, others: EditorialMarkCardProjection[] = []) {
-    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value), ...others.map(anchor)] }; let latest = value; let enabled = true; let caret = 10;
+    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value), ...others.map(anchor)] }; let latest = value; let enabled = true; let caret = 10; let rangeKind = 'none';
     const host = document.createElement('div'); const scroll = document.createElement('div'); const pane = document.createElement('aside');
     miniDocument.body.append(host as unknown as MiniElement, scroll as unknown as MiniElement, pane as unknown as MiniElement);
     const block = document.createElement('p'); block.dataset['blockId'] = 'block'; host.append(block);
@@ -158,14 +170,14 @@ describe('comments command parity and refresh continuity', () => {
     const outcome = vi.fn(async (_input: Record<string, unknown>): Promise<unknown> => { throw new Error('outcome unavailable'); });
     const receipt = vi.fn(async (input: Record<string, unknown>) => ({ state: input['recovery'] === 'confirming' ? 'confirming' : 'unresolved', clientEffectId: input['clientEffectId'], reason: '结果待确认' }));
     const options = { host, scroll, comments: { host: pane, enabled: () => enabled },
-      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, setLinkedMark: linked, setVisibleMarkIds: vi.fn(), captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: 'none' }) },
+      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, setLinkedMark: linked, setVisibleMarkIds: vi.fn(), captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: rangeKind }) },
       api: { inspectReviewFindingOfMark: async () => null, getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
     mounted = mountEditorialMarks(options);
     return { host, pane, block, scroll, get, update, decide, apply, write, status, active, linked, outcome, receipt,
-      setCaret: (next: number) => { caret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
+      setRange: (next: string) => { rangeKind = next; }, setCaret: (next: number) => { caret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
       setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
     };
@@ -178,7 +190,7 @@ describe('comments command parity and refresh continuity', () => {
     const shown = () => Array.from(ui.pane.querySelectorAll<HTMLElement>('[data-comment-card]')).filter((node) => !node.hidden).map((node) => node.dataset['commentCard']);
     chip('editor').click(); await paint(); expect(shown()).toEqual(['comment']);
     chip('literary').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
-    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="applied"]')!.click(); await paint();
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="handled"]')!.click(); await paint();
     expect(shown()).toEqual(['literary']);
     const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
     search.value = '文学性'; search.focus(); (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
@@ -192,6 +204,48 @@ describe('comments command parity and refresh continuity', () => {
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="all"]')!.click();
     chip('all').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
     chip('editor').click(); chip('editor').click(); await paint(); expect(chip('all').getAttribute('aria-pressed')).toBe('true');
+  });
+  it('compares frozen model marks and resets an unselected scrolled frame on filtering (#1454)', async () => {
+    const ai = (markId: string, modelLabel: string): EditorialMarkCardProjection => ({ ...card, markId, source: { ...card.source, kind: 'ai7', modelLabel } });
+    const ui = mount(card, [ai('model-a', '模型甲@high'), ai('model-b', '模型乙')]); await paint();
+    const paneScroll = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    paneScroll.scrollTop = 400; (paneScroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-model-filter="模型甲@high"]')!.click(); await paint();
+    expect(paneScroll.scrollTop).toBe(0);
+    const shown = () => Array.from(ui.pane.querySelectorAll<HTMLElement>('[data-comment-card]')).filter(node => !node.hidden).map(node => node.dataset['commentCard']);
+    expect(shown()).toEqual(['model-a']);
+    expect(ui.pane.querySelector('.editorial-mark-filter-summary')?.textContent).toBe('已筛选 1 / 3');
+    ui.refresh(); await paint(); expect(shown()).toEqual(['model-a']);
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-model-filter="模型乙"]')!.click(); await paint(); expect(shown()).toEqual(['model-a', 'model-b']);
+  });
+  it('expands after a completed row click without re-reading, and keeps a deselected reply open (#1454)', async () => {
+    const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    const other = ui.pane.querySelector<HTMLElement>('[data-comment-card="other"]')!;
+    expect(node.dataset['expanded']).toBe('false');
+    (node as unknown as MiniElement).dispatchEvent({ ...{ type: 'pointerdown', button: 0, bubbles: true } });
+    (node as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true }); await paint();
+    expect(node.dataset['expanded']).toBe('false');
+    node.click(); await paint(); expect(node.dataset['expanded']).toBe('true'); expect(ui.get).toHaveBeenCalledTimes(2);
+    node.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click(); await paint();
+    const input = node.querySelector('[data-comment-reply]'); other.click(); await paint();
+    expect(node.dataset['selected']).toBe('false'); expect(node.dataset['expanded']).toBe('true'); expect(node.querySelector('[data-comment-reply]')).toBe(input);
+  });
+  it('flushes layout dropped during an auto-scrolling text drag and releases a press on window blur (#1454)', async () => {
+    vi.stubGlobal('Element', MiniElement); vi.stubGlobal('Node', MiniElement);
+    const ui = mount(); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card]')!;
+    const top = node.style.top;
+    (ui.block as unknown as MiniElement).dispatchEvent({ ...{ type: 'mousedown', button: 0, bubbles: true } });
+    Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 180, bottom: 200 }) });
+    (ui.scroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint(); expect(node.style.top).toBe(top);
+    ui.setRange('range'); (ui.block as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', button: 0, bubbles: true } }); await paint();
+    expect(node.style.top).not.toBe(top);
+    (node as unknown as MiniElement).dispatchEvent({ ...{ type: 'pointerdown', button: 0, bubbles: true } });
+    const held = node.style.top; Object.assign(ui.block, { getBoundingClientRect: () => ({ top: 250, bottom: 270 }) });
+    ui.refresh(); await paint(); expect(node.style.top).toBe(held);
+    const blur = vi.mocked(window.addEventListener).mock.calls.find(call => call[0] === 'blur')![1] as () => void;
+    blur(); await paint(); expect(node.style.top).not.toBe(held);
   });
   it('keeps the chosen pane card through hover, then clears it when filtered out (#1451)', async () => {
     const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();
@@ -209,7 +263,7 @@ describe('comments command parity and refresh continuity', () => {
     expect(selected.dataset['selected']).toBe('true'); expect(other.dataset['hovered']).toBe('true');
     (other as unknown as MiniElement).dispatchEvent({ type: 'pointerleave' }); await paint();
     expect(selected.dataset['selected']).toBe('true');
-    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="applied"]')!.click(); await paint();
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="handled"]')!.click(); await paint();
     expect(selected.dataset['selected']).toBe('false');
   });
   it('selects from the caret when decoration replacement retargets the click to its paragraph (#1451)', async () => {

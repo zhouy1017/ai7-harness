@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { renderEditorialMarkCard, settleEditorialMarkCard } from '../../src/renderer/editorial-mark-card.js';
+import { renderEditorialMarkCard, settleEditorialMarkCard, setEditorialMarkCardExpanded } from '../../src/renderer/editorial-mark-card.js';
 import type { EditorialMarkCardProjection } from '../../src/shared/protocol.js';
 import { installMiniDom } from '../support/mini-dom.js';
 
@@ -120,5 +120,48 @@ describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
     expect(kept).toEqual(['accept-and-apply', 'reject']);
     expect(folded).toEqual(['accept-with-edit', 'resolve-conflict']);
     expect(full.more.hidden).toBe(false);
+  });
+});
+
+
+describe('pane compact and expanded cards (#1454)', () => {
+  it.each(['change-suggestion', 'annotation', 'editor-note'] as const)('keeps the frozen source and one-line preview for %s; selection reveals cached details', (kind) => {
+    const value = { ...card, kind, body: '第一行公开合成正文\n第二行', suggestion: kind === 'change-suggestion' ? card.suggestion : null };
+    const { panel, actions } = renderEditorialMarkCard(value, { pane: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') });
+    const content = panel.querySelector<HTMLElement>('.editorial-mark-expanded-content')!;
+    const preview = panel.querySelector<HTMLElement>('.editorial-mark-compact-preview')!;
+    expect(content.hidden).toBe(true); expect(preview.hidden).toBe(false);
+    expect(preview.textContent).toBe(kind === 'change-suggestion' ? '原文 → 改后' : '第一行公开合成正文');
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(value.source.modelLabel);
+    expect(panel.querySelector('[data-mark-source]')?.getAttribute('title') ?? panel.querySelector<HTMLElement>('[data-mark-source]')?.title).toBe(value.source.modelLabel);
+    expect(panel.querySelector('header')?.textContent).not.toContain('修改建议');
+    expect(panel.querySelector('header button')).toBeNull();
+    expect(panel.querySelector('.editorial-mark-category-badge')?.textContent).not.toMatch(/[【】]/u);
+    setEditorialMarkCardExpanded(panel, true);
+    expect(content.hidden).toBe(false); expect(preview.hidden).toBe(true);
+    expect(panel.querySelector('.editorial-mark-expanded-content')).toBe(content);
+    expect(content.contains(actions)).toBe(true);
+    expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(value.source.modelLabel);
+    expect(panel.querySelector('.editorial-mark-footer')?.textContent).toContain('gpt-6-luna@high · 任务「校对」');
+  });
+
+  it.each(['open', 'applied', 'resolved'] as const)('gives %s a word and a shape, with subdued handled rows', (status) => {
+    const { panel } = renderEditorialMarkCard({ ...card, status }, { pane: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') });
+    expect(panel.dataset['handled']).toBe(String(status !== 'open'));
+    expect(panel.querySelector('[data-mark-state]')?.textContent).toMatch(status === 'open' ? /^○ /u : /^✓ /u);
+  });
+
+  it('extracts leading disclosure and guessed-position tags without mutating stored reasons or bodies', () => {
+    const note = '【未联网核查】【锚点不唯一】（标点已与原稿对齐）公开合成理由';
+    for (const kind of ['change-suggestion', 'annotation'] as const) {
+      const value = { ...card, kind, body: note, suggestion: kind === 'change-suggestion' ? { ...card.suggestion!, rationale: note } : null };
+      for (const pane of [true, false]) {
+        const { panel } = renderEditorialMarkCard(value, { pane, expanded: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') });
+        expect(panel.querySelector('.editorial-mark-note-tags')?.textContent).toBe('未联网核查位置待确认');
+        expect(panel.querySelector(kind === 'annotation' ? '[data-mark-body]' : '[data-mark-block="rationale"]')?.textContent).toBe('公开合成理由');
+        expect(panel.querySelector('.editorial-mark-compact-preview')?.textContent ?? '').not.toContain('未联网核查');
+      }
+      expect(value.body).toBe(note); expect(value.suggestion?.rationale ?? note).toBe(note);
+    }
   });
 });
