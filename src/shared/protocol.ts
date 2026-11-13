@@ -2346,7 +2346,7 @@ export interface ProposalDraftBatchProjection {
   nextOffset: number | null;
   scopeDigest: string;
   included: ReadonlyArray<string>;
-  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' }>;
+  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' | 'guessed-anchor' }>;
   saved: boolean;
   workspace: ProposalWorkspaceProjection;
 }

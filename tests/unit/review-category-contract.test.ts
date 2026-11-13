@@ -246,7 +246,9 @@ it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
 it.each([
   ['【锚点不唯一】合成建议', true], ['【未联网核查】【锚点不唯一】合成建议', true],
   ['【未联网核查】【锚点不唯一】（标点已与原稿对齐）合成建议', true],
-  ['合成建议', false], ['【未联网核查】合成建议', false],
+  ['【未联网核查】【未联网核查】【锚点不唯一】合成建议', true],
+  ['【未联网核查】【未联网核查】【未联网核查】【锚点不唯一】合成建议', true],
+  ['合成建议', false], ['【未联网核查】合成建议', false], ['【未联网核查】【未联网核查】合成建议', false],
 ] as const)('classifies the stored review note %s', (note, guessed) => {
   expect(reviewFindingHasGuessedAnchor(note)).toBe(guessed);
 });

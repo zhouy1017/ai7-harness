@@ -5,7 +5,8 @@ export const REVIEW_GUESSED_ANCHOR_NOTE_PREFIX = '【锚点不唯一】';
 export const REVIEW_UNCHECKED_DISCLOSURE = '【未联网核查】';
 
 export function reviewFindingHasGuessedAnchor(note: string): boolean {
-  const findingNote = note.startsWith(REVIEW_UNCHECKED_DISCLOSURE) ? note.slice(REVIEW_UNCHECKED_DISCLOSURE.length) : note;
+  let findingNote = note;
+  while (findingNote.startsWith(REVIEW_UNCHECKED_DISCLOSURE)) findingNote = findingNote.slice(REVIEW_UNCHECKED_DISCLOSURE.length);
   return findingNote.startsWith(REVIEW_GUESSED_ANCHOR_NOTE_PREFIX);
 }
 
