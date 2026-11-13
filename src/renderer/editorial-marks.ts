@@ -598,6 +598,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let pressedComment: string | undefined;
   let pressedTextMark: EditorialMarkAnchorProjection | undefined;
   let textPointerDown = false;
+  let pressSequence = 0;
   let activeComment: string | undefined;
   let hoveredComment: string | undefined;
   let suppressCommentSelection = false;
@@ -705,6 +706,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     scheduleCommentsLayout();
   }
   function releaseCommentPress(): void {
+    pressSequence++;
     const id = pressedComment;
     pressedComment = undefined;
     if (!destroyed && id !== undefined) activateComment(id);
@@ -715,8 +717,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
   }
   const finishCommentPress = (): void => {
-    const id = pressedComment;
-    setTimeout(() => { if (pressedComment === id) releaseCommentPress(); }, 100);
+    if (pressedComment === undefined && !textPointerDown) return;
+    const sequence = pressSequence;
+    setTimeout(() => { if (pressSequence === sequence) releaseCommentPress(); }, 100);
   };
   function layoutComments(): void {
     if (pressedComment !== undefined || textPointerDown) return;
@@ -766,7 +769,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         commentNodes.set(mark.markId, entry);
         commentsCanvas.append(node);
         commentsResize.observe(node);
-        node.addEventListener('pointerdown', (event) => { if (event.button === 0) pressedComment = mark.markId; });
+        node.addEventListener('pointerdown', (event) => { if (event.button === 0) { pressSequence++; pressedComment = mark.markId; } });
         node.addEventListener('pointerenter', () => hoverComment(mark.markId));
         node.addEventListener('pointerleave', () => hoverComment(undefined));
         node.addEventListener('focusin', () => {
@@ -2863,10 +2866,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const onTextPointerDown = (event: PointerEvent): void => {
-    if (event.button === 0) { textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
+    if (event.button === 0) { pressSequence++; textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
   };
   const onMouseDown = (event: MouseEvent): void => {
-    if (event.button === 0 && !textPointerDown) { textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
+    if (event.button === 0 && !textPointerDown) { pressSequence++; textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
     // Some platforms select the word under a context click before the menu opens; what decides the
     // menu is what was selected before that.
     if (event.button === 2) collapsedBeforeContextClick = editor.selectedRange().kind === 'none';
