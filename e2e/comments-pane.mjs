@@ -83,6 +83,7 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&
       __comments.ids.every((id,index)=>document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(index===2?undefined:'true'));
   })()`, 'comments-search-cards-and-highlights');
+  check(await renderer.evaluate(`document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height<=84`), 'comments-filter-header-height');
   check(await renderer.evaluate(`(() => { window.dispatchEvent(new Event('resize')); return document.querySelector('[data-mark-search-input]')===__commentsSearch && __commentsSearch.value==='公开合成批注 2' && document.querySelector('[data-mark-category-filter="editor"]').getAttribute('aria-pressed')==='true'; })()`), 'comments-filter-controls-survive-redraw');
   check(await renderer.evaluate(`(() => { document.querySelector('[data-mark-status-filter="handled"]').click(); return true; })()`), 'comments-status-handled');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===true)`, 'comments-status-no-match');
@@ -288,6 +289,8 @@ export async function commentsReplyAndResolve(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]')?.hidden===true && document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]')?.hidden===false`, 'comments-buffer-reply-reordered');
   const editing = await renderer.evaluate(`(() => {const input=document.querySelector('[data-comment-reply="'+__comments.ids[11]+'"]');return {same:input===__commentsBufferReply,focused:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd,body:input.value==='公开合成滚动草稿',active:document.activeElement?.tagName};})()`);
   check(editing.same&&editing.focused&&editing.start===2&&editing.end===4&&editing.body,'comments-buffer-reply-caret',editing);
+  check(await renderer.evaluate(`(() => {document.querySelector('.editor-window [data-mark-id="'+__comments.ids[2]+'"]').scrollIntoView({block:'center',behavior:'instant'});return true;})()`), 'comments-buffer-reply-return');
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]')?.hidden===false`, 'comments-buffer-reply-returned');
 
   await commentsSelectCard(renderer, check, waitFor, 2);
   check(await renderer.evaluate(`(() => { const node=document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]'); node.querySelector('[data-mark-action="reply"]').click(); const input=node.querySelector('[data-comment-reply]'); input.value='公开合成待发回复'; input.focus(); input.setSelectionRange(3,5); globalThis.__commentsReply=input; node.querySelector('[data-mark-action="resolve"]').click(); return true; })()`), 'comments-inline-reply-draft-and-resolve');

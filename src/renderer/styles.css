@@ -3006,8 +3006,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editorial-mark-filter-popover { position: fixed; margin: 0; width: 280px; max-height: min(440px, 65vh); overflow: auto; box-sizing: border-box; padding: .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); }
 .editorial-mark-filter-popover > strong { display: block; margin-bottom: .4rem; font-size: .8rem; }
 .editorial-mark-filter-popover .editorial-mark-search { width: 100%; box-sizing: border-box; }
-.editorial-mark-disclosure { margin: 0; padding: .15rem .55rem; font-size: .7rem; color: var(--text-subdued); }
-.editorial-mark-filter-summary { padding-inline: .55rem; }
+.editorial-mark-disclosure { line-height: 16px; margin: 0; padding: .15rem .55rem; font-size: .7rem; color: var(--text-subdued); }
+.editorial-mark-filter-summary { padding-inline: .55rem; line-height: 16px; }
 .editorial-mark-filter-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .4rem; }
 .editorial-mark-filter-chips button { min-height: 28px; padding: .15rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; font-size: .76rem; }
 .editorial-mark-filter-chips button[aria-pressed="true"] { background: var(--category-fill, var(--surface-subdued)); color: var(--category-text, var(--text)); border-color: var(--category-accent, var(--focus)); box-shadow: inset 0 0 0 1px var(--category-accent, var(--focus)); font-weight: 700; }
