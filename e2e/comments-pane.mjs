@@ -41,11 +41,14 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     const page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'window-start',blockId:start}});
     const block=page.blocks.find((item)=>item.kind==='paragraph' && Array.from(item.text??'').length>=20);
     if(!block)return false;
+    const second=page.blocks.slice(page.blocks.indexOf(block)+1).find(item=>item.kind==='paragraph' && Array.from(item.text??'').length>=20);
+    if(!second)return false;
     const ids=[]; const kinds=['change-suggestion','change-suggestion','annotation','annotation','editor-note'];
-    for(let index=0;index<5;index++){
-      const words=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(block.text),item=>item.segment);
-      const from=index*3, to=from+2;
-      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:start,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:from,toGrapheme:to,selectedText:words.slice(from,to).join(''),kind:kinds[index],highlightColor:null,body:index>=2?'公开合成批注 '+index:'',proposedText:index<2?'合成':null,rationale:index<2?'公开合成理由':null});
+    for(let index=0;index<12;index++){
+      const current=index<5?block:second;
+      const words=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(current.text),item=>item.segment);
+      const from=index<5?index*3:(index-5)*2, to=from+2;
+      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:start,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:current.blockId,baseBlockDigest:current.digest,fromGrapheme:from,toGrapheme:to,selectedText:words.slice(from,to).join(''),kind:kinds[index]??'annotation',highlightColor:null,body:index>=2?'公开合成批注 '+index:'',proposedText:index<2?'合成':null,rationale:index<2?'公开合成理由':null});
       ids.push(result.markId);
     }
     globalThis.__comments={...binding,bookId,blockId:block.blockId,start,ids,journal:page.journalSequence};
@@ -81,6 +84,32 @@ export async function seedCommentsPane(renderer, check, waitFor) {
 }
 
 export async function commentsGeometryAndScroll(renderer, check, waitFor) {
+  check(await renderer.evaluate(`(() => {
+    const id=__comments.ids[11], words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
+    const pane=document.querySelector('.manuscript-comments-scroll'), card=document.querySelector('[data-comment-card="'+id+'"]');
+    if(!words||!card||card.getBoundingClientRect().top<pane.getBoundingClientRect().bottom)return false;
+    words.scrollIntoView({block:'center'});
+    document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
+    words.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true;
+  })()`), 'comments-overflow-pick');
+  await waitFor(renderer, `(() => {
+    const id=__comments.ids[11], card=document.querySelector('[data-comment-card="'+id+'"]'), words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
+    const p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(), c=card.getBoundingClientRect(), w=words.getClientRects()[0];
+    return card.dataset.selected==='true' && c.top>=p.top-1 && c.bottom<=p.bottom+1 && Math.abs(c.top-w.top)<=4 && document.querySelector('[data-comment-leader="'+id+'"]') && !document.querySelector('.editorial-mark-layer [data-mark-card]');
+  })()`, 'comments-overflow-selected-aligned');
+  check(await renderer.evaluate(`(() => { for(const id of __comments.ids.slice(2,4)){ const node=document.querySelector('[data-comment-card="'+id+'"]'); node.dispatchEvent(new PointerEvent('pointerenter')); node.dispatchEvent(new PointerEvent('pointerleave')); } return document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]').dataset.selected==='true'; })()`), 'comments-hover-keeps-selection');
+  check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-block-id]').dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true; })()`), 'comments-unmarked-clear');
+  await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
+  check(await renderer.evaluate(`(async () => {
+    const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
+    const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
+    words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
+    pane.scrollTop=30;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const card=document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]');
+    return pane.scrollTop>0 && Math.abs(card.getBoundingClientRect().top-words.getBoundingClientRect().top)<=4;
+  })()`), 'comments-scrolled-canvas-coordinates');
+
   check(await renderer.evaluate(`(() => {
     const cards=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
     const sorted=cards.map(node=>node.getBoundingClientRect()).sort((a,b)=>a.top-b.top);

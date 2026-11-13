@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorialCardCache, mountEditorialMarks, stackEditorialComments } from '../../src/renderer/editorial-marks.js';
+import { EditorialCardCache, mountEditorialMarks, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
 import { matchesEditorialMarkFilter } from '../../src/renderer/editorial-mark-filter.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkCardProjection, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -54,6 +54,25 @@ it('coalesces pending reads and scroll hits, then refreshes a changed journal an
   const fresh = { ...card, body: '最新正文', source: { ...card.source, editorName: '新责编' } };
   expect(await cache.read(card.markId, async () => fresh)).toBe(fresh);
   cache.sync({ ...page, journalSequence: 1, marks: [...page.marks] }); expect(cache.cards.size).toBe(0);
+});
+
+it('stacks around the chosen card and clamps it without losing earlier cards (#1451)', () => {
+  const items = Array.from({ length: 4 }, (_, i) => ({ desiredTop: 100 + i, measuredHeight: 50 }));
+  expect(stackEditorialComments(items, 2).map(item => item.top)).toEqual([-18, 42, 102, 162]);
+  expect(stackEditorialComments(items, 2, { top: 0, height: 120 }).map(item => item.top)).toEqual([-50, 10, 70, 130]);
+  expect(stackEditorialComments(items).map(item => item.top)).toEqual([100, 160, 220, 280]);
+});
+
+it('picks the shortest range, prefers a start over an end and keeps window-order ties (#1451)', () => {
+  const outer = { ...anchor(), markId: 'outer', fromGrapheme: 0, toGrapheme: 10 };
+  const inner = { ...outer, markId: 'inner', fromGrapheme: 2, toGrapheme: 4 };
+  const next = { ...inner, markId: 'next', fromGrapheme: 4, toGrapheme: 6 };
+  const twin = { ...inner, markId: 'twin' };
+  const marks = [outer, inner, twin, next, { ...inner, kind: 'personal-highlight' as const }];
+  expect(pickEditorialComment(marks, 'block', 3)?.markId).toBe('inner');
+  expect(pickEditorialComment(marks, 'block', 4)?.markId).toBe('next');
+  expect(pickEditorialComment(marks, 'block', 6)?.markId).toBe('next');
+  expect(pickEditorialComment(marks, 'block', 11)).toBeUndefined();
 });
 
 it('fences old Book/branch/window reads and never overwrites a newer command card', async () => {
@@ -171,6 +190,20 @@ describe('comments command parity and refresh continuity', () => {
     chip('all').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
     chip('editor').click(); chip('editor').click(); await paint(); expect(chip('all').getAttribute('aria-pressed')).toBe('true');
   });
+  it('keeps the chosen pane card through hover, then clears it when filtered out (#1451)', async () => {
+    const ui = mount(card, [{ ...card, markId: 'other' }]); await paint();
+    await ui.open(); await paint();
+    const selected = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    const other = ui.pane.querySelector<HTMLElement>('[data-comment-card="other"]')!;
+    expect(selected.dataset['selected']).toBe('true');
+    expect(ui.scroll.querySelector('[data-mark-card]')).toBeNull();
+    (other as unknown as MiniElement).dispatchEvent({ type: 'pointerenter' }); await paint();
+    expect(selected.dataset['selected']).toBe('true'); expect(other.dataset['hovered']).toBe('true');
+    (other as unknown as MiniElement).dispatchEvent({ type: 'pointerleave' }); await paint();
+    expect(selected.dataset['selected']).toBe('true');
+    ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="applied"]')!.click(); await paint();
+    expect(selected.dataset['selected']).toBe('false');
+  });
   it('reuses reply/resolve commands, keeps the actual reply input and caret across a returned-card refresh, and reads once', async () => {
     const ui = mount(); await paint();
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();
@@ -214,7 +247,7 @@ describe('comments command parity and refresh continuity', () => {
   it('recovers an explicit full-card open after one failed passive read without retrying passive refresh', async () => {
     const ui = mount(); ui.get.mockRejectedValueOnce(new Error('transient read')); await paint();
     ui.refresh(); await paint(); expect(ui.get).toHaveBeenCalledTimes(1);
-    await ui.open(); await paint();
+    ui.setEnabled(false); await ui.open(); await paint();
     expect(ui.get).toHaveBeenCalledTimes(2);
     expect(ui.scroll.querySelector('[data-mark-card]')?.textContent).toContain(card.body);
   });
@@ -264,7 +297,7 @@ describe('comments command parity and refresh continuity', () => {
     const ui = mount(suggestion); await paint(); ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.click();
     expect(ui.active).toHaveBeenLastCalledWith({ markId: card.markId, previewText: '改后' });
     ui.setEnabled(false); await paint(); expect(ui.active).toHaveBeenLastCalledWith(null);
-    ui.setEnabled(true); await paint(); await ui.open(); await paint();
+    await ui.open(); await paint();
     const calls = ui.active.mock.calls.length; ui.setEnabled(false); await paint();
     expect(ui.active.mock.calls.length).toBe(calls); expect(ui.active).toHaveBeenLastCalledWith({ markId: card.markId, previewText: '改后' });
   });
@@ -293,7 +326,7 @@ describe('comments command parity and refresh continuity', () => {
       before: { revisionId: 'revision', journalSequence: 0, workingDigest: 'c'.repeat(64) }, after: { revisionId: 'revision', journalSequence: 1, workingDigest: 'd'.repeat(64) },
       committedAt: card.createdAt, reversesEffectId: null, reversedByEffectId: null };
     const value: EditorialMarkCardProjection = { ...suggestion, status: 'applied', suggestion: { ...suggestion.suggestion!, application } };
-    const ui = mount(value); await paint(); await ui.open(); await paint();
+    const ui = mount(value); await paint(); ui.setEnabled(false); await ui.open(); await paint();
     collectTechnicalDisclosures(document.body);
     const full = ui.scroll.querySelector('[data-mark-card]')!;
     expect(full.querySelector('[data-mark-receipt]')).toBeNull();
