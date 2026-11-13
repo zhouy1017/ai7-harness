@@ -1883,14 +1883,32 @@ async function main() {
     await assertRenderer(renderer, DIRECT_EDIT, 'document-toolbar-direct');
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
-    requireJourney(await renderer.evaluate(`(async () => {
-      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-      const shell=document.querySelector('.editor-shell[data-manuscript-kind="derivative"]');
-      const toolbar=shell.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
-      const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
-      return innerWidth===1280 && innerHeight===800 && document.body.dataset.taskDrawer==='open' && shell.getBoundingClientRect().width<600 && controls.length>=7
-        && controls.every(el=>{const r=el.getBoundingClientRect();return r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight) && el.scrollWidth<=el.clientWidth+1;});
-    })()`) === true, 'document-toolbar-narrow-shell');
+    await waitFor(renderer, `Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1`, 'document-toolbar-dock-settled');
+    const widerToolbarViewport = await renderer.evaluate(`Math.round(innerWidth + 620 - document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width)`);
+    // Exercise the widest style label without changing the document version fixed for this task.
+    await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
+    for (const width of [1280, widerToolbarViewport]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      let geometry;
+      const geometryDeadline = Date.now() + 5_000;
+      do {
+        geometry = await renderer.evaluate(`(async () => {
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        await Promise.all(document.body.getAnimations().map(animation=>animation.finished.catch(()=>undefined)));
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+        const shell=document.querySelector('.editor-shell[data-manuscript-kind="derivative"]');
+        const toolbar=shell.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
+        const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
+        const shellWidth=shell.getBoundingClientRect().width;
+        const bounds=controls.map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,scroll:el.scrollWidth,client:el.clientWidth};});
+        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open',narrow:${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640,count:controls.length>=7,
+          visible:bounds.every(r=>r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight)),untruncated:bounds.every(r=>r.scroll<=r.client+1)}};
+      })()`);
+        if (Object.values(geometry.checks).every(value=>value===true)) break;
+        await new Promise(resolve=>setTimeout(resolve, 50));
+      } while (Date.now() < geometryDeadline);
+      requireJourney(Object.values(geometry.checks).every(value=>value===true), 'document-toolbar-narrow-shell', geometry);
+    }
     await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
     await clickSelector(renderer, '.task-composer [data-task-composer-action="save-draft"]', 'document-task-save');
     await waitFor(renderer, `document.querySelector('.task-composer')?.dataset.taskComposer==='draft'`, 'document-task-saved');

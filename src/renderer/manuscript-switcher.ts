@@ -129,6 +129,31 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
   panel.hidden = true;
   const writingHost = el('div', 'derivative-writing-host');
   root.append(bar, panel, writingHost);
+  // Keep the disclosure mounted: writing polls update its state without replaying popup entry animation.
+  const list = el('ul', 'manuscript-switcher-list');
+  const menu = el('details', 'derivative-menu');
+  const trigger = el('summary', 'btn secondary', '衍生稿件 ▾');
+  trigger.dataset['derivativeMenu'] = 'true';
+  trigger.setAttribute('aria-label', '衍生稿件');
+  trigger.setAttribute('aria-haspopup', 'true');
+  const createEntry = el('button', 'manuscript-switch-create', SWITCHER_WORDS.create);
+  createEntry.type = 'button';
+  createEntry.dataset['manuscriptSwitch'] = 'new';
+  createEntry.setAttribute('role', 'menuitem');
+  createEntry.setAttribute('aria-controls', panel.id);
+  createEntry.addEventListener('click', () => { menu.open = false; toggleForm(); });
+  const manage = el('button', 'manuscript-switch-manage');
+  manage.type = 'button';
+  manage.dataset['manuscriptSwitch'] = 'manage';
+  manage.setAttribute('role', 'menuitem');
+  manage.addEventListener('click', () => { menu.open = false; if (options.openWorkspace) void leave(options.openWorkspace); });
+  const menuBody = menuPanel(createEntry, manage);
+  menuBody.setAttribute('role', 'menu');
+  menuBody.setAttribute('aria-label', '衍生稿件');
+  menu.append(trigger, menuBody);
+  const state = el('span', 'manuscript-switcher-state');
+  bar.append(list, menu, state);
+
 
   const documentsOf = (next: ProductionDocumentsProjection): Array<{ type: ProductionDocumentTypeProjection; document: ProductionDocumentProjection }> =>
     next.types.flatMap((type) => type.documents.map((document) => ({ type, document })));
@@ -173,13 +198,10 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
 
   function paintBar(): void {
     if (destroyed) return;
-    const previousMenu = bar.querySelector<HTMLDetailsElement>('.derivative-menu');
-    const menuOpen = previousMenu?.open ?? false;
-    const triggerFocused = document.activeElement === previousMenu?.querySelector('summary');
     const focused = document.activeElement instanceof HTMLElement && bar.contains(document.activeElement)
       ? document.activeElement.dataset['manuscriptSwitch'] ?? null : null;
     const focusedId = focused === null ? null : (document.activeElement as HTMLElement).dataset['documentId'] ?? null;
-    const list = el('ul', 'manuscript-switcher-list');
+    list.replaceChildren();
     const entry = (label: string, kind: 'primary' | 'document', run: () => void, documentId?: string): HTMLButtonElement => {
       const item = el('li');
       const button = el('button', 'quiet manuscript-switch', label);
@@ -203,40 +225,17 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
         () => void leave(() => options.openDocument(documentNow, { typeId: type.typeId, label: type.label })), documentNow.documentId);
       button.dataset['documentTypeId'] = type.typeId;
     }
-    const create = el('button', 'quiet manuscript-switch-create', SWITCHER_WORDS.create);
-    create.type = 'button';
-    create.dataset['manuscriptSwitch'] = 'new';
-    create.setAttribute('role', 'menuitem');
-    create.setAttribute('aria-controls', panel.id);
-    create.setAttribute('aria-expanded', String(form !== null));
-    create.disabled = working || projection === null || projection.unavailableReason !== null;
-    create.addEventListener('click', () => { menu.open = false; toggleForm(); });
-    const state = el('span', 'manuscript-switcher-state');
+    createEntry.setAttribute('aria-expanded', String(form !== null));
+    createEntry.disabled = working || projection === null || projection.unavailableReason !== null;
+    manage.textContent = `管理全部衍生稿件（${all.length}）`;
+    manage.disabled = working || options.openWorkspace === undefined;
     state.textContent = writingState.drafted > 0 ? SWITCHER_WORDS.draftReady(writingState.drafted) : writingState.underWay ? SWITCHER_WORDS.writing : '';
     state.hidden = state.textContent === '';
-    const manage = el('button', 'quiet manuscript-switch-manage', `管理全部衍生稿件（${all.length}）`);
-    manage.type = 'button';
-    manage.dataset['manuscriptSwitch'] = 'manage';
-    manage.setAttribute('role', 'menuitem');
-    manage.disabled = working || options.openWorkspace === undefined;
-    manage.addEventListener('click', () => { menu.open = false; if (options.openWorkspace) void leave(options.openWorkspace); });
-    const menu = el('details', 'derivative-menu');
-    const trigger = el('summary', 'btn secondary', '衍生稿件 ▾');
-    trigger.dataset['derivativeMenu'] = 'true';
-    trigger.setAttribute('aria-label', '衍生稿件');
-    trigger.setAttribute('aria-haspopup', 'true');
-    const menuBody = menuPanel(create, manage);
-    menuBody.setAttribute('role', 'menu');
-    menuBody.setAttribute('aria-label', '衍生稿件');
-    menu.open = menuOpen;
-    menu.append(trigger, menuBody);
-    bar.replaceChildren(list, menu, state);
     bar.dataset['documentCount'] = String(projection === null ? 0 : documentsOf(projection).length);
-    if (triggerFocused) trigger.focus();
-    else if (focused !== null) {
+    if (focused !== null) {
       const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-manuscript-switch]'))
         .find((node) => node.dataset['manuscriptSwitch'] === focused && (node.dataset['documentId'] ?? null) === focusedId);
-      again?.focus();
+      if (again !== document.activeElement) again?.focus();
     }
   }
 
