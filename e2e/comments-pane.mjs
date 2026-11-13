@@ -86,7 +86,10 @@ export async function seedCommentsPane(renderer, check, waitFor) {
 export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   const coordinates = await renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
-    document.querySelector('[data-mark-search-input]').focus({preventScroll:true}); getSelection().removeAllRanges();
+    const search=document.querySelector('[data-mark-search-input]'); search.focus({preventScroll:true}); getSelection().removeAllRanges();
+    search.value='公开合成不匹配筛选'; search.dispatchEvent(new Event('input',{bubbles:true}));
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    search.value=''; search.dispatchEvent(new Event('input',{bubbles:true}));
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
     words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
@@ -99,7 +102,8 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const card=first.card;
     const freshWords=document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]');
     const cardTop=card.getBoundingClientRect().top, wordsTop=freshWords.getBoundingClientRect().top;
-    return {pass:pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected:!!document.querySelector('[data-comment-card][data-selected="true"]')};
+    const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
+    return {pass:!selected && pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected};
   })()`);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
   check(await renderer.evaluate(`(() => {
