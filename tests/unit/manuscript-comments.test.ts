@@ -209,6 +209,12 @@ describe('comments command parity and refresh continuity', () => {
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="applied"]')!.click(); await paint();
     expect(selected.dataset['selected']).toBe('false');
   });
+  it('selects from the caret when decoration replacement retargets the click to its paragraph (#1451)', async () => {
+    const ui = mount(); await paint(); ui.setCaret(1); ui.block.click(); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
+    ui.setCaret(8); ui.block.click(); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('false');
+  });
   it('reuses reply/resolve commands, keeps the actual reply input and caret across a returned-card refresh, and reads once', async () => {
     const ui = mount(); await paint();
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!.click();

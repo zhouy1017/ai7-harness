@@ -2850,7 +2850,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     suppressCommentSelection = false;
     const hit = markAt(event.target, false);
     const point = editor.captureContinuity().head;
-    const mark = hit ? pickEditorialComment(editor.currentWindow().marks, hit.blockId, point.blockId === hit.blockId && point.grapheme >= hit.fromGrapheme && point.grapheme <= hit.toGrapheme ? point.grapheme : hit.fromGrapheme) : undefined;
+    // Updating linked decorations can replace the down-target before click and retarget it to the paragraph.
+    const mark = hit ? pickEditorialComment(editor.currentWindow().marks, hit.blockId, point.blockId === hit.blockId && point.grapheme >= hit.fromGrapheme && point.grapheme <= hit.toGrapheme ? point.grapheme : hit.fromGrapheme)
+      : options.comments?.enabled() ? pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme) : undefined;
     if (options.comments?.enabled()) {
       if (!mark) { activateComment(undefined); return; }
       if (mark.anchorState === 'exact') { closeFloating(); activateComment(mark.markId); return; }
