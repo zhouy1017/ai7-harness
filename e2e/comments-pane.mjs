@@ -338,9 +338,15 @@ export async function commentsModelFilter(renderer, check, waitFor, markId) {
     const bookId=document.querySelector('.editor-shell').dataset.bookId,work=(await window.ai7.listPriorWork()).find(item=>item.bookId===bookId);
     const binding={manuscriptId:work.manuscriptId,branchId:work.branchId},card=await window.ai7.getEditorialMarkCard({...binding,markId:${JSON.stringify(markId)}});
     const page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'block',blockId:card.blockId}}),block=page.blocks.find(item=>item.blockId===card.blockId);
-    const from=card.fromGrapheme,to=Math.min(card.toGrapheme,from+2);
-    const text=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(block.text),item=>item.segment).slice(from,to).join('');
-    const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:from,toGrapheme:to,selectedText:text,kind:'annotation',highlightColor:null,body:'公开合成模型筛选对照',proposedText:null,rationale:null});
+    const split=value=>Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(value),item=>item.segment);
+    let comparison=block,from=card.toGrapheme;
+    if(from+2>split(block.text).length){
+      if(card.fromGrapheme>=2)from=card.fromGrapheme-2;
+      else {comparison=page.blocks.slice(page.blocks.indexOf(block)+1).find(item=>item.kind==='paragraph'&&split(item.text??'').length>=2);from=0;}
+    }
+    if(!comparison)return false;
+    const to=from+2,text=split(comparison.text).slice(from,to).join('');
+    const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:comparison.blockId,baseBlockDigest:comparison.digest,fromGrapheme:from,toGrapheme:to,selectedText:text,kind:'annotation',highlightColor:null,body:'公开合成模型筛选对照',proposedText:null,rationale:null});
     globalThis.__commentsModel={mark:${JSON.stringify(markId)},other:result.markId,block:block.blockId,source:card.source.modelLabel};return card.source.modelLabel==='AI7 本地检查';
   })()`), 'comments-model-frozen-local-source');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-model-reload-overview');
@@ -358,7 +364,12 @@ export async function commentsModelFilter(renderer, check, waitFor, markId) {
     return document.querySelector('[data-comment-card="'+__commentsModel.mark+'"] [data-mark-source]')?.textContent===__commentsModel.source && document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false && document.querySelector('.manuscript-comments-canvas').dataset.loading==='false';
   })()`, 'comments-model-cards-ready');
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-filter-toggle]').click();const chip=document.querySelector('[data-mark-model-filter="'+__commentsModel.source+'"]');if(!chip)return false;chip.click();return true;})()`), 'comments-model-chip');
-  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===true && document.querySelector('.editor-window [data-mark-id="'+__commentsModel.other+'"]')?.dataset.markFilteredOut==='true' && !document.querySelector('.editor-window [data-mark-id="'+__commentsModel.mark+'"][data-mark-filtered-out]')`, 'comments-model-cards-and-highlights');
+  try {
+    await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===true && document.querySelector('.editor-window [data-mark-id="'+__commentsModel.other+'"]')?.dataset.markFilteredOut==='true' && !document.querySelector('.editor-window [data-mark-id="'+__commentsModel.mark+'"][data-mark-filtered-out]')`, 'comments-model-cards-and-highlights');
+  } catch {
+    const flags=await renderer.evaluate(`(() => {const model=__commentsModel;return {ordinary:document.documentElement.dataset.technicalLayerVisible==='false',selected:document.querySelector('[data-mark-model-filter="'+model.source+'"]')?.getAttribute('aria-pressed'),sourceHidden:document.querySelector('[data-comment-card="'+model.mark+'"]')?.hidden,editorHidden:document.querySelector('[data-comment-card="'+model.other+'"]')?.hidden,sourceWord:!!document.querySelector('.editor-window [data-mark-id="'+model.mark+'"]'),editorWord:!!document.querySelector('.editor-window [data-mark-id="'+model.other+'"]'),sourceDim:!!document.querySelector('.editor-window [data-mark-id="'+model.mark+'"][data-mark-filtered-out]'),editorDim:!!document.querySelector('.editor-window [data-mark-id="'+model.other+'"][data-mark-filtered-out]')};})()`);
+    check(false,'comments-model-cards-and-highlights',flags);
+  }
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-model-filter="'+__commentsModel.source+'"]' ).click();document.querySelector('.editorial-mark-filter-popover').hidePopover();return true;})()`), 'comments-model-reset');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false`, 'comments-model-all-restored');
   check(await renderer.evaluate(`(() => {const node=document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]');node.focus();node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true;})()`), 'comments-model-full-card');
