@@ -182,6 +182,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   const controlClick = await commentsNativeClick(renderer, controlPoint);
   check(controlClick.real && Math.abs(controlClick.held.top-controlPoint.top)<=1 && controlClick.held.selected!=='true', 'comments-pushed-control-held-still', controlClick);
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]').dataset.selected==='true' && document.querySelector('[data-comment-reply="'+__comments.ids[2]+'"]')`, 'comments-pushed-control-first-click');
+  await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done(true))))`);
 
   check(await renderer.evaluate(`(() => {
     const cards=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));

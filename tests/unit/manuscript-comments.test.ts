@@ -241,6 +241,29 @@ describe('comments command parity and refresh continuity', () => {
     expect(node.dataset['selected']).not.toBe('true'); expect(node.style.top).toBe(top);
     reply.click(); await paint(); expect(node.dataset['selected']).toBe('true'); expect(node.querySelector('[data-comment-reply]')).not.toBeNull();
   });
+  it('keeps existing cards in place when an earlier mark arrives in a scrolled pane (#1451)', async () => {
+    const other = { ...card, markId: 'arriving' };
+    const ui = mount(card, [other]); ui.setPage({ marks: [anchor()] }); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!;
+    const paneScroll = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    const top = node.style.top; paneScroll.scrollTop = 100;
+    (paneScroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    ui.setPage({ journalSequence: 1, marks: [anchor(other), anchor()] }); await paint();
+    expect(node.style.top).toBe(top); expect(paneScroll.scrollTop).toBe(100);
+    expect(Number.parseFloat(ui.pane.querySelector<HTMLElement>('[data-comment-card="arriving"]')!.style.top)).toBeGreaterThan(Number.parseFloat(top));
+  });
+  it('waits until a text press completes before linking its caret mark (#1451)', async () => {
+    vi.stubGlobal('Element', MiniElement); vi.stubGlobal('Node', MiniElement);
+    const ui = mount(); await paint();
+    const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);
+    vi.stubGlobal('document', Object.assign(Object.create(document), { getSelection: () => ({ anchorNode: words }) }));
+    ui.host.focus(); ui.setCaret(1);
+    (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'mousedown', button: 0, bubbles: true } });
+    miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).not.toBe('true');
+    (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', button: 0, bubbles: true } }); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
+  });
   it('keeps the pointed mark when its last glyph puts the caret at an adjacent start (#1451)', async () => {
     vi.stubGlobal('Element', MiniElement);
     vi.stubGlobal('Node', MiniElement);
