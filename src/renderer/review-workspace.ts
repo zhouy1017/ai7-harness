@@ -1,3 +1,4 @@
+import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
@@ -2214,7 +2215,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         after = opened.findings.at(-1)!.ordinal;
       }
       const suggestions = pending.filter((finding) => finding.output === 'change-suggestion');
-      const exact = suggestions.filter((finding) => finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null);
+      const exact = suggestions.filter((finding) => !reviewFindingHasGuessedAnchor(finding.note) && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null);
       // One batch cannot decide conflicting ranges; leave every overlapping suggestion for individual review.
       const standing = category.categoryId === 'local-text-check' ? exact.filter((finding) => !exact.some((other) => other !== finding && other.blockId === finding.blockId &&
         other.fromGrapheme < finding.toGrapheme && finding.fromGrapheme < other.toGrapheme)) : exact;

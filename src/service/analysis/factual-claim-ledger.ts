@@ -2,7 +2,7 @@ import { FACTUAL_FINDING_CLASSES, type CoverageManifestProjection } from '../../
 import { canonicalJson, canonicalRecord, requireAnalysis, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
-  factualReviewMessageBlockIds, locateQuotation, type FactualReviewUnitResult, type FactualUnitAssertion,
+  factualReviewMessageBlockIds, locateQuotation, quotationForLocation, type FactualReviewUnitResult, type FactualUnitAssertion,
 } from './factual-review-contract.js';
 
 export const FACTUAL_CLAIM_LEDGER_SCHEMA = 'ai7.factual-claim-ledger/1' as const;
@@ -79,14 +79,14 @@ export function freezeFactualClaimLedger(input: {
       }
       const block = blockIds[assertion.blockOrdinal - 1];
       const text = block === undefined ? undefined : input.blocks.get(block)?.text;
-      const location = text === undefined ? { state: 'not-found' as const } : locateQuotation(text, assertion.quote);
+      const location = text === undefined ? { state: 'not-found' as const } : locateQuotation(text, assertion.quote, assertion.occurrence);
       if (block === undefined || location.state !== 'verified') {
         excluded.push({ producer, reason: location.state === 'ambiguous' ? 'quote-ambiguous' : 'quote-not-found' });
         return;
       }
       const occurrence: FactualClaimOccurrence = { bookId: input.manifest.manuscript.bookId, revision: input.manifest.manuscript.revisionId,
         block, exactRange: { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme },
-        quote: assertion.quote, assertionClass: assertion.assertionClass, question: assertion.question };
+        quote: quotationForLocation(text!, assertion.quote, location), assertionClass: assertion.assertionClass, question: assertion.question };
       const claimId = sha256Hex(canonicalJson(occurrence));
       const prior = claims.get(claimId);
       claims.set(claimId, { claimId, occurrence, producers: [...(prior?.producers ?? []), producer] });

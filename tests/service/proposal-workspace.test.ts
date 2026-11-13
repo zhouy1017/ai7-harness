@@ -67,7 +67,7 @@ function blockText(store: EditorialStore, book: Imported, blockId: string): stri
   return store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.find((block) => block.blockId === blockId)!.text;
 }
 
-function suggest(store: EditorialStore, book: Imported, blockId: string, from: number, to: number, proposedText = PROPOSED): { markId: string; pinned: string } {
+function suggest(store: EditorialStore, book: Imported, blockId: string, from: number, to: number, proposedText = PROPOSED, rationale: string | null = null): { markId: string; pinned: string } {
   const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
   const block = window.blocks.find((candidate) => candidate.blockId === blockId)!;
   const made = store.createEditorialMark({
@@ -85,7 +85,7 @@ function suggest(store: EditorialStore, book: Imported, blockId: string, from: n
     highlightColor: null,
     body: '',
     proposedText,
-    rationale: null,
+    rationale,
   });
   return { markId: made.markId, pinned: made.card!.pinnedText };
 }
@@ -435,6 +435,7 @@ describe('Proposal decision workspace', () => {
       const detached = suggest(store, book, block!.blockId, 12, 14).markId;
       const unloaded = suggest(store, book, block!.blockId, 16, 18).markId;
       const superseded = suggest(store, book, block!.blockId, 20, 22).markId;
+      const guessed = suggest(store, book, block!.blockId, 32, 34, PROPOSED, '【未联网核查】【未联网核查】【锚点不唯一】合成建议。').markId;
       const groupId = randomUUID();
       const group = [24, 28].map((from) => store.createProducedEditorialMark({ ...book, blockId: other!.blockId, fromGrapheme: from, toGrapheme: from + 2,
         pinnedText: graphemesOf(other!.text).slice(from, from + 2).join(''), kind: 'change-suggestion', body: '', proposedText: PROPOSED, rationale: null,
@@ -451,8 +452,9 @@ describe('Proposal decision workspace', () => {
       const preview = store.batchProposalDecisionDraft(request);
       expect(preview.included).toEqual([good]);
       expect(new Map(preview.excluded.map((item) => [item.markId, item.reason]))).toEqual(new Map([
-        [conflict, 'conflict'], [detached, 'unclassified-stale'], [unloaded, 'unloaded'], [group[0]!, 'atomic-group'], [group[1]!, 'atomic-group'],
+        [conflict, 'conflict'], [detached, 'unclassified-stale'], [unloaded, 'unloaded'], [group[0]!, 'atomic-group'], [group[1]!, 'atomic-group'], [guessed, 'guessed-anchor'],
       ]));
+      expect(preview.workspace.items.find((item) => item.markId === guessed)!.conflict).toBe(false);
       expect([...preview.included, ...preview.excluded.map((item) => item.markId)]).not.toContain(superseded);
       expect(preview.workspace.items.every((item) => item.draft === null)).toBe(true);
       const saved = store.batchProposalDecisionDraft({ ...request, confirmDigest: preview.scopeDigest });

@@ -10,7 +10,7 @@ import { DECISION_REASON_CHIPS } from './editorial-mark-labels.js';
 import { proposalIdentityRows } from './technical-layer-labels.js';
 
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
-const exclusionLabels = { conflict: '未解决冲突', get 'unclassified-stale'() { return technicalWords('旧基准尚未分类', '原文已变化，尚未核对'); }, unloaded: '未加载', 'other-version': '其他版本',
+const exclusionLabels = { 'guessed-anchor': '位置待确认，请逐条采纳', conflict: '未解决冲突', get 'unclassified-stale'() { return technicalWords('旧基准尚未分类', '原文已变化，尚未核对'); }, unloaded: '未加载', 'other-version': '其他版本',
   get 'atomic-group'() { return technicalWords('原子组需单独处理', '需一起处理的修改请单独处理'); }, applied: '已经应用' };
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = identityWords(text, className); if (className) node.className = className; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
@@ -221,6 +221,8 @@ export function mountProposalWorkspace(options: {
     const outcome = el('section', undefined, 'proposal-batch-outcome'); outcome.setAttribute('role', 'status');
     const left = frozen.excluded.length > 0 ? `，${frozen.excluded.length} 项未纳入` : '';
     outcome.append(el('p', frozen.included.length > 0 ? `已保存 ${frozen.included.length} 项草稿${left}；稿件未发生变化。` : `没有可处理的修改${left}。`));
+    const guessedCount = frozen.excluded.filter((item) => item.reason === 'guessed-anchor').length;
+    if (guessedCount > 0) outcome.append(el('p', `位置待确认 ${guessedCount} 项：请逐条采纳。`));
     if (frozen.excluded.length > 0) {
       const excluded = el('ul'); for (const item of frozen.excluded) { const found = workspace!.items.find((entry) => entry.markId === item.markId); excluded.append(el('li', `未纳入：${found ? `${found.chapter} · 第 ${found.position} 段 ${found.fromGrapheme}–${found.toGrapheme}` : '不在本次范围的修改项'} · ${exclusionLabels[item.reason]}`)); }
       outcome.append(excluded);

@@ -158,7 +158,7 @@ describe('the factual review reduction', () => {
     expect(reduction.assurance.statement).toBe(FACTUAL_REVIEW_ASSURANCE_STATEMENT);
   });
 
-  it('excludes a quotation that is not found and one that is found twice, with the reason and no range', () => {
+  it('excludes an absent or ambiguous quotation without guessing', () => {
     const absent = assertion({ quote: '并不存在的引文' });
     const twice = assertion({ quote: '辖三县', blockOrdinal: messageBlockIds.indexOf(blocks[2]!.blockId) + 1 });
     const reduction = reduce([closed([absent, twice])]);
@@ -232,4 +232,24 @@ describe('the factual review reduction', () => {
     expect(reduction.assurance.unresolvedConflictCount).toBe(0);
     expect(reduction.reducerClosure.state).toBe('closed');
   });
+});
+
+it('keeps distinct factual occurrences and refuses missing or invalid indexes (#1435)', () => {
+  const repeated = { quote: '辖三县', blockOrdinal: messageBlockIds.indexOf(blocks[2]!.blockId) + 1 };
+  const reduction = reduce([closed([assertion({ ...repeated, occurrence: 1 }), assertion({ ...repeated, occurrence: 2 })])]);
+  expect(reduction.findings).toHaveLength(2);
+  expect(new Set(reduction.findings.map((finding) => finding.sourceRange.fromGrapheme)).size).toBe(2);
+  expect(new Set(reduction.findings.map((finding) => finding.findingId)).size).toBe(2);
+  for (const occurrence of [0, 1.5, 99]) expect(reduce([closed([assertion({ ...repeated, occurrence })])]).excluded[0]!.reason).toBe('quote-ambiguous');
+});
+
+it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
+  expect(FACTUAL_REVIEW_REDUCER_DIGEST).toBe('89e343da4cfa1ae23655de09e463188612c399002f7bcaff395621cb3de02a52');
+});
+
+it('keeps unique factual ids stable with redundant or invalid occurrence values', () => {
+  const baseline = reduce([closed([assertion()])]).findings[0]!;
+  for (const occurrence of [1, 2, 99]) {
+    expect(reduce([closed([assertion({ occurrence })])]).findings[0]!.findingId).toBe(baseline.findingId);
+  }
 });

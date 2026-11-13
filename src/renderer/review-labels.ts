@@ -490,7 +490,7 @@ export function reviewBatchItemLine(quote: string, replacement: string): string 
 }
 
 export function reviewBatchExcludedLine(excluded: number): string {
-  return `另有 ${excluded} 条原文已变或已不在稿件上，不在其中；它们要在稿件上逐条处理。`;
+  return `另有 ${excluded} 条需要逐条确认，不在其中；请在稿件上逐条处理。`;
 }
 
 export function reviewBatchCappedLine(maximum: number): string {
