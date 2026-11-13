@@ -145,6 +145,13 @@ async function commentsSelectCard(renderer, check, waitFor, index, requireCompac
 
 export async function commentsSelectMark(renderer, check, waitFor, markId, requireCompact = false) {
   const id=JSON.stringify(markId);
+  const readyUntil=Date.now()+60_000,remaining=()=>Math.max(0,readyUntil-Date.now());
+  await renderer.evaluate(`(() => {document.querySelector('.editor-window [data-mark-id="'+${id}+'"]')?.scrollIntoView({block:'center',behavior:'instant'});return true;})()`);
+  await waitFor(renderer, `(() => {
+    const words=document.querySelector('.editor-window [data-mark-id="'+${id}+'"]'),node=document.querySelector('[data-comment-card="'+${id}+'"]');
+    if(!words||!node||node.hidden||!node.querySelector('[data-mark-card]')||node.dataset.revalidating==='true')return false;
+    const w=words.getBoundingClientRect(),v=document.querySelector('.editor-window').getBoundingClientRect();return w.bottom>v.top&&w.top<v.bottom;
+  })()`, 'comments-card-words-listed', remaining());
   await renderer.evaluate(`(() => {globalThis.__commentsPoint=null;globalThis.__commentsPointPrevious=null;document.querySelector('[data-comment-card="'+${id}+'"]')?.scrollIntoView({block:'start',behavior:'instant'});return true;})()`);
   await waitFor(renderer, `(() => {
     const node=document.querySelector('[data-comment-card="'+${id}+'"]');if(!node)return false;
@@ -153,7 +160,7 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
     if(node.hidden||y<pane.top||y>pane.bottom||!node.contains(document.elementFromPoint(x,y))){node.scrollIntoView({block:'start',behavior:'instant'});return false;}
     if(!before||before.x!==x||before.y!==y)return false;
     __commentsPoint={x,y,hit:true,top:r.top,selected:node.dataset.selected,expanded:node.dataset.expanded};return true;
-  })()`, 'comments-card-hit-ready');
+  })()`, 'comments-card-hit-ready', remaining());
   const point=await renderer.evaluate(`__commentsPoint`);
   if(requireCompact)check(point.expanded==='false'&&point.selected!=='true','comments-card-compact-before-click',point);
   const click=await commentsNativeClick(renderer,point);
