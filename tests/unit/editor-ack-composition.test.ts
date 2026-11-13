@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { afterEach, expect, it, vi } from 'vitest';
 
-// Execute the private production flush loop and composition handlers together. The view's delayed
-// composing flag models ProseMirror's end-of-composition cleanup; no editor algorithm is duplicated.
+// Execute the private production flush loop and composition handlers together. Holding view.composing
+// by hand tests defensive waiter ordering; no editable-view path to this delay has been demonstrated.
 const source = ts.createSourceFile('editor.ts', readFileSync(new URL('../../src/renderer/editor.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 function declaration(name: string): string {
   let result: ts.Node | undefined;
@@ -49,7 +49,7 @@ const program = ts.transpileModule(`
 
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
-it.each([true,false])('adopts the eighth acknowledgement across the compositionend/view cleanup gap (end before ack=%s, #1459)', async endFirst => {
+it.each([true,false])('adopts the eighth acknowledgement when the test holds the view composing flag (end before ack=%s, #1459)', async endFirst => {
   vi.useFakeTimers();
   const eighth = Promise.withResolvers<void>();
   const view = { composing: false, dom: { dataset: {} }, state: { doc: {

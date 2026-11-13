@@ -1,4 +1,4 @@
-import { commentsRangeElsewhere, commentsNativeClick, seedCommentsPane, commentsGeometryAndScroll, commentsReplyAndResolve, commentsBookMemory } from './comments-pane.mjs';
+import { commentsRangeInside, commentsNativeClick, commentsPaneForms, commentsBookMemory } from './comments-pane.mjs';
 import { existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -610,7 +610,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-mark-kind="editor-note"].editorial-mark') && !document.querySelector('[data-mark-composer]')`, 'recovered-card-note-drawn');
     // A mark can decorate before the authoritative refresh restores its selection. Finish that refresh before input.
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.parentElement.dataset.authoritativeMutation !== 'true' && document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed'`, 'recovered-card-refresh-settled');
-    await commentsRangeElsewhere(renderer,requireJourney,waitFor,'.editorial-mark[data-mark-kind="editor-note"]');
+    await commentsRangeInside(renderer,requireJourney,waitFor,'.editorial-mark[data-mark-kind="editor-note"]');
     await renderer.evaluate(`(() => { globalThis.__j08RecoveredPoint=null; document.querySelector('.editorial-mark[data-mark-kind="editor-note"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`);
     await waitFor(renderer, `(() => {
       const mark=document.querySelector('.editorial-mark[data-mark-kind="editor-note"]'),r=mark.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;
@@ -623,10 +623,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-mark-card][data-mark-kind="editor-note"]')`, 'recovered-card-ready');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-mark-card]'); return document.documentElement.dataset.technicalLayerVisible==='false' && Array.from(card.querySelectorAll('[data-mark-block]')).map((block)=>block.dataset.markBlock).join('|')==='author|body|quote|more|actions' && card.querySelector('[data-mark-body]').textContent==='恢复后公开合成备注' && card.querySelector('[data-mark-block="quote"]').textContent.length===4 && card.querySelector('[data-mark-source]').textContent.startsWith('恢复责编 · ') && !card.querySelector('.editorial-mark-more').open && card.querySelector('.editorial-mark-more [data-mark-action="remove"]') && !card.querySelector('[data-mark-action="edit"]').closest('details'); })()`, 'recovered-card-hierarchy-and-author');
 
-    at('comments-inline-reply');
-    await seedCommentsPane(renderer, requireJourney, waitFor);
-    await commentsGeometryAndScroll(renderer, requireJourney, waitFor);
-    await commentsReplyAndResolve(renderer, requireJourney, waitFor);
+    await commentsPaneForms(renderer, requireJourney, waitFor, at, 'reply');
     await commentsBookMemory(renderer, requireJourney, waitFor);
 
     // The remaining candidate UUID/SHA assertions inspect developer disclosures, not ordinary UI payload.

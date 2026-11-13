@@ -764,7 +764,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
-    'comments-inline-reply',
+    'comments-inline-reply-column',
+    'comments-inline-reply-overlay',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
@@ -1079,7 +1080,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
-    'comments-inline-apply',
+    'comments-inline-apply-column',
+    'comments-inline-apply-overlay',
     'editor-revision',
     'ai-locks',
     'selected-fast-text-scope-refusal',

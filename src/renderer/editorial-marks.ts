@@ -1090,13 +1090,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   commentsResize.observe(options.host);
   if (options.comments) commentsResize.observe(commentsScroll);
   const commentSelection = (): void => {
-    settleMarkClick(false);
+    if (pendingMarkClick) { settleMarkClick(false); return; }
     if (!options.comments?.enabled()) return;
     if (textPointerDown) return;
     scheduleCommentsLayout();
     // Focusing a card leaves the editor's native selection in place; that retained selection does not own activation.
     if (!options.host.contains(document.activeElement) || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
-    if (suppressCommentSelection) return;
+    if (suppressCommentSelection || document.getSelection()?.isCollapsed === false) return;
     const point = editor.captureContinuity().head;
     activateComment(pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme)?.markId);
   };
@@ -3057,16 +3057,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const pending = pendingMarkClick;
     if (!pending || destroyed) return;
     const native = window.getSelection();
-    const collapsed = editor.selectedRange().kind === 'none' && native?.isCollapsed !== false &&
-      (!native?.anchorNode || options.host.contains(native.anchorNode));
+    const collapsed = native?.isCollapsed === true && native.anchorNode !== null && options.host.contains(native.anchorNode);
     if (!collapsed && !final) return;
     cancelPendingMarkClick();
     if (!collapsed) return;
+    const point = editor.followNativeCaret();
+    if (!point) return;
     const generation = markClickGeneration;
     suppressCommentSelection = false;
     const hit = pending.hitId === undefined ? undefined : editor.currentWindow().marks.find(mark => mark.markId === pending.hitId);
     if (pending.hitId !== undefined && !hit) return;
-    const point = editor.captureContinuity().head;
     // Updating linked decorations can replace the down-target before click and retarget it to the paragraph.
     const mark = hit ? hit
       : options.comments?.enabled() ? pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme) : undefined;

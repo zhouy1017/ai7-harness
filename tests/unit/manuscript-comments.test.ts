@@ -167,10 +167,11 @@ describe('comments command parity and refresh continuity', () => {
   afterEach(() => { mounted?.destroy(); mounted = undefined; setTechnicalLayerVisible(technicalBefore); vi.restoreAllMocks(); vi.unstubAllGlobals(); restore(); });
   async function paint() { for (let n = 0; n < 24; n++) { await Promise.resolve(); frames.splice(0).forEach((fn) => fn()); } }
   function mount(value = card, others: EditorialMarkCardProjection[] = []) {
-    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value), ...others.map(anchor)] }; let latest = value; let enabled = true; let caret = 10; let rangeKind = 'none';
+    let page: ManuscriptWindowProjection = { ...windowOf(), marks: [anchor(value), ...others.map(anchor)] }; let latest = value; let enabled = true; let caret = 10; let nativeCaret = 10; let rangeKind = 'none';
     const host = document.createElement('div'); const scroll = document.createElement('div'); const pane = document.createElement('aside');
     miniDocument.body.append(host as unknown as MiniElement, scroll as unknown as MiniElement, pane as unknown as MiniElement);
     const block = document.createElement('p'); block.dataset['blockId'] = 'block'; host.append(block);
+    window.getSelection = () => ({isCollapsed:rangeKind==='none',anchorNode:block,anchorOffset:nativeCaret}) as unknown as Selection;
     const get = vi.fn(async (input: { markId: string }) => others.find((other) => other.markId === input.markId) ?? latest);
     const update = vi.fn(async (input: { action: string; status: 'open' | 'resolved'; body: string }) => {
       latest = input.action === 'reply' ? { ...latest, replies: [{ replyId: 'reply', body: input.body, createdAt: card.createdAt }] } : { ...latest, status: input.status };
@@ -186,14 +187,14 @@ describe('comments command parity and refresh continuity', () => {
     const outcome = vi.fn(async (_input: Record<string, unknown>): Promise<unknown> => { throw new Error('outcome unavailable'); });
     const receipt = vi.fn(async (input: Record<string, unknown>) => ({ state: input['recovery'] === 'confirming' ? 'confirming' : 'unresolved', clientEffectId: input['clientEffectId'], reason: '结果待确认' }));
     const options = { host, scroll, comments: { host: pane, enabled: () => enabled },
-      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, setLinkedMark: linked, setVisibleMarkIds: vi.fn(), captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: rangeKind }) },
+      editor: { currentWindow: () => page, setMarks: (marks: EditorialMarkAnchorProjection[]) => { page = { ...page, marks }; }, setActiveMark: active, setLinkedMark: linked, setVisibleMarkIds: vi.fn(), captureContinuity: () => ({ head: { blockId: 'block', grapheme: caret } }), followNativeCaret: () => { const selection = window.getSelection(); return selection?.isCollapsed === false ? null : { blockId: 'block', grapheme: nativeCaret }; }, focus: vi.fn(), selectRange: vi.fn(), selectedRange: () => ({ kind: rangeKind }) },
       api: { inspectReviewFindingOfMark: async () => null, getManuscriptApplyOutcome: outcome, inspectApplyReceipt: receipt, getEditorialMarkCard: get, updateEditorialMark: update, recordChangeSuggestionDecision: decide, applyChangeSuggestion: apply,
         inspectProposalWorkspace: async () => ({ items: [], offerWorkspace: false }), recordLearningReasonAsk: async () => null },
       busy: () => false, writeManuscript: write, setStatus: status, errorMessage: (_error: unknown, fallback: string) => fallback,
     } as unknown as Parameters<typeof mountEditorialMarks>[0];
     mounted = mountEditorialMarks(options);
     return { host, pane, block, scroll, get, update, decide, apply, write, status, active, linked, outcome, receipt,
-      setRange: (next: string) => { rangeKind = next; }, setCaret: (next: number) => { caret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
+      setRange: (next: string) => { rangeKind = next; }, setCaret: (next: number) => { caret = nativeCaret = next; }, setNativeCaret: (next: number) => { nativeCaret = next; }, open: () => mounted!.openMark(value.markId), refresh: () => mounted!.refreshComments(),
       setEnabled: (next: boolean) => { enabled = next; mounted!.refreshComments(); },
       setPage: (next: Partial<ManuscriptWindowProjection>) => { page = { ...page, ...next }; mounted!.refreshComments(); },
     };
@@ -359,7 +360,7 @@ describe('comments command parity and refresh continuity', () => {
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="handled"]')!.click(); await paint();
     expect(selected.dataset['selected']).toBe('false');
   });
-  it.each([true, false])('settles a retained range before activating a clicked mark (pane=%s, #1459)', async enabled => {
+  it.each([true, false])('uses the collapsed native selection while the model still holds a range (pane=%s, #1459)', async enabled => {
     vi.stubGlobal('Element', MiniElement);
     const ui = mount(); await paint(); ui.setEnabled(enabled); await paint();
     const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);
@@ -368,12 +369,19 @@ describe('comments command parity and refresh continuity', () => {
     ui.setRange('range');
     (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, button: 0 } });
     expect(ui.scroll.querySelector('[data-mark-card]')).toBeNull();
-    native.isCollapsed = true; ui.setRange('none');
-    miniDocument.body.dispatchEvent({ type: 'selectionchange' }); await paint();
+    native.isCollapsed = true;
+    await paint(); // The fallback frame precedes ProseMirror's queued selectionchange listener.
     if(enabled)expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
     else expect(ui.scroll.querySelector('[data-mark-card]')).not.toBeNull();
   });
-  it('expires a drag decision after one frame, so a later caret cannot activate it (#1459)', async () => {
+  it('resolves a paragraph-retargeted click from the native caret rather than the stale model (#1459)', async () => {
+    vi.stubGlobal('Element', MiniElement);
+    const ui = mount(); await paint(); ui.setCaret(8); ui.setNativeCaret(1);
+    vi.spyOn(window, 'getSelection').mockReturnValue({isCollapsed:true,anchorNode:ui.block} as unknown as Selection);
+    (ui.block as unknown as MiniElement).dispatchEvent({...{type:'click',bubbles:true,button:0}}); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
+  });
+  it('expires a native drag decision after one frame, so a later caret cannot activate it (#1459)', async () => {
     vi.stubGlobal('Element', MiniElement);
     const ui = mount(); await paint(); ui.setEnabled(false); await paint();
     const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);

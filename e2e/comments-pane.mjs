@@ -31,8 +31,27 @@ export async function commentsLayouts(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden===true && document.querySelector('[data-view-command="toggle-comments"]').getAttribute('aria-pressed')==='false'`, 'comments-f9-synchronized');
 }
 
-export async function seedCommentsPane(renderer, check, waitFor) {
-  await renderer.send('Emulation.setDeviceMetricsOverride', { width:1280, height:800, deviceScaleFactor:1, mobile:false });
+// Repeat the complete interaction flow, with independent marks, before restoring the desktop viewport.
+export async function commentsPaneForms(renderer, check, waitFor, at, action) {
+  const native=await renderer.evaluate('({width:innerWidth,height:innerHeight})');
+  try {
+    for(const [form,size] of [['column',{width:1280,height:800}],['overlay',{width:1008,height:681}]]) {
+      at('comments-inline-'+action+'-'+form);
+      await seedCommentsPane(renderer,check,waitFor,size);
+      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify(form==='overlay'?'absolute':'static')}`, 'comments-'+form+'-viewport');
+      await commentsGeometryAndScroll(renderer,check,waitFor);
+      if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
+      else await commentsReplyAndResolve(renderer,check,waitFor);
+      check(true,'comments-'+form+'-complete');
+    }
+  } finally {
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await waitFor(renderer,`innerWidth===${native.width} && innerHeight===${native.height}`,'comments-native-viewport-restored');
+  }
+}
+
+export async function seedCommentsPane(renderer, check, waitFor, size = {width:1280,height:800}) {
+  await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor:1, mobile:false });
   check(await renderer.evaluate(`(async () => {
     const editor=document.querySelector('[data-testid="manuscript-editor"]');
     const bookId=document.querySelector('.editor-shell').dataset.bookId;
@@ -42,10 +61,14 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     const page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'window-start',blockId:start}});
     const paragraphs=page.blocks.filter(item=>item.kind==='paragraph');
     const short=item=>item && Array.from(item.text??'').length>=20 && Array.from(item.text??'').length<=120;
-    const block=paragraphs.find((item,index)=>index>=10 && short(item) && short(paragraphs[index+1])) ?? paragraphs.find((item,index)=>short(item) && short(paragraphs[index+1]));
+    const previous=globalThis.__commentsSeedBlocks??[];
+    const candidates=paragraphs.map((item,index)=>({item,index})).filter(({item,index})=>short(item)&&short(paragraphs[index+1])&&!previous.includes(item.blockId)&&!previous.includes(paragraphs[index+1].blockId));
+    const previousIndex=paragraphs.findIndex(item=>item.blockId===previous[0]);
+    const block=previous.length?candidates.sort((a,b)=>Math.abs(b.index-previousIndex)-Math.abs(a.index-previousIndex))[0]?.item:(candidates.find(({index})=>index>=10)??candidates[0])?.item;
     if(!block)return false;
     const second=paragraphs[paragraphs.indexOf(block)+1];
     if(!second)return false;
+    globalThis.__commentsSeedBlocks=[block.blockId,second.blockId];
     const ids=[]; const kinds=['change-suggestion','change-suggestion','annotation','annotation','editor-note'];
     for(let index=0;index<12;index++){
       const current=index<5?block:second;
@@ -114,6 +137,35 @@ export async function commentsRangeElsewhere(renderer, check, waitFor, selector)
     return false;
   })()`), 'comments-existing-range-elsewhere');
   await waitFor(renderer, `(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot);return !getSelection().isCollapsed && model.from!==model.to && model.anchor.blockId===__commentsRangeBlock && model.head.blockId===__commentsRangeBlock;})()`, 'comments-existing-range-ready');
+}
+
+// Select the paragraph containing the marked words: the click is strictly INSIDE the range.
+// Chromium keeps that range through mousedown; collapsing it on mouseup must not lose the click.
+export async function commentsRangeInside(renderer, check, waitFor, selector) {
+  check(await renderer.evaluate(`(() => {
+    const words=document.querySelector(${JSON.stringify(selector)}),editor=document.querySelector('[data-testid="manuscript-editor"]'),paragraph=words.closest('[data-block-id]');
+    editor.focus({preventScroll:true});const range=document.createRange();range.selectNodeContents(paragraph);
+    const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+    globalThis.__commentsRangeBlock=paragraph.dataset.blockId;
+    return !selection.isCollapsed && selection.containsNode(words,true);
+  })()`),'comments-existing-range-inside');
+  await waitFor(renderer,`(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot),words=document.querySelector(${JSON.stringify(selector)});return !getSelection().isCollapsed && getSelection().containsNode(words,true) && model.from!==model.to && model.anchor.blockId===__commentsRangeBlock && model.head.blockId===__commentsRangeBlock;})()`,'comments-existing-range-inside-ready');
+}
+
+async function commentsInsideSelection(renderer,check,waitFor) {
+  const id=await renderer.evaluate('__comments.ids[11]'),selector='.editor-window [data-mark-id="'+id+'"]';
+  const point=()=>renderer.evaluate(`(() => {const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,hit:words.contains(document.elementFromPoint(x,y)),inside:getSelection().containsNode(words,true)};})()`);
+  for(const pane of [true,false]) {
+    if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('[data-edge-entry="comments"]').click();return document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-close-pane');
+    await commentsRangeInside(renderer,check,waitFor,selector);
+    const before=await point();check(before.hit&&before.inside,'comments-existing-range-inside-hit',before);
+    check((await commentsNativeClick(renderer,before)).real,'comments-existing-range-inside-real-click');
+    await waitFor(renderer,pane?`document.querySelector('[data-comment-card="'+${JSON.stringify(id)}+'"]').dataset.selected==='true'`:`document.querySelector('.editorial-mark-layer [data-mark-card="'+${JSON.stringify(id)}+'"]')`,pane?'comments-existing-range-inside-pane-selected':'comments-existing-range-inside-floating-open');
+    await waitFor(renderer,`getSelection().isCollapsed && JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot).from===JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot).to`,'comments-existing-range-inside-caret');
+    if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click();document.querySelector('[data-edge-entry="comments"]').click();return !document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-restore-pane');
+  }
+  check((await commentsNativeClick(renderer,await renderer.evaluate(commentsUnmarkedPoint))).real,'comments-existing-range-clear');
+  await waitFor(renderer,`!document.querySelector('[data-comment-card][data-selected="true"]')`,'comments-existing-range-cleared');
 }
 
 export async function commentsNativeClick(renderer, point) {
@@ -260,12 +312,8 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     if(disclosure.hidden||disclosure.textContent!=='以下 AI 建议未联网核查')return {disclosure:false};
     return {width:innerWidth,height:innerHeight,visible:visible.length,header,compact:rows.every(node=>node.dataset.expanded==='false'&&node.getBoundingClientRect().height<=76&&!node.querySelector('.editorial-mark-expanded-content')?.checkVisibility())};
   })()`);
-  check(compact.width===1280 && compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
-  // The hosted desktop's client viewport is smaller than the guests' native window. Exercise actual
-  // pane input in that overlay form after keeping the 1280x800 density proof above.
-  await renderer.send('Emulation.setDeviceMetricsOverride',{width:1008,height:681,deviceScaleFactor:1,mobile:false});
-  await waitFor(renderer,`(() => {const pane=document.querySelector('.manuscript-comments-pane'),p=pane.getBoundingClientRect(),edge=document.querySelector('.editor-edge').getBoundingClientRect();return innerWidth===1008&&innerHeight===681&&getComputedStyle(pane).position==='absolute'&&p.width>=300&&p.right<=edge.left+1&&document.querySelector('.manuscript-comments-scroll').clientHeight>0;})()`,'comments-overlay-viewport');
-  assertCoordinates(await readCoordinates());
+  if(compact.width===1280)check(compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
+  else check(compact.width===1008 && compact.height===681 && compact.header<=84 && compact.compact, 'comments-overlay-compact-rows', compact);
   await commentsFilterMouse(renderer,check,waitFor);
   check(await renderer.evaluate(`(async () => {
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
@@ -305,6 +353,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   check(unmarkedClick.real, 'comments-real-unmarked-clear', unmarkedClick);
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
 
+  await commentsInsideSelection(renderer,check,waitFor);
   const compactClick = await commentsSelectCard(renderer, check, waitFor, 2, true);
   check(compactClick.held.index===2 && Math.abs(compactClick.held.top-compactClick.before.top)<=1 && compactClick.held.selected!=='true' && compactClick.held.expanded==='false', 'comments-pushed-control-held-still', compactClick);
   const controlPoint = await commentsControlPoint(renderer, 2, 'reply', waitFor);
@@ -381,8 +430,8 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[1]+'"] [data-mark-state]').textContent.includes('已拒绝')`, 'comments-rejected-pane-updated');
   check(await renderer.evaluate(`(async () => { const page=await window.ai7.getManuscriptWindowAt({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,target:{kind:'window-start',blockId:__comments.start}}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:__comments.ids[1]}); return page.journalSequence===__comments.journal+1 && card.suggestion.decision.disposition==='rejected'; })()`), 'comments-reject-retains-text');
   await commentsHandledFilter(renderer, check, waitFor, [0, 1]);
-  await renderer.send('Emulation.setDeviceMetricsOverride',{width:1008,height:681,deviceScaleFactor:1,mobile:false});
 }
+
 
 export async function commentsReplyAndResolve(renderer, check, waitFor) {
   // A wheel scroll can remove preceding cards while a reply remains in the text's 200px buffer.
@@ -415,8 +464,8 @@ export async function commentsReplyAndResolve(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复')`, 'comments-existing-full-card');
   check(await renderer.evaluate(`(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); return true; })()`), 'comments-full-card-close');
   await commentsHandledFilter(renderer, check, waitFor, [2]);
-  await renderer.send('Emulation.setDeviceMetricsOverride',{width:1008,height:681,deviceScaleFactor:1,mobile:false});
 }
+
 
 export async function commentsBookMemory(renderer, check, waitFor) {
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.destination('library'))), 'comments-book-library');
