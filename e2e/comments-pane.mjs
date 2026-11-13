@@ -84,6 +84,23 @@ export async function seedCommentsPane(renderer, check, waitFor) {
 }
 
 export async function commentsGeometryAndScroll(renderer, check, waitFor) {
+  const coordinates = await renderer.evaluate(`(async () => {
+    const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
+    document.querySelector('[data-mark-search-input]').focus({preventScroll:true}); getSelection().removeAllRanges();
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
+    words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    pane.scrollTop=30;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const first=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
+    if(!first)return {pass:false,unpushed:false};
+    const card=first.card;
+    const freshWords=document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]');
+    const cardTop=card.getBoundingClientRect().top, wordsTop=freshWords.getBoundingClientRect().top;
+    return {pass:pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected:!!document.querySelector('[data-comment-card][data-selected="true"]')};
+  })()`);
+  check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
   check(await renderer.evaluate(`(() => {
     const id=__comments.ids[11], words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
     const pane=document.querySelector('.manuscript-comments-scroll'), card=document.querySelector('[data-comment-card="'+id+'"]');
@@ -118,23 +135,6 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   check(await renderer.evaluate(`(() => { for(const id of __comments.ids.slice(2,4)){ const node=document.querySelector('[data-comment-card="'+id+'"]'); node.dispatchEvent(new PointerEvent('pointerenter')); node.dispatchEvent(new PointerEvent('pointerleave')); } return document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]').dataset.selected==='true'; })()`), 'comments-hover-keeps-selection');
   check(await renderer.evaluate(`(() => { const block=document.querySelector('.editor-window [data-block-id]'); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); block.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true; })()`), 'comments-unmarked-clear');
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
-  const coordinates = await renderer.evaluate(`(async () => {
-    const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
-    document.querySelector('[data-mark-search-input]').focus({preventScroll:true}); getSelection().removeAllRanges();
-    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
-    words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
-    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    pane.scrollTop=30;
-    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    const first=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
-    if(!first)return {pass:false,unpushed:false};
-    const card=first.card;
-    const freshWords=document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]');
-    const cardTop=card.getBoundingClientRect().top, wordsTop=freshWords.getBoundingClientRect().top;
-    return {pass:pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected:!!document.querySelector('[data-comment-card][data-selected="true"]')};
-  })()`);
-  check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
 
   check(await renderer.evaluate(`(() => {
     const cards=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
