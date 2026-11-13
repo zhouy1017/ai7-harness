@@ -273,6 +273,21 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
 }
 
 export async function commentsReplyAndResolve(renderer, check, waitFor) {
+  // A wheel scroll can remove preceding cards while a reply remains in the text's 200px buffer.
+  // Reordering that live card must preserve the browser's focused editing state.
+  await commentsSelectCard(renderer, check, waitFor, 11);
+  const openReply = await commentsNativeClick(renderer, await commentsControlPoint(renderer, 11, 'reply'));
+  check(openReply.real, 'comments-buffer-reply-real-click', openReply);
+  check(await renderer.evaluate(`(() => {
+    const input=document.querySelector('[data-comment-reply="'+__comments.ids[11]+'"]');
+    input.value='公开合成滚动草稿';input.focus();input.setSelectionRange(2,4);globalThis.__commentsBufferReply=input;
+    const scroll=document.querySelector('.editor-window'),first=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
+    scroll.scrollTop+=first.getBoundingClientRect().bottom-scroll.getBoundingClientRect().top+202;return true;
+  })()`), 'comments-buffer-reply-scroll');
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]')?.hidden===true && document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]')?.hidden===false`, 'comments-buffer-reply-reordered');
+  const editing = await renderer.evaluate(`(() => {const input=document.querySelector('[data-comment-reply="'+__comments.ids[11]+'"]');return {same:input===__commentsBufferReply,focused:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd,body:input.value==='公开合成滚动草稿',active:document.activeElement?.tagName};})()`);
+  check(editing.same&&editing.focused&&editing.start===2&&editing.end===4&&editing.body,'comments-buffer-reply-caret',editing);
+
   await commentsSelectCard(renderer, check, waitFor, 2);
   check(await renderer.evaluate(`(() => { const node=document.querySelector('[data-comment-card="'+__comments.ids[2]+'"]'); node.querySelector('[data-mark-action="reply"]').click(); const input=node.querySelector('[data-comment-reply]'); input.value='公开合成待发回复'; input.focus(); input.setSelectionRange(3,5); globalThis.__commentsReply=input; node.querySelector('[data-mark-action="resolve"]').click(); return true; })()`), 'comments-inline-reply-draft-and-resolve');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[2]+'"] [data-mark-state]').textContent.includes('已处理')`, 'comments-resolved');
