@@ -208,7 +208,7 @@ describe('comments command parity and refresh continuity', () => {
   it('keeps factual identifiers, digests and result versions behind the technical layer (#1454)', async () => {
     setTechnicalLayerVisible(false);
     const ui = mount({ ...suggestion, factualCorrection: { proposalId: 'proposal-id', resultId: 'result-id', resultVersion: 42, decisionId: null,
-      level: 'quick', levelLabel: '快速整理', states: { referenceIntegrity: 'verified', claimSupport: '未核查', factualVerification: '未核查' },
+      level: 'quick', levelLabel: '快速整理', states: { referenceIntegrity: 'verified', claimSupport: '未核查', factualVerification: '待核查' },
       checkedSources: 0, candidateSources: 1, policyPin: { document: 'policy-document', sha256: 'a'.repeat(64), minimumLevel: null },
       assuranceLabel: '证据核查未完成', missingChecks: ['来源待核对'] } });
     await paint();
