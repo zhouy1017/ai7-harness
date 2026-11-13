@@ -1879,14 +1879,25 @@ async function main() {
       throw error;
     }
     at('document-task-target');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await assertRenderer(renderer, DIRECT_EDIT, 'document-toolbar-direct');
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
+    requireJourney(await renderer.evaluate(`(async () => {
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const shell=document.querySelector('.editor-shell[data-manuscript-kind="derivative"]');
+      const toolbar=shell.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
+      const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
+      return innerWidth===1280 && innerHeight===800 && document.body.dataset.taskDrawer==='open' && shell.getBoundingClientRect().width<600 && controls.length>=7
+        && controls.every(el=>{const r=el.getBoundingClientRect();return r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight) && el.scrollWidth<=el.clientWidth+1;});
+    })()`) === true, 'document-toolbar-narrow-shell');
     await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
     await clickSelector(renderer, '.task-composer [data-task-composer-action="save-draft"]', 'document-task-save');
     await waitFor(renderer, `document.querySelector('.task-composer')?.dataset.taskComposer==='draft'`, 'document-task-saved');
     const documentTarget = await renderer.evaluate(`(async()=>{const drafts=await window.ai7.inspectTaskIntentDrafts({draftId:null}); const draft=drafts.drafts.find(item=>item.origin==='composer-deliverable'); const document=(await window.ai7.inspectProductionDocuments()).types.find(item=>item.typeId==='news-release').document; return {target:draft?.version.target,pin:draft?.version.deliverable,manuscriptId:document.documentId,branchId:document.branchId,revisionId:document.versions[0].revisionId};})()`);
     requireJourney(documentTarget.target==='deliverable' && documentTarget.pin?.manuscriptId===documentTarget.manuscriptId && documentTarget.pin?.branchId===documentTarget.branchId && documentTarget.pin?.revisionId===documentTarget.revisionId && documentTarget.pin?.version===2 && documentTarget.pin?.stale===false, 'document-task-exact-version', documentTarget);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'document-task-close');
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('document-workflow-complete');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="complete"]`, 'document-workflow-complete');

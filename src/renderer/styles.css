@@ -3037,8 +3037,10 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .derivative-menu .ui-menu-panel { min-width: 15rem; }
 .editor-toolbar .editor-history-icon { padding: .1rem .3rem; flex: 0 0 28px; }
 .editor-toolbar .editor-edit-actions { flex: 1 0 auto; }
-.editor-history-icon[aria-label="撤销"] { margin-left: auto; }
-@media (max-width: 1007px) {
+.editor-history-undo { margin-left: auto; }
+@container (max-width: 600px) {
   .editor-toolbar { flex-wrap: wrap; }
-  .editor-toolbar .editor-edit-actions { flex-wrap: wrap; flex-shrink: 1; }
+  .editor-toolbar .editor-edit-actions { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
+  .editor-toolbar .editor-edit-actions > * { max-width: 100%; }
+  .editor-toolbar .btn { white-space: normal; }
 }

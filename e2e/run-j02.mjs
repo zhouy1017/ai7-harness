@@ -2131,6 +2131,9 @@ async function main() {
     for (const size of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
       requireJourney(await renderer.evaluate(`(async () => {
+        if(innerWidth!==${size.width} || innerHeight!==${size.height})return false;
+        const mode=document.querySelector('[data-editor-input-mode-toggle]');
+        if(mode.dataset.inputMode!=='direct-edit'){mode.click();document.querySelector('[data-edit-method="direct"]').click();}
         const entry=document.querySelector('[data-edge-entry="comments"]');
         if(entry.getAttribute('aria-expanded')!=='true')entry.click();
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
@@ -2138,7 +2141,9 @@ async function main() {
         const actions=toolbar.querySelector('.editor-edit-actions');
         const controls=Array.from(actions.children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
         const rects=controls.map(el=>el.getBoundingClientRect());
-        return rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs((r.top+r.height/2)-(rects[0].top+rects[0].height/2))<2 && r.bottom<=box.bottom)
+        const pane=document.querySelector('.manuscript-comments-pane'), paneBox=pane.getBoundingClientRect();
+        const commentsVisible=!pane.hidden && getComputedStyle(pane).display!=='none' && paneBox.width>0 && paneBox.height>0 && paneBox.left>=0 && paneBox.right<=innerWidth && paneBox.bottom<=innerHeight;
+        return innerWidth===${size.width} && innerHeight===${size.height} && (${size.width}!==1280 || commentsVisible) && mode.dataset.inputMode==='direct-edit' && rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs((r.top+r.height/2)-(rects[0].top+rects[0].height/2))<2 && r.bottom<=box.bottom)
           && controls.every(el=>el.scrollWidth<=el.clientWidth+1);
       })()`) === true, 'toolbar-one-row');
     }

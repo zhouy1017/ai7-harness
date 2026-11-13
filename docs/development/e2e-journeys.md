@@ -686,3 +686,5 @@ Issue #1372 hosted-size repair replaces the old simultaneous single-viewport fit
 #1452 synchronized delta：共享 `DIRECT_EDIT` 通过改稿方式菜单选择直接改稿，`READING_REVISION` 保留状态断言；J-05 `revision-reading-mode` / `revision-toggle-off` 选择自动应用与待我确认，后续输入保持待处理修订卡。J-07 与 production-documents service 测试先打开衍生稿件菜单再选择新建 / 管理；既有 switcher pin 仍按 primary、document、new、manage 顺序读取。J-02 `comments-responsive-pane` 布局阶段以直接 await 的 renderer.evaluate 检验两个指定视口下的工具栏完整单行。
 
 #1452：J-02 的 dirty-saving/history/structure 阶段通过 aria-label 读取撤销 / 重做图标；J-08 的既有 click helper 已支持 aria-label，保持不变。
+
+#1452 审阅修复：J-02 在确切的 1280×800 / 1008×681 视口选择最长的直接改稿标签，并确认批注栏可见、文字未截断和控件同一行；J-07 在衍生稿件发起任务时以 1280×800 打开停靠抽屉，检查稿件容器变窄后控件仍完整可见（允许换行）。菜单轮询重绘保留展开与焦点、取消新建返回触发入口，由 manuscript-screen 单元测试覆盖。

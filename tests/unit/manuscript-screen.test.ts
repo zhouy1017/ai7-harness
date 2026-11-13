@@ -1,3 +1,4 @@
+import type { mountWritingTask } from '../../src/renderer/writing-task.js';
 import { setAutoApplyEditorRevisions, getAutoApplyEditorRevisions } from '../../src/renderer/editor-input-mode.js';
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -24,6 +25,7 @@ const children = vi.hoisted(() => ({
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
   marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
+  writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
 }));
 
@@ -73,6 +75,13 @@ vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
     return surface;
   },
 }));
+vi.mock('../../src/renderer/writing-task.js', () => ({
+  mountWritingTask: (options: Parameters<typeof mountWritingTask>[0]) => {
+    children.writingStates.push(options.onState!);
+    return { refresh: vi.fn(), open: vi.fn(), destroy: vi.fn() };
+  },
+}));
+
 vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/reading-return.js')>(),
   readReturnPlace: vi.fn(async () => null),
@@ -191,6 +200,7 @@ beforeEach(() => {
   children.protections.length = 0;
   children.rails.length = 0;
   children.marks.length = 0;
+  children.writingStates.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
@@ -405,6 +415,25 @@ describe('the Manuscript screen lifecycle', () => {
     setAutoApplyEditorRevisions(true);
   });
 
+  it('returns keyboard choices to the method trigger and leaves a re-selected choice unannounced', async () => {
+    setAutoApplyEditorRevisions(true);
+    const app = shell(); app.open(windowOf('book-one'));
+    const menu = app.screen.querySelector<HTMLDetailsElement>('.edit-method-menu')!;
+    const trigger = menu.querySelector('summary')!;
+    app.persistenceStatus.textContent = '保持当前状态';
+    menu.open = true;
+    const current = menu.querySelector<HTMLElement>('[data-edit-method="auto"]')!;
+    current.focus(); current.click();
+    expect(app.persistenceStatus.textContent).toBe('保持当前状态');
+    expect(miniDocument.activeElement).toBe(trigger);
+    menu.open = true;
+    const confirm = menu.querySelector<HTMLElement>('[data-edit-method="confirm"]')!;
+    confirm.focus(); confirm.click(); await Promise.resolve();
+    expect(menu.open).toBe(false);
+    expect(miniDocument.activeElement).toBe(trigger);
+    app.showing?.destroy(); setAutoApplyEditorRevisions(true);
+  });
+
   it('reveals paging links only near their loaded window boundary', () => {
     vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
     const app = shell();
@@ -525,6 +554,26 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
   const documentsOf = (bookId: string, title: string) => ({
     bookId, configuration: { schema: 's', version: '1', digest: 'd' }, unavailableReason: null, sources: [], sourcesTruncated: false,
     types: [{ typeId: 'news-release', label: '新闻稿', notForThisBook: false, documents: [documentOf(bookId, title)], document: documentOf(bookId, title) }],
+  });
+
+  it('keeps the derivative menu open and focused through writing polls and returns form cancellation to its trigger', async () => {
+    const methods = { inspectProductionDocuments: async () => documentsOf('book-one', '首发通稿') };
+    const app = shell(new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) }));
+    app.open(windowOf('book-one')); await vi.advanceTimersByTimeAsync(0);
+    for (const selector of ['[data-derivative-menu]', '[data-manuscript-switch="new"]', '[data-manuscript-switch="manage"]']) {
+      app.screen.querySelector<HTMLDetailsElement>('.derivative-menu')!.open = true;
+      app.screen.querySelector<HTMLElement>(selector)!.focus();
+      children.writingStates.at(-1)!({ underWay: true, drafted: 0 });
+      expect(app.screen.querySelector<HTMLDetailsElement>('.derivative-menu')!.open).toBe(true);
+      expect(miniDocument.activeElement).toBe(app.screen.querySelector(selector));
+    }
+    app.screen.querySelector<HTMLElement>('[data-manuscript-switch="new"]')!.click();
+    app.screen.querySelector<HTMLElement>('[data-document-action="cancel-derivative"]')!.click();
+    expect(miniDocument.activeElement).toBe(app.screen.querySelector('[data-derivative-menu]'));
+    app.screen.querySelector<HTMLElement>('[data-manuscript-switch="new"]')!.click();
+    (app.screen.querySelector('.derivative-create-form') as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true, preventDefault() {} });
+    expect(miniDocument.activeElement).toBe(app.screen.querySelector('[data-derivative-menu]'));
+    app.showing?.destroy();
   });
 
   it('lists the manuscript and its documents, and renames the open document in place without remounting its editor', async () => {

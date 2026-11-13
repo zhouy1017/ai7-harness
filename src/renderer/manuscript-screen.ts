@@ -369,6 +369,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     control.title = `${label}（${shortcut}）`;
     control.classList.add('editor-history-icon');
   }
+  undo.classList.add('editor-history-undo');
   const paragraphStyle = element('select');
   paragraphStyle.setAttribute('aria-label', '段落样式');
   for (const [value, label] of [['paragraph', '正文'], ['title', '书名标题'], ...Array.from({ length: 6 }, (_, i) => [`heading-${i + 1}`, `${i + 1} 级标题`])]) {
@@ -467,6 +468,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   const choices = EDIT_METHODS.map((choice) => {
     const item = button('', 'quiet', () => {
+      const returnFocus = document.activeElement === item;
+      const close = (): void => { inputMenu.open = false; if (returnFocus) inputModeToggle.focus(); };
+      if (editor !== undefined && editMethod(editor.inputMode(), autoApplyRevisions).value === choice.value) { close(); return; }
       const apply = (): void => {
         if (editor === undefined) return;
         if (choice.autoApply !== null) {
@@ -476,7 +480,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         editor.setInputMode(choice.mode);
         paintInputMode(editor.inputMode());
         setStatus(choice.value === 'confirm' ? INPUT_MODE_CONFIRM_CHANGED : INPUT_MODE_CHANGED[choice.mode], 'success');
-        inputMenu.open = false;
+        close();
       };
       if (choice.autoApply === null && !dirty && !saving && !retryRequired) apply();
       else void editor?.flush().then(apply);
