@@ -191,7 +191,7 @@ describe('a review category reduction', () => {
       const finding = reduction.findings[0]!;
       if (state === 'quote-ambiguous') {
         expect(finding.note).toContain('锚点不唯一');
-        expect(finding.replacement).toBeNull();
+        expect(finding.replacement).toBe(ordinal === 1 && texts[0] === '目标目标' ? '替换' : null);
       }
       if (state === 'replacement-identical') expect(finding.replacement).toBeNull();
       if (outside) expect(finding.blockId).not.toBe(block(99, 'paragraph', '目标').blockId);
@@ -253,5 +253,28 @@ describe('a review category reduction', () => {
     expect(reduction.coverage.unitsOutOfScope).toBe(1);
     expect(reduction.coverage.label).toBe('覆盖：部分 · 1/2 单元 · 1 个单元不在本次审阅范围内');
     expect(reduction.reducerClosure.stages[0]).toEqual({ stage: 'unit-validation', state: 'closed', inputCount: 1 });
+  });
+});
+
+// #1435: all inputs below are public synthetic editorial examples.
+describe('paragraph occurrence retention', () => {
+  it.each([undefined, 2, 0, 1.5, 99])('keeps a change on the selected repeated quotation (%s)', (occurrence) => {
+    const result = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: byId,
+      outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+        unitOrdinal: 1, findings: [{ ...findings[1]!, occurrence }] } }] });
+    const finding = result.findings[0]!;
+    const start = occurrence === 2 ? 7 : 2;
+    expect(finding).toMatchObject({ quote: '明天', replacement: '次日', sourceRange: { fromGrapheme: start, toGrapheme: start + 2 } });
+  });
+  it('restores punctuation to the paragraph slice and retains the replacement', () => {
+    const text = '他说「明天……再来——好吗」。';
+    const localBlocks = new Map(byId);
+    localBlocks.set(blocks[2]!.blockId, { ...blocks[2]!, text });
+    const result = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: localBlocks,
+      outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+        unitOrdinal: 1, findings: [{ quote: '"明天...再来--好吗"', blockOrdinal: 3,
+          severity: 'should', note: '合成标点建议。', replacement: '明日再来。' }] } }] });
+    expect(result.findings[0]).toMatchObject({ quote: '「明天……再来——好吗」', replacement: '明日再来。',
+      sourceRange: { fromGrapheme: 2, toGrapheme: 14 } });
   });
 });

@@ -128,10 +128,12 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       bySeverity[finding.severity] += 1;
       let blockId = messageBlockIds[finding.blockOrdinal - 1];
       let block = blockId === undefined ? undefined : blocks.get(blockId);
-      let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote);
+      let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote, finding.occurrence);
       let annotation = false;
       let note = finding.note;
+      let recoveredAcrossBlocks = false;
       if (location.state === 'not-found') {
+        recoveredAcrossBlocks = true;
         let occurrences = 0;
         for (const id of distinctBlockIds) {
           const candidate = blocks.get(id);
@@ -141,19 +143,14 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
           occurrences += match.state === 'verified' ? 1 : match.occurrences;
           if (location.state === 'not-found') { block = candidate; blockId = id; location = match; }
         }
-        if (occurrences > 1 && location.state === 'verified') {
+        if (occurrences > 1) {
           annotation = true;
           note = `【锚点不唯一】${note}`;
         }
       }
       if (location.state === 'ambiguous' && block !== undefined) {
-        annotation = true;
-        // The shortest prefix with a verified match selects the first complete occurrence, preserving grapheme boundaries.
-        for (let end = 1; end <= graphemeCount(block.text); end += 1) {
-          const first = locateQuotation(sliceGraphemes(block.text, 0, end), finding.quote);
-          if (first.state === 'verified') { location = first; break; }
-        }
-        note = `【锚点不唯一】${note}`;
+        location = locateQuotation(block.text, finding.quote, 1);
+        if (!recoveredAcrossBlocks) note = `【锚点不唯一】${note}`;
       }
       const partialGrapheme = location.state === 'not-found' && distinctBlockIds.some((id) => {
         const text = blocks.get(id)?.text;
@@ -166,7 +163,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
-      const retainedFinding = { ...finding, note };
+      const retainedFinding = { ...finding, note, ...(location.state === 'verified' && block !== undefined ? { quote: sliceGraphemes(block.text, location.fromGrapheme, location.toGrapheme) } : {}) };
       if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,

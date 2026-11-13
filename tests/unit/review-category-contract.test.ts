@@ -228,3 +228,12 @@ describe('review contract v2 tolerance', () => {
     expect(legacy.promptContractDigest).not.toBe(definition.promptContractDigest);
   });
 });
+
+it.each([undefined, 2, 0, 1.5, '2', 99])('admits optional occurrence without losing a finding (%s)', (occurrence) => {
+  const parsed = parseReviewCategoryUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1,
+    findings: [{ quote: '目标', blockOrdinal: 1, occurrence, severity: 'should', note: '合成建议。', replacement: '替换' }] }),
+    { unitOrdinal: 1, blockCount: 1, output: 'change-suggestion', clauseIds: [] });
+  expect(parsed.ok).toBe(true);
+  if (parsed.ok) expect(parsed.result.findings[0]).toMatchObject({ quote: '目标', replacement: '替换',
+    ...(typeof occurrence === 'number' && Number.isInteger(occurrence) && occurrence > 0 ? { occurrence } : {}) });
+});

@@ -1197,3 +1197,27 @@ it('ends a stalled sent request at the projected deadline as that unit\'s unknow
     .toEqual([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]);
 
 }, 60_000);
+
+it.each([undefined, 2, 99])('accepts a repeated paragraph quotation in one click (#1435 occurrence %s)', async (occurrence) => {
+  const { store: opened, bookId, reviewRunId } = await productionReview(['typos-and-usage'], () => 'valid',
+    (policy) => policy, false, false, { response: async (response, _signal, body) => {
+      const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+      const message = request.messages.findLast((entry) => entry.role === 'user')!.content;
+      const header = parseReviewCategoryUnitMessageHeader(message);
+      if (header?.ordinal !== 1) return response;
+      const target = [...message.matchAll(/^\[([1-9][0-9]*)\] \[blk_[0-9a-f]{24}\] \(paragraph\) (.*)$/gmu)]
+        .find((match) => match[2]!.split('的').length > 2)!;
+      expect(target).toBeDefined();
+      const envelope = await response.json();
+      envelope.choices[0].message.content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: 1,
+        findings: [{ quote: '的', blockOrdinal: Number(target[1]), occurrence, severity: 'should', note: '合成同词建议。', replacement: '之' }] });
+      return new Response(JSON.stringify(envelope), { status: 200 });
+    } });
+  const run = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  expect(run.findings).toHaveLength(1);
+  const finding = run.findings[0]!;
+  expect(finding).toMatchObject({ quote: '的', replacement: '之' });
+  const applied = opened.applyChangeSuggestion({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
+    windowStartBlockId: finding.blockId, markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+  expect(applied.card!.suggestion!.decision).toBeTruthy();
+});

@@ -212,3 +212,28 @@ describe('reference integrity: locating a quotation in the block it names', () =
     expect(graphemeCount('民国26年')).toBe(5);
   });
 });
+
+describe('quotation occurrence and punctuation (#1435)', () => {
+  it('selects overlapping complete matches with a 1-based occurrence', () => {
+    expect(locateQuotation('甲甲甲', '甲甲', 2)).toEqual({ state: 'verified', fromGrapheme: 1, toGrapheme: 3 });
+    for (const occurrence of [undefined, 0, -1, 1.5, 3, NaN]) {
+      expect(locateQuotation('甲甲甲', '甲甲', occurrence)).toEqual({ state: 'ambiguous', occurrences: 2 });
+    }
+  });
+  it.each(['“目标……”', '「目标……」', '『目标…』', "'目标...'", '＂目标...＂'])('maps quotes and ellipses: %s', (text) => {
+    const location = locateQuotation('前' + text + '后', '"目标..."');
+    expect(location.state).toBe('verified');
+    if (location.state === 'verified') expect(sliceGraphemes('前' + text + '后', location.fromGrapheme, location.toGrapheme)).toBe(text);
+  });
+  it('maps dashes with original grapheme boundaries', () => {
+    expect(locateQuotation('甲——乙', '甲--乙')).toEqual({ state: 'verified', fromGrapheme: 0, toGrapheme: 4 });
+    expect(locateQuotation('甲--乙', '甲——乙')).toEqual({ state: 'verified', fromGrapheme: 0, toGrapheme: 4 });
+    expect(locateQuotation('甲—乙甲——乙', '甲--乙', 2)).toEqual({ state: 'verified', fromGrapheme: 3, toGrapheme: 7 });
+  });
+});
+
+it.each([undefined, 2, 0, 1.5, '2', 99])('keeps factual assertions with optional occurrence (%s)', (occurrence) => {
+  const parsed = parseFactualReviewUnitResult(unitResult([assertion({ occurrence })]), expected);
+  expect(parsed.ok).toBe(true);
+  if (parsed.ok) expect(parsed.result.assertions).toHaveLength(1);
+});

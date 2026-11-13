@@ -27,7 +27,7 @@ import { canonicalJson, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   factualReviewMessageBlockIds,
-  locateQuotation,
+  locateQuotation, sliceGraphemes,
   normalizedQuotation,
   type FactualReviewUnitResult,
   type FactualUnitAssertion,
@@ -145,7 +145,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
         assertionOrdinal: index + 1,
         assertion,
         blockId,
-        location: locateQuotation(block.text, assertion.quote),
+        location: locateQuotation(block.text, assertion.quote, assertion.occurrence),
       });
     });
   }
@@ -159,7 +159,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
   let verified = 0;
   const questions: ResearchOutcome[] = [];
   for (const entry of located) {
-    const { assertion } = entry;
+    const assertion = entry.location.state === 'verified' ? { ...entry.assertion, quote: sliceGraphemes(blocks.get(entry.blockId)!.text, entry.location.fromGrapheme, entry.location.toGrapheme) } : entry.assertion;
     if (notExactFetched(assertion) || entry.location.state !== 'verified') {
       const reason = notExactFetched(assertion) ? 'not-exact-fetched' as const : entry.location.state === 'ambiguous' ? 'quote-ambiguous' as const : 'quote-not-found' as const;
       excluded.push({
@@ -311,11 +311,14 @@ export function locatedUnitFindings(
     if (!FACTUAL_FINDING_CLASSES.includes(assertion.assertionClass)) continue;
     const blockId = messageBlockIds[assertion.blockOrdinal - 1];
     const block = blockId === undefined ? undefined : blocks.get(blockId);
-    if (blockId === undefined || block === undefined || locateQuotation(block.text, assertion.quote).state !== 'verified') continue;
-    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(assertion.quote) });
+    if (blockId === undefined || block === undefined) continue;
+    const location = locateQuotation(block.text, assertion.quote, assertion.occurrence);
+    if (location.state !== 'verified') continue;
+    const quote = sliceGraphemes(block.text, location.fromGrapheme, location.toGrapheme);
+    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote) });
     if (seen.has(findingIdentity)) continue;
     seen.add(findingIdentity);
-    located.push({ findingId: findingIdentity, blockId, quote: assertion.quote, basis: assertion.basis, category: assertion.category });
+    located.push({ findingId: findingIdentity, blockId, quote, basis: assertion.basis, category: assertion.category });
   }
   return located;
 }
