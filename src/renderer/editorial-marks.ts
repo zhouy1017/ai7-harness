@@ -261,6 +261,8 @@ export class EditorialCardCache {
   #reads = new Map<string, Promise<EditorialMarkCardProjection | undefined>>();
   #failed = new Set<string>();
   #epoch = 0;
+  #activeReads = 0;
+  #queuedReads: Array<{ markId: string; start(): void; cancel(): void }> = [];
   sync(window: Pick<ManuscriptWindowProjection, 'bookId' | 'manuscriptId' | 'branchId' | 'revisionId' | 'journalSequence' | 'workingDigest' | 'blocks' | 'marks'>): void {
     const identity = JSON.stringify([window.bookId, window.manuscriptId, window.branchId, window.revisionId, window.journalSequence,
       window.workingDigest, window.blocks.map((block) => block.blockId)]);
@@ -269,9 +271,22 @@ export class EditorialCardCache {
     this.#marks = window.marks;
     this.clear();
   }
-  clear(): void { this.#epoch++; this.cards.clear(); this.#reads.clear(); this.#failed.clear(); }
+  clear(): void {
+    this.#epoch++; this.cards.clear(); this.#reads.clear(); this.#failed.clear();
+    for (const read of this.#queuedReads.splice(0)) read.cancel();
+  }
   failed(markId: string): boolean { return this.#failed.has(markId); }
-  invalidate(markId: string): void { this.cards.delete(markId); this.#reads.delete(markId); this.#failed.delete(markId); }
+  invalidate(markId: string): void {
+    this.cards.delete(markId); this.#reads.delete(markId); this.#failed.delete(markId);
+    this.#queuedReads = this.#queuedReads.filter(read => { if (read.markId !== markId) return true; read.cancel(); return false; });
+  }
+  #startReads(): void {
+    // The service admits 16 pending requests shared by the whole window. Leave room for editing and navigation.
+    while (this.#activeReads < 4 && this.#queuedReads.length > 0) {
+      this.#activeReads++;
+      this.#queuedReads.shift()!.start();
+    }
+  }
   put(card: EditorialMarkCardProjection): void {
     // Replacing the pending entry prevents an older read from overwriting a command's returned card.
     this.invalidate(card.markId);
@@ -285,16 +300,21 @@ export class EditorialCardCache {
     const existing = this.#reads.get(markId);
     if (existing) return existing;
     const epoch = this.#epoch;
-    const read = Promise.resolve().then(fetch).then((card) => {
-      if (epoch !== this.#epoch || this.#reads.get(markId) !== read) return undefined;
-      if (card.kind !== 'personal-highlight') this.cards.set(markId, card);
-      return card;
-    }).catch((error: unknown) => {
-      if (epoch !== this.#epoch || this.#reads.get(markId) !== read) return undefined;
-      this.#failed.add(markId);
-      throw error;
+    const read = new Promise<EditorialMarkCardProjection | undefined>((resolve, reject) => {
+      this.#queuedReads.push({ markId, cancel: () => resolve(undefined), start: () => {
+        void Promise.resolve().then(() => epoch === this.#epoch && this.#reads.get(markId) === read ? fetch() : undefined).then(card => {
+          if (!card || epoch !== this.#epoch || this.#reads.get(markId) !== read) { resolve(undefined); return; }
+          if (card.kind !== 'personal-highlight') this.cards.set(markId, card);
+          resolve(card);
+        }).catch((error: unknown) => {
+          if (epoch !== this.#epoch || this.#reads.get(markId) !== read) { resolve(undefined); return; }
+          this.#failed.add(markId);
+          reject(error);
+        }).finally(() => { this.#activeReads--; this.#startReads(); });
+      } });
     });
     this.#reads.set(markId, read);
+    this.#startReads();
     return read;
   }
 }

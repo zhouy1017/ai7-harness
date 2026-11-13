@@ -103,6 +103,21 @@ it('fences old Book/branch/window reads and never overwrites a newer command car
   cache.put({ ...card, kind: 'personal-highlight' }); expect(cache.cards.size).toBe(0);
 });
 
+it('drops queued reads on a new projection while running reads keep their shared slots (#1459)', async () => {
+  const cache = new EditorialCardCache(); cache.sync(windowOf());
+  const held = Array.from({length:4},()=>deferred<EditorialMarkCardProjection>());
+  const running = held.map((value,index)=>cache.read(`running-${index}`,()=>value.promise));
+  const obsolete = vi.fn(async()=>card);
+  const queued = cache.read('queued',obsolete);
+  await Promise.resolve(); cache.clear();
+  await expect(queued).resolves.toBeUndefined(); expect(obsolete).not.toHaveBeenCalled();
+  const latest = vi.fn(async()=>card); const next = cache.read(card.markId,latest);
+  await Promise.resolve(); expect(latest).not.toHaveBeenCalled();
+  held.forEach(value=>value.resolve(card));
+  await Promise.all(running); await expect(next).resolves.toBe(card);
+  expect(latest).toHaveBeenCalledOnce(); expect(cache.cards.size).toBe(1);
+});
+
 it('does not retry a failed read on scrolling until its version changes', async () => {
   const cache = new EditorialCardCache(); const page = windowOf(); cache.sync(page);
   const fetch = vi.fn(async (): Promise<EditorialMarkCardProjection> => { throw new Error('read failed'); });
@@ -206,6 +221,20 @@ describe('comments command parity and refresh continuity', () => {
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="all"]')!.click();
     chip('all').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
     chip('editor').click(); chip('editor').click(); await paint(); expect(chip('all').getAttribute('aria-pressed')).toBe('true');
+  });
+  it('keeps every category badge readable when slow card reads meet the shared 16-request service limit (#1459)', async () => {
+    const cards = [card, ...Array.from({length:20},(_,index)=>({...card,markId:`slow-${index}`}))];
+    const ui = mount(card,cards.slice(1));
+    const release: Array<() => void> = []; let pending = 0; let refused = 0;
+    ui.get.mockImplementation(input => {
+      if(pending===16){refused++;return Promise.reject(new Error('SERVICE_UNAVAILABLE'));}
+      pending++;
+      return new Promise(resolve=>release.push(()=>{pending--;resolve(cards.find(value=>value.markId===input.markId)!);}));
+    });
+    for(let turn=0;turn<cards.length;turn++){await paint();release.splice(0).forEach(done=>done());}
+    await paint();
+    expect(refused).toBe(0);
+    for(const value of cards)expect(ui.pane.querySelector(`[data-mark-card="${value.markId}"] .editorial-mark-category-badge`)?.textContent).toBe('编辑修订');
   });
   it('keeps factual identifiers, digests and result versions behind the technical layer (#1454)', async () => {
     setTechnicalLayerVisible(false);
