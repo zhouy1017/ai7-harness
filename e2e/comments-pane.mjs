@@ -118,15 +118,18 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   check(await renderer.evaluate(`(() => { for(const id of __comments.ids.slice(2,4)){ const node=document.querySelector('[data-comment-card="'+id+'"]'); node.dispatchEvent(new PointerEvent('pointerenter')); node.dispatchEvent(new PointerEvent('pointerleave')); } return document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]').dataset.selected==='true'; })()`), 'comments-hover-keeps-selection');
   check(await renderer.evaluate(`(() => { const block=document.querySelector('.editor-window [data-block-id]'); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); block.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true; })()`), 'comments-unmarked-clear');
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
-  check(await renderer.evaluate(`(async () => {
+  const coordinates = await renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
     const card=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).sort((a,b)=>parseFloat(a.style.top)-parseFloat(b.style.top))[0];
     const words=document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]');
     words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
     pane.scrollTop=30;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    return pane.scrollTop>0 && Math.abs(card.getBoundingClientRect().top-words.getBoundingClientRect().top)<=4;
-  })()`), 'comments-scrolled-canvas-coordinates');
+    const freshWords=document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]');
+    const cardTop=card.getBoundingClientRect().top, wordsTop=freshWords.getBoundingClientRect().top;
+    return {pass:pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected:!!document.querySelector('[data-comment-card][data-selected="true"]')};
+  })()`);
+  check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
 
   check(await renderer.evaluate(`(() => {
     const cards=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
