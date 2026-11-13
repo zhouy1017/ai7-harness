@@ -291,16 +291,19 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const p=pane.getBoundingClientRect(), l=last.getBoundingClientRect();
     const moved=pane.scrollTop>oldScroll && pane.scrollTop>0 && first.getBoundingClientRect().top<before-1;
     const reachable=moved && l.top>=p.top-1 && l.bottom<=p.bottom+1 && Math.abs(first.getBoundingClientRect().top-before+pane.scrollTop-oldScroll)<=4 && pane.scrollHeight===height;
-    scroll.scrollTop+=24;
+    const beforeText=scroll.scrollTop;
+    scroll.scrollTop+=scroll.scrollTop<scroll.scrollHeight-scroll.clientHeight?24:-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const textMoved=scroll.scrollTop!==beforeText;
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     const cardTop=firstAnchor.card.getBoundingClientRect().top, wordsTop=firstAnchor.anchor.getBoundingClientRect().top;
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
-    return {pass:reachable && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
+    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
   const assertCoordinates = coordinates => {
   check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
   check(!coordinates.selected, 'comments-scrolled-canvas-unselected', coordinates);
+  check(coordinates.textMoved, 'comments-scrolled-canvas-text-moved', coordinates);
   check(coordinates.scrollTop===0, 'comments-scrolled-canvas-text-scroll-reset', coordinates);
   check(Math.abs(coordinates.cardTop-coordinates.wordsTop)<=4, 'comments-scrolled-canvas-word-level', coordinates);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
