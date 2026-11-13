@@ -22,3 +22,14 @@ export function setAutoApplyEditorRevisions(enabled: boolean): void {
   autoApplyPreference = enabled;
   try { localStorage.setItem(AUTO_APPLY_KEY, String(enabled)); } catch { /* Editing remains available without storage. */ }
 }
+
+/** Presentation of the existing settings; no new persisted preference. */
+export const EDIT_METHODS = [
+  { value: 'auto', mode: 'reading-revision', autoApply: true, title: '修订 · 自动应用', description: '改动留痕，停笔后自动写入稿件，可逐条撤销。' },
+  { value: 'confirm', mode: 'reading-revision', autoApply: false, title: '修订 · 待我确认', description: '改动留痕为待处理的修订卡，由你逐条应用。' },
+  { value: 'direct', mode: 'direct-edit', autoApply: null, title: '直接改稿 · 不留痕', description: '直接改动正文，不生成修订卡。' },
+] as const;
+export function editMethod(mode: EditorInputMode, autoApply: boolean): typeof EDIT_METHODS[number] {
+  return EDIT_METHODS[mode === 'direct-edit' ? 2 : autoApply ? 0 : 1];
+}
+export const INPUT_MODE_CONFIRM_CHANGED = '已切换为修订 · 待我确认；修改将留下待处理的修订卡。';

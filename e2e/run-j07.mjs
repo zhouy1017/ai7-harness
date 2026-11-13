@@ -831,6 +831,7 @@ async function openManuscript(renderer, name) {
  */
 async function openDerivativePanel(renderer, { title, typeId, mode }, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
+  await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
   await clickSelector(renderer, '[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]', `${name}-open`);
   await waitFor(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const first = form?.querySelector('[data-document-field]'); return first?.dataset.documentField === 'title' && document.activeElement === first; })()`, `${name}-title-first`);
   if (title !== undefined) await fill(renderer, '.derivative-create-form [data-document-field="title"]', title, `${name}-title`);
@@ -1810,6 +1811,7 @@ async function main() {
     })()`);
     requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
     // #1427: the compact switcher reaches the separate workspace and returns to the same editor.
+    await clickSelector(renderer, '[data-derivative-menu]', 'derivatives-menu-open');
     await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'derivatives-workspace-open');
     await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-item') !== null`, 'derivatives-workspace-ready');
     await assertRenderer(renderer, `(() => {
@@ -3068,7 +3070,7 @@ async function main() {
     await openDerivativePanel(renderer, { typeId: 'promotion-article', mode: 'import' }, 'multi-import');
     await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'multi-import');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
-    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 3 && document.querySelector('[data-manuscript-switch="manage"]')?.textContent === '管理全部衍生稿件 (4)'`, 'multi-four-listed');
+    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 3 && document.querySelector('[data-manuscript-switch="manage"]')?.textContent === '管理全部衍生稿件（4）'`, 'multi-four-listed');
     at('multi-documents-ordinary-identities');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>{const type=page.types.find(type=>type.typeId==='promotion-article');return type.documents.length===3&&new Set(type.documents.map(doc=>doc.documentId)).size===3&&type.document.documentId===type.documents[0].documentId&&type.documents.every(doc=>doc.versions.length===1);})`, 'multi-independent-identities');
     const primaryAfter = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3147,6 +3149,7 @@ async function main() {
     at('scoped-ai-edit-derivative');
     // On a derivative document the same entries stand (Issue #1412): 就选中部分让 AI 修改… is offered, and its paragraph is locked
     // and unlocked from the menu and the 🔒 badge.
+    await clickSelector(renderer, '[data-derivative-menu]', 'derivatives-menu-open');
     await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'scoped-derivatives-manage');
     await waitFor(renderer, `document.querySelector('.derivatives-item') !== null`, 'scoped-derivatives-list');
     await fill(renderer, '.derivatives-filters input[type="search"]', WRITING_LIBRARY_TITLE, 'scoped-derivatives-search');

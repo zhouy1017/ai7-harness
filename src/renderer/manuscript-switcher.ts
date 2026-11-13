@@ -1,3 +1,4 @@
+import { menuPanel } from './components/controls.js';
 import type {
   ProductionDocumentProjection,
   ProductionDocumentsProjection,
@@ -18,7 +19,7 @@ import { mountWritingTask, type WritingTaskSurface } from './writing-task.js';
 export const SWITCHER_WORDS = {
   label: '本书稿件',
   primary: (bookTitle: string) => `主稿件（《${bookTitle}》）`,
-  create: '+ 新建 / 导入衍生稿件',
+  create: '新建 / 导入衍生稿件…',
   draftReady: (count: number) => `草稿已写好 ${count} 篇`,
   writing: 'AI 写作进行中',
   panelHeading: '新建 / 导入衍生稿件',
@@ -205,16 +206,22 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     create.setAttribute('aria-controls', panel.id);
     create.setAttribute('aria-expanded', String(form !== null));
     create.disabled = working || projection === null || projection.unavailableReason !== null;
-    create.addEventListener('click', () => toggleForm());
+    create.addEventListener('click', () => { menu.open = false; toggleForm(); });
     const state = el('span', 'manuscript-switcher-state');
     state.textContent = writingState.drafted > 0 ? SWITCHER_WORDS.draftReady(writingState.drafted) : writingState.underWay ? SWITCHER_WORDS.writing : '';
     state.hidden = state.textContent === '';
-    const manage = el('button', 'quiet manuscript-switch-manage', `管理全部衍生稿件 (${all.length})`);
+    const manage = el('button', 'quiet manuscript-switch-manage', `管理全部衍生稿件（${all.length}）`);
     manage.type = 'button';
     manage.dataset['manuscriptSwitch'] = 'manage';
     manage.disabled = working || options.openWorkspace === undefined;
-    manage.addEventListener('click', () => { if (options.openWorkspace) void leave(options.openWorkspace); });
-    bar.replaceChildren(list, create, manage, state);
+    manage.addEventListener('click', () => { menu.open = false; if (options.openWorkspace) void leave(options.openWorkspace); });
+    const menu = el('details', 'derivative-menu');
+    const trigger = el('summary', 'btn secondary', '衍生稿件 ▾');
+    trigger.dataset['derivativeMenu'] = 'true';
+    trigger.setAttribute('aria-label', '衍生稿件');
+    trigger.setAttribute('aria-haspopup', 'true');
+    menu.append(trigger, menuPanel(create, manage));
+    bar.replaceChildren(list, menu, state);
     bar.dataset['documentCount'] = String(projection === null ? 0 : documentsOf(projection).length);
     if (focused !== null) {
       const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-manuscript-switch]'))

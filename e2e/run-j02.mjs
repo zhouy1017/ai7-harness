@@ -2117,6 +2117,22 @@ async function main() {
     at('comments-responsive-pane');
     await commentsOrdinaryForEditor(renderer, requireJourney, waitFor);
     await commentsLayouts(renderer, requireJourney, waitFor);
+    // #1452: toolbar geometry at both Owner viewport sizes, in the existing layouts stage.
+    for (const size of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
+      requireJourney(await renderer.evaluate(`(async () => {
+        const entry=document.querySelector('[data-edge-entry="comments"]');
+        if(entry.getAttribute('aria-expanded')!=='true')entry.click();
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const toolbar=document.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
+        const actions=toolbar.querySelector('.editor-edit-actions');
+        const controls=Array.from(actions.children).filter(el=>!el.hidden && getComputedStyle(el).display!=='none');
+        const rects=controls.map(el=>el.getBoundingClientRect());
+        return rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs(r.top-rects[0].top)<4 && r.bottom<=box.bottom)
+          && controls.every(el=>el.scrollWidth<=el.clientWidth+1);
+      })()`) === true, `toolbar-one-row-${size.width}`);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to
     // shut the product down or to clear the run root would read as an accessibility failure (#474).
     at('completion-browser-close');

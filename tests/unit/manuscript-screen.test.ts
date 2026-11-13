@@ -1,3 +1,4 @@
+import { setAutoApplyEditorRevisions, getAutoApplyEditorRevisions } from '../../src/renderer/editor-input-mode.js';
 import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
@@ -377,8 +378,29 @@ describe('the Manuscript screen lifecycle', () => {
     expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['修订模式', '修订模式 · 人工修改自动应用：开', '让 AI 修改…', '撤销', '重做', '重试权威刷新']);
+      .toEqual(['修订 · 自动应用改动留痕，停笔后自动写入稿件，可逐条撤销。', '修订 · 待我确认改动留痕为待处理的修订卡，由你逐条应用。', '直接改稿 · 不留痕直接改动正文，不生成修订卡。', '让 AI 修改…', '', '', '重试权威刷新']);
     app.showing?.destroy();
+  });
+
+  it('reads the existing preference and maps each menu choice without losing it in direct edit', () => {
+    setAutoApplyEditorRevisions(false);
+    const app = shell();
+    app.open(windowOf('book-one'));
+    const trigger = app.screen.querySelector('[data-editor-input-mode-toggle]')!;
+    const choose = (value: string): void => app.screen.querySelector<HTMLElement>(`[data-edit-method="${value}"]`)!.click();
+    expect(trigger.textContent).toBe('修订 · 待我确认 ▾');
+    choose('direct');
+    expect(children.editorSurfaces.at(-1)!.setInputMode).toHaveBeenLastCalledWith('direct-edit');
+    expect(getAutoApplyEditorRevisions()).toBe(false);
+    expect(trigger.textContent).toBe('直接改稿 · 不留痕 ▾');
+    choose('auto');
+    expect(children.editorSurfaces.at(-1)!.setInputMode).toHaveBeenLastCalledWith('reading-revision');
+    expect(getAutoApplyEditorRevisions()).toBe(true);
+    choose('confirm');
+    expect(getAutoApplyEditorRevisions()).toBe(false);
+    expect(trigger.textContent).toBe('修订 · 待我确认 ▾');
+    app.showing?.destroy();
+    setAutoApplyEditorRevisions(true);
   });
 
   it('reveals paging links only near their loaded window boundary', () => {
@@ -518,7 +540,7 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
       { productionDocument: { typeId: 'news-release', typeLabel: '新闻稿', document: documentOf('book-one', '首发通稿') as never } });
     await vi.advanceTimersByTimeAsync(0);
     const switches = [...app.screen.querySelectorAll<HTMLButtonElement>('[data-manuscript-switch]')].map((node) => [node.dataset['manuscriptSwitch'], node.textContent, node.getAttribute('aria-current')]);
-    expect(switches).toEqual([['primary', '主稿件（《合成书》）', null], ['document', '[新闻稿] 首发通稿', 'page'], ['new', '+ 新建 / 导入衍生稿件', null], ['manage', '管理全部衍生稿件 (1)', null]]);
+    expect(switches).toEqual([['primary', '主稿件（《合成书》）', null], ['document', '[新闻稿] 首发通稿', 'page'], ['new', '新建 / 导入衍生稿件…', null], ['manage', '管理全部衍生稿件（1）', null]]);
     // Ordinary mode: no seven phases, no 交付 in the document's lens, and its 批注栏 is offered.
     expect(app.screen.querySelector('.document-lens')?.textContent).not.toContain('交付');
     expect(app.screen.querySelector('[data-edge-entry="comments"]')).not.toBeNull();

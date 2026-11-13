@@ -1,5 +1,6 @@
 import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
+import { menuPanel } from './components/controls.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
@@ -29,7 +30,7 @@ import {
 } from './manuscript-search-labels.js';
 import { replacementRevisionRationale } from '../shared/editor-revision-words.js';
 import { AI_LOCK_SECTION_LABEL, AI_UNLOCK_SECTION_LABEL, setAiLocks, type ScopedAiEditHost } from './scoped-ai-edit.js';
-import { DEFAULT_EDITOR_INPUT_MODE, getAutoApplyEditorRevisions, setAutoApplyEditorRevisions, INPUT_MODE_CHANGED, INPUT_MODE_LABELS, INPUT_MODE_TITLES, type EditorInputMode } from './editor-input-mode.js';
+import { DEFAULT_EDITOR_INPUT_MODE, getAutoApplyEditorRevisions, setAutoApplyEditorRevisions, INPUT_MODE_CHANGED, INPUT_MODE_CONFIRM_CHANGED, EDIT_METHODS, editMethod, type EditorInputMode } from './editor-input-mode.js';
 import { shortcutHint } from './commands.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
 import {
@@ -362,6 +363,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   title.append(meta);
   const undo = button('撤销', 'quiet', () => void runHistory('undo'));
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
+  for (const [control, label, symbol, shortcut] of [[undo, '撤销', 'i-undo', shortcutHint('edit.undo') ?? 'Ctrl+Z'], [redo, '重做', 'i-redo', shortcutHint('edit.redo') ?? 'Ctrl+Shift+Z']] as const) {
+    control.replaceChildren(icon(symbol));
+    control.setAttribute('aria-label', label);
+    control.title = `${label}（${shortcut}）`;
+    control.classList.add('editor-history-icon');
+  }
   const paragraphStyle = element('select');
   paragraphStyle.setAttribute('aria-label', '段落样式');
   for (const [value, label] of [['paragraph', '正文'], ['title', '书名标题'], ...Array.from({ length: 6 }, (_, i) => [`heading-${i + 1}`, `${i + 1} 级标题`])]) {
@@ -440,46 +447,54 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
-  // Revision mode records ordinary input; direct edit is the explicit opt-out from revision cards.
-  const inputModeToggle = button(INPUT_MODE_LABELS[DEFAULT_EDITOR_INPUT_MODE], 'secondary', () => {
-    const mode = editor?.inputMode() === 'direct-edit' ? 'reading-revision' : 'direct-edit';
-    if (!dirty && !saving && !retryRequired) setInputMode(mode);
-    else void editor?.flush().then(() => setInputMode(mode));
-  });
-  inputModeToggle.className = `${inputModeToggle.className} editor-input-mode-toggle`;
-  inputModeToggle.dataset['editorInputModeToggle'] = 'true';
-  const paintInputMode = (mode: EditorInputMode): void => {
-    inputModeToggle.textContent = INPUT_MODE_LABELS[mode];
-    inputModeToggle.title = INPUT_MODE_TITLES[mode];
-    inputModeToggle.dataset['inputMode'] = mode;
-    inputModeToggle.setAttribute('aria-pressed', String(mode === 'direct-edit'));
-    content.dataset['inputMode'] = mode;
-  };
-  const setInputMode = (mode: EditorInputMode): void => {
-    if (editor === undefined) return;
-    editor.setInputMode(mode);
-    paintInputMode(editor.inputMode());
-    setStatus(INPUT_MODE_CHANGED[editor.inputMode()], 'success');
-  };
-  paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
-  // 让 AI 修改… (Issue #1412): the unlocked parts of this section or of the whole text, on the manuscript and on a document.
+  // Present the existing mode and auto-apply settings as one choice.
   let autoApplyRevisions = getAutoApplyEditorRevisions();
-  const autoApplyToggle = button('', 'secondary', () => {
-    void editor?.flush().then(() => {
-      autoApplyRevisions = !autoApplyRevisions;
-      setAutoApplyEditorRevisions(autoApplyRevisions);
-      paintAutoApply();
-    });
-  });
-  autoApplyToggle.dataset['editorAutoApplyToggle'] = 'true';
-  const paintAutoApply = (): void => {
-    autoApplyToggle.textContent = `修订模式 · 人工修改自动应用：${autoApplyRevisions ? '开' : '关'}`;
-    autoApplyToggle.setAttribute('aria-pressed', String(autoApplyRevisions));
+  const inputMenu = element('details', 'edit-method-menu');
+  const inputModeToggle = element('summary', 'btn secondary editor-input-mode-toggle');
+  inputModeToggle.dataset['editorInputModeToggle'] = 'true';
+  inputModeToggle.setAttribute('aria-haspopup', 'true');
+  const paintInputMode = (mode: EditorInputMode): void => {
+    const choice = editMethod(mode, autoApplyRevisions);
+    inputModeToggle.textContent = `${choice.title} ▾`;
+    inputModeToggle.title = `改稿方式：${choice.description}`;
+    inputModeToggle.setAttribute('aria-label', `改稿方式：${choice.title}`);
+    inputModeToggle.dataset['inputMode'] = mode;
+    inputModeToggle.dataset['autoApply'] = String(autoApplyRevisions);
+    content.dataset['inputMode'] = mode;
+    for (const item of inputMenu.querySelectorAll<HTMLElement>('[data-edit-method]')) {
+      item.setAttribute('aria-checked', String(item.dataset['editMethod'] === choice.value));
+    }
   };
-  paintAutoApply();
+  const choices = EDIT_METHODS.map((choice) => {
+    const item = button('', 'quiet', () => {
+      const apply = (): void => {
+        if (editor === undefined) return;
+        if (choice.autoApply !== null) {
+          autoApplyRevisions = choice.autoApply;
+          setAutoApplyEditorRevisions(autoApplyRevisions);
+        }
+        editor.setInputMode(choice.mode);
+        paintInputMode(editor.inputMode());
+        setStatus(choice.value === 'confirm' ? INPUT_MODE_CONFIRM_CHANGED : INPUT_MODE_CHANGED[choice.mode], 'success');
+        inputMenu.open = false;
+        inputModeToggle.focus();
+      };
+      if (!dirty && !saving && !retryRequired) apply();
+      else void editor?.flush().then(apply);
+    });
+    item.dataset['editMethod'] = choice.value;
+    item.setAttribute('role', 'menuitemradio');
+    item.append(element('strong', undefined, choice.title), element('span', undefined, choice.description));
+    return item;
+  });
+  const methodPanel = menuPanel(...choices);
+  methodPanel.setAttribute('role', 'menu');
+  methodPanel.setAttribute('aria-label', '改稿方式');
+  inputMenu.append(inputModeToggle, methodPanel);
+  paintInputMode(DEFAULT_EDITOR_INPUT_MODE);
   const scopedAiEditEntry = button('让 AI 修改…', 'secondary', () => editorialMarks?.composeScopedAiEdit());
   scopedAiEditEntry.dataset['scopedAiEditEntry'] = 'true';
-  toolbarActions.append(inputModeToggle, autoApplyToggle, scopedAiEditEntry, paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.append(inputMenu, paragraphStyle, scopedAiEditEntry, ...(isDocument ? [saveVersion, taskOnDocument] : []), undo, redo, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
   // 本书稿件 (Issue #1403): the manuscript and every derivative document of the Book, and 新建 / 导入衍生稿件, above the editor.
   let switcher: ManuscriptSwitcher | undefined;

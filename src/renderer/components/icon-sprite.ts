@@ -2,9 +2,11 @@
  * The 17 A4 IDs are fixed; i-nav and i-task are the prototype's right-rail extensions. Issue #1413 cluster 2 gives every
  * entry its own symbol: i-agent (全域智能体), i-workspace (Agent 工作区) and i-comment (批注).
  */
-export const ICON_IDS = ['i-inbox', 'i-library', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-agent', 'i-workspace', 'i-comment'] as const;
+export const ICON_IDS = ['i-inbox', 'i-library', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo'] as const;
 export type IconId = (typeof ICON_IDS)[number];
 const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>>> = {
+  "i-undo": [["path", {"d": "M4 9h10a6 6 0 010 12"}], ["path", {"d": "M9 4L4 9l5 5"}]],
+  "i-redo": [["path", {"d": "M20 9H10a6 6 0 000 12"}], ["path", {"d": "M15 4l5 5-5 5"}]],
   "i-inbox": [["path", {"d": "M3 12l2.6-7h12.8L21 12v7H3z"}], ["path", {"d": "M3 12h5l1.5 3h5L16 12h5"}]],
   "i-library": [["rect", {"x": "3", "y": "4", "width": "4", "height": "16", "rx": "1"}], ["rect", {"x": "9.5", "y": "4", "width": "4", "height": "16", "rx": "1"}], ["path", {"d": "M16.2 4.6l3.9.9-3.3 14.5-3.9-.9z"}]],
   "i-series": [["path", {"d": "M12 3l9 4.5-9 4.5-9-4.5z"}], ["path", {"d": "M3 12l9 4.5 9-4.5"}], ["path", {"d": "M3 16.5L12 21l9-4.5"}]],
