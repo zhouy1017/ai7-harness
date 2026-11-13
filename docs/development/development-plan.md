@@ -6,19 +6,19 @@ The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-proc
 
 ## Current R1 → 0.7.0 Alpha (#1459)
 
-R1 starts from `dev@6fdb6a8b`. Three lanes are dispatched together; lane 1 is serial because both of its slices edit the 批注栏 files:
+R1 starts from delivered 0.6.5 Beta at `dev@6fdb6a8b`. All four slices are merged into `codex/integration-0.7.0` at `3cc53efd`; the 0.7.0 Alpha closure candidate awaits its final ladder, dev merge and human-test refresh. Protocol 202 records PR #1462’s addition of `guessed-anchor` to `ProposalDraftBatchProjection.excluded.reason`; schema 113, Data Version 1 and policy v35 / set v26 stay unchanged.
 
-| Lane | Slice | Outcome |
-| --- | --- | --- |
-| 1 (renderer, first) | [#1451](https://github.com/zhouy1017/ai7-harness/issues/1451) | With the 批注栏 open, choosing a mark selects and aligns its pane card and draws a connector in the category colour; no duplicate floating card |
-| 1 (renderer, after #1451) | [#1454](https://github.com/zhouy1017/ai7-harness/issues/1454) | Compact and expanded pane cards, the 「模型@思考强度」 mark always visible, a one-row filter header |
-| 2 (renderer) | [#1452](https://github.com/zhouy1017/ai7-harness/issues/1452) | One 改稿方式 control, icon 撤销 / 重做, one 衍生稿件 menu; the toolbar fits on one row |
-| 3 (service) | [#1435](https://github.com/zhouy1017/ai7-harness/issues/1435) | Quotations located by occurrence and punctuation equivalence keep their replacement |
+| Lane | Slice | Outcome | Integration commit |
+| --- | --- | --- | --- |
+| 1 (renderer, first) | [#1451](https://github.com/zhouy1017/ai7-harness/issues/1451) | With the 批注栏 open, choosing a mark selects and aligns its pane card and draws a connector in the category colour; no duplicate floating card | `05d66561` (#1461) |
+| 1 (renderer, after #1451) | [#1454](https://github.com/zhouy1017/ai7-harness/issues/1454) | Compact and expanded pane cards, the 「模型@思考强度」 mark always visible, a one-row filter header | `3cc53efd` (#1466) |
+| 2 (renderer) | [#1452](https://github.com/zhouy1017/ai7-harness/issues/1452) | One 改稿方式 control, icon 撤销 / 重做, one 衍生稿件 menu; the toolbar fits on one row and wraps instead of clipping in a narrow shell | `ae444945`, `e903fa28` (#1460, #1465) |
+| 3 (service) | [#1435](https://github.com/zhouy1017/ai7-harness/issues/1435) | Repeated or punctuation-variant quotations keep their replacement; guessed locations keep one-click 接受 and stay out of bulk apply | `106a47e5` (#1462) |
 
 Remaining delivery order:
 
-1. Slice pull requests merge serially into `codex/integration-0.7.0`; every merged tip runs the full background-guest ladder.
-2. The closure candidate raises `package.json` 0.6.5 → 0.7.0 with its version-ledger row.
+1. Verify the committed 0.7.0 closure candidate with host checks and the final full ladder split over the three background guests.
+2. Merge the draft closure PR into `codex/integration-0.7.0` after review; no dev delivery is claimed here.
 3. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes #1459 and its slices, then refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1` ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
 4. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
 
