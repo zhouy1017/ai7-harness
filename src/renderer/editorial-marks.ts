@@ -882,7 +882,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     scheduleCommentsLayout();
     // Focusing a card leaves the editor's native selection in place; that retained selection does not own activation.
     if (!options.host.contains(document.activeElement) || !options.host.contains(document.getSelection()?.anchorNode ?? null)) return;
-    if (suppressCommentSelection) { suppressCommentSelection = false; return; }
+    if (suppressCommentSelection) return;
     const point = editor.captureContinuity().head;
     activateComment(pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme)?.markId);
   };
@@ -2807,6 +2807,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     else showSelectionMenu({ x: event.clientX, y: event.clientY });
   };
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') suppressCommentSelection = false;
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
     event.preventDefault();
     const selection = window.getSelection();
