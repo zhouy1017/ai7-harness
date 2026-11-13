@@ -205,6 +205,28 @@ describe('comments command parity and refresh continuity', () => {
     chip('all').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
     chip('editor').click(); chip('editor').click(); await paint(); expect(chip('all').getAttribute('aria-pressed')).toBe('true');
   });
+  it('keeps factual identifiers, digests and result versions behind the technical layer (#1454)', async () => {
+    setTechnicalLayerVisible(false);
+    const ui = mount({ ...suggestion, factualCorrection: { proposalId: 'proposal-id', resultId: 'result-id', resultVersion: 42, decisionId: null,
+      level: 'quick', levelLabel: '快速整理', states: { referenceIntegrity: 'verified', claimSupport: '未核查', factualVerification: '未核查' },
+      checkedSources: 0, candidateSources: 1, policyPin: { document: 'policy-document', sha256: 'a'.repeat(64), minimumLevel: null },
+      assuranceLabel: '证据核查未完成', missingChecks: ['来源待核对'] } });
+    await paint();
+    const text = () => ui.pane.querySelector('[data-comment-card]')!.textContent;
+    expect(text()).toContain('证据核查未完成'); expect(text()).toContain('快速整理');
+    for (const technical of ['result-id', 'policy-document', 'aaaaaaaaaaaa', '第 42 版']) expect(text()).not.toContain(technical);
+    setTechnicalLayerVisible(true); ui.setPage({ journalSequence: 1 }); await paint();
+    expect(text()).toContain('policy-document'); expect(text()).toContain('第 42 版');
+  });
+  it('keeps an initial failed read expanded with an explicit retry, then uses the returned card (#1454)', async () => {
+    const ui = mount(); ui.get.mockRejectedValueOnce(new Error('read unavailable')); await paint();
+    const failed = ui.pane.querySelector<HTMLElement>('[data-comment-pending]')!;
+    expect(failed.dataset['expanded']).toBe('true'); expect(failed.textContent).toContain('批注读取失败');
+    expect(ui.get).toHaveBeenCalledTimes(1); ui.refresh(); await paint(); expect(ui.get).toHaveBeenCalledTimes(1);
+    failed.querySelector<HTMLButtonElement>('[data-comment-retry]')!.click(); await paint();
+    expect(ui.pane.querySelector('[data-comment-pending]')).toBeNull();
+    expect(ui.pane.querySelector('[data-mark-body]')?.textContent).toBe(card.body); expect(ui.get).toHaveBeenCalledTimes(2);
+  });
   it('compares frozen model marks and resets an unselected scrolled frame on filtering (#1454)', async () => {
     const ai = (markId: string, modelLabel: string): EditorialMarkCardProjection => ({ ...card, markId, source: { ...card.source, kind: 'ai7', modelLabel } });
     const ui = mount(card, [ai('model-a', '模型甲@high'), ai('model-b', '模型乙')]); await paint();

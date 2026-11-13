@@ -3076,3 +3076,5 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editorial-mark-footer { margin: .5rem 0 0; font-size: .7rem; line-height: 1.4; color: var(--text-subdued); }
 .editorial-mark-note-tags { display: flex; gap: .3rem; margin-top: .4rem; flex-wrap: wrap; }
 .editorial-mark-note-tag { border: 1px solid var(--boundary); border-radius: 4px; padding: .1rem .3rem; font-size: .7rem; color: var(--text-subdued); }
+
+.manuscript-comments-read { padding: .6rem; box-sizing: border-box; background: var(--surface); border: 1px solid var(--boundary); }

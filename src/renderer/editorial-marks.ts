@@ -1789,13 +1789,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const facts = el('dl', 'editorial-mark-factual-facts');
     for (const [term, value] of [
-      ['事实核查结果', `第 ${lineage.resultVersion} 版 · ${lineage.levelLabel}`],
+      ['事实核查结果', lineage.levelLabel],
       ['引文完整性', lineage.states.referenceIntegrity === 'verified' ? '引文已在原文中定位' : '引文未能定位'],
       ['断言支持', lineage.states.claimSupport],
       ['事实核查', lineage.states.factualVerification],
       ['来源', `已核对 ${lineage.checkedSources} 个 · 候选 ${lineage.candidateSources} 个`],
-      ['核查政策', `${lineage.policyPin.document} · ${lineage.policyPin.sha256.slice(0, 12)}`],
     ] as ReadonlyArray<readonly [string, string]>) facts.append(el('dt', undefined, term), el('dd', undefined, value));
+    const technical = el('details', 'technical-details');
+    technical.append(el('summary', undefined, '查看技术详情'), el('p', undefined, `结果 ${lineage.resultId} · 第 ${lineage.resultVersion} 版 · 核查政策 ${lineage.policyPin.document} · ${lineage.policyPin.sha256.slice(0, 12)}`));
+    block.append(technicalDisclosure(technical));
     block.append(facts, el('p', 'muted', '核查结果是证据评估，不是事实定论；这条修改建议仍由你决定是否应用。'));
     return [block];
   };

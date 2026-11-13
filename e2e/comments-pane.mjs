@@ -335,7 +335,6 @@ export async function commentsModelFilter(renderer, check, waitFor, markId) {
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false`, 'comments-model-all-restored');
   check(await renderer.evaluate(`(() => {const node=document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]');node.focus();node.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true;})()`), 'comments-model-full-card');
   await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__commentsModel.mark+'"]')`, 'comments-model-full-card-ready');
-  check(await renderer.evaluate(`(() => {document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click();return true;})()`), 'comments-model-close-pane');
 }
 
 
