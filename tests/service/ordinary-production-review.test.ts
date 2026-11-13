@@ -17,7 +17,7 @@ import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConne
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
-import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
+import { graphemeCount, parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { modelRequestNotSent } from '../../src/service/provider/deepseek-adapter.js';
 import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
@@ -1217,8 +1217,8 @@ it.each([undefined, 2, 99])('accepts a repeated paragraph quotation in one click
   expect(run.findings).toHaveLength(1);
   const finding = run.findings[0]!;
   const text = opened.baselineAnalysisLedger.readWorkingBlocks(run.manuscript.branchId).find((block) => block.blockId === finding.blockId)!.text;
-  const first = [...text].indexOf('的');
-  const expectedStart = occurrence === 2 ? [...text].indexOf('的', first + 1) : first;
+  const first = text.indexOf('的');
+  const expectedStart = graphemeCount(text.slice(0, occurrence === 2 ? text.indexOf('的', first + 1) : first));
   expect(finding).toMatchObject({ quote: '的', replacement: '之', fromGrapheme: expectedStart, toGrapheme: expectedStart + 1 });
   const applied = opened.applyChangeSuggestion({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
     windowStartBlockId: finding.blockId, markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });

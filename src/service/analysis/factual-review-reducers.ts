@@ -313,8 +313,7 @@ export function locatedUnitFindings(
     const blockId = messageBlockIds[assertion.blockOrdinal - 1];
     const block = blockId === undefined ? undefined : blocks.get(blockId);
     if (blockId === undefined || block === undefined) continue;
-    const requested = locateQuotation(block.text, assertion.quote, assertion.occurrence);
-    const location = requested;
+    const location = locateQuotation(block.text, assertion.quote, assertion.occurrence);
     if (location.state !== 'verified') continue;
     const quote = quotationForLocation(block.text, assertion.quote, location);
     const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote), ...(assertion.occurrence === undefined ? {} : { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme }) });
