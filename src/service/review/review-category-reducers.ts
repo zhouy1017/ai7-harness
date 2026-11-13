@@ -131,9 +131,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote, finding.occurrence);
       let annotation = false;
       let note = finding.note;
-      let recoveredAcrossBlocks = false;
       if (location.state === 'not-found') {
-        recoveredAcrossBlocks = true;
         let matchingBlocks = 0;
         for (const id of distinctBlockIds) {
           const candidate = blocks.get(id);
@@ -150,7 +148,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       }
       if (location.state === 'ambiguous' && block !== undefined) {
         location = locateQuotation(block.text, finding.quote, 1);
-        if (!recoveredAcrossBlocks) note = `【锚点不唯一】${note}`;
+        if (!annotation) note = `【锚点不唯一】${note}`;
       }
       const partialGrapheme = location.state === 'not-found' && distinctBlockIds.some((id) => {
         const text = blocks.get(id)?.text;
