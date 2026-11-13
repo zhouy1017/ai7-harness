@@ -90,6 +90,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     if(!words||!card||card.getBoundingClientRect().top<pane.getBoundingClientRect().bottom)return false;
     words.scrollIntoView({block:'center'});
     document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
+    document.querySelector('[data-testid="manuscript-editor"]').focus();
+    const range=document.createRange(); range.selectNodeContents(words); range.collapse(true);
+    const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range);
     words.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true;
   })()`), 'comments-overflow-pick');
   await waitFor(renderer, `(() => {
@@ -98,7 +101,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     return card.dataset.selected==='true' && c.top>=p.top-1 && c.bottom<=p.bottom+1 && Math.abs(c.top-w.top)<=4 && document.querySelector('[data-comment-leader="'+id+'"]') && !document.querySelector('.editorial-mark-layer [data-mark-card]');
   })()`, 'comments-overflow-selected-aligned');
   check(await renderer.evaluate(`(() => { for(const id of __comments.ids.slice(2,4)){ const node=document.querySelector('[data-comment-card="'+id+'"]'); node.dispatchEvent(new PointerEvent('pointerenter')); node.dispatchEvent(new PointerEvent('pointerleave')); } return document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]').dataset.selected==='true'; })()`), 'comments-hover-keeps-selection');
-  check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-block-id]').dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true; })()`), 'comments-unmarked-clear');
+  check(await renderer.evaluate(`(() => { const block=document.querySelector('.editor-window [data-block-id]'); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); block.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true; })()`), 'comments-unmarked-clear');
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
   check(await renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
