@@ -125,10 +125,11 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
     words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    const card=Array.from(document.querySelectorAll('[data-comment-card]')).find(node=>{ const anchor=document.querySelector('.editor-window [data-mark-id="'+node.dataset.commentCard+'"]'); return !node.hidden && anchor && anchor.getBoundingClientRect().top>=pane.getBoundingClientRect().top+8 && Math.abs(node.getBoundingClientRect().top-anchor.getBoundingClientRect().top)<=4; });
-    if(!card)return {pass:false,unpushed:false};
     pane.scrollTop=30;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const first=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
+    if(!first)return {pass:false,unpushed:false};
+    const card=first.card;
     const freshWords=document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]');
     const cardTop=card.getBoundingClientRect().top, wordsTop=freshWords.getBoundingClientRect().top;
     return {pass:pane.scrollTop>0 && Math.abs(cardTop-wordsTop)<=4, scrollTop:pane.scrollTop, cardTop, wordsTop, paneTop:pane.getBoundingClientRect().top, connected:words.isConnected, selected:!!document.querySelector('[data-comment-card][data-selected="true"]')};
