@@ -9,7 +9,7 @@ What R1 is to give the editor (candidates, not delivered):
 - **A toolbar that fits on one row.** One 改稿方式 control, icon 撤销 / 重做 and one 衍生稿件 menu ([#1452](https://github.com/zhouy1017/ai7-harness/issues/1452)).
 - **修改建议 survive repeated words and punctuation variants.** A finding whose words can be located inside the paragraph keeps its replacement and its one-click 接受 ([#1435](https://github.com/zhouy1017/ai7-harness/issues/1435)).
 
-Version: `package.json` stays 0.6.5 until the R1 closure candidate raises it to 0.7.0 with its [version ledger](docs/development/versioning.md) row under [ADR 0098](docs/adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md). Schema 113, protocol 201, Data Version 1 and policy v35 / set v26 are unchanged; no tag or release.
+Version: the [version ledger](docs/development/versioning.md) reads integrated **0.6.5** and `package.json` is 0.6.5; the R1 closure candidate raises both to 0.7.0 under [ADR 0098](docs/adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md). Schema 113, protocol 201, Data Version 1 and policy v35 / set v26 are unchanged; no tag or release.
 
 ## Delivered #1444 (0.6.5 Beta)
 
