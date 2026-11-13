@@ -1166,20 +1166,22 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       compositionend() {
         composing = false;
         view.dom.dataset['composing'] = 'false';
-        const waiting = compositionWaiters;
-        compositionWaiters = [];
-        for (const resolve of waiting) resolve();
         // A composition that ended past the soft limit was never cut short; input pauses now (DUR-008), and again once the
         // input method's last change has reached the document.
         const settleComposition = (): void => {
           if (destroyed) return;
-          if (view.composing) {
+          if (composing || view.composing) {
             window.setTimeout(settleComposition, 20);
             return;
           }
           checkBufferLimit();
           applyEditableState();
           announceState();
+          // An acknowledgement may arrive after compositionend but before ProseMirror clears its flag.
+          // Release those waiters here too; no later compositionend is required to adopt a durable write.
+          const waiting = compositionWaiters;
+          compositionWaiters = [];
+          for (const resolve of waiting) resolve();
         };
         queueMicrotask(settleComposition);
         scheduleAutomaticFlush();
