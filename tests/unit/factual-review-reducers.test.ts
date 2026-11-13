@@ -158,12 +158,13 @@ describe('the factual review reduction', () => {
     expect(reduction.assurance.statement).toBe(FACTUAL_REVIEW_ASSURANCE_STATEMENT);
   });
 
-  it('excludes a quotation that is not found and one that is found twice, with the reason and no range', () => {
+  it('anchors the first repeated quotation and excludes an absent quotation', () => {
     const absent = assertion({ quote: '并不存在的引文' });
     const twice = assertion({ quote: '辖三县', blockOrdinal: messageBlockIds.indexOf(blocks[2]!.blockId) + 1 });
     const reduction = reduce([closed([absent, twice])]);
-    expect(reduction.findings).toEqual([]);
-    expect(reduction.excluded.map((entry) => entry.reason)).toEqual(['quote-not-found', 'quote-ambiguous']);
+    expect(reduction.findings).toHaveLength(1);
+    expect(reduction.findings[0]!.quote).toBe('辖三县');
+    expect(reduction.excluded.map((entry) => entry.reason)).toEqual(['quote-not-found']);
     for (const entry of reduction.excluded) {
       expect(entry.states.referenceIntegrity).toBe('failed');
       expect(entry.reasonLabel.length).toBeGreaterThan(0);

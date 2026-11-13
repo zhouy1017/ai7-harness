@@ -140,12 +140,13 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
         });
         return;
       }
+      const requested = locateQuotation(block.text, assertion.quote, assertion.occurrence);
       located.push({
         unitOrdinal: outcome.unitOrdinal,
         assertionOrdinal: index + 1,
         assertion,
         blockId,
-        location: locateQuotation(block.text, assertion.quote, assertion.occurrence),
+        location: requested.state === 'ambiguous' ? locateQuotation(block.text, assertion.quote, 1) : requested,
       });
     });
   }
@@ -312,7 +313,8 @@ export function locatedUnitFindings(
     const blockId = messageBlockIds[assertion.blockOrdinal - 1];
     const block = blockId === undefined ? undefined : blocks.get(blockId);
     if (blockId === undefined || block === undefined) continue;
-    const location = locateQuotation(block.text, assertion.quote, assertion.occurrence);
+    const requested = locateQuotation(block.text, assertion.quote, assertion.occurrence);
+    const location = requested.state === 'ambiguous' ? locateQuotation(block.text, assertion.quote, 1) : requested;
     if (location.state !== 'verified') continue;
     const quote = sliceGraphemes(block.text, location.fromGrapheme, location.toGrapheme);
     const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote) });

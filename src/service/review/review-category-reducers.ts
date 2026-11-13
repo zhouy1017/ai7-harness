@@ -134,16 +134,16 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let recoveredAcrossBlocks = false;
       if (location.state === 'not-found') {
         recoveredAcrossBlocks = true;
-        let occurrences = 0;
+        let matchingBlocks = 0;
         for (const id of distinctBlockIds) {
           const candidate = blocks.get(id);
           if (candidate === undefined) continue;
           const match = locateQuotation(candidate.text, finding.quote);
           if (match.state === 'not-found') continue;
-          occurrences += match.state === 'verified' ? 1 : match.occurrences;
+          matchingBlocks += 1;
           if (location.state === 'not-found') { block = candidate; blockId = id; location = match; }
         }
-        if (occurrences > 1) {
+        if (matchingBlocks > 1) {
           annotation = true;
           note = `【锚点不唯一】${note}`;
         }

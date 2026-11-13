@@ -191,7 +191,7 @@ describe('a review category reduction', () => {
       const finding = reduction.findings[0]!;
       if (state === 'quote-ambiguous') {
         expect(finding.note).toContain('锚点不唯一');
-        expect(finding.replacement).toBe(ordinal === 1 && texts[0] === '目标目标' ? '替换' : null);
+        expect(finding.replacement).toBe(texts.filter((text) => text.includes('目标')).length === 1 || texts[0] === '目标目标' ? '替换' : null);
       }
       if (state === 'replacement-identical') expect(finding.replacement).toBeNull();
       if (outside) expect(finding.blockId).not.toBe(block(99, 'paragraph', '目标').blockId);
