@@ -477,7 +477,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         paintInputMode(editor.inputMode());
         setStatus(choice.value === 'confirm' ? INPUT_MODE_CONFIRM_CHANGED : INPUT_MODE_CHANGED[choice.mode], 'success');
         inputMenu.open = false;
-        inputModeToggle.focus();
+        editor.focus();
       };
       if (choice.autoApply === null && !dirty && !saving && !retryRequired) apply();
       else void editor?.flush().then(apply);

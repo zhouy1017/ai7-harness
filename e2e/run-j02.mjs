@@ -2122,7 +2122,7 @@ async function main() {
       for (const key of ['ArrowDown', 'ArrowDown', 'Escape']) {
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
-        requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); return ${key==='Escape'?"!menu.open && document.activeElement===menu.querySelector('summary')":"menu.open && menu.querySelector('.ui-menu-panel').contains(document.activeElement)"}; })()`) === true, `toolbar-menu-${key}`);
+        requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); return ${key==='Escape'?"!menu.open && document.activeElement===menu.querySelector('summary')":"menu.open && menu.querySelector('.ui-menu-panel').contains(document.activeElement)"}; })()`) === true, 'toolbar-menu-keyboard');
       }
     }
     // #1452: toolbar geometry at both Owner viewport sizes, in the existing layouts stage.
@@ -2138,7 +2138,7 @@ async function main() {
         const rects=controls.map(el=>el.getBoundingClientRect());
         return rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs(r.top-rects[0].top)<4 && r.bottom<=box.bottom)
           && controls.every(el=>el.scrollWidth<=el.clientWidth+1);
-      })()`) === true, `toolbar-one-row-${size.width}`);
+      })()`) === true, 'toolbar-one-row');
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to
