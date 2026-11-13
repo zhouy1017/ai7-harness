@@ -261,7 +261,7 @@ describe('paragraph occurrence retention', () => {
   it.each([undefined, 2, 0, 1.5, 99])('keeps a change on the selected repeated quotation (%s)', (occurrence) => {
     const result = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: byId,
       outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
-        unitOrdinal: 1, findings: [{ ...findings[1]!, occurrence }] } }] });
+        unitOrdinal: 1, findings: [{ ...findings[1]!, ...(occurrence === undefined ? {} : { occurrence }) }] } }] });
     const finding = result.findings[0]!;
     const start = occurrence === 2 ? 7 : 2;
     expect(finding).toMatchObject({ quote: '明天', replacement: '次日', sourceRange: { fromGrapheme: start, toGrapheme: start + 2 } });
