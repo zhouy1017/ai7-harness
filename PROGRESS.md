@@ -158,6 +158,8 @@ Known R1 limits:
 - The model is not yet told it may give an occurrence, so a repeated word is always located by guess: these 修改建议 keep one-click 接受 but stay out of 接受并应用全部. Quotations that already located keep the model’s text; the three reducer descriptors are frozen at their pre-#1435 wording. All three await retirement of the frozen fixture manifest (R2 #1453) and the contract rewrite (R3 #1434).
 - 批注栏 previews briefly show 正在更新批注… during a re-read; IME state across a card reorder is not proven.
 - J-02’s 1280×800 toolbar geometry check would also pass on the old toolbar; J-07’s narrow-shell check is the one that can fail.
+- At 1008×681 the 批注栏 is an overlay on the text. Its layout and the mark click were repaired after the hosted Gate failed there ([PR #1469](https://github.com/zhouy1017/ai7-harness/pull/1469)), and J-05 / J-08 now run the pane's real-input stages in both forms; but in the overlay form the connector between the words and the card is painted under the pane and is not visible, and J-08's connector check proves only that the element exists.
+- The guests run at 1164×781 and the hosted Gate at 1008×681, so a green guest ladder did not predict the Gate. On hosted runners J-02's structure burst failed twice (both at : the text whole, seven of eight writes journalled, one pending) and J-12's paged-away check once; no mechanism was found and neither has recurred in the hosted runs since.
 - The guest pool has three guests; the split full ladder starts only from PowerShell. `-ContinueOnFailure` has run once with a failure (`05d66561`).
 
 Known limitation: the manuscript export menu's 「导出审阅报告（.docx）」 is unit-checked only (J-04 drives the 审阅 header button, which calls the same function, #1430).

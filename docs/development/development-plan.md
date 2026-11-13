@@ -14,6 +14,7 @@ R1 starts from delivered 0.6.5 Beta at `dev@6fdb6a8b`. All four slices are merge
 | 1 (renderer, after #1451) | [#1454](https://github.com/zhouy1017/ai7-harness/issues/1454) | Compact and expanded pane cards, the 「模型@思考强度」 mark always visible, a one-row filter header | `3cc53efd` (#1466) |
 | 2 (renderer) | [#1452](https://github.com/zhouy1017/ai7-harness/issues/1452) | One 改稿方式 control, icon 撤销 / 重做, one 衍生稿件 menu; the toolbar fits on one row and wraps instead of clipping in a narrow shell | `ae444945`, `e903fa28` (#1460, #1465) |
 | 3 (service) | [#1435](https://github.com/zhouy1017/ai7-harness/issues/1435) | Repeated or punctuation-variant quotations keep their replacement; guessed locations keep one-click 接受 and stay out of bulk apply | `106a47e5` (#1462) |
+| repair | [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) | The 批注栏 works in the 1008×681 overlay form and a click on a mark is no longer dropped; found by the hosted Gate | `bedddbca` (#1469) |
 
 Remaining delivery order:
 
