@@ -3132,17 +3132,20 @@ async function main() {
     // 错别字与规范用语 in one confirmation: the strip states the exact write scope before 确认应用, and one
     // Effect writes every listed suggestion (V2-UX-REV-006, PDEC-012, EAPP-003).
     const beforeBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
-    const batchable = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.output === 'change-suggestion' && finding.status === 'pending' && finding.markStatus === 'open' && finding.anchorState === 'exact');
-    requireJourney(batchable.length > 1, 'review-batch-candidates', { count: batchable.length });
+    const pendingSuggestions = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.output === 'change-suggestion' && finding.status === 'pending');
+    const guessed = pendingSuggestions.filter((finding) => finding.note.startsWith('【锚点不唯一】'));
+    const batchable = pendingSuggestions.filter((finding) => !finding.note.startsWith('【锚点不唯一】') && finding.markStatus === 'open' && finding.anchorState === 'exact');
+    const batchExcluded = pendingSuggestions.length - batchable.length;
+    requireJourney(batchable.length > 1 && guessed.some((finding) => finding.quote === '古怪' && finding.replacement === '奇怪'), 'review-batch-candidates', { count: batchable.length, excluded: batchExcluded });
     // 接受并应用全部 applies in one step (Issue #1410 item 5): the result names the count and offers 撤销本批应用.
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'review-batch-prepare');
     await waitFor(renderer, `(() => { const ids=${JSON.stringify(batchable.map((finding) => finding.findingId))}; return ids.every((id)=>document.querySelector('article.review-finding[data-finding-id="'+id+'"]')?.dataset.status==='handled'); })()`, 'review-batch-handled', 60_000);
-    await assertRenderer(renderer, `(() => { const strip=document.querySelector('section.review-batch-applied[data-review-category="typos-and-usage"]'); return strip?.dataset.reviewBatchState==='applied' && (strip.querySelector('.review-batch-scope')?.textContent??'').startsWith('已把 ${batchable.length} 条修改建议写入稿件。') && strip.querySelector('[data-review-action="batch-undo"]')?.textContent==='撤销本批应用' && document.querySelector('[data-review-action="batch-confirm"]')===null; })()`, 'review-batch-applied-with-undo');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector('section.review-batch-applied[data-review-category="typos-and-usage"]'); return strip?.dataset.reviewBatchState==='applied' && (strip.querySelector('.review-batch-scope')?.textContent??'').startsWith('已把 ${batchable.length} 条修改建议写入稿件。') && strip.textContent.includes('另有 ${batchExcluded} 条需要逐条确认') && strip.querySelector('[data-review-action="batch-undo"]')?.textContent==='撤销本批应用' && document.querySelector('[data-review-action="batch-confirm"]')===null; })()`, 'review-batch-applied-with-undo');
     const afterBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     requireJourney(afterBatch?.manuscript?.journalSequence === beforeBatch.manuscript.journalSequence + 1 &&
       batchable.every((finding) => afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus === 'applied'),
     'review-batch-one-effect', { before: beforeBatch.manuscript.journalSequence, after: afterBatch?.manuscript?.journalSequence });
-    requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation').every((finding) =>
+    requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation' || finding.note.startsWith('【锚点不唯一】')).every((finding) =>
       afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus !== 'applied'), 'review-batch-preserves-annotations');
 
     at('review-ignore-with-reason');

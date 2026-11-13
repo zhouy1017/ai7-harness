@@ -531,7 +531,7 @@ describe('one-step review actions (#1410)', () => {
 
   it('excludes guessed and punctuation-matched suggestions from the batch and counts both (#1435)', async () => {
     const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));
-    const { root, status } = await view([{ ...suggestion('guess', 1), note: '【锚点不唯一】合成建议。' },
+    const { root, status } = await view([{ ...suggestion('guess', 1), quote: '古怪', replacement: '奇怪', note: '【锚点不唯一】同一段内“古怪”重复出现，可酌情替换其一。' },
       { ...suggestion('punctuation', 2), note: '【锚点不唯一】（标点已与原稿对齐）合成建议。' }, suggestion('pinned', 3)],
       { applyChangeSuggestionBatch: applyBatch, getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn() });
     button(root, 'batch-prepare')!.click(); await flush();
