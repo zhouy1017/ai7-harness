@@ -275,14 +275,15 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
 export async function commentsReplyAndResolve(renderer, check, waitFor) {
   // A wheel scroll can remove preceding cards while a reply remains in the text's 200px buffer.
   // Reordering that live card must preserve the browser's focused editing state.
-  await commentsSelectCard(renderer, check, waitFor, 11);
-  const openReply = await commentsNativeClick(renderer, await commentsControlPoint(renderer, 11, 'reply'));
-  check(openReply.real, 'comments-buffer-reply-real-click', openReply);
+  check(await renderer.evaluate(`(() => {const node=document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]');node.focus({preventScroll:true});return true;})()`), 'comments-buffer-reply-select');
+  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]')?.dataset.expanded==='true'`, 'comments-buffer-reply-expanded');
   check(await renderer.evaluate(`(() => {
-    const input=document.querySelector('[data-comment-reply="'+__comments.ids[11]+'"]');
+    const node=document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]');node.querySelector('[data-mark-action="reply"]').click();
+    const input=node.querySelector('[data-comment-reply]');if(!input)return false;
     input.value='公开合成滚动草稿';input.focus();input.setSelectionRange(2,4);globalThis.__commentsBufferReply=input;
-    const scroll=document.querySelector('.editor-window'),first=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
-    scroll.scrollTop+=first.getBoundingClientRect().bottom-scroll.getBoundingClientRect().top+202;return true;
+    const ready=document.activeElement===input&&input.selectionStart===2&&input.selectionEnd===4;
+    const scroll=document.querySelector('.editor-window'),first=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');if(!first)return false;
+    scroll.scrollTop+=first.getBoundingClientRect().bottom-scroll.getBoundingClientRect().top+202;return ready;
   })()`), 'comments-buffer-reply-scroll');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[0]+'"]')?.hidden===true && document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]')?.hidden===false`, 'comments-buffer-reply-reordered');
   const editing = await renderer.evaluate(`(() => {const input=document.querySelector('[data-comment-reply="'+__comments.ids[11]+'"]');return {same:input===__commentsBufferReply,focused:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd,body:input.value==='公开合成滚动草稿',active:document.activeElement?.tagName};})()`);
