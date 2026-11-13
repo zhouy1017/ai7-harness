@@ -237,3 +237,7 @@ it.each([undefined, 2, 0, 1.5, '2', 99])('admits optional occurrence without los
   if (parsed.ok) expect(parsed.result.findings[0]).toMatchObject({ quote: '目标', replacement: '替换',
     ...(typeof occurrence === 'number' && Number.isInteger(occurrence) && occurrence > 0 ? { occurrence } : {}) });
 });
+
+it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
+  expect(REVIEW_CATEGORY_REDUCER_DIGEST).toBe('a8e818cb4afefbb4e0cff17b634b3a903fb5dc424c9f863e03fc8200c036a8df');
+});

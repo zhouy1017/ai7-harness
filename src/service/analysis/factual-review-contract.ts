@@ -261,8 +261,8 @@ export function factualReviewRequestDigest(promptContractDigest: string, unitOrd
  * Presentation-only folding of one grapheme, kick-in 17 rule 7. Exactly two equivalences are applied:
  * every full-width ASCII form (U+FF01–U+FF5E) folds onto its half-width original, and the ideographic
  * space folds onto a space, which the whitespace collapse below then handles. Nothing else moves — no
- * case folding, no NFKC over the wider compatibility ranges, no punctuation substitution — because a
- * changed character is not an exact quotation.
+ * case folding or NFKC over wider compatibility ranges. The separate punctuation pass runs only
+ * after this exact folding fails.
  */
 function foldWidth(segment: string): string {
   let folded = '';
@@ -339,7 +339,7 @@ function fold(text: string, punctuation = false): FoldedText {
     normalized += folded.text.slice(previous, start);
     from.push(...fromGrapheme.slice(previous, start));
     to.push(...toGrapheme.slice(previous, start));
-    normalized += /^[.…]/u.test(match[0]) ? '…' : /^[—–-]/u.test(match[0]) ? '—' : '"';
+    normalized += /^[.…]/u.test(match[0]) ? '…' : /^[—–-]/u.test(match[0]) ? '—' : /^[‘’']/u.test(match[0]) ? "'" : '"';
     from.push(fromGrapheme[start]!);
     to.push(toGrapheme[start + match[0].length - 1]!);
     previous = start + match[0].length;
@@ -362,8 +362,13 @@ export type QuotationLocation =
  * repeated quotations remain ambiguous. Punctuation equivalence is tried only after the original fold fails.
  */
 export function locateQuotation(blockText: string, quote: string, occurrence?: number): QuotationLocation {
-  const exact = locateFoldedQuotation(blockText, quote, occurrence, false);
+  const exact = locateExactQuotation(blockText, quote, occurrence);
   return exact.state === 'not-found' ? locateFoldedQuotation(blockText, quote, occurrence, true) : exact;
+}
+
+/** Original width/whitespace matching, used before searching punctuation-equivalent candidates. */
+export function locateExactQuotation(blockText: string, quote: string, occurrence?: number): QuotationLocation {
+  return locateFoldedQuotation(blockText, quote, occurrence, false);
 }
 
 function locateFoldedQuotation(blockText: string, quote: string, occurrence: number | undefined, punctuation: boolean): QuotationLocation {

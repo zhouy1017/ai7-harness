@@ -529,6 +529,17 @@ describe('one-step review actions (#1410)', () => {
     expect(root.querySelector('section.review-batch-applied')).toBeNull();
   });
 
+  it('excludes guessed and punctuation-matched suggestions from the batch and counts both (#1435)', async () => {
+    const applyBatch = vi.fn(async () => ({ application: { effectId: 'effect' } }));
+    const { root, status } = await view([{ ...suggestion('guess', 1), note: '【锚点不唯一】合成建议。' },
+      { ...suggestion('punctuation', 2), note: '【锚点不唯一】（标点已与原稿对齐）合成建议。' }, suggestion('pinned', 3)],
+      { applyChangeSuggestionBatch: applyBatch, getManuscriptApplyOutcome: vi.fn(), inspectApplyReceipt: vi.fn() });
+    button(root, 'batch-prepare')!.click(); await flush();
+    expect(applyBatch).toHaveBeenCalledWith(expect.objectContaining({ markIds: ['pinned'] }));
+    expect(status).toHaveBeenLastCalledWith(expect.stringContaining('另有 2 条需要逐条确认'), 'success');
+    expect(root.querySelector('section.review-batch-applied')!.textContent).toContain('1 条');
+  });
+
   it('stops 撤销本批应用 at the first suggestion whose words moved on, and says how far it came', async () => {
     const reverse = vi.fn(async (input: { markId: string }) => { if (input.markId === 'm1') throw new Error('anchor moved'); return { application: { effectId: 'reverse' } }; });
     const outcome = vi.fn(async () => ({ state: 'not-committed' }));

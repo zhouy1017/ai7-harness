@@ -167,7 +167,7 @@ describe('a review category reduction', () => {
   });
   it.each([
     { name: 'preserves a declared success even with another match', texts: ['目标', '目标'], ordinal: 1, state: 'verified' },
-    { name: 'preserves declared ambiguity', texts: ['目标目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },
+    { name: 'keeps a guessed suggestion for declared ambiguity', texts: ['目标目标', '目标'], ordinal: 1, state: 'quote-ambiguous', expectedReplacement: '替换' },
     { name: 'refuses matches across blocks', texts: ['没有', '目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },
     { name: 'refuses repeated matches within another block', texts: ['没有', '目标目标'], ordinal: 1, state: 'quote-ambiguous' },
     { name: 'refuses an absent quote', texts: ['没有', '仍然没有'], ordinal: 1, state: 'quote-not-found' },
@@ -178,7 +178,7 @@ describe('a review category reduction', () => {
     { name: 'rejects an identical resolved replacement', texts: ['没有', '目标'], ordinal: 1, replacement: '目标', state: 'replacement-identical' },
     { name: 'preserves Exact Fetch exclusion after recovery', texts: ['没有', '目标'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
     { name: 'preserves Exact Fetch exclusion before whole-block fallback', texts: ['没有', '仍然没有'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
-  ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state }) => {
+  ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state, expectedReplacement }) => {
     const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
     const unit = { ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: repeatedId ? [inputs[1]!.blockId] : [] };
     const records = new Map(inputs.filter((_, index) => index !== missing).map((entry) => [entry.blockId, entry]));
@@ -192,7 +192,7 @@ describe('a review category reduction', () => {
       const finding = reduction.findings[0]!;
       if (state === 'quote-ambiguous') {
         expect(finding.note).toContain('锚点不唯一');
-        expect(finding.replacement).toBe(texts.filter((text) => text.includes('目标')).length === 1 || texts[0] === '目标目标' ? '替换' : null);
+        expect(finding.replacement).toBe(expectedReplacement ?? null);
       }
       if (state === 'replacement-identical') expect(finding.replacement).toBeNull();
       if (outside) expect(finding.blockId).not.toBe(block(99, 'paragraph', '目标').blockId);
@@ -277,5 +277,35 @@ describe('paragraph occurrence retention', () => {
           severity: 'should', note: '合成标点建议。', replacement: '明日再来。' }] } }] });
     expect(result.findings[0]).toMatchObject({ quote: '「明天……再来——好吗」', replacement: '明日再来。',
       sourceRange: { fromGrapheme: 2, toGrapheme: 14 } });
+  });
+});
+
+describe('anchoring repair regressions (#1435)', () => {
+  function run(texts: string[], entries: ReviewUnitFinding[]) {
+    const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
+    return reduceReviewCategory({ categoryId: 'typos-and-usage', manifest: { ...manifest,
+      units: [{ ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: [] }] },
+      blocks: new Map(inputs.map((entry) => [entry.blockId, entry])), outcomes: [{ unitOrdinal: 1, state: 'closed',
+        result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: entries } }] });
+  }
+  const entry: ReviewUnitFinding = { quote: '说“好”', blockOrdinal: 1, severity: 'should', note: '合成建议。', replacement: '说“再见”' };
+  it('preserves exact recovery in another block before considering punctuation in the named block', () => {
+    const result = run(['他说"好"就走了。', '她说“好”就留下。'], [entry]);
+    expect(result.findings[0]).toMatchObject({ quote: entry.quote, note: entry.note, replacement: entry.replacement,
+      sourceRange: { fromGrapheme: 1, toGrapheme: 5 } });
+    expect(result.findings[0]!.blockId).toBe(block(2, 'paragraph', '').blockId);
+  });
+  it('retains both selected occurrences as distinct suggestions', () => {
+    const result = run(['他慢慢的走，她轻轻的笑。'], [1, 2].map((occurrence) => ({ ...entry, quote: '的', replacement: '地', occurrence })));
+    expect(result.findings.map((finding) => finding.sourceRange.fromGrapheme)).toEqual([3, 9]);
+    expect(new Set(result.findings.map((finding) => finding.findingId)).size).toBe(2);
+  });
+  it('labels missing or invalid occurrence and punctuation matches for individual acceptance only', () => {
+    for (const occurrence of [undefined, 1.5, 99]) {
+      const result = run(['我的书放在桌上，他慢慢的走。'], [{ ...entry, quote: '的', replacement: '地', ...(occurrence === undefined ? {} : { occurrence }) }]);
+      expect(result.findings[0]).toMatchObject({ replacement: '地', note: '【锚点不唯一】合成建议。', sourceRange: { fromGrapheme: 1, toGrapheme: 2 } });
+    }
+    const result = run(['他说「明天再来」。'], [{ ...entry, quote: '"明天再来"', replacement: '"次日再来"' }]);
+    expect(result.findings[0]).toMatchObject({ quote: '「明天再来」', replacement: '"次日再来"', note: '【锚点不唯一】（标点已与原稿对齐）合成建议。' });
   });
 });

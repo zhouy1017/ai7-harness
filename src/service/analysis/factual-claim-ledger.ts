@@ -79,8 +79,7 @@ export function freezeFactualClaimLedger(input: {
       }
       const block = blockIds[assertion.blockOrdinal - 1];
       const text = block === undefined ? undefined : input.blocks.get(block)?.text;
-      const requested = text === undefined ? { state: 'not-found' as const } : locateQuotation(text, assertion.quote, assertion.occurrence);
-      const location = requested.state === 'ambiguous' ? locateQuotation(text!, assertion.quote, 1) : requested;
+      const location = text === undefined ? { state: 'not-found' as const } : locateQuotation(text, assertion.quote, assertion.occurrence);
       if (block === undefined || location.state !== 'verified') {
         excluded.push({ producer, reason: location.state === 'ambiguous' ? 'quote-ambiguous' : 'quote-not-found' });
         return;

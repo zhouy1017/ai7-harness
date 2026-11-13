@@ -1,3 +1,4 @@
+import { REVIEW_GUESSED_ANCHOR_NOTE_PREFIX } from '../../shared/review-basis.js';
 import { notExactFetched } from '../retrieval/result-validator.js';
 import {
   REVIEW_CATEGORY_ASSURANCE_STATEMENT,
@@ -19,7 +20,7 @@ import {
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex, graphemeCount } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
-import { locateQuotation, quotationForLocation, normalizedQuotation, sliceGraphemes } from '../analysis/factual-review-contract.js';
+import { locateExactQuotation, locateQuotation, quotationForLocation, normalizedQuotation, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from '../analysis/reducers.js';
 import { reviewCategoryMessageBlockIds, REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, type ReviewCrossChapterResult, type ReviewCategoryUnitResult, type ReviewUnitFinding } from './review-category-contract.js';
 import type { CrossUnitOutcome } from '../analysis/reducers.js';
@@ -128,28 +129,33 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       bySeverity[finding.severity] += 1;
       let blockId = messageBlockIds[finding.blockOrdinal - 1];
       let block = blockId === undefined ? undefined : blocks.get(blockId);
-      let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote, finding.occurrence);
+      let location: ReturnType<typeof locateQuotation> = { state: 'not-found' };
       let annotation = false;
       let wholeParagraphFallback = false;
       let note = finding.note;
-      if (location.state === 'not-found') {
-        let matchingBlocks = 0;
-        for (const id of distinctBlockIds) {
-          const candidate = blocks.get(id);
-          if (candidate === undefined) continue;
-          const match = locateQuotation(candidate.text, finding.quote);
-          if (match.state === 'not-found') continue;
-          matchingBlocks += 1;
-          if (location.state === 'not-found') { block = candidate; blockId = id; location = match; }
+      // Preserve every existing exact recovery before trying punctuation equivalence anywhere.
+      for (const locate of [locateExactQuotation, locateQuotation]) {
+        blockId = messageBlockIds[finding.blockOrdinal - 1];
+        block = blockId === undefined ? undefined : blocks.get(blockId);
+        location = block === undefined ? { state: 'not-found' } : locate(block.text, finding.quote, finding.occurrence);
+        if (location.state === 'not-found') {
+          let occurrences = 0;
+          for (const id of distinctBlockIds) {
+            const candidate = blocks.get(id);
+            if (candidate === undefined) continue;
+            const match = locate(candidate.text, finding.quote);
+            if (match.state === 'not-found') continue;
+            occurrences += match.state === 'verified' ? 1 : match.occurrences;
+            if (location.state === 'not-found') { block = candidate; blockId = id; location = match; }
+          }
+          // Wrong paragraph plus a repeated quotation is two guesses: preserve annotation behaviour.
+          if (occurrences > 1) annotation = true;
         }
-        if (matchingBlocks > 1) {
-          annotation = true;
-          note = `【锚点不唯一】${note}`;
-        }
-      }
-      if (location.state === 'ambiguous' && block !== undefined) {
-        location = locateQuotation(block.text, finding.quote, 1);
-        if (!annotation) note = `【锚点不唯一】${note}`;
+        if (location.state === 'not-found') continue;
+        const guessed = location.state === 'ambiguous' || annotation || locate === locateQuotation;
+        if (location.state === 'ambiguous' && block !== undefined) location = locate(block.text, finding.quote, 1);
+        if (guessed) note = `${REVIEW_GUESSED_ANCHOR_NOTE_PREFIX}${locate === locateQuotation ? '（标点已与原稿对齐）' : ''}${note}`;
+        break;
       }
       const partialGrapheme = location.state === 'not-found' && distinctBlockIds.some((id) => {
         const text = blocks.get(id)?.text;
@@ -219,7 +225,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
     const reference = { unitOrdinal: entry.unitOrdinal, blockOrdinal: finding.blockOrdinal, findingOrdinal: entry.findingOrdinal,
       unitDigest: manifest.units[entry.unitOrdinal - 1]!.digest,
       resultDigest: resultDigests.get(entry.unitOrdinal)! };
-    const key = canonicalJson(input.exactOccurrences ? [coordinates, replacement] : [entry.blockId, normalized, replacement]);
+    const key = canonicalJson(input.exactOccurrences ? [coordinates, replacement] : [coordinates, normalized, replacement]);
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {
       merged += 1;
@@ -233,7 +239,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
     }
     findingsByKey.set(key, findings.length);
     findings.push({
-      findingId: findingId(input.exactOccurrences ? { kind: 'finding', categoryId, ...coordinates, replacement }
+      findingId: findingId(input.exactOccurrences || locateExactQuotation(entry.blockText!, finding.quote).state !== 'verified' ? { kind: 'finding', categoryId, ...coordinates, replacement }
         : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalized, replacement }),
       unitOrdinal: entry.unitOrdinal,
       blockId: entry.blockId,

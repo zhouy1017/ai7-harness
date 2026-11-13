@@ -1216,7 +1216,10 @@ it.each([undefined, 2, 99])('accepts a repeated paragraph quotation in one click
   const run = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
   expect(run.findings).toHaveLength(1);
   const finding = run.findings[0]!;
-  expect(finding).toMatchObject({ quote: '的', replacement: '之' });
+  const text = opened.baselineAnalysisLedger.readWorkingBlocks(run.manuscript.branchId).find((block) => block.blockId === finding.blockId)!.text;
+  const first = [...text].indexOf('的');
+  const expectedStart = occurrence === 2 ? [...text].indexOf('的', first + 1) : first;
+  expect(finding).toMatchObject({ quote: '的', replacement: '之', fromGrapheme: expectedStart, toGrapheme: expectedStart + 1 });
   const applied = opened.applyChangeSuggestion({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
     windowStartBlockId: finding.blockId, markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
   expect(applied.card!.suggestion!.decision).toBeTruthy();

@@ -63,6 +63,7 @@ import { withModelClarification } from '../provider/clarification-contract.js';
  * The reducer descriptor is shared by the whole family: how findings are located, merged and excluded
  * does not depend on the category.
  */
+// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
 export const REVIEW_CATEGORY_REDUCER_DESCRIPTOR = {
   schema: 'ai7.editorial-review.reducers/2',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],

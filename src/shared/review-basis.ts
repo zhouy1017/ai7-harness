@@ -1,3 +1,6 @@
+/** Located for individual review, excluded from automatic batch application. */
+export const REVIEW_GUESSED_ANCHOR_NOTE_PREFIX = '【锚点不唯一】';
+
 /** Structured review basis. Historical snapshots/report records retain their original text. */
 export interface ReviewCategoryBasis {
   readonly categoryId: string;

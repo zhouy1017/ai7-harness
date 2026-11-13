@@ -146,7 +146,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
         assertionOrdinal: index + 1,
         assertion,
         blockId,
-        location: requested.state === 'ambiguous' ? locateQuotation(block.text, assertion.quote, 1) : requested,
+        location: requested,
       });
     });
   }
@@ -186,7 +186,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
       revision: manifest.manuscript.revisionId, block: entry.blockId,
       exactRange: { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },
       quote: assertion.quote, assertionClass: assertion.assertionClass, question: assertion.question })
-      : `${entry.blockId}\u0000${normalized}`;
+      : `${entry.blockId}\u0000${normalized}\u0000${entry.location.fromGrapheme}:${entry.location.toGrapheme}`;
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {
       merged += 1;
@@ -198,7 +198,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
       continue;
     }
     const identity = input.exactOccurrences === true ? `fnd_${sha256Hex(key).slice(0, 24)}`
-      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized });
+      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized, ...(assertion.occurrence === undefined ? {} : { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme }) });
     const outcome = input.research.lookup(
       { findingId: identity, question: assertion.question, severity: assertion.severity },
       null,
@@ -314,10 +314,10 @@ export function locatedUnitFindings(
     const block = blockId === undefined ? undefined : blocks.get(blockId);
     if (blockId === undefined || block === undefined) continue;
     const requested = locateQuotation(block.text, assertion.quote, assertion.occurrence);
-    const location = requested.state === 'ambiguous' ? locateQuotation(block.text, assertion.quote, 1) : requested;
+    const location = requested;
     if (location.state !== 'verified') continue;
     const quote = quotationForLocation(block.text, assertion.quote, location);
-    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote) });
+    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote), ...(assertion.occurrence === undefined ? {} : { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme }) });
     if (seen.has(findingIdentity)) continue;
     seen.add(findingIdentity);
     located.push({ findingId: findingIdentity, blockId, quote, basis: assertion.basis, category: assertion.category });

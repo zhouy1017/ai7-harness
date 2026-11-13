@@ -220,7 +220,7 @@ describe('quotation occurrence and punctuation (#1435)', () => {
       expect(locateQuotation('甲甲甲', '甲甲', occurrence)).toEqual({ state: 'ambiguous', occurrences: 2 });
     }
   });
-  it.each(['“目标……”', '「目标……」', '『目标…』', "'目标...'", '＂目标...＂'])('maps quotes and ellipses: %s', (text) => {
+  it.each(['“目标……”', '「目标……」', '『目标…』', '＂目标...＂'])('maps quotes and ellipses: %s', (text) => {
     const location = locateQuotation('前' + text + '后', '"目标..."');
     expect(location.state).toBe('verified');
     if (location.state === 'verified') expect(sliceGraphemes('前' + text + '后', location.fromGrapheme, location.toGrapheme)).toBe(text);
@@ -236,4 +236,10 @@ it.each([undefined, 2, 0, 1.5, '2', 99])('keeps factual assertions with optional
   const parsed = parseFactualReviewUnitResult(unitResult([assertion({ occurrence })]), expected);
   expect(parsed.ok).toBe(true);
   if (parsed.ok) expect(parsed.result.assertions).toHaveLength(1);
+});
+
+it('keeps single and double quote families distinct (#1435)', () => {
+  expect(locateQuotation('54"', "54'")).toEqual({ state: 'not-found' });
+  expect(locateQuotation('54′', '54"')).toEqual({ state: 'not-found' });
+  expect(locateQuotation('‘目标…’', "'目标...'").state).toBe('verified');
 });

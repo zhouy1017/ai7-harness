@@ -48,6 +48,7 @@ import { carryPositionalResult } from './reused-result.js';
  *
  * The reducer lists and locates; it never synthesizes across units (the Authority Ceiling). Its counts are the revision's summary.
  */
+// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
 export const CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR = {
   schema: 'ai7.custom-analysis.reducers/1',
   stages: ['unit-validation', 'reference-integrity'],
