@@ -840,7 +840,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       else item.node.classList.remove('editorial-mark-card-active');
       if (commentsCanvas.children[index] !== item.node) commentsCanvas.insertBefore(item.node, commentsCanvas.children[index] ?? null);
     }
-    commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
+    // The final card may align near the viewport's top: retain blank space below it so the browser does not clamp
+    // the requested scroll offset and push the pair apart. Manual pane reading keeps that existing canvas extent.
+    const scrollFloor = preservePanePositions ? Number.parseFloat(commentsCanvas.style.height) || 0
+      : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
+    commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
     for (const node of options.host.querySelectorAll<HTMLElement>('[data-mark-id]')) node.dataset['commentHovered'] = String(node.dataset['markId'] === hoveredComment);
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
