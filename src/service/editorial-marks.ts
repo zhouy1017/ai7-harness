@@ -1,3 +1,4 @@
+import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
 import { EditorialLearningLedger } from './learning/ledger.js';
 import { historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
@@ -1185,9 +1186,12 @@ export class EditorialMarkStore {
       const included: string[] = [];
       // A drifted anchor is a classified Three-way Proposal Conflict (原文已变, ADR 0085) whatever its base pin says;
       // only a detached one is a stale base not yet classified (V2-UX-PDEC-005).
+      // Review Run notes are stored as the proposal item's rationale by #markInput / #insertItem.
+      const itemRationale = this.#db.prepare('SELECT rationale FROM proposal_change_items WHERE item_id = ?');
       for (const item of scope) {
+        const guessed = input.disposition === 'accepted' && reviewFindingHasGuessedAnchor(text(itemRationale.get(item.itemId)!.rationale));
         const reason = item.atomicGroupId !== null ? 'atomic-group' : item.otherVersion ? 'other-version' : !item.loaded ? 'unloaded'
-          : item.anchorState === 'detached' ? 'unclassified-stale' : item.conflict ? 'conflict' : item.appliedRevisionId !== null ? 'applied' : null;
+          : item.anchorState === 'detached' ? 'unclassified-stale' : item.conflict ? 'conflict' : item.appliedRevisionId !== null ? 'applied' : guessed ? 'guessed-anchor' : null;
         if (reason === null) included.push(item.markId); else excluded.push({ markId: item.markId, reason });
       }
       for (const markId of input.markIds) if (input.scope === 'selection' && !scope.some((item) => item.markId === markId)) {

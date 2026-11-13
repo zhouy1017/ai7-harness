@@ -27,7 +27,7 @@ import { canonicalJson, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   factualReviewMessageBlockIds,
-  locateQuotation,
+  locateExactQuotation, locateQuotation, quotationForLocation,
   normalizedQuotation,
   type FactualReviewUnitResult,
   type FactualUnitAssertion,
@@ -140,12 +140,13 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
         });
         return;
       }
+      const requested = locateQuotation(block.text, assertion.quote, assertion.occurrence);
       located.push({
         unitOrdinal: outcome.unitOrdinal,
         assertionOrdinal: index + 1,
         assertion,
         blockId,
-        location: locateQuotation(block.text, assertion.quote),
+        location: requested,
       });
     });
   }
@@ -159,7 +160,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
   let verified = 0;
   const questions: ResearchOutcome[] = [];
   for (const entry of located) {
-    const { assertion } = entry;
+    const assertion = entry.location.state === 'verified' ? { ...entry.assertion, quote: quotationForLocation(blocks.get(entry.blockId)!.text, entry.assertion.quote, entry.location) } : entry.assertion;
     if (notExactFetched(assertion) || entry.location.state !== 'verified') {
       const reason = notExactFetched(assertion) ? 'not-exact-fetched' as const : entry.location.state === 'ambiguous' ? 'quote-ambiguous' as const : 'quote-not-found' as const;
       excluded.push({
@@ -185,7 +186,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
       revision: manifest.manuscript.revisionId, block: entry.blockId,
       exactRange: { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },
       quote: assertion.quote, assertionClass: assertion.assertionClass, question: assertion.question })
-      : `${entry.blockId}\u0000${normalized}`;
+      : `${entry.blockId}\u0000${normalized}\u0000${entry.location.fromGrapheme}:${entry.location.toGrapheme}`;
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {
       merged += 1;
@@ -197,7 +198,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
       continue;
     }
     const identity = input.exactOccurrences === true ? `fnd_${sha256Hex(key).slice(0, 24)}`
-      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized });
+      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized, ...(locateExactQuotation(blocks.get(entry.blockId)!.text, entry.assertion.quote).state === 'verified' ? {} : { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme }) });
     const outcome = input.research.lookup(
       { findingId: identity, question: assertion.question, severity: assertion.severity },
       null,
@@ -311,11 +312,14 @@ export function locatedUnitFindings(
     if (!FACTUAL_FINDING_CLASSES.includes(assertion.assertionClass)) continue;
     const blockId = messageBlockIds[assertion.blockOrdinal - 1];
     const block = blockId === undefined ? undefined : blocks.get(blockId);
-    if (blockId === undefined || block === undefined || locateQuotation(block.text, assertion.quote).state !== 'verified') continue;
-    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(assertion.quote) });
+    if (blockId === undefined || block === undefined) continue;
+    const location = locateQuotation(block.text, assertion.quote, assertion.occurrence);
+    if (location.state !== 'verified') continue;
+    const quote = quotationForLocation(block.text, assertion.quote, location);
+    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote), ...(locateExactQuotation(block.text, assertion.quote).state === 'verified' ? {} : { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme }) });
     if (seen.has(findingIdentity)) continue;
     seen.add(findingIdentity);
-    located.push({ findingId: findingIdentity, blockId, quote: assertion.quote, basis: assertion.basis, category: assertion.category });
+    located.push({ findingId: findingIdentity, blockId, quote, basis: assertion.basis, category: assertion.category });
   }
   return located;
 }

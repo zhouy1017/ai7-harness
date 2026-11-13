@@ -140,6 +140,7 @@ describe('a review category reduction', () => {
     for (const result of results) {
       expect(result.excluded).toEqual([]);
       expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.quote).toBe('A B'); // Existing replay requests retain the model's already-verifiable quote.
       expect(result.findings[0]!.sourceRange).toEqual({ blockId: paragraphs[1]!.blockId, fromGrapheme: 3, toGrapheme: 6 });
       expect(sliceGraphemes(paragraphs[1]!.text, 3, 6)).toBe('Ａ　Ｂ');
     }
@@ -166,7 +167,7 @@ describe('a review category reduction', () => {
   });
   it.each([
     { name: 'preserves a declared success even with another match', texts: ['目标', '目标'], ordinal: 1, state: 'verified' },
-    { name: 'preserves declared ambiguity', texts: ['目标目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },
+    { name: 'keeps a guessed suggestion for declared ambiguity', texts: ['目标目标', '目标'], ordinal: 1, state: 'quote-ambiguous', expectedReplacement: '替换' },
     { name: 'refuses matches across blocks', texts: ['没有', '目标', '目标'], ordinal: 1, state: 'quote-ambiguous' },
     { name: 'refuses repeated matches within another block', texts: ['没有', '目标目标'], ordinal: 1, state: 'quote-ambiguous' },
     { name: 'refuses an absent quote', texts: ['没有', '仍然没有'], ordinal: 1, state: 'quote-not-found' },
@@ -177,7 +178,7 @@ describe('a review category reduction', () => {
     { name: 'rejects an identical resolved replacement', texts: ['没有', '目标'], ordinal: 1, replacement: '目标', state: 'replacement-identical' },
     { name: 'preserves Exact Fetch exclusion after recovery', texts: ['没有', '目标'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
     { name: 'preserves Exact Fetch exclusion before whole-block fallback', texts: ['没有', '仍然没有'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
-  ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state }) => {
+  ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state, expectedReplacement }) => {
     const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
     const unit = { ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: repeatedId ? [inputs[1]!.blockId] : [] };
     const records = new Map(inputs.filter((_, index) => index !== missing).map((entry) => [entry.blockId, entry]));
@@ -191,7 +192,7 @@ describe('a review category reduction', () => {
       const finding = reduction.findings[0]!;
       if (state === 'quote-ambiguous') {
         expect(finding.note).toContain('锚点不唯一');
-        expect(finding.replacement).toBeNull();
+        expect(finding.replacement).toBe(expectedReplacement ?? null);
       }
       if (state === 'replacement-identical') expect(finding.replacement).toBeNull();
       if (outside) expect(finding.blockId).not.toBe(block(99, 'paragraph', '目标').blockId);
@@ -253,5 +254,65 @@ describe('a review category reduction', () => {
     expect(reduction.coverage.unitsOutOfScope).toBe(1);
     expect(reduction.coverage.label).toBe('覆盖：部分 · 1/2 单元 · 1 个单元不在本次审阅范围内');
     expect(reduction.reducerClosure.stages[0]).toEqual({ stage: 'unit-validation', state: 'closed', inputCount: 1 });
+  });
+});
+
+// #1435: all inputs below are public synthetic editorial examples.
+describe('paragraph occurrence retention', () => {
+  it.each([undefined, 2, 0, 1.5, 99])('keeps a change on the selected repeated quotation (%s)', (occurrence) => {
+    const result = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: byId,
+      outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+        unitOrdinal: 1, findings: [{ ...findings[1]!, ...(occurrence === undefined ? {} : { occurrence }) }] } }] });
+    const finding = result.findings[0]!;
+    const start = occurrence === 2 ? 7 : 2;
+    expect(finding).toMatchObject({ quote: '明天', replacement: '次日', sourceRange: { fromGrapheme: start, toGrapheme: start + 2 } });
+  });
+  it('restores punctuation to the paragraph slice and retains the replacement', () => {
+    const text = '他说「明天……再来——好吗」。';
+    const localBlocks = new Map(byId);
+    localBlocks.set(blocks[2]!.blockId, { ...blocks[2]!, text });
+    const result = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: localBlocks,
+      outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA,
+        unitOrdinal: 1, findings: [{ quote: '"明天...再来--好吗"', blockOrdinal: 3,
+          severity: 'should', note: '合成标点建议。', replacement: '明日再来。' }] } }] });
+    expect(result.findings[0]).toMatchObject({ quote: '「明天……再来——好吗」', replacement: '明日再来。',
+      sourceRange: { fromGrapheme: 2, toGrapheme: 14 } });
+  });
+});
+
+describe('anchoring repair regressions (#1435)', () => {
+  function run(texts: string[], entries: ReviewUnitFinding[]) {
+    const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
+    return reduceReviewCategory({ categoryId: 'typos-and-usage', manifest: { ...manifest,
+      units: [{ ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: [] }] },
+      blocks: new Map(inputs.map((entry) => [entry.blockId, entry])), outcomes: [{ unitOrdinal: 1, state: 'closed',
+        result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: entries } }] });
+  }
+  const entry: ReviewUnitFinding = { quote: '说“好”', blockOrdinal: 1, severity: 'should', note: '合成建议。', replacement: '说“再见”' };
+  it('preserves exact recovery in another block before considering punctuation in the named block', () => {
+    const result = run(['他说"好"就走了。', '她说“好”就留下。'], [entry]);
+    expect(result.findings[0]).toMatchObject({ quote: entry.quote, note: entry.note, replacement: entry.replacement,
+      sourceRange: { fromGrapheme: 1, toGrapheme: 5 } });
+    expect(result.findings[0]!.blockId).toBe(block(2, 'paragraph', '').blockId);
+  });
+  it('retains both selected occurrences as distinct suggestions', () => {
+    const result = run(['他慢慢的走，她轻轻的笑。'], [1, 2].map((occurrence) => ({ ...entry, quote: '的', replacement: '地', occurrence })));
+    expect(result.findings.map((finding) => finding.sourceRange.fromGrapheme)).toEqual([3, 9]);
+    expect(new Set(result.findings.map((finding) => finding.findingId)).size).toBe(2);
+  });
+  it('keeps unchanged annotation ids byte-identical to base 2f6f14df', () => {
+    // Literal results from running the base reducer on these same public synthetic inputs.
+    const fallback = run(['今天天气晴朗。'], [{ ...entry, quote: '并不存在', replacement: '替换' }]).findings[0]!;
+    expect(fallback).toMatchObject({ findingId: 'rfd_b75a21bab65708d7870ae8c6', quote: '并不存在', replacement: null });
+    const repeated = run(['没有', '目标目标'], [{ ...entry, quote: '目标', replacement: '替换' }]).findings[0]!;
+    expect(repeated).toMatchObject({ findingId: 'rfd_2512d2f5cd41359ade23aef2', quote: '目标', replacement: null });
+  });
+  it('labels missing or invalid occurrence and punctuation matches for individual acceptance only', () => {
+    for (const occurrence of [undefined, 1.5, 99]) {
+      const result = run(['我的书放在桌上，他慢慢的走。'], [{ ...entry, quote: '的', replacement: '地', ...(occurrence === undefined ? {} : { occurrence }) }]);
+      expect(result.findings[0]).toMatchObject({ replacement: '地', note: '【锚点不唯一】合成建议。', sourceRange: { fromGrapheme: 1, toGrapheme: 2 } });
+    }
+    const result = run(['他说「明天再来」。'], [{ ...entry, quote: '"明天再来"', replacement: '"次日再来"' }]);
+    expect(result.findings[0]).toMatchObject({ quote: '「明天再来」', replacement: '"次日再来"', note: '【锚点不唯一】（标点已与原稿对齐）合成建议。' });
   });
 });

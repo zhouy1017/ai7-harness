@@ -1,3 +1,15 @@
+/** Located for individual review, excluded from automatic batch application. */
+export const REVIEW_GUESSED_ANCHOR_NOTE_PREFIX = '【锚点不唯一】';
+
+/** Production disclosure is prepended without changing the reducer's note bytes. */
+export const REVIEW_UNCHECKED_DISCLOSURE = '【未联网核查】';
+
+export function reviewFindingHasGuessedAnchor(note: string): boolean {
+  let findingNote = note;
+  while (findingNote.startsWith(REVIEW_UNCHECKED_DISCLOSURE)) findingNote = findingNote.slice(REVIEW_UNCHECKED_DISCLOSURE.length);
+  return findingNote.startsWith(REVIEW_GUESSED_ANCHOR_NOTE_PREFIX);
+}
+
 /** Structured review basis. Historical snapshots/report records retain their original text. */
 export interface ReviewCategoryBasis {
   readonly categoryId: string;
