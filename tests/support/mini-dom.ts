@@ -142,7 +142,6 @@ export class MiniElement {
     else this.children.splice(this.children.indexOf(reference), 0, node);
     return node;
   }
-  moveBefore(node: MiniElement, reference: MiniElement | null): void { this.insertBefore(node, reference); }
   replaceWith(...nodes: Array<MiniElement | string>): void {
     const parent = this.parentElement;
     if (parent === null) return;

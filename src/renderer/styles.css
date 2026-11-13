@@ -1626,8 +1626,8 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .editor-workspace { position: relative; display: grid; flex: 1 1 0; grid-template-columns: minmax(0, 1fr) 4.75rem; grid-template-rows: minmax(0, 1fr); min-height: 0; overflow: hidden; }
 .manuscript-comments-pane { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface-subdued); border-left: 1px solid var(--boundary); }
 .manuscript-comments-pane[hidden] { display: none; }
-.manuscript-comments-heading { display: flex; align-items: center; gap: .2rem; padding: .3rem .4rem; border-bottom: 1px solid var(--boundary); }
-.manuscript-comments-heading button { min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
+.manuscript-comments-heading { height: 34px; min-height: 34px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: .2rem; padding: .15rem .4rem; border-bottom: 1px solid var(--boundary); }
+.manuscript-comments-heading button { height: 28px; box-sizing: border-box; line-height: 20px; min-height: 28px; padding: .15rem .2rem; white-space: nowrap; font-size: .7rem; }
 .manuscript-comments-heading > strong { font-size: .8rem; white-space: nowrap; }
 .manuscript-comments-heading .editorial-mark-filter-chips { flex: 1; flex-wrap: nowrap; gap: .1rem; margin: 0; }
 .manuscript-comments-heading .editorial-mark-filter-chips button { border: 0; border-radius: 4px; padding: .15rem .2rem; }

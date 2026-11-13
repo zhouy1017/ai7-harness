@@ -133,6 +133,7 @@ describe('comments command parity and refresh continuity', () => {
     const create = miniDocument.createElement;
     vi.spyOn(miniDocument, 'createElement').mockImplementation((tag) => {
       const node = create(tag);
+      Object.assign(node, { moveBefore: (child: MiniElement, before: MiniElement | null) => node.insertBefore(child, before) });
       Object.assign(node, { style: {}, clientHeight: 600, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 50, bottom: 230, left: 600, right: 920, width: 320, height: 180 }) });
       let hidden = false;
       Object.defineProperty(node, 'hidden', { get: () => hidden, set: (value: boolean) => { hidden = value; if (value && node.contains(miniDocument.activeElement)) miniDocument.activeElement = null; } });

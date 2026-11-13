@@ -83,7 +83,8 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&
       __comments.ids.every((id,index)=>document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(index===2?undefined:'true'));
   })()`, 'comments-search-cards-and-highlights');
-  check(await renderer.evaluate(`document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height<=84`), 'comments-filter-header-height');
+  const filterHeader=await renderer.evaluate(`({heading:document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height,filters:document.querySelector('.editorial-mark-filters').getBoundingClientRect().height})`);
+  check(filterHeader.heading+filterHeader.filters<=84, 'comments-filter-header-height', filterHeader);
   check(await renderer.evaluate(`(() => { window.dispatchEvent(new Event('resize')); return document.querySelector('[data-mark-search-input]')===__commentsSearch && __commentsSearch.value==='公开合成批注 2' && document.querySelector('[data-mark-category-filter="editor"]').getAttribute('aria-pressed')==='true'; })()`), 'comments-filter-controls-survive-redraw');
   check(await renderer.evaluate(`(() => { document.querySelector('[data-mark-status-filter="handled"]').click(); return true; })()`), 'comments-status-handled');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===true)`, 'comments-status-no-match');
