@@ -3073,7 +3073,7 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editorial-mark-compact-preview { margin: .2rem 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; line-height: 20px; }
 .editorial-mark-card[data-pane-card][data-expanded="false"][data-handled="true"] { color: var(--text-subdued); font-weight: 400; background: var(--surface-subdued); box-shadow: none; }
 .editorial-mark-card[data-pane-card][data-expanded="false"][data-handled="true"] .editorial-mark-category-badge { color: inherit; background: transparent; font-weight: 400; }
-.editorial-mark-footer { margin: .5rem 0 0; font-size: .7rem; line-height: 1.4; color: var(--text-subdued); }
+.editorial-mark-footer { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: .5rem 0 0; font-size: .7rem; line-height: 1.4; color: var(--text-subdued); }
 .editorial-mark-note-tags { display: flex; gap: .3rem; margin-top: .4rem; flex-wrap: wrap; }
 .editorial-mark-note-tag { border: 1px solid var(--boundary); border-radius: 4px; padding: .1rem .3rem; font-size: .7rem; color: var(--text-subdued); }
 

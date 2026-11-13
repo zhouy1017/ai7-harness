@@ -143,12 +143,21 @@ describe('pane compact and expanded cards (#1454)', () => {
     expect(content.contains(actions)).toBe(true);
     expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(value.source.modelLabel);
     expect(panel.querySelector('.editorial-mark-footer')?.textContent).toContain('gpt-6-luna@high · 任务「校对」');
+    expect(panel.querySelector<HTMLElement>('.editorial-mark-footer')?.title).toBe(panel.querySelector('.editorial-mark-footer')?.textContent);
   });
 
-  it.each(['open', 'applied', 'resolved'] as const)('gives %s a word and a shape, with subdued handled rows', (status) => {
-    const { panel } = renderEditorialMarkCard({ ...card, status }, { pane: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') });
-    expect(panel.dataset['handled']).toBe(String(status !== 'open'));
-    expect(panel.querySelector('[data-mark-state]')?.textContent).toMatch(status === 'open' ? /^○ /u : /^✓ /u);
+  it.each(['change-suggestion', 'annotation', 'editor-note'] as const)('keeps source and expansion content through open and handled states of %s', (kind) => {
+    for (const status of ['open', 'applied', 'resolved'] as const) {
+      const value = { ...card, kind, status, body: '公开合成内容', suggestion: kind === 'change-suggestion' ? card.suggestion : null };
+      const { panel } = renderEditorialMarkCard(value, { pane: true, technical: false, moreOpen: new Map(), dismiss: document.createElement('button') });
+      expect(panel.dataset['handled']).toBe(String(status !== 'open'));
+      expect(panel.querySelector('[data-mark-state]')?.textContent).toMatch(status === 'open' ? /^○ /u : /^✓ /u);
+      expect(panel.querySelector('[data-mark-source]')?.textContent).toBe(card.source.modelLabel);
+      expect(panel.querySelector<HTMLElement>('.editorial-mark-expanded-content')?.hidden).toBe(true);
+      setEditorialMarkCardExpanded(panel, true);
+      expect(panel.querySelector<HTMLElement>('.editorial-mark-expanded-content')?.hidden).toBe(false);
+      expect(panel.querySelector(kind === 'change-suggestion' ? 'ins' : '[data-mark-body]')?.textContent).toBe(kind === 'change-suggestion' ? '改后' : '公开合成内容');
+    }
   });
 
   it('extracts leading disclosure and guessed-position tags without mutating stored reasons or bodies', () => {

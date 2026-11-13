@@ -155,6 +155,7 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   expandedContent.append(more, actions);
   if (options.pane) {
     const footer = node('p', 'editorial-mark-footer', `${markSourceLine({ ...card, convertedFrom: null, resolvedFrom: null }, options.technical)} · ${markTimeLabel(card.createdAt)}`);
+    footer.title = footer.textContent ?? '';
     expandedContent.append(footer);
     setEditorialMarkCardExpanded(panel, options.expanded ?? false);
   }

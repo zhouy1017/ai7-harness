@@ -808,7 +808,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       button.setAttribute('aria-pressed', String(markFilter.selectedModels.has(source)));
     }
     for (const [source, button] of modelButtons) if (!sources.has(source) && !markFilter.selectedModels.has(source)) { button.remove(); modelButtons.delete(source); }
-    const activeFilters = markFilter.selectedCategories.size + markFilter.selectedModels.size + (markFilter.keyword.trim() ? 1 : 0);
+    const activeFilters = markFilter.selectedCategories.size + markFilter.selectedModels.size + (markFilter.keyword.trim() ? 1 : 0) + (markFilter.status === 'all' ? 0 : 1);
     filterButton.textContent = activeFilters ? `筛选 ${activeFilters}` : '筛选';
     disclosureLine.hidden = !comments.some(mark => {
       const card = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card;

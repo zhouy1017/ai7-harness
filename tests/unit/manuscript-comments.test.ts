@@ -192,6 +192,7 @@ describe('comments command parity and refresh continuity', () => {
     chip('literary').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
     ui.pane.querySelector<HTMLButtonElement>('[data-mark-status-filter="handled"]')!.click(); await paint();
     expect(shown()).toEqual(['literary']);
+    expect(ui.pane.querySelector('[data-mark-filter-toggle]')?.textContent).toBe('筛选 3');
     const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
     search.value = '文学性'; search.focus(); (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
     ui.setPage({ journalSequence: 1 }); await paint();
