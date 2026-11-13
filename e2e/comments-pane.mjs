@@ -90,11 +90,11 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     if(!words||!card||card.getBoundingClientRect().top<pane.getBoundingClientRect().bottom)return false;
     words.scrollIntoView({block:'center'});
     document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
-    document.querySelector('[data-testid="manuscript-editor"]').focus();
-    const range=document.createRange(); range.selectNodeContents(words); range.collapse(true);
-    const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    words.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true;
+    return true;
   })()`), 'comments-overflow-pick');
+  const wordsPoint = await renderer.evaluate(`(() => { const r=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]' ).getClientRects()[0]; return {x:r.left+Math.min(4,r.width/2),y:r.top+r.height/2}; })()`);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...wordsPoint, button: 'left', clickCount: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...wordsPoint, button: 'left', clickCount: 1 });
   try { await waitFor(renderer, `(() => {
     const id=__comments.ids[11], card=document.querySelector('[data-comment-card="'+id+'"]'), words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
     const p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(), c=card.getBoundingClientRect(), w=words.getClientRects()[0];
