@@ -1887,15 +1887,17 @@ async function main() {
     await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
     for (const width of [1280, 1368]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
-      requireJourney(await renderer.evaluate(`(async () => {
+      const geometry = await renderer.evaluate(`(async () => {
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
         const shell=document.querySelector('.editor-shell[data-manuscript-kind="derivative"]');
         const toolbar=shell.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
         const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
         const shellWidth=shell.getBoundingClientRect().width;
-        return innerWidth===${width} && innerHeight===800 && document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6' && document.body.dataset.taskDrawer==='open' && (${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640) && controls.length>=7
-          && controls.every(el=>{const r=el.getBoundingClientRect();return r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight) && el.scrollWidth<=el.clientWidth+1;});
-      })()`) === true, 'document-toolbar-narrow-shell');
+        const bounds=controls.map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,scroll:el.scrollWidth,client:el.clientWidth};});
+        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open',narrow:${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640,count:controls.length>=7,
+          visible:bounds.every(r=>r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight)),untruncated:bounds.every(r=>r.scroll<=r.client+1)}};
+      })()`);
+      requireJourney(Object.values(geometry.checks).every(value=>value===true), 'document-toolbar-narrow-shell', geometry);
     }
     await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
     await clickSelector(renderer, '.task-composer [data-task-composer-action="save-draft"]', 'document-task-save');
