@@ -338,8 +338,9 @@ export async function commentsModelFilter(renderer, check, waitFor, markId) {
     const bookId=document.querySelector('.editor-shell').dataset.bookId,work=(await window.ai7.listPriorWork()).find(item=>item.bookId===bookId);
     const binding={manuscriptId:work.manuscriptId,branchId:work.branchId},card=await window.ai7.getEditorialMarkCard({...binding,markId:${JSON.stringify(markId)}});
     const page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'block',blockId:card.blockId}}),block=page.blocks.find(item=>item.blockId===card.blockId);
-    const text=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(block.text),item=>item.segment).slice(0,2).join('');
-    const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:0,toGrapheme:2,selectedText:text,kind:'annotation',highlightColor:null,body:'公开合成模型筛选对照',proposedText:null,rationale:null});
+    const from=card.fromGrapheme,to=Math.min(card.toGrapheme,from+2);
+    const text=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(block.text),item=>item.segment).slice(from,to).join('');
+    const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:from,toGrapheme:to,selectedText:text,kind:'annotation',highlightColor:null,body:'公开合成模型筛选对照',proposedText:null,rationale:null});
     globalThis.__commentsModel={mark:${JSON.stringify(markId)},other:result.markId,block:block.blockId,source:card.source.modelLabel};return card.source.modelLabel==='AI7 本地检查';
   })()`), 'comments-model-frozen-local-source');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-model-reload-overview');
@@ -350,7 +351,12 @@ export async function commentsModelFilter(renderer, check, waitFor, markId) {
     const entry=document.querySelector('[data-edge-entry="comments"]');if(entry.getAttribute('aria-expanded')!=='true')entry.click();
     document.querySelector('.editor-window [data-block-id="'+__commentsModel.block+'"]').scrollIntoView({block:'center',behavior:'instant'});return true;
   })()`), 'comments-model-open');
-  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.mark+'"] [data-mark-source]')?.textContent===__commentsModel.source && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false`, 'comments-model-cards-ready');
+  await waitFor(renderer, `(() => {
+    const scroll=document.querySelector('.editor-window'),words=scroll.querySelector('[data-mark-id="'+__commentsModel.mark+'"]');if(!words)return false;
+    const r=words.getClientRects()[0]??words.getBoundingClientRect(),v=scroll.getBoundingClientRect();
+    if(r.top<v.top+40||r.bottom>v.bottom-40){scroll.scrollTop+=r.top-v.top-80;return false;}
+    return document.querySelector('[data-comment-card="'+__commentsModel.mark+'"] [data-mark-source]')?.textContent===__commentsModel.source && document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===false && document.querySelector('.manuscript-comments-canvas').dataset.loading==='false';
+  })()`, 'comments-model-cards-ready');
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-filter-toggle]').click();const chip=document.querySelector('[data-mark-model-filter="'+__commentsModel.source+'"]');if(!chip)return false;chip.click();return true;})()`), 'comments-model-chip');
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__commentsModel.mark+'"]')?.hidden===false && document.querySelector('[data-comment-card="'+__commentsModel.other+'"]')?.hidden===true && document.querySelector('.editor-window [data-mark-id="'+__commentsModel.other+'"]')?.dataset.markFilteredOut==='true' && !document.querySelector('.editor-window [data-mark-id="'+__commentsModel.mark+'"][data-mark-filtered-out]')`, 'comments-model-cards-and-highlights');
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-model-filter="'+__commentsModel.source+'"]' ).click();document.querySelector('.editorial-mark-filter-popover').hidePopover();return true;})()`), 'comments-model-reset');
