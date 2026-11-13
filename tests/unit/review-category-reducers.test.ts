@@ -300,6 +300,13 @@ describe('anchoring repair regressions (#1435)', () => {
     expect(result.findings.map((finding) => finding.sourceRange.fromGrapheme)).toEqual([3, 9]);
     expect(new Set(result.findings.map((finding) => finding.findingId)).size).toBe(2);
   });
+  it('keeps unchanged annotation ids byte-identical to base 2f6f14df', () => {
+    // Literal results from running the base reducer on these same public synthetic inputs.
+    const fallback = run(['今天天气晴朗。'], [{ ...entry, quote: '并不存在', replacement: '替换' }]).findings[0]!;
+    expect(fallback).toMatchObject({ findingId: 'rfd_b75a21bab65708d7870ae8c6', quote: '并不存在', replacement: null });
+    const repeated = run(['没有', '目标目标'], [{ ...entry, quote: '目标', replacement: '替换' }]).findings[0]!;
+    expect(repeated).toMatchObject({ findingId: 'rfd_2512d2f5cd41359ade23aef2', quote: '目标', replacement: null });
+  });
   it('labels missing or invalid occurrence and punctuation matches for individual acceptance only', () => {
     for (const occurrence of [undefined, 1.5, 99]) {
       const result = run(['我的书放在桌上，他慢慢的走。'], [{ ...entry, quote: '的', replacement: '地', ...(occurrence === undefined ? {} : { occurrence }) }]);

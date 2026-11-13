@@ -78,6 +78,7 @@ interface LocatedFinding {
   readonly blockId: string;
   readonly blockText: string | null;
   readonly location: ReturnType<typeof locateQuotation>;
+  readonly legacy?: { blockId: string; quote: string; replacement: string | null; fromGrapheme: number; toGrapheme: number };
 }
 
 function stage(name: AnalysisReducerStageProjection['stage'], inputCount: number, gaps: number): AnalysisReducerStageProjection {
@@ -132,6 +133,8 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let location: ReturnType<typeof locateQuotation> = { state: 'not-found' };
       let annotation = false;
       let wholeParagraphFallback = false;
+      let punctuationMatched = false;
+      let legacy: LocatedFinding['legacy'];
       let note = finding.note;
       // Preserve every existing exact recovery before trying punctuation equivalence anywhere.
       for (const locate of [locateExactQuotation, locateQuotation]) {
@@ -152,8 +155,19 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
           if (occurrences > 1) annotation = true;
         }
         if (location.state === 'not-found') continue;
-        const guessed = location.state === 'ambiguous' || annotation || locate === locateQuotation;
+        const wasAmbiguous = location.state === 'ambiguous';
+        const guessed = wasAmbiguous || annotation || locate === locateQuotation;
+        punctuationMatched = locate === locateQuotation;
         if (location.state === 'ambiguous' && block !== undefined) location = locate(block.text, finding.quote, 1);
+        if (locate === locateExactQuotation && location.state === 'verified' && block !== undefined) {
+          const previous = locateExactQuotation(block.text, finding.quote);
+          const previousLocation = previous.state === 'ambiguous' ? locateExactQuotation(block.text, finding.quote, 1) : previous;
+          if (previousLocation.state === 'verified') {
+            const replacement = previous.state === 'ambiguous' || annotation ? null : finding.replacement ?? null;
+            legacy = { blockId: blockId!, quote: finding.quote, ...previousLocation,
+              replacement: replacement === sliceGraphemes(block.text, previousLocation.fromGrapheme, previousLocation.toGrapheme) ? null : replacement };
+          }
+        }
         if (guessed) note = `${REVIEW_GUESSED_ANCHOR_NOTE_PREFIX}${locate === locateQuotation ? '（标点已与原稿对齐）' : ''}${note}`;
         break;
       }
@@ -165,16 +179,18 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
         location = { state: 'verified', fromGrapheme: 0, toGrapheme: graphemeCount(block.text) };
         annotation = true;
         wholeParagraphFallback = true;
+        legacy = { blockId: blockId!, quote: finding.quote, replacement: null, ...location };
         note = `【引文未逐字匹配】${note}`;
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
-      const retainedFinding = { ...finding, note, ...(!wholeParagraphFallback && location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
+      const retainedFinding = { ...finding, note, ...(!wholeParagraphFallback && (!annotation || punctuationMatched) && location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
       if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,
         findingOrdinal: (outcome.result.acceptedIndexes?.[index] ?? index) + 1,
         finding: retainedFinding,
+        ...(legacy === undefined ? {} : { legacy }),
         blockId: blockId ?? '',
         blockText: block?.text ?? null,
         location,
@@ -238,8 +254,10 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       continue;
     }
     findingsByKey.set(key, findings.length);
+    const legacyUnchanged = entry.legacy !== undefined && entry.legacy.blockId === entry.blockId && entry.legacy.quote === finding.quote &&
+      entry.legacy.replacement === replacement && entry.legacy.fromGrapheme === coordinates.fromGrapheme && entry.legacy.toGrapheme === coordinates.toGrapheme;
     findings.push({
-      findingId: findingId(input.exactOccurrences || locateExactQuotation(entry.blockText!, finding.quote).state !== 'verified' ? { kind: 'finding', categoryId, ...coordinates, replacement }
+      findingId: findingId(input.exactOccurrences || !legacyUnchanged ? { kind: 'finding', categoryId, ...coordinates, replacement }
         : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalized, replacement }),
       unitOrdinal: entry.unitOrdinal,
       blockId: entry.blockId,

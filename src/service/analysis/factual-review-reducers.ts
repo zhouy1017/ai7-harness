@@ -27,7 +27,7 @@ import { canonicalJson, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   factualReviewMessageBlockIds,
-  locateQuotation, quotationForLocation,
+  locateExactQuotation, locateQuotation, quotationForLocation,
   normalizedQuotation,
   type FactualReviewUnitResult,
   type FactualUnitAssertion,
@@ -198,7 +198,7 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
       continue;
     }
     const identity = input.exactOccurrences === true ? `fnd_${sha256Hex(key).slice(0, 24)}`
-      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized, ...(assertion.occurrence === undefined ? {} : { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme }) });
+      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized, ...(locateExactQuotation(blocks.get(entry.blockId)!.text, entry.assertion.quote).state === 'verified' ? {} : { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme }) });
     const outcome = input.research.lookup(
       { findingId: identity, question: assertion.question, severity: assertion.severity },
       null,
@@ -316,7 +316,7 @@ export function locatedUnitFindings(
     const location = locateQuotation(block.text, assertion.quote, assertion.occurrence);
     if (location.state !== 'verified') continue;
     const quote = quotationForLocation(block.text, assertion.quote, location);
-    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote), ...(assertion.occurrence === undefined ? {} : { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme }) });
+    const findingIdentity = findingId({ kind: 'finding', blockId, quote: normalizedQuotation(quote), ...(locateExactQuotation(block.text, assertion.quote).state === 'verified' ? {} : { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme }) });
     if (seen.has(findingIdentity)) continue;
     seen.add(findingIdentity);
     located.push({ findingId: findingIdentity, blockId, quote, basis: assertion.basis, category: assertion.category });

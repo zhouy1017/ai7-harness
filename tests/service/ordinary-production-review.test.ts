@@ -1,3 +1,4 @@
+import { REVIEW_UNCHECKED_DISCLOSURE, reviewFindingHasGuessedAnchor } from '../../src/shared/review-basis.js';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { afterEach, expect, it, beforeEach, vi } from 'vitest';
@@ -1220,6 +1221,10 @@ it.each([undefined, 2, 99])('accepts a repeated paragraph quotation in one click
   const first = text.indexOf('的');
   const expectedStart = graphemeCount(text.slice(0, occurrence === 2 ? text.indexOf('的', first + 1) : first));
   expect(finding).toMatchObject({ quote: '的', replacement: '之', fromGrapheme: expectedStart, toGrapheme: expectedStart + 1 });
+  expect(finding.note.startsWith(REVIEW_UNCHECKED_DISCLOSURE)).toBe(true);
+  expect(reviewFindingHasGuessedAnchor(finding.note)).toBe(occurrence !== 2);
+  const aggregate = opened.inspectBookFindings(bookId).items.find((item) => item.target.kind === 'review' && item.target.findingId === finding.findingId)!;
+  expect(aggregate.suggestion!.batchAllowed).toBe(occurrence === 2);
   const applied = opened.applyChangeSuggestion({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
     windowStartBlockId: finding.blockId, markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
   expect(applied.card!.suggestion!.decision).toBeTruthy();

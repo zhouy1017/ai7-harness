@@ -1,3 +1,4 @@
+import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
 import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
@@ -3499,7 +3500,7 @@ export class EditorialStore {
             yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
               ...(finding.output === 'change-suggestion' && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null ? {
                 suggestion: { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, markId: finding.markId, blockId: finding.blockId,
-                  batchAllowed: run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
+                  batchAllowed: !reviewFindingHasGuessedAnchor(finding.note) && run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
               } : {}),
               target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
           }

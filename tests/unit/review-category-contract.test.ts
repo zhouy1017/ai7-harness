@@ -1,3 +1,4 @@
+import { reviewFindingHasGuessedAnchor } from '../../src/shared/review-basis.js';
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
@@ -240,4 +241,12 @@ it.each([undefined, 2, 0, 1.5, '2', 99])('admits optional occurrence without los
 
 it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
   expect(REVIEW_CATEGORY_REDUCER_DIGEST).toBe('a8e818cb4afefbb4e0cff17b634b3a903fb5dc424c9f863e03fc8200c036a8df');
+});
+
+it.each([
+  ['【锚点不唯一】合成建议', true], ['【未联网核查】【锚点不唯一】合成建议', true],
+  ['【未联网核查】【锚点不唯一】（标点已与原稿对齐）合成建议', true],
+  ['合成建议', false], ['【未联网核查】合成建议', false],
+] as const)('classifies the stored review note %s', (note, guessed) => {
+  expect(reviewFindingHasGuessedAnchor(note)).toBe(guessed);
 });

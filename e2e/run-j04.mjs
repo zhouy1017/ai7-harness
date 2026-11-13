@@ -3133,8 +3133,8 @@ async function main() {
     // Effect writes every listed suggestion (V2-UX-REV-006, PDEC-012, EAPP-003).
     const beforeBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const pendingSuggestions = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.output === 'change-suggestion' && finding.status === 'pending');
-    const guessed = pendingSuggestions.filter((finding) => finding.note.startsWith('【锚点不唯一】'));
-    const batchable = pendingSuggestions.filter((finding) => !finding.note.startsWith('【锚点不唯一】') && finding.markStatus === 'open' && finding.anchorState === 'exact');
+    const guessed = pendingSuggestions.filter((finding) => finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】'));
+    const batchable = pendingSuggestions.filter((finding) => !finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】') && finding.markStatus === 'open' && finding.anchorState === 'exact');
     const batchExcluded = pendingSuggestions.length - batchable.length;
     requireJourney(batchable.length > 1 && guessed.some((finding) => finding.quote === '古怪' && finding.replacement === '奇怪'), 'review-batch-candidates', { count: batchable.length, excluded: batchExcluded });
     // 接受并应用全部 applies in one step (Issue #1410 item 5): the result names the count and offers 撤销本批应用.
@@ -3145,7 +3145,7 @@ async function main() {
     requireJourney(afterBatch?.manuscript?.journalSequence === beforeBatch.manuscript.journalSequence + 1 &&
       batchable.every((finding) => afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus === 'applied'),
     'review-batch-one-effect', { before: beforeBatch.manuscript.journalSequence, after: afterBatch?.manuscript?.journalSequence });
-    requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation' || finding.note.startsWith('【锚点不唯一】')).every((finding) =>
+    requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation' || finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】')).every((finding) =>
       afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus !== 'applied'), 'review-batch-preserves-annotations');
 
     at('review-ignore-with-reason');

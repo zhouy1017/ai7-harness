@@ -246,3 +246,10 @@ it('keeps distinct factual occurrences and refuses missing or invalid indexes (#
 it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
   expect(FACTUAL_REVIEW_REDUCER_DIGEST).toBe('89e343da4cfa1ae23655de09e463188612c399002f7bcaff395621cb3de02a52');
 });
+
+it('keeps unique factual ids stable with redundant or invalid occurrence values', () => {
+  const baseline = reduce([closed([assertion()])]).findings[0]!;
+  for (const occurrence of [1, 2, 99]) {
+    expect(reduce([closed([assertion({ occurrence })])]).findings[0]!.findingId).toBe(baseline.findingId);
+  }
+});
