@@ -90,6 +90,11 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     if(!words||!card||card.getBoundingClientRect().top<pane.getBoundingClientRect().bottom)return false;
     words.scrollIntoView({block:'center'});
     document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
+    globalThis.__commentsClickTrace=[];
+    for(const type of ['mousedown','mouseup','click']) document.addEventListener(type,event=>{
+      const target=event.target instanceof Element?event.target:null;
+      __commentsClickTrace.push({type, wanted:target?.closest('[data-mark-id]')?.dataset.markId===id, inEditor:!!target?.closest('[data-testid="manuscript-editor"]'), collapsed:getSelection()?.isCollapsed});
+    },{capture:true,once:true});
     return true;
   })()`), 'comments-overflow-pick');
   const wordsPoint = await renderer.evaluate(`(() => { const r=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]' ).getClientRects()[0]; return {x:r.left+Math.min(4,r.width/2),y:r.top+r.height/2}; })()`);
@@ -103,7 +108,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const geometry = await renderer.evaluate(`(() => {
       const id=__comments.ids[11], card=document.querySelector('[data-comment-card="'+id+'"]'), words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
       const p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(), c=card.getBoundingClientRect(), w=words.getClientRects()[0];
-      return {selected:card.dataset.selected==='true', paneTop:p.top, paneBottom:p.bottom, cardTop:c.top, cardBottom:c.bottom, wordsTop:w.top, connector:!!document.querySelector('[data-comment-leader="'+id+'"]'), floating:!!document.querySelector('.editorial-mark-layer [data-mark-card]')};
+      const selection=getSelection(), parent=selection?.anchorNode?.parentElement, block=parent?.closest('[data-block-id]');
+      let caret=-1; if(block&&selection?.anchorNode){ const range=document.createRange(); range.selectNodeContents(block); range.setEnd(selection.anchorNode,selection.anchorOffset); caret=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(range.toString())).length; }
+      return {selected:card.dataset.selected==='true', selectedIndex:__comments.ids.findIndex(id=>document.querySelector('[data-comment-card="'+id+'"]')?.dataset.selected==='true'), paneTop:p.top, paneBottom:p.bottom, cardTop:c.top, cardBottom:c.bottom, wordsTop:w.top, wordsLeft:w.left, wordsRight:w.right, wordsHeight:w.height, caret, caretBlock:block?.dataset.blockId===words.closest('[data-block-id]')?.dataset.blockId, clickTrace:__commentsClickTrace, connector:!!document.querySelector('[data-comment-leader="'+id+'"]'), floating:!!document.querySelector('.editorial-mark-layer [data-mark-card]')};
     })()`);
     check(false, 'comments-overflow-selected-aligned', geometry);
   }
