@@ -609,12 +609,13 @@ async function main() {
     await assertRenderer(renderer, `(() => { const form=document.querySelector('[data-mark-composer]'); const body=form.querySelector('[data-mark-field="body"]'); body.value='恢复后公开合成备注'; body.dispatchEvent(new Event('input',{bubbles:true})); form.querySelector('[data-mark-action="submit"]').click(); return true; })()`, 'recovered-card-submit');
     await waitFor(renderer, `document.querySelector('[data-mark-kind="editor-note"].editorial-mark') && !document.querySelector('[data-mark-composer]')`, 'recovered-card-note-drawn');
     // A mark can decorate before the authoritative refresh restores its selection. Finish that refresh before input.
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.parentElement.dataset.authoritativeMutation === 'false' && document.documentElement.dataset.ai7CloseRisk === 'false'`, 'recovered-card-refresh-settled');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.parentElement.dataset.authoritativeMutation !== 'true' && document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed'`, 'recovered-card-refresh-settled');
     await renderer.evaluate(`(() => { globalThis.__j08RecoveredPoint=null; document.querySelector('.editorial-mark[data-mark-kind="editor-note"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`);
     await waitFor(renderer, `(() => {
       const mark=document.querySelector('.editorial-mark[data-mark-kind="editor-note"]'),r=mark.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;
       const previous=globalThis.__j08RecoveredPoint;globalThis.__j08RecoveredPoint={x,y};
-      return previous?.x===x && previous?.y===y && mark.contains(document.elementFromPoint(x,y));
+      if(!mark.contains(document.elementFromPoint(x,y))){mark.scrollIntoView({block:'center',behavior:'instant'});return false;}
+      return previous?.x===x && previous?.y===y;
     })()`, 'recovered-card-hit-ready');
     requireJourney((await commentsNativeClick(renderer,await renderer.evaluate('globalThis.__j08RecoveredPoint'))).real, 'recovered-card-open');
     await waitFor(renderer, `(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot);return getSelection().isCollapsed && model.from===model.to;})()`, 'recovered-card-caret');
