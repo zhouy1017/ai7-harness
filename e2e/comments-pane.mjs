@@ -95,11 +95,18 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range);
     words.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true;
   })()`), 'comments-overflow-pick');
-  await waitFor(renderer, `(() => {
+  try { await waitFor(renderer, `(() => {
     const id=__comments.ids[11], card=document.querySelector('[data-comment-card="'+id+'"]'), words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
     const p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(), c=card.getBoundingClientRect(), w=words.getClientRects()[0];
     return card.dataset.selected==='true' && c.top>=p.top-1 && c.bottom<=p.bottom+1 && Math.abs(c.top-w.top)<=4 && document.querySelector('[data-comment-leader="'+id+'"]') && !document.querySelector('.editorial-mark-layer [data-mark-card]');
-  })()`, 'comments-overflow-selected-aligned');
+  })()`, 'comments-overflow-selected-aligned'); } catch {
+    const geometry = await renderer.evaluate(`(() => {
+      const id=__comments.ids[11], card=document.querySelector('[data-comment-card="'+id+'"]'), words=document.querySelector('.editor-window [data-mark-id="'+id+'"]');
+      const p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(), c=card.getBoundingClientRect(), w=words.getClientRects()[0];
+      return {selected:card.dataset.selected==='true', paneTop:p.top, paneBottom:p.bottom, cardTop:c.top, cardBottom:c.bottom, wordsTop:w.top, connector:!!document.querySelector('[data-comment-leader="'+id+'"]'), floating:!!document.querySelector('.editorial-mark-layer [data-mark-card]')};
+    })()`);
+    check(false, 'comments-overflow-selected-aligned', geometry);
+  }
   check(await renderer.evaluate(`(() => { for(const id of __comments.ids.slice(2,4)){ const node=document.querySelector('[data-comment-card="'+id+'"]'); node.dispatchEvent(new PointerEvent('pointerenter')); node.dispatchEvent(new PointerEvent('pointerleave')); } return document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]').dataset.selected==='true'; })()`), 'comments-hover-keeps-selection');
   check(await renderer.evaluate(`(() => { const block=document.querySelector('.editor-window [data-block-id]'); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); block.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0})); return true; })()`), 'comments-unmarked-clear');
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
