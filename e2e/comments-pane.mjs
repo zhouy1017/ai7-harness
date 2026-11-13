@@ -91,7 +91,8 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[0]+'"]');
     words.scrollIntoView({block:'center'}); scroll.scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    pane.scrollTop=30;
+    // Leave room for the first paragraph above the pane's filter header: its desired canvas top must be positive.
+    pane.scrollTop=500;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const first=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     if(!first)return {pass:false,unpushed:false};
