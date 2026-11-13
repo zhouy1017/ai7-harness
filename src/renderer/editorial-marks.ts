@@ -593,6 +593,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   leaders.setAttribute('aria-hidden', 'true');
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
+  let preservePanePositions = false;
   let activeComment: string | undefined;
   let hoveredComment: string | undefined;
   let suppressCommentSelection = false;
@@ -616,6 +617,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     for (const [id, entry] of commentNodes) entry.node.dataset['active'] = entry.node.dataset['selected'] = String(id === markId);
     editor.setLinkedMark(activeComment ?? null);
     scheduleCommentsLayout();
+  };
+  const hoverComment = (markId: string | undefined): void => {
+    hoveredComment = markId;
+    for (const [id, entry] of commentNodes) entry.node.dataset['hovered'] = String(id === markId);
+    for (const node of options.host.querySelectorAll<HTMLElement>('[data-mark-id]')) node.dataset['commentHovered'] = String(node.dataset['markId'] === markId);
   };
   const returnToCommentAnchor = (card: Pick<EditorialMarkCardProjection, 'blockId' | 'fromGrapheme'>): void => {
     editor.selectRange(card.blockId, card.fromGrapheme, card.fromGrapheme);
@@ -669,8 +675,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     scheduleCommentsLayout();
   }
   function scheduleCommentsLayout(): void {
+    preservePanePositions = false;
+    queueCommentsLayout();
+  }
+  function queueCommentsLayout(): void {
     if (destroyed || commentsFrame !== undefined || !options.comments) return;
-    commentsFrame = requestAnimationFrame(() => { commentsFrame = undefined; layoutComments(); });
+    commentsFrame = requestAnimationFrame(() => { commentsFrame = undefined; layoutComments(); preservePanePositions = false; });
+  }
+  function scrollCommentsPane(): void {
+    // Reading neighbouring cards must not snap the pane back to its selected card.
+    if (commentsFrame === undefined) preservePanePositions = activeComment !== undefined;
+    queueCommentsLayout();
   }
   function layoutComments(): void {
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
@@ -719,8 +734,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         commentNodes.set(mark.markId, entry);
         commentsCanvas.append(node);
         commentsResize.observe(node);
-        node.addEventListener('pointerenter', () => { hoveredComment = mark.markId; scheduleCommentsLayout(); });
-        node.addEventListener('pointerleave', () => { hoveredComment = undefined; scheduleCommentsLayout(); });
+        node.addEventListener('pointerenter', () => hoverComment(mark.markId));
+        node.addEventListener('pointerleave', () => hoverComment(undefined));
         node.addEventListener('focusin', () => {
           const rect = commentAnchor(mark)?.getBoundingClientRect();
           if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -806,9 +821,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
-    const placed = stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
+    const placed = preservePanePositions ? items.map(item => ({ ...item, top: Number.parseFloat(item.node.style.top) || 0 }))
+      : stackEditorialComments(items, selectedIndex, { top: paneTop, height: commentsScroll.clientHeight });
     // Shift canvas and scroll together: cards above the selection remain reachable.
-    const shift = selectedIndex < 0 ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
+    const shift = selectedIndex < 0 || preservePanePositions ? 0 : Math.max(0, 8 - Math.min(...placed.map(item => item.top)));
     for (const item of placed) item.top += shift;
     const forward = revealed?.pending ? placed.find(item => item.mark.markId === revealed!.markId) : undefined;
     if (forward && revealed) { revealed = { markId: revealed.markId, pending: false }; forward.node.focus({ preventScroll: true }); }
@@ -888,7 +904,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   document.addEventListener('selectionchange', commentSelection);
   options.scroll.addEventListener('scroll', scheduleCommentsLayout, { passive: true });
-  commentsScroll.addEventListener('scroll', scheduleCommentsLayout, { passive: true });
+  commentsScroll.addEventListener('scroll', scrollCommentsPane, { passive: true });
   window.addEventListener('resize', scheduleCommentsLayout);
 
   /**
@@ -2795,8 +2811,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   const onMarkHover = (event: PointerEvent): void => {
     if (!options.comments?.enabled()) return;
-    hoveredComment = event.type === 'pointerout' ? undefined : markAt(event.target, false)?.markId;
-    scheduleCommentsLayout();
+    hoverComment(event.type === 'pointerout' ? undefined : markAt(event.target, false)?.markId);
   };
   const onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
@@ -2942,7 +2957,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (commentsFrame !== undefined) cancelAnimationFrame(commentsFrame);
       document.removeEventListener('selectionchange', commentSelection);
       options.scroll.removeEventListener('scroll', scheduleCommentsLayout);
-      commentsScroll.removeEventListener('scroll', scheduleCommentsLayout);
+      commentsScroll.removeEventListener('scroll', scrollCommentsPane);
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
       options.host.removeEventListener('pointerover', onMarkHover);

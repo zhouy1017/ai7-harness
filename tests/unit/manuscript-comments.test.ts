@@ -197,6 +197,11 @@ describe('comments command parity and refresh continuity', () => {
     const other = ui.pane.querySelector<HTMLElement>('[data-comment-card="other"]')!;
     expect(selected.dataset['selected']).toBe('true');
     expect(ui.scroll.querySelector('[data-mark-card]')).toBeNull();
+    const top = selected.style.top;
+    const paneScroll = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    paneScroll.scrollTop = 70;
+    (paneScroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(selected.style.top).toBe(top); expect(paneScroll.scrollTop).toBe(70);
     (other as unknown as MiniElement).dispatchEvent({ type: 'pointerenter' }); await paint();
     expect(selected.dataset['selected']).toBe('true'); expect(other.dataset['hovered']).toBe('true');
     (other as unknown as MiniElement).dispatchEvent({ type: 'pointerleave' }); await paint();
