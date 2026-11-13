@@ -51,7 +51,7 @@ export async function seedCommentsPane(renderer, check, waitFor) {
       const current=index<5?block:second;
       const words=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(current.text),item=>item.segment);
       const from=index<5?index*3:(index-5)*2, to=from+2;
-      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:start,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:current.blockId,baseBlockDigest:current.digest,fromGrapheme:from,toGrapheme:to,selectedText:words.slice(from,to).join(''),kind:kinds[index]??'annotation',highlightColor:null,body:index>=2?'公开合成批注 '+index:'',proposedText:index<2?'合成':null,rationale:index<2?'公开合成理由':null});
+      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:start,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:current.blockId,baseBlockDigest:current.digest,fromGrapheme:from,toGrapheme:to,selectedText:words.slice(from,to).join(''),kind:kinds[index]??'annotation',highlightColor:null,body:index>=2?(index===3?'【未联网核查】【锚点不唯一】（标点已与原稿对齐）':'')+'公开合成批注 '+index:'',proposedText:index<2?'合成':null,rationale:index<2?'公开合成理由':null});
       ids.push(result.markId);
     }
     globalThis.__comments={...binding,bookId,blockId:block.blockId,start,ids,journal:page.journalSequence};
@@ -76,7 +76,7 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     pane.querySelector('[data-mark-filter-toggle]').click();
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
-    globalThis.__commentsSearch=input; return true;
+    globalThis.__commentsSearch=input; return document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height<=84;
   })()`), 'comments-category-badges-and-search');
   await waitFor(renderer, `(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
@@ -168,6 +168,8 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const rows=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
     const visible=rows.filter(node=>{const r=node.getBoundingClientRect();return !node.hidden&&r.top>=p.top-1&&r.bottom<=p.bottom+1;});
     const header=document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height;
+    const disclosure=document.querySelector('.editorial-mark-disclosure');
+    if(disclosure.hidden||disclosure.textContent!=='以下 AI 建议未联网核查')return {disclosure:false};
     return {width:innerWidth,height:innerHeight,visible:visible.length,header,compact:rows.every(node=>node.dataset.expanded==='false'&&node.getBoundingClientRect().height<=76&&!node.querySelector('.editorial-mark-expanded-content')?.checkVisibility())};
   })()`);
   check(compact.width===1280 && compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
