@@ -1,3 +1,4 @@
+import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -3553,6 +3554,7 @@ async function main() {
         await reviewAction(renderer, `article.review-finding[data-finding-id="${finding.findingId}"] [data-review-action="go-to-text"]`, 'factual-range-author-open');
         // This producing route is the local fixture. It must not invent a remote model or reasoning effort.
         await waitFor(renderer, `(() => { const author=document.querySelector('[data-mark-card="${finding.markId}"] [data-mark-source]')?.textContent ?? ''; return document.documentElement.dataset.technicalLayerVisible==='false' && author.startsWith('AI7 本地检查 · ') && !author.includes('@high'); })()`, 'factual-range-producing-author', 30_000);
+        await commentsModelFilter(renderer, requireJourney, waitFor, finding.markId);
       }
     }
     cancellation.throwIfRequested();

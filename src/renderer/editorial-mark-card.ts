@@ -1,6 +1,6 @@
 import type { EditorialMarkCardProjection } from '../shared/protocol.js';
 import { resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
-import { MARK_KIND_LABELS, markSourceLine, markStateLabel, markTimeLabel } from './editorial-mark-labels.js';
+import { MARK_KIND_LABELS, markSourceLine, markSourceMark, markIsHandled, markDisplayNote, markStateLabel, markTimeLabel } from './editorial-mark-labels.js';
 
 /** Renderer-session memory shared by cards even when the manuscript surface is remounted. */
 export const editorialMarkCardMoreOpen = new Map<string, boolean>();
@@ -31,11 +31,14 @@ function wording(tag: 'ins' | 'del', text: string, other: string): HTMLElement {
  */
 export function renderEditorialMarkCard(card: EditorialMarkCardProjection, options: {
   technical: boolean;
+  pane?: boolean;
+  expanded?: boolean;
   moreOpen: Map<string, boolean>;
   dismiss: HTMLButtonElement;
 }): { panel: HTMLElement; more: HTMLDetailsElement; actions: HTMLElement } {
   const panel = node('section', 'editorial-mark-card');
   panel.dataset['markCard'] = card.markId;
+  panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}${options.pane ? '卡片' : '浮卡'}`);
   panel.dataset['learningDecisionId'] = card.suggestion?.decision?.decisionId ?? '';
   panel.dataset['markKind'] = card.kind;
   panel.dataset['markCategory'] = card.categoryKey;
@@ -44,6 +47,7 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   const category = resolveEditorialMarkCategory({ sourceKind: card.source.kind, sourceOrigin: card.source.origin, sourceLabel: card.source.label });
   const badge = node('span', 'editorial-mark-category-badge', category.badgeText);
   badge.title = card.categoryLabel;
+  if (options.pane) badge.textContent = category.badgeText.replace(/^【|】$/gu, '');
   header.append(badge, node('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]), options.dismiss);
   // The author, time and state pill are the header's second line (Issue #1413 cluster 3).
   const author = node('p', 'editorial-mark-author');
@@ -55,8 +59,33 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   const state = node('span', 'state-term status-pill', compactState);
   state.dataset['markState'] = card.suggestion?.decision?.disposition ?? card.status;
   author.append(source, state);
-  header.append(author);
+  if (options.pane) {
+    source.textContent = markSourceMark(card.source, options.technical);
+    source.title = source.textContent;
+    header.replaceChildren(badge);
+    if (card.kind !== 'change-suggestion') header.append(node('span', 'editorial-mark-kind', MARK_KIND_LABELS[card.kind]));
+    const handled = markIsHandled({ ...card, disposition: card.suggestion?.decision?.disposition ?? null });
+    panel.dataset['handled'] = String(handled);
+    state.textContent = `${handled ? '✓' : '○'} ${compactState}`;
+    state.title = fullState;
+    header.append(source, state);
+  } else header.append(author);
   panel.append(header);
+  const expandedContent = options.pane ? node('div', 'editorial-mark-expanded-content') : panel;
+  const displayNote = markDisplayNote(card.suggestion?.rationale ?? card.body);
+  if (options.pane) {
+    const preview = node('p', 'editorial-mark-compact-preview', card.suggestion
+      ? `${card.suggestion.currentText || '插入位置'} → ${(card.suggestion.decision?.editedText ?? card.suggestion.proposedText) || '（删去这段文字）'}`
+      : displayNote.text.split(/\r?\n/u)[0]);
+    panel.append(preview, expandedContent);
+    panel.dataset['paneCard'] = 'true';
+  }
+  if (displayNote.unchecked || displayNote.guessedAnchor) {
+    const tags = node('div', 'editorial-mark-note-tags');
+    if (displayNote.unchecked) tags.append(node('small', 'editorial-mark-note-tag', '未联网核查'));
+    if (displayNote.guessedAnchor) tags.append(node('small', 'editorial-mark-note-tag', '位置待确认'));
+    expandedContent.append(tags);
+  }
   const content = node('div', 'editorial-mark-content');
   content.dataset['markRegion'] = 'content';
   if (card.kind === 'change-suggestion' && card.suggestion !== null) {
@@ -78,15 +107,15 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
     const arrow = node('span', 'editorial-mark-diff-arrow', '→');
     arrow.setAttribute('aria-hidden', 'true');
     content.append(original, arrow, proposed);
-    panel.append(content);
+    expandedContent.append(content);
     if (suggestion.rationale.trim()) {
-      const rationale = node('p', 'editorial-mark-rationale', suggestion.rationale);
+      const rationale = node('p', 'editorial-mark-rationale', displayNote.text);
       rationale.dataset['markBlock'] = 'rationale';
       rationale.dataset['markRegion'] = 'rationale';
-      panel.append(rationale);
+      expandedContent.append(rationale);
     }
   } else {
-    const body = node('p', 'editorial-mark-body', card.body);
+    const body = node('p', 'editorial-mark-body', displayNote.text);
     body.dataset['markBody'] = card.kind;
     body.dataset['markBlock'] = 'body';
     content.append(body);
@@ -102,7 +131,7 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
     }
     const quote = node('blockquote', 'editorial-mark-quote', card.pinnedText);
     quote.dataset['markBlock'] = 'quote';
-    panel.append(content, quote);
+    expandedContent.append(content, quote);
   }
   const more = node('details', 'editorial-mark-more');
   more.dataset['markBlock'] = 'more';
@@ -124,8 +153,23 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
   const actions = node('section', 'editorial-mark-region editorial-mark-actions');
   actions.dataset['markRegion'] = 'disposition';
   actions.dataset['markBlock'] = 'actions';
-  panel.append(more, actions);
+  expandedContent.append(more, actions);
+  if (options.pane) {
+    const footer = node('p', 'editorial-mark-footer', `${markSourceLine({ ...card, convertedFrom: null, resolvedFrom: null }, options.technical)} · ${markTimeLabel(card.createdAt)}`);
+    footer.title = footer.textContent ?? '';
+    expandedContent.append(footer);
+    setEditorialMarkCardExpanded(panel, options.expanded ?? false);
+  }
   return { panel, more, actions };
+}
+
+/** Expansion only changes visibility; cached content, controls and forms keep their identity. */
+export function setEditorialMarkCardExpanded(panel: HTMLElement, expanded: boolean): void {
+  panel.dataset['expanded'] = String(expanded);
+  const preview = panel.querySelector<HTMLElement>('.editorial-mark-compact-preview');
+  const content = panel.querySelector<HTMLElement>('.editorial-mark-expanded-content');
+  if (preview) preview.hidden = expanded;
+  if (content) content.hidden = !expanded;
 }
 
 /** A change reads on one line when both sides together are at most this many characters. */

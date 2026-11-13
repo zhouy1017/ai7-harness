@@ -838,7 +838,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   commentsEntry.setAttribute('aria-expanded', String(commentsOpen));
   const commentsFocusOff = focusMode.subscribe(() => editorialMarks?.refreshComments());
   const commentsHeading = element('header', 'manuscript-comments-heading');
-  const commentsClose = button('关闭批注栏', 'quiet', () => { setCommentsOpen(false); commentsEntry.focus(); });
+  const commentsClose = button('×', 'quiet', () => { setCommentsOpen(false); commentsEntry.focus(); });
+  commentsClose.setAttribute('aria-label', '关闭批注栏');
+  commentsClose.title = '关闭批注栏';
   commentsHeading.append(element('strong', undefined, '批注'), commentsClose);
   commentsPane.append(commentsHeading);
   function setCommentsOpen(open: boolean): void {

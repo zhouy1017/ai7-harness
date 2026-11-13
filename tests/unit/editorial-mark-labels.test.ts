@@ -18,6 +18,9 @@ import {
   markPointKind,
   markPointLabel,
   markSourceLine,
+  markSourceMark,
+  markIsHandled,
+  markDisplayNote,
   markStateLabel,
   markTimeLabel,
   reverseApplyNote,
@@ -177,4 +180,18 @@ describe('the wording of the Mark surface', () => {
     expect(markTimeLabel(new Date(2026, 8, 7, 14, 5).toISOString())).toBe('9月7日 14:05');
     expect(markTimeLabel('not a time')).toBe('');
   });
+});
+
+
+it('keeps source marks separate from provenance and identifies handled states (#1454)', () => {
+  expect(markSourceMark({ ...editor, editorName: '责编甲' })).toBe('责编甲');
+  expect(markSourceMark({ ...editor, kind: 'imported-author', label: '作者甲' })).toBe('作者甲');
+  const source = { kind: 'ai7', origin: 'task', label: '校对', taskId: 'task', modelLabel: '模型甲@high', modelTechnicalLabel: 'raw-model' } as const;
+  expect(markSourceMark(source)).toBe('模型甲@high'); expect(markSourceMark(source, true)).toBe('raw-model');
+  expect(markSourceMark({ ...source, modelLabel: 'AI7 本地检查' })).toBe('AI7 本地检查');
+  for (const status of ['applied', 'resolved']) expect(markIsHandled({ status })).toBe(true);
+  expect(markIsHandled({ status: 'open', disposition: 'rejected' })).toBe(true);
+  expect(markIsHandled({ status: 'open', disposition: 'accepted-with-edit' })).toBe(false);
+  expect(markIsHandled({ status: 'applied', conflict: 'unresolved' })).toBe(false);
+  expect(markDisplayNote('【未联网核查】公开理由')).toEqual({ text: '公开理由', unchecked: true, guessedAnchor: false });
 });

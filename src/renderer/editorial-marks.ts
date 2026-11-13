@@ -1,4 +1,4 @@
-import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard } from './editorial-mark-card.js';
+import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard, settleEditorialMarkCard, setEditorialMarkCardExpanded } from './editorial-mark-card.js';
 import { EDITORIAL_MARK_CATEGORIES, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
 import { matchesEditorialMarkFilter, type EditorialMarkFilter } from './editorial-mark-filter.js';
 import { windowStep } from './components/controls.js';
@@ -62,6 +62,9 @@ import {
   REVERSAL_CORRECTION_LINE,
   SAFE_MERGE_LINE,
   markDriftNote,
+  markSourceMark,
+  markIsHandled,
+  markDisplayNote,
   markTimeLabel,
   selectionMenuReason,
 } from './editorial-mark-labels.js';
@@ -532,6 +535,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     scheduleCommentsLayout();
   };
   let working = false;
+  const workingMarks = new Set<string>();
   /** The Series the Book is in (Issue #63, S28b): each selection menu reads them again and is drawn again when they moved (#642). */
   const seriesOf = options.seriesOf;
   const inSeries = seriesOf === undefined ? null : seriesMembership(() => seriesOf(null), () => !destroyed);
@@ -542,7 +546,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const commentNodes = new Map<string, { card: EditorialMarkCardProjection; node: HTMLElement; receipt?: ApplyReceiptProjection | undefined; readState?: string }>();
   const commentsScroll = el('div', 'manuscript-comments-scroll');
   // These nodes and this selection belong to the mounted pane, never to a polling/card redraw.
-  const markFilter: EditorialMarkFilter = { selectedCategories: new Set(), status: 'all', keyword: '' };
+  const markFilter: EditorialMarkFilter = { selectedCategories: new Set(), selectedModels: new Set(), status: 'all', keyword: '' };
   const filterBar = el('div', 'editorial-mark-filters');
   filterBar.setAttribute('role', 'region');
   filterBar.setAttribute('aria-label', '筛选批注');
@@ -558,7 +562,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     chip.addEventListener('click', () => {
       if (key === 'all') markFilter.selectedCategories.clear();
       else if (!markFilter.selectedCategories.delete(key)) markFilter.selectedCategories.add(key);
-      scheduleCommentsLayout();
+      filterChanged();
     });
     categoryButtons.set(key, chip);
     categoryChips.append(chip);
@@ -566,11 +570,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const statusChips = el('div', 'editorial-mark-filter-chips');
   statusChips.setAttribute('role', 'group');
   statusChips.setAttribute('aria-label', '批注状态');
-  for (const [status, label] of [['all', '全部'], ['open', '待处理'], ['applied', '已应用']] as const) {
+  for (const [status, label] of [['all', '全部'], ['open', '待处理'], ['handled', '已处理']] as const) {
     const chip = el('button', 'quiet', label);
     chip.type = 'button';
     chip.dataset['markStatusFilter'] = status;
-    chip.addEventListener('click', () => { markFilter.status = status; scheduleCommentsLayout(); });
+    chip.addEventListener('click', () => { markFilter.status = status; filterChanged(); });
     statusChips.append(chip);
   }
   const search = el('input', 'editorial-mark-search');
@@ -578,11 +582,40 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   search.dataset['markSearchInput'] = '';
   search.placeholder = '搜索原文、修改建议或理由';
   search.setAttribute('aria-label', '搜索批注');
-  search.addEventListener('input', () => { markFilter.keyword = search.value; scheduleCommentsLayout(); });
+  search.addEventListener('input', () => { markFilter.keyword = search.value; filterChanged(); });
   const filterSummary = el('p', 'editorial-mark-filter-summary');
   filterSummary.setAttribute('role', 'status');
   filterSummary.setAttribute('aria-live', 'polite');
-  filterBar.append(categoryChips, statusChips, search, filterSummary);
+  const modelChips = el('div', 'editorial-mark-filter-chips');
+  modelChips.setAttribute('role', 'group');
+  modelChips.setAttribute('aria-label', '模型（可多选）');
+  const modelButtons = new Map<string, HTMLButtonElement>();
+  const filterPopover = el('div', 'editorial-mark-filter-popover');
+  filterPopover.id = `comments-filter-${crypto.randomUUID()}`;
+  filterPopover.setAttribute('popover', 'auto');
+  filterPopover.setAttribute('aria-label', '筛选批注');
+  filterPopover.append(el('strong', undefined, '分类'), categoryChips, el('strong', undefined, '模型'), modelChips, search);
+  const filterButton = el('button', 'quiet', '筛选');
+  filterButton.type = 'button';
+  filterButton.dataset['markFilterToggle'] = '';
+  filterButton.setAttribute('popovertarget', filterPopover.id);
+  filterButton.setAttribute('aria-controls', filterPopover.id);
+  filterButton.setAttribute('aria-haspopup', 'true');
+  filterButton.setAttribute('aria-expanded', 'false');
+  filterButton.addEventListener('click', () => {
+    const rect = filterButton.getBoundingClientRect();
+    filterPopover.style.left = `${Math.max(8, Math.min(rect.right - 280, innerWidth - 288))}px`;
+    filterPopover.style.top = `${rect.bottom + 4}px`;
+  });
+  filterPopover.addEventListener('toggle', () => filterButton.setAttribute('aria-expanded', String(filterPopover.matches(':popover-open'))));
+  const disclosureLine = el('p', 'editorial-mark-disclosure', '以下 AI 建议未联网核查');
+  disclosureLine.hidden = true;
+  const heading = options.comments?.host.querySelector('.manuscript-comments-heading');
+  if (heading) heading.insertBefore(statusChips, heading.lastElementChild);
+  else filterBar.append(statusChips);
+  if (heading) heading.insertBefore(filterButton, heading.lastElementChild);
+  else filterBar.append(filterButton);
+  filterBar.append(disclosureLine, filterSummary, filterPopover);
   const commentsCanvas = el('div', 'manuscript-comments-canvas');
   commentsCanvas.setAttribute('role', 'list');
   commentsCanvas.setAttribute('aria-label', '当前可见区域批注');
@@ -599,6 +632,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let pressedTextMark: EditorialMarkAnchorProjection | undefined;
   let textPointerDown = false;
   let pressSequence = 0;
+  let layoutAfterPress = false;
   let activeComment: string | undefined;
   let hoveredComment: string | undefined;
   let suppressCommentSelection = false;
@@ -659,9 +693,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(input, send, problem);
     let generation = 0;
     let composing = false;
-    input.addEventListener('input', () => { generation++; });
-    input.addEventListener('compositionstart', () => { composing = true; generation++; });
-    input.addEventListener('compositionend', () => { composing = false; generation++; });
+    input.addEventListener('input', () => { generation++; scheduleCommentsLayout(); });
+    input.addEventListener('compositionstart', () => { composing = true; form.dataset['composing'] = 'true'; generation++; });
+    input.addEventListener('compositionend', () => { composing = false; form.dataset['composing'] = 'false'; generation++; scheduleCommentsLayout(); });
+    form.addEventListener('focusout', scheduleCommentsLayout);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       if (!input.value.trim() || send.disabled || composing) return;
@@ -686,6 +721,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     });
     entry.node.append(form);
     input.focus({ preventScroll: true });
+    scheduleCommentsLayout();
+  }
+  function filterChanged(): void {
+    commentsFrameScroll = 0;
+    commentsScroll.scrollTop = 0;
+    for (const entry of commentNodes.values()) entry.node.style.top = '';
     scheduleCommentsLayout();
   }
   function scheduleCommentsLayout(): void {
@@ -715,14 +756,19 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       pressedTextMark = undefined;
       commentSelection();
     }
+    if (layoutAfterPress && !destroyed) { layoutAfterPress = false; scheduleCommentsLayout(); }
   }
+  const cancelCommentPress = (): void => {
+    pressSequence++; pressedComment = undefined; textPointerDown = false; pressedTextMark = undefined;
+    if (layoutAfterPress && !destroyed) { layoutAfterPress = false; scheduleCommentsLayout(); }
+  };
   const finishCommentPress = (): void => {
     if (pressedComment === undefined && !textPointerDown) return;
     const sequence = pressSequence;
     setTimeout(() => { if (pressSequence === sequence) releaseCommentPress(); }, 100);
   };
   function layoutComments(): void {
-    if (pressedComment !== undefined || textPointerDown) return;
+    if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
     if (!visible) { hoverComment(undefined); editor.setVisibleMarkIds(null); return; }
@@ -731,7 +777,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const matching = new Set(comments.filter((mark) => matchesEditorialMarkFilter(mark, cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card, markFilter)).map((mark) => mark.markId));
     if (inlinePreviewId !== undefined && !matching.has(inlinePreviewId)) clearInlinePreview();
     if (activeComment !== undefined && !matching.has(activeComment)) activateComment(undefined);
-    const filtering = markFilter.selectedCategories.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
+    const filtering = markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
     editor.setVisibleMarkIds(filtering ? new Set([...matching, ...marks.filter((mark) => mark.kind === 'personal-highlight').map((mark) => mark.markId)]) : null);
     for (const [key, button] of categoryButtons) {
       const count = key === 'all' ? comments.length : comments.filter((mark) => mark.categoryKey === key).length;
@@ -741,23 +787,80 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       button.hidden = key !== 'all' && count === 0 && !markFilter.selectedCategories.has(key);
       button.setAttribute('aria-pressed', String(key === 'all' ? markFilter.selectedCategories.size === 0 : markFilter.selectedCategories.has(key)));
     }
-    for (const button of statusChips.querySelectorAll<HTMLButtonElement>('button')) button.setAttribute('aria-pressed', String(button.dataset['markStatusFilter'] === markFilter.status));
-    const summary = `当前区域 ${matching.size} / ${comments.length} 条批注${matching.size === 0 && filtering ? ' · 没有匹配的批注' : ''}`;
+    for (const button of statusChips.querySelectorAll<HTMLButtonElement>('button')) {
+      const status = button.dataset['markStatusFilter'];
+      const count = comments.filter(mark => status === 'all' || (status === 'handled' ? markIsHandled(mark) : !markIsHandled(mark))).length;
+      button.textContent = `${status === 'all' ? '全部' : status === 'handled' ? '已处理' : '待处理'} ${count}`;
+      button.setAttribute('aria-pressed', String(status === markFilter.status));
+    }
+    const sources = new Set(comments.flatMap(mark => {
+      const card = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card;
+      return card?.source.kind === 'ai7' ? [markSourceMark(card.source)] : [];
+    }));
+    for (const source of new Set([...sources, ...markFilter.selectedModels])) {
+      let button = modelButtons.get(source);
+      if (!button) {
+        button = el('button', 'quiet', source);
+        button.type = 'button'; button.dataset['markModelFilter'] = source; button.title = source;
+        button.addEventListener('click', () => {
+          if (!markFilter.selectedModels.delete(source)) markFilter.selectedModels.add(source);
+          filterChanged();
+        });
+        modelButtons.set(source, button); modelChips.append(button);
+      }
+      button.setAttribute('aria-pressed', String(markFilter.selectedModels.has(source)));
+    }
+    for (const [source, button] of modelButtons) if (!sources.has(source) && !markFilter.selectedModels.has(source)) { button.remove(); modelButtons.delete(source); }
+    const activeFilters = markFilter.selectedCategories.size + markFilter.selectedModels.size + (markFilter.keyword.trim() ? 1 : 0) + (markFilter.status === 'all' ? 0 : 1);
+    filterButton.textContent = activeFilters ? `筛选 ${activeFilters}` : '筛选';
+    filterSummary.hidden = !filtering;
+    const summary = `已筛选 ${matching.size} / ${comments.length}${matching.size === 0 ? ' · 没有匹配的批注' : ''}`;
     if (filterSummary.textContent !== summary) filterSummary.textContent = summary;
     const viewport = options.scroll.getBoundingClientRect();
+    const listed = comments.flatMap(mark => {
+      if (!matching.has(mark.markId)) return [];
+      const anchor = commentAnchor(mark);
+      if (!anchor) return [];
+      const rect = anchor.getBoundingClientRect();
+      return rect.bottom < viewport.top - 200 || rect.top > viewport.bottom + 200 ? [] : [{ mark, rect }];
+    });
+    disclosureLine.hidden = !listed.some(({ mark }) => {
+      const card = cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card;
+      return card !== undefined && markDisplayNote(card.suggestion?.rationale ?? card.body).unchecked;
+    });
     const base = commentsScroll.getBoundingClientRect();
     const items = [];
     const present = new Set<string>();
-    for (const mark of editor.currentWindow().marks) {
-      if (mark.kind === 'personal-highlight' || !matching.has(mark.markId)) continue;
-      const anchor = commentAnchor(mark);
-      if (!anchor) continue;
-      const rect = anchor.getBoundingClientRect();
-      if (rect.bottom < viewport.top - 200 || rect.top > viewport.bottom + 200) continue;
+    for (const { mark, rect } of listed) {
       const freshCard = cardCache.cards.get(mark.markId);
       let entry = commentNodes.get(mark.markId);
       const card = freshCard ?? entry?.card;
-      if (!card) continue;
+      if (!card) {
+        present.add(mark.markId);
+        let pending = commentsCanvas.querySelector<HTMLElement>(`[data-comment-pending="${CSS.escape(mark.markId)}"]`);
+        if (!pending) {
+          pending = el('article', 'manuscript-comments-card manuscript-comments-read');
+          pending.tabIndex = 0; pending.dataset['commentPending'] = pending.dataset['commentCard'] = mark.markId;
+          pending.dataset['expanded'] = String(mark.markId === activeComment);
+          pending.addEventListener('pointerdown', (event) => { if (event.button === 0) { pressSequence++; pressedComment = mark.markId; } });
+          pending.addEventListener('click', () => activateComment(mark.markId));
+          commentsCanvas.append(pending);
+        }
+        pending.dataset['expanded'] = String(mark.markId === activeComment);
+        const failed = cardCache.failed(mark.markId);
+        const state = failed ? 'failed' : 'pending';
+        if (pending.dataset['readState'] !== state) {
+          pending.dataset['readState'] = state;
+          pending.replaceChildren(el('p', undefined, failed ? '批注读取失败。' : '正在读取批注…'));
+          if (failed) {
+            const retry = el('button', 'quiet', '重试读取'); retry.type = 'button'; retry.dataset['commentRetry'] = mark.markId;
+            retry.addEventListener('click', () => refreshComments(true)); pending.append(retry);
+          }
+        }
+        items.push({ mark, anchor: rect, node: pending, desiredTop: rect.top - base.top + commentsFrameScroll, measuredHeight: pending.getBoundingClientRect().height });
+        continue;
+      }
+      commentsCanvas.querySelector(`[data-comment-pending="${CSS.escape(mark.markId)}"]`)?.remove();
       const readState = freshCard ? 'ready' : cardCache.failed(mark.markId) ? 'failed' : 'pending';
       const stale = readState !== 'ready';
       present.add(mark.markId);
@@ -781,7 +884,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         });
         node.addEventListener('click', (event) => {
           activateComment(mark.markId);
-          if ((event.target as Element).closest('button, input, textarea, summary, a')) return;
+          const anchor = commentAnchor(mark);
+          const bounds = anchor?.getBoundingClientRect();
+          const viewport = options.scroll.getBoundingClientRect();
+          if (bounds && (bounds.top < viewport.top || bounds.bottom > viewport.bottom)) anchor?.scrollIntoView({ block: 'center', behavior: 'instant' });
+          if ((event.target as Element).closest('button, input, textarea, summary, a')) { scheduleCommentsLayout(); return; }
           const current = commentNodes.get(mark.markId)?.card;
           if (!current) return;
           commentAnchor({ ...mark, blockId: current.blockId })?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
@@ -842,9 +949,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           if (selection && focused instanceof HTMLTextAreaElement) focused.setSelectionRange(...selection);
         }
       }
+      const replyForm = entry.node.querySelector<HTMLFormElement>('.manuscript-comments-reply');
+      const replyInput = replyForm?.querySelector<HTMLTextAreaElement>('[data-comment-reply]');
+      const replyOpen = replyForm !== null && (Boolean(replyInput?.value.length) || replyForm.contains(document.activeElement) || replyForm.dataset['sending'] === 'true' || replyForm.dataset['composing'] === 'true');
+      if (replyForm && !replyOpen) replyForm.remove();
+      const expanded = mark.markId === activeComment || recoveryCards.has(mark.markId) || workingMarks.has(mark.markId) || replyOpen;
+      setEditorialMarkCardExpanded(entry.node.querySelector<HTMLElement>('.editorial-mark-card')!, expanded);
+      entry.node.dataset['expanded'] = String(expanded);
       entry.node.dataset['revalidating'] = String(stale);
       entry.node.setAttribute('aria-busy', String(readState === 'pending'));
-      const replyForm = entry.node.querySelector<HTMLFormElement>('.manuscript-comments-reply');
       const replySend = replyForm?.querySelector<HTMLButtonElement>('[data-mark-action="send-reply"]');
       if (replySend) replySend.disabled = stale || replyForm?.dataset['sending'] === 'true';
       entry.node.hidden = false;
@@ -858,6 +971,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         else { if (inlinePreviewId === id) clearInlinePreview(); commentsResize.unobserve(entry.node); entry.node.remove(); commentNodes.delete(id); }
       }
     }
+    for (const pending of commentsCanvas.querySelectorAll<HTMLElement>('[data-comment-pending]')) if (!present.has(pending.dataset['commentPending']!)) pending.remove();
     const selectedIndex = items.findIndex(item => item.mark.markId === activeComment && item.anchor.bottom >= viewport.top && item.anchor.top <= viewport.bottom);
     const paneTop = commentsScroll.scrollTop || 0;
     const holdingFrame = preservePanePositions || (activeComment === undefined && paneTop > 0);
@@ -890,7 +1004,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       item.node.dataset['hovered'] = String(item.mark.markId === hoveredComment);
       if (item.mark.markId === activeComment) item.node.classList.add('editorial-mark-card-active');
       else item.node.classList.remove('editorial-mark-card-active');
-      if (commentsCanvas.children[index] !== item.node) commentsCanvas.insertBefore(item.node, commentsCanvas.children[index] ?? null);
+      // A live reply must keep focus, selection and IME when preceding cards leave the buffer.
+      // Unlike insertBefore, moveBefore keeps the connected card's browser editing state.
+      if (commentsCanvas.children[index] !== item.node) commentsCanvas.moveBefore(item.node, commentsCanvas.children[index] ?? null);
     }
     // The final card may align near the viewport's top: retain blank space below it so the browser does not clamp
     // the requested scroll offset and push the pair apart. Manual pane reading keeps that existing canvas extent.
@@ -930,6 +1046,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       commentsIdentity = identity;
       for (const entry of commentNodes.values()) { commentsResize.unobserve(entry.node); entry.node.remove(); }
       commentNodes.clear();
+      for (const node of commentsCanvas.querySelectorAll('[data-comment-pending]')) node.remove();
       activateComment(undefined);
     }
     cardCache.sync(current);
@@ -963,8 +1080,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   document.addEventListener('selectionchange', commentSelection);
   options.scroll.addEventListener('scroll', scrollCommentsText, { passive: true });
   document.addEventListener('pointerup', finishCommentPress);
-  document.addEventListener('pointercancel', finishCommentPress);
+  document.addEventListener('pointercancel', cancelCommentPress);
   document.addEventListener('click', releaseCommentPress);
+  window.addEventListener('blur', cancelCommentPress);
   commentsScroll.addEventListener('scroll', scrollCommentsPane, { passive: true });
   window.addEventListener('resize', scheduleCommentsLayout);
 
@@ -1061,9 +1179,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   /** Run one mark command: refused while another is in flight, and every failure is said in words. */
-  const command = async (run: () => Promise<void>, failure: string): Promise<boolean> => {
+  const command = async (run: () => Promise<void>, failure: string, markId?: string): Promise<boolean> => {
     if (destroyed || refuseWhileBusy()) return false;
     working = true;
+    if (markId) { workingMarks.add(markId); scheduleCommentsLayout(); }
     try {
       await run();
       return true;
@@ -1072,6 +1191,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       return false;
     } finally {
       working = false;
+      if (markId) { workingMarks.delete(markId); scheduleCommentsLayout(); }
     }
   };
 
@@ -1481,11 +1601,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   async function changeInlineRevision(markId: string, action: 'apply-inline-revision' | 'revert-inline-revision'): Promise<void> {
     if (refuseWhileBusy() || !options.writeInlineRevision) return;
     working = true;
+    workingMarks.add(markId); scheduleCommentsLayout();
     try {
       const result = await options.writeInlineRevision(() => update(markId, action, {}));
       if (result) { applyCommand(result); refreshComments(); }
     } catch (error) { options.setStatus(options.errorMessage(error, '修订未能更新。'), 'error'); }
-    finally { working = false; }
+    finally { working = false; workingMarks.delete(markId); scheduleCommentsLayout(); }
   }
 
   /** Apply one change to a mark and show what it became: its card, or nothing when it has none now. */
@@ -1504,7 +1625,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (result.card !== null && result.card.kind !== 'personal-highlight') showCard(result.card);
       else closeFloating();
     }
-  }, '标记未能更新。');
+  }, '标记未能更新。', markId);
 
   const convertForm = (
     source: { markId: string; kind: EditorialMarkKind; blockId: string; pinnedText: string; body: string },
@@ -1679,13 +1800,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     const facts = el('dl', 'editorial-mark-factual-facts');
     for (const [term, value] of [
-      ['事实核查结果', `第 ${lineage.resultVersion} 版 · ${lineage.levelLabel}`],
+      ['事实核查结果', lineage.levelLabel],
       ['引文完整性', lineage.states.referenceIntegrity === 'verified' ? '引文已在原文中定位' : '引文未能定位'],
       ['断言支持', lineage.states.claimSupport],
       ['事实核查', lineage.states.factualVerification],
       ['来源', `已核对 ${lineage.checkedSources} 个 · 候选 ${lineage.candidateSources} 个`],
-      ['核查政策', `${lineage.policyPin.document} · ${lineage.policyPin.sha256.slice(0, 12)}`],
     ] as ReadonlyArray<readonly [string, string]>) facts.append(el('dt', undefined, term), el('dd', undefined, value));
+    const technical = el('details', 'technical-details');
+    technical.append(el('summary', undefined, '查看技术详情'), el('p', undefined, `结果 ${lineage.resultId} · 第 ${lineage.resultVersion} 版 · 核查政策 ${lineage.policyPin.document} · ${lineage.policyPin.sha256.slice(0, 12)}`));
+    block.append(technicalDisclosure(technical));
     block.append(facts, el('p', 'muted', '核查结果是证据评估，不是事实定论；这条修改建议仍由你决定是否应用。'));
     return [block];
   };
@@ -1708,7 +1831,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (inline) showCard(card);
       else { closeFloating(); editor.focus(); }
     });
-    const { panel, more, actions } = renderEditorialMarkCard(card, { technical: technicalLayerVisible, moreOpen, dismiss });
+    const { panel, more, actions } = renderEditorialMarkCard(card, { technical: technicalLayerVisible, moreOpen, dismiss, pane: inline });
     panel.setAttribute('role', inline ? 'listitem' : 'dialog');
     panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}${inline ? '卡片' : '浮卡'}`);
 
@@ -2125,7 +2248,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       );
       notePrompt(before, result.card);
       if (reveal && result.card) showCard(result.card);
-    }, '你的处理未能记录。');
+    }, '你的处理未能记录。', card.markId);
   }
 
   /**
@@ -2142,6 +2265,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   ): Promise<void> {
     if (destroyed || refuseWhileBusy()) return;
     working = true;
+    workingMarks.add(markId); scheduleCommentsLayout();
     try {
       options.setStatus('正在应用到稿件…', 'busy');
       const applied = await applyOnce(
@@ -2177,6 +2301,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       options.setStatus(options.errorMessage(error, '无法确认这次应用的结果；请重新打开这条修改建议查看。'), 'error');
     } finally {
       working = false;
+      workingMarks.delete(markId); scheduleCommentsLayout();
     }
   }
 
@@ -2902,6 +3027,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const onClick = (event: MouseEvent): void => {
     if (event.button !== 0) return;
     textPointerDown = false;
+    if (layoutAfterPress) { layoutAfterPress = false; scheduleCommentsLayout(); }
     const downMark = pressedTextMark;
     pressedTextMark = undefined;
     // ✎ 已改 (Issue #1411): the badge, or the applied words themselves, bring the revision's card forward in the 批注栏.
@@ -3029,8 +3155,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       document.removeEventListener('selectionchange', commentSelection);
       options.scroll.removeEventListener('scroll', scrollCommentsText);
       document.removeEventListener('pointerup', finishCommentPress);
-      document.removeEventListener('pointercancel', finishCommentPress);
+      document.removeEventListener('pointercancel', cancelCommentPress);
       document.removeEventListener('click', releaseCommentPress);
+      window.removeEventListener('blur', cancelCommentPress);
+      filterButton.remove();
+      if (heading) statusChips.remove();
       commentsScroll.removeEventListener('scroll', scrollCommentsPane);
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
