@@ -1889,6 +1889,8 @@ async function main() {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
       const geometry = await renderer.evaluate(`(async () => {
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        await Promise.all(document.body.getAnimations().map(animation=>animation.finished.catch(()=>undefined)));
+        await new Promise(resolve=>requestAnimationFrame(resolve));
         const shell=document.querySelector('.editor-shell[data-manuscript-kind="derivative"]');
         const toolbar=shell.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
         const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
