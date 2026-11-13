@@ -77,4 +77,18 @@ describe('J-02 names which burst condition was unmet when its one budget ran out
       ['true', 'false'].flatMap((risk) => [true, false].map((bounded) => helpers.burstWords({ text, delta, risk, bounded })))));
     for (const word of words) expect(controller.isContentFreeCheckLabel(`structure-burst-durable-${word}`), word).toBe(true);
   });
+
+  it('distinguishes an undispatched write, an outstanding IPC and an unreflected acknowledgement', () => {
+    const state = { text: 'whole', delta: 7, risk: 'true', bounded: true };
+    for (const [writes, expected] of [
+      [{ invoked: 7, returned: 7, failed: 0 }, 'not-dispatched'],
+      [{ invoked: 8, returned: 7, failed: 0 }, 'awaiting-ack'],
+      [{ invoked: 8, returned: 8, failed: 0 }, 'ack-received'],
+      [{ invoked: 8, returned: 7, failed: 1 }, 'write-error'],
+    ]) {
+      const label = `structure-burst-durable-${helpers.burstWords({ ...state, writes })}`;
+      expect(label).toBe(`structure-burst-durable-whole-journal-7of8-pending-bounded-${expected}`);
+      expect(controller.isContentFreeCheckLabel(label)).toBe(true);
+    }
+  });
 });
