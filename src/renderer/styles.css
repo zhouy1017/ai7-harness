@@ -1632,14 +1632,23 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
 .manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
 .manuscript-comments-card > .editorial-mark-card { position: static; width: 100%; box-sizing: border-box; padding: .6rem .7rem; box-shadow: 0 2px 8px var(--shadow); }
-.manuscript-comments-card[data-active="true"] { outline: 2px solid var(--mark-annotation); outline-offset: 1px; }
+.manuscript-comments-card[data-selected="true"] { outline: 2px solid var(--category-accent); outline-offset: -2px; }
+.manuscript-comments-card[data-hovered="true"]:not([data-selected="true"]) { outline: 1px solid var(--category-accent); }
 .manuscript-comments-reply { padding: .6rem; background: var(--surface); border: 1px solid var(--boundary); }
 .manuscript-comments-reply textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .manuscript-comments-problem { color: var(--status-blocked); margin: .2rem 0; }
 .manuscript-comments-problem:empty { display: none; }
 .manuscript-comments-leaders { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 7; pointer-events: none; overflow: hidden; }
-.manuscript-comments-leaders path { fill: none; stroke: var(--mark-annotation); stroke-width: 1.5px; stroke-dasharray: 4 3; opacity: .7; }
-.manuscript-comments-anchor { outline: 1px solid var(--mark-annotation); background-color: var(--mark-annotation-fill); }
+.manuscript-comments-leaders path { fill: none; stroke: var(--category-accent); stroke-width: 2px; }
+.manuscript-comments-leaders circle { fill: var(--category-accent); }
+.ProseMirror .editorial-mark.manuscript-comments-anchor[data-mark-category]:not(.editorial-mark-personal-highlight),
+.ProseMirror .editorial-mark-point.manuscript-comments-anchor[data-mark-category] { background-color: var(--category-fill); border-bottom: 3px solid var(--category-accent); }
+.ProseMirror [data-comment-hovered="true"] { outline: 1px solid var(--category-accent); }
+@media (forced-colors: active) {
+  .manuscript-comments-card[data-selected="true"] { outline-color: Highlight; }
+  .manuscript-comments-leaders path { stroke: Highlight; }
+  .manuscript-comments-leaders circle { fill: Highlight; }
+}
 @media (min-width: 1120px) {
   .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; grid-template-rows: minmax(0, 1fr); }
 }
@@ -1809,7 +1818,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-applied-badge { display: none; }
 .editor-shell[data-applied-marks="hidden"] .ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { background: transparent; border-bottom-color: transparent; }
 .editor-shell[data-applied-marks="hidden"] .ProseMirror [data-block-id][data-mark-line="applied"] { border-left-color: transparent; }
-.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--mark-suggestion); outline-offset: 1px; }
+.manuscript-comments-card.editorial-mark-card-active { outline: 2px solid var(--category-accent); outline-offset: -2px; }
 /* 阅读与修订模式 (Issue #1411): the mode pill says which mode the text is in. */
 .editor-input-mode-toggle { white-space: nowrap; }
 .inline-track-del { color: var(--status-blocked); text-decoration: line-through; background: var(--status-blocked-surface); user-select: none; }
