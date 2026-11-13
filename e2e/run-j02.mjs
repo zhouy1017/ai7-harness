@@ -2119,8 +2119,7 @@ async function main() {
     await commentsLayouts(renderer, requireJourney, waitFor);
     for (const selector of ['.edit-method-menu', '.derivative-menu']) {
       requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); menu.open=false; menu.querySelector('summary').focus(); return true; })()`) === true, 'toolbar-menu-focus');
-      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      await pressStructureKey(renderer, 'Enter');
       requireJourney(await renderer.evaluate(`document.querySelector('${selector}').open`) === true, 'toolbar-menu-enter-open');
       for (const key of ['ArrowDown', 'ArrowDown', 'Escape']) {
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
