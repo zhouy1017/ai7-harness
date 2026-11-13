@@ -171,6 +171,7 @@ export function parseReviewCrossChapterResult(text: string, input: ReviewCrossCh
 
 /** One finding exactly as the model listed it, before Reference Integrity has looked at it. */
 export interface ReviewUnitFinding {
+  readonly occurrence?: number;
   readonly quote: string;
   /** 1-based over the unit's blocks in message order: the overlap blocks first, then the own blocks. */
   readonly blockOrdinal: number;
@@ -406,7 +407,7 @@ export function parseReviewCategoryUnitResult(
     if (candidate.severity !== severity) mark(index, 'severity-normalized');
     if (candidate.note !== note) mark(index, 'note-normalized');
     if (candidate.clauseId != null && clauseId === undefined) mark(index, 'clause-unknown');
-    accepted.push({ quote: candidate.quote, blockOrdinal, severity, note, ...(replacement === undefined ? {} : { replacement }), ...(clauseId === undefined ? candidate.clauseId == null ? {} : { clauseId: null } : { clauseId }) });
+    accepted.push({ quote: candidate.quote, blockOrdinal, ...(Number.isSafeInteger(candidate.occurrence) && (candidate.occurrence as number) > 0 ? { occurrence: candidate.occurrence as number } : {}), severity, note, ...(replacement === undefined ? {} : { replacement }), ...(clauseId === undefined ? candidate.clauseId == null ? {} : { clauseId: null } : { clauseId }) });
     acceptedIndexes.push(index);
   });
   // Parsed rejections are a complete review outcome and remain visible in the excluded appendix.

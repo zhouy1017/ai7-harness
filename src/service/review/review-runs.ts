@@ -1,3 +1,4 @@
+import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
 import { researchModelChannelLabel } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
@@ -3014,7 +3015,7 @@ export class ReviewRunStore {
       // #809: the live non-web route has no external evidence. The label follows the recorded
       // result into both its finding and its mark; model confidence cannot turn it into verification.
       const unverified = revision.policyPin.operationalScope === 'developer-live' || revision.policyPin.operationalScope === 'ordinary-production';
-      const disclosure = unverified ? '【未联网核查】' : '';
+      const disclosure = unverified ? REVIEW_UNCHECKED_DISCLOSURE : '';
       findings = review.findings.filter((finding) => read(finding) && blocks.has(finding.sourceRange.blockId)).map((finding) => ({
         kindRef: finding.findingId,
         severity: finding.severity,

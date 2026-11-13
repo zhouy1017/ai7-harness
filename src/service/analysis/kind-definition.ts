@@ -614,6 +614,7 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
 
 // ---- factual review ------------------------------------------------------------------------------
 
+// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
 export const FACTUAL_REVIEW_REDUCER_DESCRIPTOR = {
   schema: 'ai7.factual-review.reducers/1',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
