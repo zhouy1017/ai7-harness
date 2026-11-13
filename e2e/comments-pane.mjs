@@ -68,16 +68,21 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     check(false,'comments-five-visible',geometry);
   }
   // #1429: use the existing complete comments journey to exercise category/search linkage.
-  check(await renderer.evaluate(`(() => {
+  const category=await renderer.evaluate(`(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
     const cards=__comments.ids.map(id=>pane.querySelector('[data-mark-card="'+id+'"]'));
     const inline=__comments.ids.map(id=>document.querySelector('.editor-window [data-mark-id="'+id+'"]'));
-    if(!cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='编辑修订') || !inline.every(mark=>mark?.dataset.markCategory==='editor'))return false;
+    const cardsReady=cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='编辑修订');
+    const inlineReady=inline.every(mark=>mark?.dataset.markCategory==='editor');
+    if(!cardsReady || !inlineReady)return {cardsReady,inlineReady,headerReady:false};
     pane.querySelector('[data-mark-filter-toggle]').click();
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
-    globalThis.__commentsSearch=input; return document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height<=84;
-  })()`), 'comments-category-badges-and-search');
+    globalThis.__commentsSearch=input; const heading=document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height,filters=document.querySelector('.editorial-mark-filters').getBoundingClientRect().height; return {cardsReady,inlineReady,headerReady:heading+filters<=84,heading,filters};
+  })()`);
+  check(category.cardsReady,'comments-category-badges-and-search-cards',category);
+  check(category.inlineReady,'comments-category-badges-and-search-words',category);
+  check(category.cardsReady&&category.inlineReady&&category.headerReady,'comments-category-badges-and-search',category);
   await waitFor(renderer, `(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
     return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&
@@ -199,6 +204,10 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
     return {pass:reachable && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
+  check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
+  check(!coordinates.selected, 'comments-scrolled-canvas-unselected', coordinates);
+  check(coordinates.scrollTop===0, 'comments-scrolled-canvas-text-scroll-reset', coordinates);
+  check(Math.abs(coordinates.cardTop-coordinates.wordsTop)<=4, 'comments-scrolled-canvas-word-level', coordinates);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
   const compact = await renderer.evaluate(`(() => {
     const pane=document.querySelector('.manuscript-comments-scroll'), p=pane.getBoundingClientRect();
