@@ -210,6 +210,7 @@ describe('comments command parity and refresh continuity', () => {
     expect(selected.dataset['selected']).toBe('false');
   });
   it('selects from the caret when decoration replacement retargets the click to its paragraph (#1451)', async () => {
+    vi.stubGlobal('Element', MiniElement);
     const ui = mount(); await paint();
     const click = () => (ui.block as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', bubbles: true, button: 0 } });
     ui.setCaret(1); click(); await paint();
