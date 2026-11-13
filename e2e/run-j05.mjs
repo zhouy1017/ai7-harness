@@ -1118,7 +1118,8 @@ async function main() {
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
-    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') { toggle.click(); document.querySelector('[data-edit-method="auto"]').click(); } return ${READING_REVISION} && toggle.textContent==='修订 · 自动应用 ▾' && toggle.dataset.autoApply==='true'; })()`, 'revision-reading-mode');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') { toggle.click(); document.querySelector('[data-edit-method="auto"]').click(); } return true; })()`, 'revision-reading-mode');
+    await waitFor(renderer, `${READING_REVISION} && document.querySelector('[data-editor-input-mode-toggle]').textContent==='修订 · 自动应用 ▾' && document.querySelector('[data-editor-input-mode-toggle]').dataset.autoApply==='true'`, 'revision-reading-mode-ready');
     await assertRenderer(renderer, `(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return false; window.__j05RevBlock=block.dataset.blockId; window.__j05RevOriginal=window.__j05.text(block.dataset.blockId); return typeof window.__j05RevOriginal==='string'; })()`, 'revision-block');
     // Typing over a selection writes in place; its settle creates an applied editor card without a composer.
     await selectInlineRevision(renderer, 'revision-select');

@@ -479,7 +479,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         inputMenu.open = false;
         inputModeToggle.focus();
       };
-      if (!dirty && !saving && !retryRequired) apply();
+      if (choice.autoApply === null && !dirty && !saving && !retryRequired) apply();
       else void editor?.flush().then(apply);
     });
     item.dataset['editMethod'] = choice.value;

@@ -2117,6 +2117,14 @@ async function main() {
     at('comments-responsive-pane');
     await commentsOrdinaryForEditor(renderer, requireJourney, waitFor);
     await commentsLayouts(renderer, requireJourney, waitFor);
+    for (const selector of ['.edit-method-menu', '.derivative-menu']) {
+      requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); menu.open=false; menu.querySelector('summary').focus(); return true; })()`) === true, 'toolbar-menu-focus');
+      for (const key of ['ArrowDown', 'ArrowDown', 'Escape']) {
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: key==='Escape'?27:40 });
+        requireJourney(await renderer.evaluate(`(() => { const menu=document.querySelector('${selector}'); return ${key==='Escape'?"!menu.open && document.activeElement===menu.querySelector('summary')":"menu.open && menu.querySelector('.ui-menu-panel').contains(document.activeElement)"}; })()`) === true, `toolbar-menu-${key}`);
+      }
+    }
     // #1452: toolbar geometry at both Owner viewport sizes, in the existing layouts stage.
     for (const size of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });

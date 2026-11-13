@@ -382,7 +382,7 @@ describe('the Manuscript screen lifecycle', () => {
     app.showing?.destroy();
   });
 
-  it('reads the existing preference and maps each menu choice without losing it in direct edit', () => {
+  it('reads the existing preference and maps each menu choice without losing it in direct edit', async () => {
     setAutoApplyEditorRevisions(false);
     const app = shell();
     app.open(windowOf('book-one'));
@@ -394,9 +394,11 @@ describe('the Manuscript screen lifecycle', () => {
     expect(getAutoApplyEditorRevisions()).toBe(false);
     expect(trigger.textContent).toBe('直接改稿 · 不留痕 ▾');
     choose('auto');
+    await Promise.resolve();
     expect(children.editorSurfaces.at(-1)!.setInputMode).toHaveBeenLastCalledWith('reading-revision');
     expect(getAutoApplyEditorRevisions()).toBe(true);
     choose('confirm');
+    await Promise.resolve();
     expect(getAutoApplyEditorRevisions()).toBe(false);
     expect(trigger.textContent).toBe('修订 · 待我确认 ▾');
     app.showing?.destroy();
