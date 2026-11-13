@@ -60,6 +60,7 @@ it('stacks around the chosen card and clamps it without losing earlier cards (#1
   const items = Array.from({ length: 4 }, (_, i) => ({ desiredTop: 100 + i, measuredHeight: 50 }));
   expect(stackEditorialComments(items, 2).map(item => item.top)).toEqual([-18, 42, 102, 162]);
   expect(stackEditorialComments(items, 2, { top: 0, height: 120 }).map(item => item.top)).toEqual([-50, 10, 70, 130]);
+  expect(stackEditorialComments(items, 2, { top: 150, height: 120 }).map(item => item.top)).toEqual([30, 90, 150, 210]);
   expect(stackEditorialComments(items).map(item => item.top)).toEqual([100, 160, 220, 280]);
 });
 
@@ -68,7 +69,9 @@ it('picks the shortest range, prefers a start over an end and keeps window-order
   const inner = { ...outer, markId: 'inner', fromGrapheme: 2, toGrapheme: 4 };
   const next = { ...inner, markId: 'next', fromGrapheme: 4, toGrapheme: 6 };
   const twin = { ...inner, markId: 'twin' };
-  const marks = [outer, inner, twin, next, { ...inner, kind: 'personal-highlight' as const }];
+  const highlight = { ...inner, markId: 'highlight', kind: 'personal-highlight' as const };
+  const marks = [outer, inner, twin, next, highlight];
+  expect(pickEditorialComment([highlight], 'block', 3)).toBeUndefined();
   expect(pickEditorialComment(marks, 'block', 3)?.markId).toBe('inner');
   expect(pickEditorialComment(marks, 'block', 4)?.markId).toBe('next');
   expect(pickEditorialComment(marks, 'block', 6)?.markId).toBe('next');
@@ -217,6 +220,35 @@ describe('comments command parity and refresh continuity', () => {
     expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('true');
     ui.setCaret(8); click(); await paint();
     expect(ui.pane.querySelector<HTMLElement>('[data-comment-card]')!.dataset['selected']).toBe('false');
+  });
+  it('keeps unselected pane scroll and layout frames, then resets them on text movement (#1451)', async () => {
+    const ui = mount(); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card]')!;
+    const paneScroll = ui.pane.querySelector<HTMLElement>('.manuscript-comments-scroll')!;
+    const top = node.style.top;
+    paneScroll.scrollTop = 100; (paneScroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint();
+    expect(node.style.top).toBe(top); expect(paneScroll.scrollTop).toBe(100);
+    ui.refresh(); await paint(); expect(node.style.top).toBe(top); expect(paneScroll.scrollTop).toBe(100);
+    (ui.scroll as unknown as MiniElement).dispatchEvent({ type: 'scroll' }); await paint(); expect(paneScroll.scrollTop).toBe(0);
+  });
+  it('holds pointer-focused controls in place until the completed click selects their card (#1451)', async () => {
+    const ui = mount(); await paint();
+    const node = ui.pane.querySelector<HTMLElement>('[data-comment-card]')!;
+    const reply = node.querySelector<HTMLButtonElement>('[data-mark-action="reply"]')!;
+    const top = node.style.top;
+    (node as unknown as MiniElement).dispatchEvent({ ...{ type: 'pointerdown', button: 0, bubbles: true } });
+    reply.focus(); (reply as unknown as MiniElement).dispatchEvent({ type: 'focusin', bubbles: true }); await paint();
+    expect(node.dataset['selected']).not.toBe('true'); expect(node.style.top).toBe(top);
+    reply.click(); await paint(); expect(node.dataset['selected']).toBe('true'); expect(node.querySelector('[data-comment-reply]')).not.toBeNull();
+  });
+  it('keeps the pointed mark when its last glyph puts the caret at an adjacent start (#1451)', async () => {
+    vi.stubGlobal('Element', MiniElement);
+    vi.stubGlobal('Node', MiniElement);
+    const ui = mount(card, [{ ...card, markId: 'adjacent', fromGrapheme: 2, toGrapheme: 4 }]); await paint();
+    const words = document.createElement('span'); words.dataset['markId'] = card.markId; ui.block.append(words);
+    ui.setCaret(2); (words as unknown as MiniElement).dispatchEvent({ ...{ type: 'mousedown', button: 0, bubbles: true } });
+    (ui.block as unknown as MiniElement).dispatchEvent({ ...{ type: 'click', button: 0, bubbles: true } }); await paint();
+    expect(ui.pane.querySelector<HTMLElement>('[data-comment-card="comment"]')!.dataset['selected']).toBe('true');
   });
   it('reuses reply/resolve commands, keeps the actual reply input and caret across a returned-card refresh, and reads once', async () => {
     const ui = mount(); await paint();

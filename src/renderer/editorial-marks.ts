@@ -594,6 +594,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   options.comments?.host.parentElement?.append(leaders);
   let commentsFrame: number | undefined;
   let preservePanePositions = false;
+  let commentsFrameScroll = 0;
+  let pressedComment: string | undefined;
+  let pressedTextMark: EditorialMarkAnchorProjection | undefined;
   let activeComment: string | undefined;
   let hoveredComment: string | undefined;
   let suppressCommentSelection = false;
@@ -619,9 +622,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     scheduleCommentsLayout();
   };
   const hoverComment = (markId: string | undefined): void => {
+    if (hoveredComment === markId) return;
+    const previous = hoveredComment;
     hoveredComment = markId;
-    for (const [id, entry] of commentNodes) entry.node.dataset['hovered'] = String(id === markId);
-    for (const node of options.host.querySelectorAll<HTMLElement>('[data-mark-id]')) node.dataset['commentHovered'] = String(node.dataset['markId'] === markId);
+    for (const id of [previous, markId]) {
+      if (id === undefined) continue;
+      const entry = commentNodes.get(id);
+      if (entry) entry.node.dataset['hovered'] = String(id === markId);
+      for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(id)}"]`)) {
+        if (id === markId) node.dataset['commentHovered'] = 'true';
+        else delete node.dataset['commentHovered'];
+      }
+    }
   };
   const returnToCommentAnchor = (card: Pick<EditorialMarkCardProjection, 'blockId' | 'fromGrapheme'>): void => {
     editor.selectRange(card.blockId, card.fromGrapheme, card.fromGrapheme);
@@ -684,13 +696,27 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }
   function scrollCommentsPane(): void {
     // Reading neighbouring cards must not snap the pane back to its selected card.
-    if (commentsFrame === undefined) preservePanePositions = activeComment !== undefined;
+    if (commentsFrame === undefined) preservePanePositions = true;
     queueCommentsLayout();
   }
+  function scrollCommentsText(): void {
+    if (activeComment === undefined) { commentsFrameScroll = 0; commentsScroll.scrollTop = 0; }
+    scheduleCommentsLayout();
+  }
+  function releaseCommentPress(): void {
+    const id = pressedComment;
+    pressedComment = undefined;
+    if (!destroyed && id !== undefined) activateComment(id);
+  }
+  const finishCommentPress = (): void => {
+    const id = pressedComment;
+    setTimeout(() => { if (pressedComment === id) releaseCommentPress(); }, 0);
+  };
   function layoutComments(): void {
+    if (pressedComment !== undefined) return;
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
-    if (!visible) { editor.setVisibleMarkIds(null); return; }
+    if (!visible) { hoverComment(undefined); editor.setVisibleMarkIds(null); return; }
     const marks = editor.currentWindow().marks;
     const comments = marks.filter((mark) => mark.kind !== 'personal-highlight');
     const matching = new Set(comments.filter((mark) => matchesEditorialMarkFilter(mark, cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card, markFilter)).map((mark) => mark.markId));
@@ -734,14 +760,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         commentNodes.set(mark.markId, entry);
         commentsCanvas.append(node);
         commentsResize.observe(node);
+        node.addEventListener('pointerdown', (event) => { if (event.button === 0) pressedComment = mark.markId; });
         node.addEventListener('pointerenter', () => hoverComment(mark.markId));
         node.addEventListener('pointerleave', () => hoverComment(undefined));
         node.addEventListener('focusin', () => {
+          if (pressedComment !== undefined) return;
           const rect = commentAnchor(mark)?.getBoundingClientRect();
-          if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const currentViewport = options.scroll.getBoundingClientRect();
+          if (rect && (rect.bottom < currentViewport.top || rect.top > currentViewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
           activateComment(mark.markId);
         });
         node.addEventListener('click', (event) => {
+          activateComment(mark.markId);
           if ((event.target as Element).closest('button, input, textarea, summary, a')) return;
           const current = commentNodes.get(mark.markId)?.card;
           if (!current) return;
@@ -810,7 +840,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (replySend) replySend.disabled = stale || replyForm?.dataset['sending'] === 'true';
       entry.node.hidden = false;
       entry.node.dataset['markCategory'] = mark.categoryKey;
-      items.push({ mark, anchor: rect, node: entry.node, desiredTop: rect.top - base.top + (commentsScroll.scrollTop || 0), measuredHeight: entry.node.getBoundingClientRect().height });
+      items.push({ mark, anchor: rect, node: entry.node, desiredTop: rect.top - base.top + (activeComment === undefined ? commentsFrameScroll : commentsScroll.scrollTop || 0), measuredHeight: entry.node.getBoundingClientRect().height });
     }
     for (const [id, entry] of commentNodes) {
       if (!present.has(id)) {
@@ -846,7 +876,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : selectedIndex >= 0 ? paneTop + shift + commentsScroll.clientHeight : 0;
     commentsCanvas.style.height = `${Math.max(commentsScroll.clientHeight, scrollFloor, ...placed.map((item) => item.top + item.measuredHeight + 10))}px`;
     if (shift) commentsScroll.scrollTop = paneTop + shift;
-    for (const node of options.host.querySelectorAll<HTMLElement>('[data-mark-id]')) node.dataset['commentHovered'] = String(node.dataset['markId'] === hoveredComment);
+    if (activeComment !== undefined && !preservePanePositions) commentsFrameScroll = paneTop + shift;
+    if (hoveredComment !== undefined) for (const node of options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(hoveredComment)}"]`)) node.dataset['commentHovered'] = 'true';
     const active = selectedIndex < 0 ? undefined : placed.find((item) => item.mark.markId === activeComment);
     if (active) {
       const origin = options.comments!.host.parentElement!.getBoundingClientRect();
@@ -907,7 +938,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     activateComment(pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme)?.markId);
   };
   document.addEventListener('selectionchange', commentSelection);
-  options.scroll.addEventListener('scroll', scheduleCommentsLayout, { passive: true });
+  options.scroll.addEventListener('scroll', scrollCommentsText, { passive: true });
+  document.addEventListener('pointerup', finishCommentPress);
+  document.addEventListener('pointercancel', finishCommentPress);
+  document.addEventListener('click', releaseCommentPress);
   commentsScroll.addEventListener('scroll', scrollCommentsPane, { passive: true });
   window.addEventListener('resize', scheduleCommentsLayout);
 
@@ -2809,6 +2843,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const onMouseDown = (event: MouseEvent): void => {
+    if (event.button === 0) { suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
     // Some platforms select the word under a context click before the menu opens; what decides the
     // menu is what was selected before that.
     if (event.button === 2) collapsedBeforeContextClick = editor.selectedRange().kind === 'none';
@@ -2840,6 +2875,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   const onClick = (event: MouseEvent): void => {
     if (event.button !== 0) return;
+    const downMark = pressedTextMark;
+    pressedTextMark = undefined;
     // ✎ 已改 (Issue #1411): the badge, or the applied words themselves, bring the revision's card forward in the 批注栏.
     const badge = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-applied-mark-id]') : null;
     if (badge !== null) { event.preventDefault(); void revealRevision(badge.dataset['appliedMarkId']!); return; }
@@ -2852,14 +2889,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     }
     if (editor.selectedRange().kind !== 'none') return;
     suppressCommentSelection = false;
-    const hit = markAt(event.target, false);
+    const hit = markAt(event.target, false) ?? downMark;
     const point = editor.captureContinuity().head;
     // Updating linked decorations can replace the down-target before click and retarget it to the paragraph.
-    const mark = hit ? pickEditorialComment(editor.currentWindow().marks, hit.blockId, point.blockId === hit.blockId && point.grapheme >= hit.fromGrapheme && point.grapheme <= hit.toGrapheme ? point.grapheme : hit.fromGrapheme)
+    const mark = hit ? hit
       : options.comments?.enabled() ? pickEditorialComment(editor.currentWindow().marks, point.blockId, point.grapheme) : undefined;
     if (options.comments?.enabled()) {
       if (!mark) { activateComment(undefined); return; }
-      if (mark.anchorState === 'exact') { closeFloating(); activateComment(mark.markId); return; }
+      if (mark.anchorState === 'exact') { closeFloating(); activateComment(mark.markId); suppressCommentSelection = hit !== undefined; return; }
     }
     // A drifted one still opens its floating card, where its conflict is resolved.
     if (mark !== undefined && mark.kind === 'change-suggestion' && mark.status === 'applied' && mark.anchorState === 'exact') { void revealRevision(mark.markId); return; }
@@ -2962,7 +2999,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       commentsResize.disconnect();
       if (commentsFrame !== undefined) cancelAnimationFrame(commentsFrame);
       document.removeEventListener('selectionchange', commentSelection);
-      options.scroll.removeEventListener('scroll', scheduleCommentsLayout);
+      options.scroll.removeEventListener('scroll', scrollCommentsText);
+      document.removeEventListener('pointerup', finishCommentPress);
+      document.removeEventListener('pointercancel', finishCommentPress);
+      document.removeEventListener('click', releaseCommentPress);
       commentsScroll.removeEventListener('scroll', scrollCommentsPane);
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
