@@ -1887,7 +1887,10 @@ async function main() {
     await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
     for (const width of [1280, 1368]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
-      const geometry = await renderer.evaluate(`(async () => {
+      let geometry;
+      const geometryDeadline = Date.now() + 5_000;
+      do {
+        geometry = await renderer.evaluate(`(async () => {
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
         await Promise.all(document.body.getAnimations().map(animation=>animation.finished.catch(()=>undefined)));
         await new Promise(resolve=>requestAnimationFrame(resolve));
@@ -1899,6 +1902,9 @@ async function main() {
         return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open',narrow:${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640,count:controls.length>=7,
           visible:bounds.every(r=>r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight)),untruncated:bounds.every(r=>r.scroll<=r.client+1)}};
       })()`);
+        if (Object.values(geometry.checks).every(value=>value===true)) break;
+        await new Promise(resolve=>setTimeout(resolve, 50));
+      } while (Date.now() < geometryDeadline);
       requireJourney(Object.values(geometry.checks).every(value=>value===true), 'document-toolbar-narrow-shell', geometry);
     }
     await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
