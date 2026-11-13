@@ -93,7 +93,7 @@ async function commentsNativeClick(renderer, point) {
   await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 });
   const held = await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); const node=document.elementFromPoint(${point.x},${point.y})?.closest('[data-comment-card]'); return {top:node?.getBoundingClientRect().top,selected:node?.dataset.selected}; })()`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 });
-  const events = await renderer.evaluate(`__commentsClickTrace`);
+  const events = await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done(__commentsClickTrace))))`);
   return { target: true, held, events, real:events.mousedown===true && events.mouseup===true && events.click===true };
 }
 

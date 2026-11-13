@@ -716,10 +716,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }
   const finishCommentPress = (): void => {
     const id = pressedComment;
-    setTimeout(() => { if (pressedComment === id) releaseCommentPress(); }, 0);
+    setTimeout(() => { if (pressedComment === id) releaseCommentPress(); }, 100);
   };
   function layoutComments(): void {
-    if (pressedComment !== undefined) return;
+    if (pressedComment !== undefined || textPointerDown) return;
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
     leaders.replaceChildren();
     if (!visible) { hoverComment(undefined); editor.setVisibleMarkIds(null); return; }
@@ -2862,8 +2862,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return undefined;
   };
 
-  const onMouseDown = (event: MouseEvent): void => {
+  const onTextPointerDown = (event: PointerEvent): void => {
     if (event.button === 0) { textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
+  };
+  const onMouseDown = (event: MouseEvent): void => {
+    if (event.button === 0 && !textPointerDown) { textPointerDown = true; suppressCommentSelection = false; pressedTextMark = markAt(event.target, false); }
     // Some platforms select the word under a context click before the menu opens; what decides the
     // menu is what was selected before that.
     if (event.button === 2) collapsedBeforeContextClick = editor.selectedRange().kind === 'none';
@@ -2955,6 +2958,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   reflow.observe(options.host);
 
   options.host.addEventListener('mousedown', onMouseDown);
+  options.host.addEventListener('pointerdown', onTextPointerDown, { capture: true });
   options.host.addEventListener('pointerover', onMarkHover);
   options.host.addEventListener('pointerout', onMarkHover);
   options.host.addEventListener('contextmenu', onContextMenu);
@@ -3028,6 +3032,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       window.removeEventListener('resize', scheduleCommentsLayout);
       commentsScroll.remove();
       options.host.removeEventListener('pointerover', onMarkHover);
+      options.host.removeEventListener('pointerdown', onTextPointerDown, { capture: true });
       options.host.removeEventListener('pointerout', onMarkHover);
       filterBar.remove();
       leaders.remove();
