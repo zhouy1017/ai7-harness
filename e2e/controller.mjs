@@ -764,7 +764,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   'J-08': Object.freeze([
-    'comments-inline-reply',
+    'comments-inline-reply-column',
+    'comments-inline-reply-overlay',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'controller-loopback-sentinel',
@@ -1079,7 +1080,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
   // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
   'J-05': Object.freeze([
-    'comments-inline-apply',
+    'comments-inline-apply-column',
+    'comments-inline-apply-overlay',
     'editor-revision',
     'ai-locks',
     'selected-fast-text-scope-refusal',
@@ -2064,6 +2066,18 @@ export function localDebugRefused() {
 /** True only on a developer host that set the controller switch. Never true under CI. */
 export function localDebugEnabled() {
   return process.env[LOCAL_DEBUG_ENV] === '1' && !localDebugRefused();
+}
+
+/** Slow-renderer reproduction only: debug/repeat opt in; ordinary Journeys and CI ignore it. */
+export async function applyRendererDiagnostics(journey, send) {
+  const value = process.env.AI7_E2E_CPU_THROTTLE;
+  if (!localDebugEnabled() || value === undefined) return;
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate < 1 || rate > 20) {
+    throw new Error('AI7_E2E_CPU_THROTTLE must be a number from 1 to 20');
+  }
+  await send('Emulation.setCPUThrottlingRate', { rate });
+  recordDebugDetail(journey, `renderer CPU throttling rate ${rate}`);
 }
 
 /** The ignored per-run artifact directory under test-results/; created lazily, shared with a launching controller. */

@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -345,6 +345,7 @@ async function attachRendererTarget(browser, launchScenario) {
   };
   at(`launch-${launchScenario}-renderer-runtime-enable`);
   await send('Runtime.enable');
+  await applyRendererDiagnostics('J-02', send);
   return { evaluate, observeIpc, setJournalFault, send };
 }
 
@@ -447,6 +448,13 @@ async function waitForChecks(renderer, expression, location, timeout = 60_000, w
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
+  if (words === 'burst' && renderer.burstObservationStart !== undefined) {
+    const ipc = await renderer.observeIpc();
+    const writes = ipc.events.filter(event => event.ordinal > renderer.burstObservationStart && event.operation === 'flushJournalEdit');
+    const count = phase => writes.filter(event => event.phase === phase).length;
+    observed = { ...observed, writes: { invoked: count('invoke'), returned: count('result'), failed: count('error') } };
+    if (localDebugEnabled()) recordDebugDetail('J-02', `burst write boundary ${JSON.stringify(observed)}`);
+  }
   throw journeyCheckFailure('J-02', words === 'burst' ? `${location}-${burstWords(observed)}` : location, { failed });
 }
 
@@ -501,9 +509,18 @@ function burstBoundedWord(bounded) {
  * how many of the 8 journal entries were written, whether a write was still pending, and the window size; `unread` when nothing
  * was read. No text, identity or count beyond these words.
  */
+function burstWriteWord(writes) {
+  if (writes?.failed > 0) return 'write-error';
+  if (writes?.invoked < 8) return 'not-dispatched';
+  if (writes?.invoked === 8 && writes.returned < 8) return 'awaiting-ack';
+  if (writes?.invoked === 8 && writes.returned === 8) return 'ack-received';
+  return 'write-unread';
+}
+
 function burstWords(observed) {
   if (observed === null || typeof observed !== 'object') return 'unread';
-  return `${burstTextWord(observed.text)}-journal-${burstJournalWord(observed.delta)}-${burstPendingWord(observed.risk)}-${burstBoundedWord(observed.bounded)}`;
+  const state = `${burstTextWord(observed.text)}-journal-${burstJournalWord(observed.delta)}-${burstPendingWord(observed.risk)}-${burstBoundedWord(observed.bounded)}`;
+  return observed.writes === undefined ? state : `${state}-${burstWriteWord(observed.writes)}`;
 }
 
 /**
@@ -2010,6 +2027,7 @@ async function runStructureJourney(renderer) {
   requireJourney(merged.blockId === tail.blockId && merged.position === tail.position && merged.totalBlocks === tail.totalBlocks, 'structure-tail-restored');
 
   at('structure-rapid-queue');
+  renderer.burstObservationStart = (await renderer.observeIpc()).events.at(-1)?.ordinal ?? 0;
   await placeStructureCaret(renderer, blockId, 12, 'structure-burst-caret');
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02BurstSequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Enter','Enter','Backspace','Backspace','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return !document.querySelector('#persistence-status')?.textContent.includes('上一处分段或合并'); })()`, 'structure-all-keys-accepted-before-ipc');
   await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const whole = p.text === window.__j02Structure.text; const bounded = p.blocks <= ${MAX_RENDERER_BLOCKS}; return { whole, ordered: p.journal === window.__j02BurstSequence + 8, settled: p.closeRisk === 'false', bounded,

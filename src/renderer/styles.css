@@ -1656,7 +1656,7 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
   .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; grid-template-rows: minmax(0, 1fr); }
 }
 @media (max-width: 1119px) {
-  .editor-workspace > .manuscript-comments-pane { position: absolute; z-index: 8; inset: 0 4.75rem 0 auto; width: min(340px, calc(100% - 4.75rem)); }
+  .editor-workspace > .manuscript-comments-pane { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: min(340px, calc(100% - 4.75rem)); }
 }
 @media (max-width: 760px) {
   .editor-workspace > .manuscript-comments-pane { right: 3.4rem; width: min(340px, calc(100% - 3.4rem)); }

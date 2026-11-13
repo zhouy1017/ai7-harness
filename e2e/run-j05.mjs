@@ -1,4 +1,4 @@
-import { seedCommentsPane, commentsGeometryAndScroll, commentsApplyAndReject, commentsSelectMark } from './comments-pane.mjs';
+import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { READING_REVISION, DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { READING_REVISION, DIRECT_EDIT, applyRendererDiagnostics, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 // J-05, first slice (Issue #407): Editorial Marks on the manuscript. An editor marks exact text with a
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
@@ -169,6 +169,7 @@ async function attachRenderer(browser) {
     return response;
   };
   await send('Runtime.enable');
+  await applyRendererDiagnostics('J-05', send);
   return {
     send,
     evaluate: async (expression) => {
@@ -1111,10 +1112,7 @@ async function main() {
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
     await settled(renderer, 'local-workflow-settled');
 
-    at('comments-inline-apply');
-    await seedCommentsPane(renderer, requireJourney, waitFor);
-    await commentsGeometryAndScroll(renderer, requireJourney, waitFor);
-    await commentsApplyAndReject(renderer, requireJourney, waitFor);
+    await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.

@@ -1,4 +1,4 @@
-import { seedCommentsPane, commentsGeometryAndScroll, commentsReplyAndResolve, commentsBookMemory } from './comments-pane.mjs';
+import { commentsRangeInside, commentsNativeClick, commentsPaneForms, commentsBookMemory } from './comments-pane.mjs';
 import { existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { applyRendererDiagnostics, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -155,6 +155,7 @@ async function attachRenderer(browser) {
     return response;
   };
   await send('Runtime.enable');
+  await applyRendererDiagnostics('J-08', send);
   return {
     send,
     evaluate: async (expression) => {
@@ -607,17 +608,22 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-mark-composer="create-editor-note"]')`, 'recovered-card-composer');
     await assertRenderer(renderer, `(() => { const form=document.querySelector('[data-mark-composer]'); const body=form.querySelector('[data-mark-field="body"]'); body.value='恢复后公开合成备注'; body.dispatchEvent(new Event('input',{bubbles:true})); form.querySelector('[data-mark-action="submit"]').click(); return true; })()`, 'recovered-card-submit');
     await waitFor(renderer, `document.querySelector('[data-mark-kind="editor-note"].editorial-mark') && !document.querySelector('[data-mark-composer]')`, 'recovered-card-note-drawn');
-    // A synthetic click does not collapse the selection as a real left-click does. Match J-05's caret-first interaction.
-    await assertRenderer(renderer, `(() => { const mark=document.querySelector('.editorial-mark[data-mark-kind="editor-note"]'); document.querySelector('[data-testid="manuscript-editor"]').focus(); const range=document.createRange(); range.selectNodeContents(mark); range.collapse(true); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); return selection.isCollapsed; })()`, 'recovered-card-caret');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await assertRenderer(renderer, `(() => { document.querySelector('.editorial-mark[data-mark-kind="editor-note"]').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'recovered-card-open');
+    // A mark can decorate before the authoritative refresh restores its selection. Finish that refresh before input.
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.parentElement.dataset.authoritativeMutation !== 'true' && document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed'`, 'recovered-card-refresh-settled');
+    await commentsRangeInside(renderer,requireJourney,waitFor,'.editorial-mark[data-mark-kind="editor-note"]');
+    await renderer.evaluate(`(() => { globalThis.__j08RecoveredPoint=null; document.querySelector('.editorial-mark[data-mark-kind="editor-note"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`);
+    await waitFor(renderer, `(() => {
+      const mark=document.querySelector('.editorial-mark[data-mark-kind="editor-note"]'),r=mark.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;
+      const previous=globalThis.__j08RecoveredPoint;globalThis.__j08RecoveredPoint={x,y};
+      if(!mark.contains(document.elementFromPoint(x,y))){mark.scrollIntoView({block:'center',behavior:'instant'});return false;}
+      return previous?.x===x && previous?.y===y;
+    })()`, 'recovered-card-hit-ready');
+    requireJourney((await commentsNativeClick(renderer,await renderer.evaluate('globalThis.__j08RecoveredPoint'))).real, 'recovered-card-open');
+    await waitFor(renderer, `(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot);return getSelection().isCollapsed && model.from===model.to;})()`, 'recovered-card-caret');
     await waitFor(renderer, `document.querySelector('[data-mark-card][data-mark-kind="editor-note"]')`, 'recovered-card-ready');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-mark-card]'); return document.documentElement.dataset.technicalLayerVisible==='false' && Array.from(card.querySelectorAll('[data-mark-block]')).map((block)=>block.dataset.markBlock).join('|')==='author|body|quote|more|actions' && card.querySelector('[data-mark-body]').textContent==='恢复后公开合成备注' && card.querySelector('[data-mark-block="quote"]').textContent.length===4 && card.querySelector('[data-mark-source]').textContent.startsWith('恢复责编 · ') && !card.querySelector('.editorial-mark-more').open && card.querySelector('.editorial-mark-more [data-mark-action="remove"]') && !card.querySelector('[data-mark-action="edit"]').closest('details'); })()`, 'recovered-card-hierarchy-and-author');
 
-    at('comments-inline-reply');
-    await seedCommentsPane(renderer, requireJourney, waitFor);
-    await commentsGeometryAndScroll(renderer, requireJourney, waitFor);
-    await commentsReplyAndResolve(renderer, requireJourney, waitFor);
+    await commentsPaneForms(renderer, requireJourney, waitFor, at, 'reply');
     await commentsBookMemory(renderer, requireJourney, waitFor);
 
     // The remaining candidate UUID/SHA assertions inspect developer disclosures, not ordinary UI payload.

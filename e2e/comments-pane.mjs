@@ -18,7 +18,7 @@ export async function commentsLayouts(renderer, check, waitFor) {
   for (const size of [native, { width: 1280, height: 800 }, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
     check(await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(!entry||entry.disabled)return false; if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`), 'comments-layout-open');
-    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1120 ? p.width>=300 && p.width<=340 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute' && p.left>=document.querySelector('.editor-workspace').getBoundingClientRect().left-1); })()`, 'comments-responsive-geometry');
+    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1120 ? p.width>=300 && p.width<=340 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute' && p.width>=Math.min(300,document.querySelector('.editor-workspace').getBoundingClientRect().width-e.width) && p.left>=document.querySelector('.editor-workspace').getBoundingClientRect().left-1); })()`, 'comments-responsive-geometry');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='on' && getComputedStyle(document.querySelector('.manuscript-comments-pane')).display==='none'; })()`), 'comments-focus-hidden');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='off' && !document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-focus-restored');
     check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
@@ -31,8 +31,27 @@ export async function commentsLayouts(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden===true && document.querySelector('[data-view-command="toggle-comments"]').getAttribute('aria-pressed')==='false'`, 'comments-f9-synchronized');
 }
 
-export async function seedCommentsPane(renderer, check, waitFor) {
-  await renderer.send('Emulation.setDeviceMetricsOverride', { width:1280, height:800, deviceScaleFactor:1, mobile:false });
+// Repeat the complete interaction flow, with independent marks, before restoring the desktop viewport.
+export async function commentsPaneForms(renderer, check, waitFor, at, action) {
+  const native=await renderer.evaluate('({width:innerWidth,height:innerHeight})');
+  try {
+    for(const [form,size] of [['column',{width:1280,height:800}],['overlay',{width:1008,height:681}]]) {
+      at('comments-inline-'+action+'-'+form);
+      await seedCommentsPane(renderer,check,waitFor,size);
+      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify(form==='overlay'?'absolute':'static')}`, 'comments-'+form+'-viewport');
+      await commentsGeometryAndScroll(renderer,check,waitFor);
+      if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
+      else await commentsReplyAndResolve(renderer,check,waitFor);
+      check(true,'comments-'+form+'-complete');
+    }
+  } finally {
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await waitFor(renderer,`innerWidth===${native.width} && innerHeight===${native.height}`,'comments-native-viewport-restored');
+  }
+}
+
+export async function seedCommentsPane(renderer, check, waitFor, size = {width:1280,height:800}) {
+  await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor:1, mobile:false });
   check(await renderer.evaluate(`(async () => {
     const editor=document.querySelector('[data-testid="manuscript-editor"]');
     const bookId=document.querySelector('.editor-shell').dataset.bookId;
@@ -42,10 +61,14 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     const page=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'window-start',blockId:start}});
     const paragraphs=page.blocks.filter(item=>item.kind==='paragraph');
     const short=item=>item && Array.from(item.text??'').length>=20 && Array.from(item.text??'').length<=120;
-    const block=paragraphs.find((item,index)=>index>=10 && short(item) && short(paragraphs[index+1])) ?? paragraphs.find((item,index)=>short(item) && short(paragraphs[index+1]));
+    const previous=globalThis.__commentsSeedBlocks??[];
+    const candidates=paragraphs.map((item,index)=>({item,index})).filter(({item,index})=>short(item)&&short(paragraphs[index+1])&&!previous.includes(item.blockId)&&!previous.includes(paragraphs[index+1].blockId));
+    const previousIndex=paragraphs.findIndex(item=>item.blockId===previous[0]);
+    const block=previous.length?candidates.sort((a,b)=>Math.abs(b.index-previousIndex)-Math.abs(a.index-previousIndex))[0]?.item:(candidates.find(({index})=>index>=10)??candidates[0])?.item;
     if(!block)return false;
     const second=paragraphs[paragraphs.indexOf(block)+1];
     if(!second)return false;
+    globalThis.__commentsSeedBlocks=[block.blockId,second.blockId];
     const ids=[]; const kinds=['change-suggestion','change-suggestion','annotation','annotation','editor-note'];
     for(let index=0;index<12;index++){
       const current=index<5?block:second;
@@ -68,16 +91,21 @@ export async function seedCommentsPane(renderer, check, waitFor) {
     check(false,'comments-five-visible',geometry);
   }
   // #1429: use the existing complete comments journey to exercise category/search linkage.
-  check(await renderer.evaluate(`(() => {
+  const category=await renderer.evaluate(`(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
     const cards=__comments.ids.map(id=>pane.querySelector('[data-mark-card="'+id+'"]'));
     const inline=__comments.ids.map(id=>document.querySelector('.editor-window [data-mark-id="'+id+'"]'));
-    if(!cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='编辑修订') || !inline.every(mark=>mark?.dataset.markCategory==='editor'))return false;
+    const cardsReady=cards.every(card=>card?.dataset.markCategory==='editor' && card.querySelector('.editorial-mark-category-badge')?.textContent==='编辑修订');
+    const inlineReady=inline.every(mark=>mark?.dataset.markCategory==='editor');
+    if(!cardsReady || !inlineReady)return {cardsReady,inlineReady,headerReady:false};
     pane.querySelector('[data-mark-filter-toggle]').click();
     pane.querySelector('[data-mark-category-filter="editor"]').click();
     const input=pane.querySelector('[data-mark-search-input]'); input.value='公开合成批注 2'; input.dispatchEvent(new Event('input',{bubbles:true}));
-    globalThis.__commentsSearch=input; return document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height+document.querySelector('.editorial-mark-filters').getBoundingClientRect().height<=84;
-  })()`), 'comments-category-badges-and-search');
+    globalThis.__commentsSearch=input; const heading=document.querySelector('.manuscript-comments-heading').getBoundingClientRect().height,filters=document.querySelector('.editorial-mark-filters').getBoundingClientRect().height; return {cardsReady,inlineReady,headerReady:heading+filters<=84,heading,filters};
+  })()`);
+  check(category.cardsReady,'comments-category-badges-and-search-cards',category);
+  check(category.inlineReady,'comments-category-badges-and-search-words',category);
+  check(category.cardsReady&&category.inlineReady&&category.headerReady,'comments-category-badges-and-search',category);
   await waitFor(renderer, `(() => {
     const pane=document.querySelector('.manuscript-comments-pane');
     return __comments.ids.every((id,index)=>pane.querySelector('[data-comment-card="'+id+'"]')?.hidden===(index!==2)) &&
@@ -95,7 +123,52 @@ export async function seedCommentsPane(renderer, check, waitFor) {
 }
 
 // Native input is intentional: focus and pointer-down must take the same path as an editor's first click.
-async function commentsNativeClick(renderer, point) {
+export async function commentsRangeElsewhere(renderer, check, waitFor, selector) {
+  check(await renderer.evaluate(`(() => {
+    const words=document.querySelector(${JSON.stringify(selector)}),editor=document.querySelector('[data-testid="manuscript-editor"]'),target=words.closest('[data-block-id]');
+    const paragraphs=Array.from(editor.querySelectorAll('p[data-block-id]')).filter(node=>node!==target);
+    for(const paragraph of paragraphs){
+      const walk=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);let text;
+      while(text=walk.nextNode())if(text.length>=4&&!text.parentElement.closest('[data-mark-id]')){
+        editor.focus({preventScroll:true});const range=document.createRange();range.setStart(text,0);range.setEnd(text,4);
+        const selection=getSelection();selection.removeAllRanges();selection.addRange(range);globalThis.__commentsRangeBlock=paragraph.dataset.blockId;return !selection.isCollapsed;
+      }
+    }
+    return false;
+  })()`), 'comments-existing-range-elsewhere');
+  await waitFor(renderer, `(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot);return !getSelection().isCollapsed && model.from!==model.to && model.anchor.blockId===__commentsRangeBlock && model.head.blockId===__commentsRangeBlock;})()`, 'comments-existing-range-ready');
+}
+
+// Select the paragraph containing the marked words: the click is strictly INSIDE the range.
+// Chromium keeps that range through mousedown; collapsing it on mouseup must not lose the click.
+export async function commentsRangeInside(renderer, check, waitFor, selector) {
+  check(await renderer.evaluate(`(() => {
+    const words=document.querySelector(${JSON.stringify(selector)}),editor=document.querySelector('[data-testid="manuscript-editor"]'),paragraph=words.closest('[data-block-id]');
+    editor.focus({preventScroll:true});const range=document.createRange();range.selectNodeContents(paragraph);
+    const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+    globalThis.__commentsRangeBlock=paragraph.dataset.blockId;
+    return !selection.isCollapsed && selection.containsNode(words,true);
+  })()`),'comments-existing-range-inside');
+  await waitFor(renderer,`(() => {const model=JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot),words=document.querySelector(${JSON.stringify(selector)});return !getSelection().isCollapsed && getSelection().containsNode(words,true) && model.from!==model.to && model.anchor.blockId===__commentsRangeBlock && model.head.blockId===__commentsRangeBlock;})()`,'comments-existing-range-inside-ready');
+}
+
+async function commentsInsideSelection(renderer,check,waitFor) {
+  const id=await renderer.evaluate('__comments.ids[11]'),selector='.editor-window [data-mark-id="'+id+'"]';
+  const point=()=>renderer.evaluate(`(() => {const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,hit:words.contains(document.elementFromPoint(x,y)),inside:getSelection().containsNode(words,true)};})()`);
+  for(const pane of [true,false]) {
+    if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('[data-edge-entry="comments"]').click();return document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-close-pane');
+    await commentsRangeInside(renderer,check,waitFor,selector);
+    const before=await point();check(before.hit&&before.inside,'comments-existing-range-inside-hit',before);
+    check((await commentsNativeClick(renderer,before)).real,'comments-existing-range-inside-real-click');
+    await waitFor(renderer,pane?`document.querySelector('[data-comment-card="'+${JSON.stringify(id)}+'"]').dataset.selected==='true'`:`document.querySelector('.editorial-mark-layer [data-mark-card="'+${JSON.stringify(id)}+'"]')`,pane?'comments-existing-range-inside-pane-selected':'comments-existing-range-inside-floating-open');
+    await waitFor(renderer,`getSelection().isCollapsed && JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot).from===JSON.parse(document.querySelector('[data-testid="manuscript-editor"]').dataset.selectionSnapshot).to`,'comments-existing-range-inside-caret');
+    if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click();document.querySelector('[data-edge-entry="comments"]').click();return !document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-restore-pane');
+  }
+  check((await commentsNativeClick(renderer,await renderer.evaluate(commentsUnmarkedPoint))).real,'comments-existing-range-clear');
+  await waitFor(renderer,`!document.querySelector('[data-comment-card][data-selected="true"]')`,'comments-existing-range-cleared');
+}
+
+export async function commentsNativeClick(renderer, point) {
   if (!point) return { target: false };
   await renderer.evaluate(`(() => { globalThis.__commentsClickTrace={}; for(const type of ['mousedown','mouseup','click']) document.addEventListener(type,()=>{__commentsClickTrace[type]=true;},{capture:true,once:true}); return true; })()`);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, buttons: 0 });
@@ -124,15 +197,31 @@ async function commentsSelectCard(renderer, check, waitFor, index, requireCompac
 
 export async function commentsSelectMark(renderer, check, waitFor, markId, requireCompact = false) {
   const id=JSON.stringify(markId);
-  await renderer.evaluate(`(() => {globalThis.__commentsPoint=null;globalThis.__commentsPointPrevious=null;document.querySelector('[data-comment-card="'+${id}+'"]')?.scrollIntoView({block:'start',behavior:'instant'});return true;})()`);
+  const readyUntil=Date.now()+60_000,remaining=()=>Math.max(0,readyUntil-Date.now());
+  await renderer.evaluate(`(() => {document.querySelector('.editor-window [data-mark-id="'+${id}+'"]')?.scrollIntoView({block:'center',behavior:'instant'});return true;})()`);
   await waitFor(renderer, `(() => {
+    const words=document.querySelector('.editor-window [data-mark-id="'+${id}+'"]'),node=document.querySelector('[data-comment-card="'+${id}+'"]');
+    if(!words||!node||node.hidden||!node.querySelector('[data-mark-card]')||node.dataset.revalidating==='true')return false;
+    const w=words.getBoundingClientRect(),v=document.querySelector('.editor-window').getBoundingClientRect();return w.bottom>v.top&&w.top<v.bottom;
+  })()`, 'comments-card-words-listed', remaining());
+  await renderer.evaluate(`(() => {globalThis.__commentsPoint=null;globalThis.__commentsPointPrevious=null;document.querySelector('[data-comment-card="'+${id}+'"]')?.scrollIntoView({block:'start',behavior:'instant'});return true;})()`);
+  try { await waitFor(renderer, `(() => {
     const node=document.querySelector('[data-comment-card="'+${id}+'"]');if(!node)return false;
     const r=node.getBoundingClientRect(),pane=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(),x=r.left+12,y=r.top+10;
     const before=__commentsPointPrevious;__commentsPointPrevious={x,y};
     if(node.hidden||y<pane.top||y>pane.bottom||!node.contains(document.elementFromPoint(x,y))){node.scrollIntoView({block:'start',behavior:'instant'});return false;}
     if(!before||before.x!==x||before.y!==y)return false;
     __commentsPoint={x,y,hit:true,top:r.top,selected:node.dataset.selected,expanded:node.dataset.expanded};return true;
-  })()`, 'comments-card-hit-ready');
+  })()`, 'comments-card-hit-ready', remaining()); } catch {
+    const reason=await renderer.evaluate(`(() => {
+      const node=document.querySelector('[data-comment-card="'+${id}+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
+      if(!node)return 'missing';if(!pane||pane.getClientRects().length===0)return 'pane-hidden';if(node.hidden)return 'not-listed';
+      const r=node.getBoundingClientRect(),p=pane.getBoundingClientRect(),x=r.left+12,y=r.top+10;
+      if(y<p.top||y>p.bottom)return 'outside-pane';if(!node.contains(document.elementFromPoint(x,y)))return 'covered';return 'moving';
+    })()`);
+    const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving'};
+    check(false,names[reason]??'comments-card-hit-ready');
+  }
   const point=await renderer.evaluate(`__commentsPoint`);
   if(requireCompact)check(point.expanded==='false'&&point.selected!=='true','comments-card-compact-before-click',point);
   const click=await commentsNativeClick(renderer,point);
@@ -164,18 +253,28 @@ async function commentsFilterMouse(renderer, check, waitFor) {
 }
 
 const commentsUnmarkedPoint = `(() => {
-  const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'), block=words.closest('[data-block-id]');
-  const walk=document.createTreeWalker(block,NodeFilter.SHOW_TEXT); let node, last;
-  while(node=walk.nextNode()) if(node.textContent.trim() && !node.parentElement.closest('[data-mark-id]'))last=node;
-  if(!last)return null;
-  const range=document.createRange(); range.selectNodeContents(last); const rects=range.getClientRects(), r=rects[rects.length-1];
-  const x=r.right-3,y=r.top+r.height/2; return document.elementFromPoint(x,y)?.closest('[data-mark-id]')?null:{x,y};
+  const editor=document.querySelector('[data-testid="manuscript-editor"]'),words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]');
+  const target=words.closest('[data-block-id]'),viewport=document.querySelector('.editor-window').getBoundingClientRect();
+  const blocks=[target,...Array.from(editor.querySelectorAll('[data-block-id]')).filter(node=>node!==target)];
+  for(const block of blocks){const walk=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let node;
+    while(node=walk.nextNode())if(node.textContent.trim()&&!node.parentElement.closest('[data-mark-id]')){
+      // Avoid the shared caret rule at a mark's inclusive end: choose an interior unmarked glyph.
+      const glyphs=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(node.textContent));
+      if(glyphs.length<3)continue;
+      const range=document.createRange();range.setStart(node,glyphs[1].index);range.setEnd(node,glyphs[2].index);
+      for(const r of range.getClientRects()){
+        const x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
+        if(y>viewport.top&&y<viewport.bottom&&editor.contains(hit)&&!hit.closest('[data-mark-id]'))return {x,y};
+      }
+    }
+  }
+  return null;
 })()`;
 
 export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   await renderer.send('Page.bringToFront');
   await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-  const coordinates = await renderer.evaluate(`(async () => {
+  const readCoordinates = () => renderer.evaluate(`(async () => {
     const pane=document.querySelector('.manuscript-comments-scroll'), scroll=document.querySelector('.editor-window');
     const search=document.querySelector('[data-mark-search-input]'); document.querySelector('[data-mark-filter-toggle]').focus({preventScroll:true}); getSelection().removeAllRanges();
     search.value='公开合成不匹配筛选'; search.dispatchEvent(new Event('input',{bubbles:true}));
@@ -192,14 +291,24 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const p=pane.getBoundingClientRect(), l=last.getBoundingClientRect();
     const moved=pane.scrollTop>oldScroll && pane.scrollTop>0 && first.getBoundingClientRect().top<before-1;
     const reachable=moved && l.top>=p.top-1 && l.bottom<=p.bottom+1 && Math.abs(first.getBoundingClientRect().top-before+pane.scrollTop-oldScroll)<=4 && pane.scrollHeight===height;
-    scroll.scrollTop+=24;
+    const beforeText=scroll.scrollTop;
+    scroll.scrollTop+=scroll.scrollTop<scroll.scrollHeight-scroll.clientHeight?24:-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const textMoved=scroll.scrollTop!==beforeText;
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     const cardTop=firstAnchor.card.getBoundingClientRect().top, wordsTop=firstAnchor.anchor.getBoundingClientRect().top;
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
-    return {pass:reachable && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
+    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
+  const assertCoordinates = coordinates => {
+  check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
+  check(!coordinates.selected, 'comments-scrolled-canvas-unselected', coordinates);
+  check(coordinates.textMoved, 'comments-scrolled-canvas-text-moved', coordinates);
+  check(coordinates.scrollTop===0, 'comments-scrolled-canvas-text-scroll-reset', coordinates);
+  check(Math.abs(coordinates.cardTop-coordinates.wordsTop)<=4, 'comments-scrolled-canvas-word-level', coordinates);
   check(coordinates.pass, 'comments-scrolled-canvas-coordinates', coordinates);
+  };
+  assertCoordinates(await readCoordinates());
   const compact = await renderer.evaluate(`(() => {
     const pane=document.querySelector('.manuscript-comments-scroll'), p=pane.getBoundingClientRect();
     const rows=__comments.ids.map(id=>document.querySelector('[data-comment-card="'+id+'"]'));
@@ -209,7 +318,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     if(disclosure.hidden||disclosure.textContent!=='以下 AI 建议未联网核查')return {disclosure:false};
     return {width:innerWidth,height:innerHeight,visible:visible.length,header,compact:rows.every(node=>node.dataset.expanded==='false'&&node.getBoundingClientRect().height<=76&&!node.querySelector('.editorial-mark-expanded-content')?.checkVisibility())};
   })()`);
-  check(compact.width===1280 && compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
+  if(compact.width===1280)check(compact.height===800 && compact.visible>=7 && compact.header<=84 && compact.compact, 'comments-seven-compact-visible', compact);
+  else check(compact.width===1008 && compact.height===681 && compact.header<=84 && compact.compact, 'comments-overlay-compact-rows', compact);
+  await commentsFilterMouse(renderer,check,waitFor);
   check(await renderer.evaluate(`(async () => {
     const words=document.querySelector('.editor-window [data-mark-id="'+__comments.ids[11]+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
     words.scrollIntoView({block:'center',behavior:'instant'}); document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
@@ -217,13 +328,16 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   })()`), 'comments-overflow-position');
   const elsewhere = await commentsNativeClick(renderer, await renderer.evaluate(commentsUnmarkedPoint));
   check(elsewhere.real, 'comments-real-unmarked-caret', elsewhere);
+  await commentsRangeElsewhere(renderer, check, waitFor, '.editor-window [data-mark-id="'+await renderer.evaluate('__comments.ids[11]')+'"]');
   const wordPoint = await renderer.evaluate(`(async () => {
     const id=__comments.ids[11],words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'),pane=document.querySelector('.manuscript-comments-scroll');
     words.scrollIntoView({block:'center',behavior:'instant'}); document.querySelector('.editor-window').scrollTop+=words.getBoundingClientRect().top-pane.getBoundingClientRect().top-24;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await Promise.all(document.body.getAnimations().map(a=>a.finished));
     const fresh=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), r=fresh.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;
+    pane.scrollTop=0;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const c=document.querySelector('[data-comment-card="'+id+'"]')?.getBoundingClientRect(),p=pane.getBoundingClientRect();
-    return {x,y,outside:!!c && (c.top>=p.bottom || c.bottom<=p.top),hit:fresh.contains(document.elementFromPoint(x,y)),elsewhere:!fresh.contains(getSelection()?.anchorNode)};
+    return {cardTop:c?.top,cardBottom:c?.bottom,paneTop:p.top,paneBottom:p.bottom,paneScroll:pane.scrollTop,x,y,outside:!!c && (c.top>=p.bottom || c.bottom<=p.top),hit:fresh.contains(document.elementFromPoint(x,y)),elsewhere:!fresh.contains(getSelection()?.anchorNode)};
   })()`);
   check(wordPoint.outside && wordPoint.hit && wordPoint.elsewhere, 'comments-overflow-card-outside-before-click', wordPoint);
   const wordClick = await commentsNativeClick(renderer, wordPoint);
@@ -247,6 +361,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
   check(unmarkedClick.real, 'comments-real-unmarked-clear', unmarkedClick);
   await waitFor(renderer, `!document.querySelector('[data-comment-card][data-selected="true"]') && !document.querySelector('[data-comment-leader]')`, 'comments-cleared-pair');
 
+  await commentsInsideSelection(renderer,check,waitFor);
   const compactClick = await commentsSelectCard(renderer, check, waitFor, 2, true);
   check(compactClick.held.index===2 && Math.abs(compactClick.held.top-compactClick.before.top)<=1 && compactClick.held.selected!=='true' && compactClick.held.expanded==='false', 'comments-pushed-control-held-still', compactClick);
   const controlPoint = await commentsControlPoint(renderer, 2, 'reply', waitFor);
@@ -323,8 +438,8 @@ export async function commentsApplyAndReject(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-comment-card="'+__comments.ids[1]+'"] [data-mark-state]').textContent.includes('已拒绝')`, 'comments-rejected-pane-updated');
   check(await renderer.evaluate(`(async () => { const page=await window.ai7.getManuscriptWindowAt({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,target:{kind:'window-start',blockId:__comments.start}}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,markId:__comments.ids[1]}); return page.journalSequence===__comments.journal+1 && card.suggestion.decision.disposition==='rejected'; })()`), 'comments-reject-retains-text');
   await commentsHandledFilter(renderer, check, waitFor, [0, 1]);
-  await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
+
 
 export async function commentsReplyAndResolve(renderer, check, waitFor) {
   // A wheel scroll can remove preceding cards while a reply remains in the text's 200px buffer.
@@ -357,8 +472,8 @@ export async function commentsReplyAndResolve(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('.editorial-mark-layer [data-mark-card="'+__comments.ids[2]+'"] [data-mark-region="replies"]')?.textContent.includes('公开合成待发回复')`, 'comments-existing-full-card');
   check(await renderer.evaluate(`(() => { document.querySelector('.editorial-mark-layer [data-mark-action="close"]').click(); return true; })()`), 'comments-full-card-close');
   await commentsHandledFilter(renderer, check, waitFor, [2]);
-  await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
+
 
 export async function commentsBookMemory(renderer, check, waitFor) {
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.destination('library'))), 'comments-book-library');
