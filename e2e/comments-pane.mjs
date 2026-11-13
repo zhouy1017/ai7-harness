@@ -258,9 +258,12 @@ const commentsUnmarkedPoint = `(() => {
   const blocks=[target,...Array.from(editor.querySelectorAll('[data-block-id]')).filter(node=>node!==target)];
   for(const block of blocks){const walk=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let node;
     while(node=walk.nextNode())if(node.textContent.trim()&&!node.parentElement.closest('[data-mark-id]')){
-      const range=document.createRange();range.selectNodeContents(node);
+      // Avoid the shared caret rule at a mark's inclusive end: choose an interior unmarked glyph.
+      const glyphs=Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(node.textContent));
+      if(glyphs.length<3)continue;
+      const range=document.createRange();range.setStart(node,glyphs[1].index);range.setEnd(node,glyphs[2].index);
       for(const r of range.getClientRects()){
-        const x=r.left+Math.min(3,r.width/2),y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
+        const x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);
         if(y>viewport.top&&y<viewport.bottom&&editor.contains(hit)&&!hit.closest('[data-mark-id]'))return {x,y};
       }
     }
