@@ -995,7 +995,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       item.node.dataset['hovered'] = String(item.mark.markId === hoveredComment);
       if (item.mark.markId === activeComment) item.node.classList.add('editorial-mark-card-active');
       else item.node.classList.remove('editorial-mark-card-active');
-      if (commentsCanvas.children[index] !== item.node) commentsCanvas.insertBefore(item.node, commentsCanvas.children[index] ?? null);
+      // A live reply must keep focus, selection and IME when preceding cards leave the buffer.
+      // Unlike insertBefore, moveBefore keeps the connected card's browser editing state.
+      if (commentsCanvas.children[index] !== item.node) commentsCanvas.moveBefore(item.node, commentsCanvas.children[index] ?? null);
     }
     // The final card may align near the viewport's top: retain blank space below it so the browser does not clamp
     // the requested scroll offset and push the pair apart. Manual pane reading keeps that existing canvas extent.

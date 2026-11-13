@@ -3122,7 +3122,6 @@ async function main() {
     await assertRenderer(renderer, `document.querySelectorAll('article.review-finding [data-referenced-rules]').length===0`, 'review-no-referenced-rules-chip-under-ci');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.startsWith('AI7 本地检查 · ') && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.includes('审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
-    await commentsModelFilter(renderer, requireJourney, waitFor, typosFinding.markId);
     await assertRenderer(renderer, `(() => {const reject=document.querySelector('[data-mark-card] [data-mark-action="reject"]');if(!(reject instanceof HTMLButtonElement)||reject.disabled)return false;reject.click();return true;})()`, 'review-learning-reject');
     await waitFor(renderer, `document.querySelector('[data-mark-card] [data-learning-reason-ask]') !== null`, 'review-learning-ask');
     await assertRenderer(renderer, `(() => {const ask=document.querySelector('[data-learning-reason-ask]');return ask.querySelectorAll('input[type="radio"]').length===3&&ask.querySelectorAll('input:checked').length===0&&ask.querySelector('textarea')?.value===''&&ask.querySelector('[data-learning-ask-answer]')?.disabled===true&&document.querySelector('[data-mark-action="withdraw"]')?.disabled===false;})()`, 'review-learning-ask-unselected-nonblocking');
@@ -3555,6 +3554,7 @@ async function main() {
         await reviewAction(renderer, `article.review-finding[data-finding-id="${finding.findingId}"] [data-review-action="go-to-text"]`, 'factual-range-author-open');
         // This producing route is the local fixture. It must not invent a remote model or reasoning effort.
         await waitFor(renderer, `(() => { const author=document.querySelector('[data-mark-card="${finding.markId}"] [data-mark-source]')?.textContent ?? ''; return document.documentElement.dataset.technicalLayerVisible==='false' && author.startsWith('AI7 本地检查 · ') && !author.includes('@high'); })()`, 'factual-range-producing-author', 30_000);
+        await commentsModelFilter(renderer, requireJourney, waitFor, finding.markId);
       }
     }
     cancellation.throwIfRequested();
