@@ -1641,7 +1641,8 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 .manuscript-comments-leaders { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 7; pointer-events: none; overflow: hidden; }
 .manuscript-comments-leaders path { fill: none; stroke: var(--category-accent); stroke-width: 2px; }
 .manuscript-comments-leaders circle { fill: var(--category-accent); }
-.ProseMirror .manuscript-comments-anchor[data-mark-category] { background-color: var(--category-fill); border-bottom: 3px solid var(--category-accent); }
+.ProseMirror .editorial-mark.manuscript-comments-anchor[data-mark-category]:not(.editorial-mark-personal-highlight),
+.ProseMirror .editorial-mark-point.manuscript-comments-anchor[data-mark-category] { background-color: var(--category-fill); border-bottom: 3px solid var(--category-accent); }
 .ProseMirror [data-comment-hovered="true"] { outline: 1px solid var(--category-accent); }
 @media (forced-colors: active) {
   .manuscript-comments-card[data-selected="true"] { outline-color: Highlight; }
