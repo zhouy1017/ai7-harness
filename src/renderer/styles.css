@@ -3038,7 +3038,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .editor-toolbar .editor-history-icon { padding: .1rem .3rem; flex: 0 0 28px; }
 .editor-toolbar .editor-edit-actions { flex: 1 0 auto; }
 .editor-history-undo { margin-left: auto; }
-@container (max-width: 600px) {
+/* Widest derivative controls measure up to 627px; reserve 53px for gaps and browser text metrics. */
+@container (max-width: 680px) {
   .editor-toolbar { flex-wrap: wrap; }
   .editor-toolbar .editor-edit-actions { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
   .editor-toolbar .editor-edit-actions > * { max-width: 100%; }

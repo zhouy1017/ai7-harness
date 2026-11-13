@@ -560,10 +560,16 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
     const methods = { inspectProductionDocuments: async () => documentsOf('book-one', '首发通稿') };
     const app = shell(new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) }));
     app.open(windowOf('book-one')); await vi.advanceTimersByTimeAsync(0);
+    const mountedMenu = app.screen.querySelector('.derivative-menu')!;
+    const mountedPanel = mountedMenu.querySelector('.ui-menu-panel');
     for (const selector of ['[data-derivative-menu]', '[data-manuscript-switch="new"]', '[data-manuscript-switch="manage"]']) {
       app.screen.querySelector<HTMLDetailsElement>('.derivative-menu')!.open = true;
       app.screen.querySelector<HTMLElement>(selector)!.focus();
+      const focusedItem = miniDocument.activeElement;
       children.writingStates.at(-1)!({ underWay: true, drafted: 0 });
+      expect(app.screen.querySelector('.derivative-menu')).toBe(mountedMenu);
+      expect(mountedMenu.querySelector('.ui-menu-panel')).toBe(mountedPanel);
+      expect(miniDocument.activeElement).toBe(focusedItem);
       expect(app.screen.querySelector<HTMLDetailsElement>('.derivative-menu')!.open).toBe(true);
       expect(miniDocument.activeElement).toBe(app.screen.querySelector(selector));
     }
