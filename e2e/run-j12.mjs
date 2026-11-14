@@ -563,6 +563,9 @@ async function saveMilestone(renderer) {
   await click(renderer, '保存里程碑版本', 'milestone-save');
   await waitFor(renderer, milestonePersisted(before, 'r2'), 'milestone-saved', 120_000);
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-revision-caption');
+  // #1483: persistence can precede the editor/outline reconciliation that releases the write guard.
+  // Follow the enabled milestone controls and cleared close risk before asking the shell to leave.
+  await waitFor(renderer, `(() => { const label=document.querySelector('#milestone-label'); return label instanceof HTMLInputElement && !label.disabled && document.documentElement.dataset.ai7CloseRisk==='false'; })()`, 'milestone-write-settled');
 }
 
 /**
