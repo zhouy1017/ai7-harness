@@ -1,4 +1,5 @@
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
+import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
@@ -1207,6 +1208,7 @@ import {
 } from './store-operation-support.js';
 import {
   configureDatabase,
+  WalCheckpointPolicy,
   initializeManuscriptIntakeSchema,
   initializeManuscriptReimportSchema,
   initializeModelServiceSchema,
@@ -2778,6 +2780,8 @@ export class EditorialStore {
   readonly #control: StoreControl;
   #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
   #recoveryObjectLifecycleTail: Promise<void> = Promise.resolve();
+  readonly #checkpoint: WalCheckpointPolicy;
+  #checkpointWorker: WalCheckpointMaintenance | undefined;
   #cleanShutdownMarked = false;
   #poisoned = false;
   readonly #reimportPreparationWork = new Map<string, ReimportPreparationWork>();
@@ -2806,6 +2810,7 @@ export class EditorialStore {
     this.#dataRoot = dataRoot;
     this.#objectsRoot = objectsRoot;
     this.#authority = authority;
+    this.#checkpoint = new WalCheckpointPolicy(authority, join(dataRoot, 'store', 'ai7.sqlite'));
     this.#journal = journal;
     this.#ingest = ingest;
     this.#boundedAuthority = boundedAuthority;
@@ -3372,11 +3377,25 @@ export class EditorialStore {
     }
   }
 
-  markCleanShutdown(): void {
+  /** The checkpoint worker runs only pragmas; data transactions stay on the service's existing serial writer lane. */
+  startCheckpointWorker(factory?: CheckpointWorkerFactory): Promise<boolean> {
+    this.#checkpointWorker ??= new WalCheckpointMaintenance(this.#checkpoint, join(this.#dataRoot, 'store', 'ai7.sqlite'), factory);
+    return this.#checkpointWorker.ready;
+  }
+
+  async stopCheckpointWorker(clean = false): Promise<void> { await this.#checkpointWorker?.stop(clean); }
+
+  /** Called only after the service response frame has been written. */
+  checkpointAfterResponse(idle: boolean): ReturnType<WalCheckpointPolicy['maintain']> {
+    return this.#checkpointWorker ? this.#checkpointWorker.maintain(idle) : this.#checkpoint.maintain(idle);
+  }
+
+  markCleanShutdown(checkpoint = true): void {
     this.#assertAvailable();
     requireStore(!this.#cleanShutdownMarked, 'LIFETIME_STATE_CHANGED', '本地服务生命周期无法重复结束。');
     this.#boundedCall(() => this.#boundedAuthority.markServiceLifetimeClean(this.#lifetimeId, new Date().toISOString()));
     this.#cleanShutdownMarked = true;
+    if (checkpoint) this.#checkpoint.shutdown();
   }
 
   async inspectEditorialWorkspaceProfile(bookId: string): Promise<EditorialWorkspaceProfileProjection> {
@@ -6041,6 +6060,7 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;
     this.#indexQueue.length = 0;
@@ -13370,9 +13390,16 @@ export class EditorialStore {
     return this.#boundedCall(() => this.#bounded.readManuscriptEntryPosition(manuscriptId, branchId));
   }
 
+  async waitForJournalCheckpoint(): Promise<void> { await this.#checkpointWorker?.waitForJournalWrite(); }
+
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
-    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
+    this.#assertAvailable();
+    if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite();
+    else this.#checkpoint.admitJournalWrite();
+    const ack = this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
       new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+    this.#checkpointWorker?.journalWritten();
+    return ack;
   }
 
   inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,

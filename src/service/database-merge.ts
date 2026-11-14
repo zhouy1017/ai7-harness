@@ -1276,6 +1276,8 @@ export function mergeIntoStoreFile(
   for (const suffix of STORE_JOURNALS) rmSync(join(packageRoot, 'store', `ai7.sqlite${suffix}`), { force: true });
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   try {
+    // The store is closed during mergeIntoStoreFile; this temporary merge writer owns its connection until close.
+    db.exec('PRAGMA wal_autocheckpoint = 0; PRAGMA synchronous = FULL');
     const count = listBooks(db, readMergingBooks(books.path, books));
     const present = Number((db.prepare('SELECT count(*) AS n FROM main.books WHERE book_id IN (SELECT book_id FROM temp.merge_books)').get() as SqlRow).n);
     if (present === count) return 'already';

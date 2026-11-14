@@ -97,7 +97,9 @@ import {
   type ModelServiceRouteId,
 } from '../shared/protocol.js';
 import { modelServiceRowsOutsideBindings } from './model-service-connections.js';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { statSync, statfsSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { asNumber, asString, requireStore, type SqlRow } from './store-records.js';
 import { isModelTextAttemptProvenance } from './material-index.js';
@@ -575,6 +577,7 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
     PRAGMA recursive_triggers = ON;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = FULL;
+    PRAGMA wal_autocheckpoint = 0;
     PRAGMA busy_timeout = 5000;
     PRAGMA trusted_schema = OFF;
     PRAGMA secure_delete = ON;
@@ -586,6 +589,104 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
     'SCHEMA_INVALID',
     'SQLite 递归触发器未启用，无法保护不可变记录。',
   );
+}
+
+export const WAL_CHECKPOINT_LIMITS = { softBytes: 256 * 1024 * 1024, emergencyBytes: 16 * 1024 * 1024 * 1024 };
+
+/** Connection configuration disables automatic checkpoints; the store runs this only after responses, outside edit commits. */
+export function recordCheckpointSkip(error: unknown, source: string): void {
+  const code = typeof error === 'object' && error !== null && 'errcode' in error ? Number(error.errcode) : 0;
+  process.stderr.write('AI7_CHECKPOINT_SKIPPED/' + JSON.stringify({ source, sqliteCode: Number.isFinite(code) ? code : 0 }) + '\n');
+}
+
+export class WalCheckpointPolicy {
+  readonly #pageBytes: number;
+  #lastFrames = 0;
+  #reclaim = false;
+
+  constructor(
+    readonly db: DatabaseSync,
+    readonly path: string,
+    readonly limits = WAL_CHECKPOINT_LIMITS,
+  ) {
+    this.#pageBytes = asNumber((db.prepare('PRAGMA page_size').get() as SqlRow).page_size) + 24;
+  }
+
+  frames(): number {
+    const row = this.db.prepare('PRAGMA wal_checkpoint(NOOP)').get() as SqlRow;
+    const frames = asNumber(row.log);
+    // A concurrent checkpoint can return -1 (busy); that is not a WAL reset or a new write.
+    if (frames >= 0) this.#lastFrames = frames;
+    return this.#lastFrames;
+  }
+
+  fileBytes(): number {
+    try { return statSync(`${this.path}-wal`).size; }
+    catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return 0;
+      throw error;
+    }
+  }
+
+  needsMaintenance(): boolean { return this.frames() * this.#pageBytes >= this.limits.softBytes; }
+
+  /** Refuse before BEGIN; the renderer retains and retries the exact command through its existing protection path. */
+  admitJournalWrite(): void {
+    let freeBytes = -1;
+    try { const space = statfsSync(dirname(this.path)); freeBytes = space.bavail * space.bsize; }
+    catch { process.stderr.write('AI7_WAL_SPACE_UNAVAILABLE\n'); }
+    requireStore(freeBytes < 0 || freeBytes >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘已满，请腾出空间后再保存。');
+    // 30 bursts can append 11.84 GB before checkpointing catches up. Normal backlog is not a write refusal.
+    const ceiling = freeBytes < 0 ? this.limits.emergencyBytes : Math.min(this.limits.emergencyBytes, Math.floor(freeBytes / 4));
+    const walBytes = this.fileBytes();
+    if (walBytes >= ceiling) { this.#reclaim = true; this.#recordEmergency(walBytes, ceiling, freeBytes); }
+    requireStore(walBytes < ceiling, 'JOURNAL_CHECKPOINT_BUSY', '本机存储空间暂时不足，请稍候重试保存。');
+  }
+
+  #recordEmergency(walBytes: number, ceilingBytes: number, freeBytes: number): void {
+    const record = JSON.stringify({ flag: 'JOURNAL_CHECKPOINT_BUSY', timestamp: Date.now(), walBytes, ceilingBytes, freeBytes });
+    // One bounded numeric observation, not a manuscript or service log; never affects admission or recovery.
+    const target = join(dirname(this.path), 'wal-checkpoint-pressure.json');
+    const staged = `${target}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(staged, record, { flag: 'wx', mode: 0o600 });
+      renameSync(staged, target);
+    } catch { process.stderr.write('AI7_WAL_DIAGNOSTIC_WRITE_FAILED\n'); }
+    finally { try { rmSync(staged, { force: true }); } catch { /* Diagnostics must not mask the original refusal. */ } }
+    process.stderr.write('AI7_WAL_EMERGENCY/' + record + '\n');
+  }
+
+  maintain(idle: boolean, force = false): { busy: boolean; beforeBytes: number; afterBytes: number } | null {
+    try {
+      if (!force && !idle && !this.#reclaim && !this.needsMaintenance()) return null;
+      const beforeBytes = this.fileBytes();
+      const timeout = asNumber((this.db.prepare('PRAGMA busy_timeout').get() as SqlRow).timeout);
+      this.db.exec('PRAGMA busy_timeout = 0');
+      try {
+        // Backfill without a writer lock first. Only an entirely backfilled, idle WAL may be truncated.
+        const passive = this.db.prepare('PRAGMA wal_checkpoint(PASSIVE)').get() as SqlRow;
+        let busy = asNumber(passive.busy) !== 0 || asNumber(passive.log) > asNumber(passive.checkpointed);
+        if (idle && !busy) {
+          const latest = this.db.prepare('PRAGMA wal_checkpoint(NOOP)').get() as SqlRow;
+          if (asNumber(latest.log) === asNumber(latest.checkpointed)) {
+            const trimmed = this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as SqlRow;
+            busy = asNumber(trimmed.busy) !== 0;
+          }
+        }
+        const afterBytes = this.fileBytes();
+        if (afterBytes === 0) this.#reclaim = false;
+        return { busy, beforeBytes, afterBytes };
+      } finally { this.db.exec(`PRAGMA busy_timeout = ${timeout}`); }
+    } catch (error) {
+      recordCheckpointSkip(error, 'fallback');
+      return null;
+    }
+  }
+
+  shutdown(): void {
+    // Busy readers/unfinished statements leave FULL-durable WAL for the next open.
+    this.maintain(true, true);
+  }
 }
 
 const ABANDONMENT_CLEANUP_SCHEMA = `
