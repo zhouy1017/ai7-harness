@@ -371,6 +371,10 @@ async function startWholeBookTask(
   // The Task Input is frozen from the journal: the words typed just now, and any held after a failed write, are
   // settled first, or nothing is prepared.
   if (!(await settleScreen())) return null;
+  if (input.quick === null) {
+    taskDrawer.openLaunch({ bookId, operation: 'launchBaselineAnalysis', title: '分析', input: { goal: input.goal, update: input.update } }, () => null);
+    return null;
+  }
   setStatus(TASK_PANEL_COMPOSE_STATUS.preparing, 'busy');
   try {
     const initial = await window.ai7.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: false });
@@ -2948,6 +2952,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
     errorMessage: rendererErrorMessage,
     technicalDetails,
     awaitServiceJob,
+    openLaunch: (request) => taskDrawer.openLaunch(request, () => host),
     // AI7 初评's plan opens in the Task Drawer beside 评估 (Issue #429, S81b1), and its bar starts it.
     openPlan: (ref) => openTaskPlan(bookId, 'initial-evaluation', ref),
     // 审稿意见 (Issue #429, S81c): its plan in the drawer likewise, and its draft on the manuscript surface as 交付物 opens one.
@@ -4780,6 +4785,7 @@ function renderEditorWindow(
     openPrimaryManuscript: renderBookManuscript,
     openDerivativesWorkspace: renderDerivativesWorkspace,
     openProductionDocument,
+    openLaunch: (request) => taskDrawer.openLaunch(request, () => null),
     openWritingPlan: (bookId, ref, note) => openTaskPlan(bookId, 'writing', ref, note),
   });
 }

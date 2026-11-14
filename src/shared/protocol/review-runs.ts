@@ -898,6 +898,7 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  launchNotice?: string;
   /** Own ranges of the current coverage units, without manuscript text. */
   scopeUnitCounts?: { whole: number; units: ReadonlyArray<{ startPosition: number; endPosition: number }> };
   /** Latest editor-declared Book table, carried by its existing local ReviewRun. */

@@ -72,7 +72,10 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
       inherited = Object.keys(selection).length === 0;
       const selected = resolveRuntimeExecutionConfig(defaultChoice, selection);
       models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === selected.modelConnectionId && choice.config.modelId === selected.modelId);
-      paint(selected.reasoningEffort);
+      if (models.selectedIndex < 0) {
+        models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
+        paint(defaultChoice.reasoningEffort);
+      } else paint(selected.reasoningEffort);
     },
   };
 }

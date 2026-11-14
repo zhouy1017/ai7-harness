@@ -8,6 +8,29 @@ export interface RuntimeExecutionConfig {
   readonly reasoningEffort?: string;
 }
 
+export const DISPATCH_TASK_KINDS = ['review-run', 'baseline-analysis', 'custom-analysis', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'scoped-ai-edit'] as const;
+export type DispatchTaskKind = (typeof DISPATCH_TASK_KINDS)[number];
+
+/** Launch operation → local preference kind, shared by ordinary and cross-Book starts. */
+export const LEDGER_TASK_LAUNCH_KINDS = {
+  launchBaselineAnalysis: 'baseline-analysis', launchCustomAnalysis: 'custom-analysis', launchWritingTask: 'writing',
+  launchInitialEvaluation: 'initial-evaluation', launchReadersReport: 'readers-report', launchEvaluationRewrite: 'evaluation-rewrite',
+} as const satisfies Readonly<Record<string, DispatchTaskKind>>;
+export type LedgerTaskLaunchOperation = keyof typeof LEDGER_TASK_LAUNCH_KINDS;
+
+export interface TaskExecutionLaunchInput {
+  readonly clientCommandId: string;
+  readonly executionConfig?: RuntimeExecutionConfig;
+  /** A remembered catalogue choice may fall back; an explicit choice keeps upstream validation. */
+  readonly rememberedChoice?: boolean;
+}
+
+export interface TaskExecutionLaunchResult {
+  readonly taskIntentId: string;
+  readonly runRecordId: string;
+  readonly launchNotice?: string;
+}
+
 export function validReasoningEffort(value: unknown): value is string {
   return typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}$/u.test(value);
 }

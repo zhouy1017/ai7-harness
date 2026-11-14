@@ -280,6 +280,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.dataset['runReportDigest'] = report.reportDigest;
     disclosure.dataset['runReportRun'] = report.runRecordId;
     disclosure.dataset['runReportClassification'] = report.classification;
+    if (report.modelLabel !== undefined) disclosure.append(element('p', 'task-model', `模型 ${report.modelLabel}`));
     disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
     disclosure.append(element('p', 'research-status', researchStatusLine(report)));
     if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
@@ -765,6 +766,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     quick: DefaultExecutionRuleReference | null = null,
     preview = false,
   ): Promise<void> {
+    if (quick === null && !input.reconfirm) {
+      taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析',
+        input: { goal: input.goal as Parameters<typeof window.ai7.launchBaselineAnalysis>[0]['goal'], update: input.update } }, () => controls.start);
+      return;
+    }
     const { start, cancel, others } = controls;
     start.disabled = true;
     for (const other of others) other.disabled = true;
@@ -1235,6 +1241,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       setStatus,
       errorMessage: rendererErrorMessage,
       openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
+      openLaunch: (request) => taskDrawer.openLaunch(request, () => card),
       jump: (blockId) => void jumpToManuscript(projection.bookId, { manuscriptId: null, blockId, markId: null }, '这段原文已不在当前稿件中。'),
     });
 

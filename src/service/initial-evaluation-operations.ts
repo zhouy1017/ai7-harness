@@ -1,3 +1,4 @@
+import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import {
   TASK_MATERIAL_LIVE_UNAVAILABLE,
@@ -267,6 +268,14 @@ export function inspectInitialEvaluation(host: InitialEvaluationOperationsHost, 
 }
 
 export function createInitialEvaluationPreparationWork(host: InitialEvaluationOperationsHost, bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null, seriesId: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
+  return buildInitialEvaluationTask(host, bookId, launchPolicy, materialIds, redoOf, seriesId, (ledger, input) => ledger.prepare(input));
+}
+
+export function launchInitialEvaluationTask(host: InitialEvaluationOperationsHost, bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string>, redoOf: string | null, seriesId: string | null, context: TaskLaunchContext): InitialEvaluationProjection {
+  return buildInitialEvaluationTask(host, bookId, launchPolicy, materialIds, redoOf, seriesId, launchedTaskPlan(context)).projection!;
+}
+
+function buildInitialEvaluationTask(host: InitialEvaluationOperationsHost, bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string>, redoOf: string | null, seriesId: string | null, createPlan: TaskPlanCreator): AnalysisPreparationResult<InitialEvaluationProjection> {
   requireStore(seriesId === null || seriesKnowledgeAllowed(launchPolicy, INITIAL_EVALUATION_KIND), 'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
   const scopes = seriesId === null ? undefined : [freezeSeriesScope(host.authority, bookId, seriesId)];
   internalRequireEvaluationMaterialScope(host, materialIds.length > 0, INITIAL_EVALUATION_KIND);
@@ -276,7 +285,7 @@ export function createInitialEvaluationPreparationWork(host: InitialEvaluationOp
   const profile = host.evaluationProfiles.current();
   const ledger = internalInitialLedger(host, profile, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) }, undefined, scopes);
   const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
-  const result = host.analysisCall(() => ledger.prepare({
+  const result = host.analysisCall(() => createPlan(ledger, {
     phase: 'start',
     bookId,
     goal: INITIAL_EVALUATION_MODE_GOALS[mode],

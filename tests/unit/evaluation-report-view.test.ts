@@ -120,10 +120,11 @@ function rewriting(saveEvaluation: (input: { content: { verdict?: string | null 
   const inspectTaskPlan = vi.fn(async () => ({ kind: 'evaluation-rewrite', start: { readiness: 'ready', planEnvelopeDigest: 'plan', categoryDigests: [] } }));
   const authorizeEvaluationRewrite = vi.fn(async () => undefined);
   const openRewritePlan = vi.fn();
+  const openLaunch = vi.fn();
   const api = { inspectEvaluation: async () => page, startEvaluation: async () => editing, saveEvaluation: vi.fn(saveEvaluation), prepareEvaluationRewrite, inspectTaskPlan, authorizeEvaluationRewrite };
   const surface = mountEvaluation({ root: root as unknown as HTMLElement, api, bookId: 'book', technicalDetails: details, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
-    awaitServiceJob: async () => ({ state: 'completed', kind: 'evaluation-rewrite-preparation', result: prepared }), openRewritePlan } as unknown as MountEvaluationOptions);
-  return { root, surface, api, editing, openRewritePlan };
+    awaitServiceJob: async () => ({ state: 'completed', kind: 'evaluation-rewrite-preparation', result: prepared }), openRewritePlan, openLaunch } as unknown as MountEvaluationOptions);
+  return { root, surface, api, editing, openRewritePlan, openLaunch };
 }
 async function typeVerdict(root: ReturnType<typeof miniDocument.createElement>, words: string): Promise<void> {
   root.querySelector('[data-evaluation-action="edit-report"]')!.click();
@@ -132,16 +133,17 @@ async function typeVerdict(root: ReturnType<typeof miniDocument.createElement>, 
   verdict.value = words; verdict.dispatchEvent({ type: 'input', bubbles: true });
 }
 
-it('saves the edits still in the form, then prepares and starts 按我的修改重新生成 in the same click', async () => {
+it('saves the edits still in the form before opening the regeneration start bar', async () => {
   let view!: ReturnType<typeof rewriting>;
   view = rewriting(async (input) => ({ ...view.editing, record: { ...record, entries: 2, content: { ...record.content, verdict: input.content.verdict ?? null } } }));
   await view.surface.load();
   await typeVerdict(view.root, '按编辑意见收紧中段。');
   view.root.querySelector('[data-evaluation-action="prepare-rewrite"]')!.click();
-  await vi.waitFor(() => expect(view.api.authorizeEvaluationRewrite).toHaveBeenCalledWith({ taskIntentId: 'rewrite-task', planEnvelopeDigest: 'plan' }));
+  await vi.waitFor(() => expect(view.openLaunch).toHaveBeenCalledWith({ bookId: 'book', operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', input: { recordId: 'report' } }));
   expect(view.api.saveEvaluation).toHaveBeenCalledWith(expect.objectContaining({ recordId: 'report', finalize: false, content: expect.objectContaining({ verdict: '按编辑意见收紧中段。' }) }));
-  expect(view.api.saveEvaluation.mock.invocationCallOrder[0]!).toBeLessThan(view.api.prepareEvaluationRewrite.mock.invocationCallOrder[0]!);
-  expect(view.api.prepareEvaluationRewrite).toHaveBeenCalledWith({ recordId: 'report' });
+  expect(view.api.saveEvaluation.mock.invocationCallOrder[0]!).toBeLessThan(view.openLaunch.mock.invocationCallOrder[0]!);
+  expect(view.api.prepareEvaluationRewrite).not.toHaveBeenCalled();
+  expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.openRewritePlan).not.toHaveBeenCalled();
 });
 
@@ -154,5 +156,6 @@ it('starts nothing when the save before regenerating is refused, and keeps the t
   await vi.waitFor(() => expect(view.root.querySelector('.evaluation-refusal')).not.toBeNull());
   expect(view.api.prepareEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
+  expect(view.openLaunch).not.toHaveBeenCalled();
   expect(view.root.querySelector('.evaluation-lists [data-evaluation-field="verdict"]')!.value).toBe('按编辑意见收紧中段。');
 });

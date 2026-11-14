@@ -1,3 +1,4 @@
+import type { TaskLaunchRequest } from './task-drawer.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { menuPanel } from './components/controls.js';
@@ -109,7 +110,7 @@ interface ManuscriptScreenOptions {
   persistenceStatus: HTMLElement;
   contextView: HTMLElement;
   viewPreferences: ViewPreferences;
-  preferences: Pick<ShellPreferences, 'current' | 'viewAnalysis'>;
+  preferences: Pick<ShellPreferences, 'current' | 'viewAnalysis' | 'load'>;
   commandDispatcher: CommandDispatcher;
   taskDrawer: ReturnType<typeof mountTaskDrawer>;
   interrupted(): boolean;
@@ -136,6 +137,7 @@ interface ManuscriptScreenOptions {
   openDerivativesWorkspace?(bookId: string, bookTitle: string): void;
   openProductionDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, bookTitle: string, notice?: string | null): Promise<void>;
   openWritingPlan(bookId: string, taskIntentId: string, note?: string): void;
+  openLaunch(request: TaskLaunchRequest): void;
 }
 
 /** A Production Document's type and versions, read for a window that holds it (Issue #415, S66). */
@@ -941,6 +943,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     ...(options.openDerivativesWorkspace === undefined ? {} : { openWorkspace: () => leaveFor(async () => options.openDerivativesWorkspace!(initialWindow.bookId, bookTitle)) }),
     openPrimary: () => leaveFor(() => options.openPrimaryManuscript(initialWindow.bookId, bookTitle)),
     openDocument: (document, type, notice) => leaveFor(() => options.openProductionDocument(document, type, bookTitle, notice)),
+    openLaunch: options.openLaunch,
     openWritingPlan: (ref, note) => options.openWritingPlan(initialWindow.bookId, ref, note),
   });
   content.append(switcher.element, toolbar, workspace, technicalDisclosure(identities));
@@ -1101,6 +1104,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 就选中部分让 AI 修改… and 🔒 (Issue #1412): what the scoped edit's composer and lock calls stand on.
   const scopedAiEditHost: ScopedAiEditHost = {
     api,
+    preferences: async () => { await options.preferences.load(); return options.preferences.current; },
     flush: async () => { await editor?.flush(); },
     current: () => editor?.currentWindow() ?? currentWindow,
     refresh: () => reloadWindow(),

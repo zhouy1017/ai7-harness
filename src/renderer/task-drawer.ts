@@ -1,3 +1,7 @@
+import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
+import { createDispatchChooser } from './components/dispatch-chooser.js';
+import type { RuntimeExecutionConfig, DispatchTaskKind, TaskExecutionLaunchResult } from '../shared/runtime-execution-config.js';
+import type { ServiceOperationMap } from '../shared/protocol.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
@@ -184,7 +188,12 @@ export interface TaskPlanRequest {
   readonly ref: string | null;
 }
 
+export type TaskLaunchOperation = 'launchBaselineAnalysis' | 'launchCustomAnalysis' | 'launchWritingTask' | 'launchInitialEvaluation' | 'launchReadersReport' | 'launchEvaluationRewrite';
+export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; operation: K; title: string;
+  input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
+
 export interface TaskDrawerSurface {
+  openLaunch(request: TaskLaunchRequest, returnFocus: () => HTMLElement | null): void;
   /**
    * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
@@ -207,7 +216,7 @@ export interface TaskDrawerSurface {
   openComposer(seed: TaskComposerSeed, returnFocus: () => HTMLElement | null): void;
   openDraft(bookId: string, draftId: string, returnFocus: () => HTMLElement | null): void;
   /** What the drawer shows now: one Task's plan, a Book's 任务 panel, a dialogue, the composer, or nothing. */
-  view(): { readonly kind: 'plan' | 'panel' | 'dialogue' | 'composer'; readonly bookId: string } | null;
+  view(): { readonly kind: 'plan' | 'panel' | 'dialogue' | 'composer' | 'launch'; readonly bookId: string } | null;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -220,6 +229,8 @@ export interface TaskDrawerSurface {
 
 type DrawerApi = Pick<
   RendererApi,
+  | TaskLaunchOperation
+  | 'getModelServiceSettings'
   | 'inspectEvaluation'
   | 'prepareInitialEvaluation'
   | 'prepareReadersReport'
@@ -450,7 +461,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * What the slot shows (Issue #423, S77a): one Task's plan, the Book's 任务 panel, one dialogue (Issue #52, S17a), or the
    * Context-bound Task Composer (Issue #423, slice 7a).
    */
-  let view: 'plan' | 'panel' | 'dialogue' | 'composer' = 'plan';
+  let view: 'plan' | 'panel' | 'dialogue' | 'composer' | 'launch' = 'plan';
   /** Where 收起 takes the composer: back to the plan or the panel it was opened from, or closed. */
   let composerReturn: (() => void) | null = null;
   /** An unfinished draft — or unsaved words — left beside another Book (TASK-006): collapsed, never following the new Book. */
@@ -630,7 +641,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     back.hidden = view === 'panel';
     title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : view === 'composer' ? TASK_COMPOSER_TITLES.draft : TASK_DRAWER_TITLE;
     modes.hidden = view !== 'plan';
-    foot.hidden = view !== 'plan';
+    foot.hidden = view !== 'plan' && view !== 'launch';
     // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
     if (view !== 'dialogue') dialogueSurface.stop();
     if (view !== 'plan') {
@@ -2793,6 +2804,54 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       composer.openDraft(bookId, draftId);
       title.focus();
     },
+    openLaunch(next, finder) {
+      ticket += 1; const current = ticket;
+      clearPoll(); panel.stop(); dialogueSurface.stop();
+      view = 'launch'; panelBookId = next.bookId; request = null; plan = null;
+      returnFocus = finder;
+      root.hidden = false; root.dataset['taskDrawer'] = 'open'; shell.dataset['taskDrawer'] = 'open';
+      showView(); title.textContent = next.title; modes.hidden = true;
+      const kinds = LEDGER_TASK_LAUNCH_KINDS;
+      root.dataset['taskLaunchKind'] = kinds[next.operation];
+      const description = el('p', undefined, '开始时使用当前稿件，并固定本次任务的模型与思考强度。');
+      const estimate = el('details', 'task-launch-estimate'); estimate.append(el('summary', undefined, '查看预计用量'), el('p', undefined, '实际用量随稿件长度与模型回答变化，完成后可在运行记录查看。本次任务不会直接替换稿件。'));
+      body.replaceChildren(description, estimate);
+      let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
+      let commandId = crypto.randomUUID();
+      const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); } });
+      const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
+      const start = control('开始任务', 'primary', 'launch'); start.disabled = true;
+      start.addEventListener('click', () => { void (async () => {
+        if (start.disabled) return;
+        start.disabled = true;
+        if (!(await options.settle())) { start.disabled = false; return; }
+        problem.textContent = '';
+        try {
+          let result: TaskExecutionLaunchResult;
+          switch (next.operation) {
+            case 'launchBaselineAnalysis': result = await api.launchBaselineAnalysis({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchCustomAnalysis': result = await api.launchCustomAnalysis({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchWritingTask': result = await api.launchWritingTask({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchInitialEvaluation': result = await api.launchInitialEvaluation({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchReadersReport': result = await api.launchReadersReport({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchEvaluationRewrite': result = await api.launchEvaluationRewrite({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+          }
+          const kind = next.operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kinds[next.operation] as TaskPlanKind;
+          options.onRecorded(kind, next.bookId, result.taskIntentId);
+          options.setStatus(result.launchNotice ?? '已开始任务', 'success');
+          if (ticket === current) surface.open({ bookId: next.bookId, kind, ref: result.taskIntentId }, finder, result.launchNotice, { view: 'run' });
+        } catch (error) { if (ticket === current) { start.disabled = false; problem.textContent = options.errorMessage(error, '无法开始任务。'); } }
+      })(); });
+      bar.hidden = false; bar.replaceChildren(chooser.element, start, problem);
+      options.onOpen(); title.focus();
+      void Promise.all([api.getModelServiceSettings(), api.getPreferences()]).then(([settings, preferences]) => {
+        if (ticket !== current) return;
+        executionConfig = preferences.values['model.dispatchChoices'][kinds[next.operation]] ?? {};
+        rememberedChoice = Object.keys(executionConfig).length > 0;
+        chooser.render(settings, preferences.values['model.favourites'], executionConfig);
+      }).catch(() => { if (ticket === current) chooser.unavailable(); }).finally(() => { if (ticket === current) start.disabled = interrupted; });
+      if (interrupted) disableAll();
+    },
     open(next, finder, note, how) {
       ticket += 1;
       panel.stop();
@@ -2892,13 +2951,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     view() {
       if (root.hidden) return null;
+      if (view === 'launch') return panelBookId === null ? null : { kind: 'launch', bookId: panelBookId };
       if (view === 'composer') return panelBookId === null ? null : { kind: 'composer', bookId: panelBookId };
       if (view === 'dialogue') return panelBookId === null ? null : { kind: 'dialogue', bookId: panelBookId };
       if (view === 'panel') return panelBookId === null ? null : { kind: 'panel', bookId: panelBookId };
       return request === null ? null : { kind: 'plan', bookId: request.bookId };
     },
     refresh(kind) {
-      if (root.hidden || interrupted || view === 'dialogue' || view === 'composer') return;
+      if (root.hidden || interrupted || view === 'dialogue' || view === 'composer' || view === 'launch') return;
       if (view === 'panel') {
         panel.refresh();
         return;
@@ -2949,7 +3009,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         surface.close(false);
         return;
       }
-      if (view === 'dialogue') return;
+      if (view === 'dialogue' || view === 'launch') return;
       if (view === 'panel') {
         panel.refresh();
         return;

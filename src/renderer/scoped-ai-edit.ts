@@ -1,3 +1,6 @@
+import { createDispatchChooser } from './components/dispatch-chooser.js';
+import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import type { PreferenceValues } from '../shared/preferences.js';
 import type { DialogueSelectionInput, ManuscriptWindowProjection, RendererApi } from '../shared/protocol.js';
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import {
@@ -53,7 +56,8 @@ type Tone = 'busy' | 'success' | 'error' | undefined;
 
 /** What the manuscript surface gives the composer and the lock calls. */
 export interface ScopedAiEditHost {
-  readonly api: Pick<RendererApi, 'startScopedAiEdit' | 'inspectScopedAiEdit' | 'setAiEditLocks' | 'inspectAiEditLocks'>;
+  readonly api: Pick<RendererApi, 'startScopedAiEdit' | 'inspectScopedAiEdit' | 'setAiEditLocks' | 'inspectAiEditLocks' | 'getModelServiceSettings'>;
+  preferences(): Promise<Pick<PreferenceValues, 'model.favourites' | 'model.dispatchChoices'>>;
   /** Write the editor's own pending typing first, so the base the request names is the text on screen. */
   flush(): Promise<void>;
   /** The window on screen now. */
@@ -203,7 +207,16 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
   const cancel = el('button', 'btn quiet', SCOPED_AI_EDIT_WORDS.cancel);
   cancel.type = 'button';
   cancel.dataset['scopedAiEdit'] = 'cancel';
-  actions.append(submit, cancel);
+  let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
+  let clientCommandId = crypto.randomUUID();
+  const chooser = createDispatchChooser({ role: 'fast-interaction', changed(config) { executionConfig = config; rememberedChoice = false; clientCommandId = crypto.randomUUID(); } });
+  const choiceReady = Promise.all([host.api.getModelServiceSettings(), host.preferences()]).then(([settings, preferences]) => {
+    if (closed) return;
+    executionConfig = preferences['model.dispatchChoices']['scoped-ai-edit'] ?? {};
+    rememberedChoice = Object.keys(executionConfig).length > 0;
+    chooser.render(settings, preferences['model.favourites'], executionConfig);
+  }).catch(() => chooser.unavailable());
+  actions.append(chooser.element, submit, cancel);
   form.append(actions);
   let closed = false;
   const close = (): void => {
@@ -215,6 +228,7 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
   form.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); options.onSettled?.(null); }
   });
+  for (const event of ['input', 'change']) form.addEventListener(event, () => { if (!submit.disabled) clientCommandId = crypto.randomUUID(); });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     void run();
@@ -232,18 +246,20 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     submit.disabled = cancel.disabled = instruction.disabled = true;
     let settled: ScopedAiEditProjection;
     try {
+      await choiceReady;
       await host.flush();
       const window = host.current();
       host.setStatus(SCOPED_AI_EDIT_WORDS.requesting, 'busy');
       settled = await host.api.startScopedAiEdit({
         manuscriptId: window.manuscriptId, branchId: window.branchId, baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence,
-        expectedLocksDigest: await locksDigest(host), instruction: words, scope: chosen(),
+        expectedLocksDigest: await locksDigest(host), instruction: words, scope: chosen(), clientCommandId, executionConfig, rememberedChoice,
       });
     } catch (error) {
       host.setStatus(host.errorMessage(error, SCOPED_AI_EDIT_WORDS.failed), 'error');
       submit.disabled = cancel.disabled = instruction.disabled = false;
       return;
     }
+    const launchNotice = settled.launchNotice;
     close();
     try {
       while (settled.state === 'requesting') {
@@ -256,7 +272,7 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
       return;
     }
     if (settled.markIds.length > 0) await host.refresh(settled);
-    host.setStatus(settled.label, settled.state === 'applied' || settled.state === 'unchanged' ? 'success' : 'error');
+    host.setStatus(`${launchNotice === undefined ? '' : `${launchNotice} `}${settled.label}`, settled.state === 'applied' || settled.state === 'unchanged' ? 'success' : 'error');
     options.onSettled?.(settled);
   };
   options.mount.append(form);

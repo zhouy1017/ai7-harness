@@ -27,6 +27,27 @@ import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../.
 
 const encoder = new TextEncoder();
 
+describe('one-step drawer launch frames (#1455)', () => {
+  const bookId = '11111111-1111-4111-8111-111111111111';
+  const commands = [
+    ['launchBaselineAnalysis', { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }],
+    ['launchCustomAnalysis', { dimensionId: bookId, update: null }],
+    ['launchWritingTask', { typeId: 'promotion-article', audience: '读者', channel: '本社', requirements: null }],
+    ['launchInitialEvaluation', {}], ['launchReadersReport', { template: 'author' }],
+    ['launchEvaluationRewrite', { recordId: bookId }],
+  ] as const;
+  it.each(commands)('decodes %s with a closed choice and command identity', (op, task) => {
+    const input = { bookId, ...task, clientCommandId: randomUUID(), executionConfig: { modelConnectionId: 'instance-reference', modelId: 'account/model', reasoningEffort: 'high' }, rememberedChoice: true };
+    const frame = { id: randomUUID(), op, input };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [{ ...input, clientCommandId: 'broken' }, { ...input, executionConfig: { endpoint: 'private' } },
+      { ...input, rememberedChoice: 'yes' }, { ...input, authorize: true }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
+    }
+    if (op === 'launchBaselineAnalysis') expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, reconfirm: false } })))).toThrow(ProtocolError);
+  });
+});
+
 describe('editable procedure commands (#1170)', () => {
   it('carries exact version selections and new versions without accepting execution authority', () => {
     const document = baselineProcedureDefinition();

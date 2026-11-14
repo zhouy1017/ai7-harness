@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import type { RuntimeExecutionConfig, DispatchTaskKind } from '../shared/runtime-execution-config.js';
 import { canonicalJson } from './analysis/canonical.js';
 import type { ConfiguredProviderBinding } from './launch-policy.js';
 import { transact } from './analysis/run-state.js';
@@ -32,8 +32,9 @@ export function initializeTaskLaunchSchema(db: DatabaseSync): void {
   });
 }
 
-export type LaunchTaskKind = 'review-run' | 'baseline-analysis' | 'custom-analysis' | 'writing' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'scoped-ai-edit';
+export type LaunchTaskKind = DispatchTaskKind;
 export interface LaunchChoice {
+  readonly notice?: string;
   readonly executionConfig: RuntimeExecutionConfig;
   readonly binding: ConfiguredProviderBinding | null;
 }
@@ -45,16 +46,17 @@ const digest = (value: string): string => createHash('sha256').update(value).dig
 
 /** The command identity is instance-local. Resolve settings only for a new command, inside its write transaction. */
 export function launchFromSnapshot(db: DatabaseSync, command: { clientCommandId: string; bookId: string; kind: LaunchTaskKind; input: unknown },
-  resolve: () => LaunchChoice, create: (choice: LaunchChoice, snapshotId: string) => { runId: string; manuscript: unknown }): { runId: string; repeated: boolean } {
+  resolve: () => LaunchChoice, create: (choice: LaunchChoice, snapshotId: string) => { runId: string; manuscript: unknown }): { runId: string; repeated: boolean; notice?: string } {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(command.clientCommandId)) {
     throw new TaskLaunchError('TASK_LAUNCH_COMMAND_INVALID', '任务启动标识无效。');
   }
   const inputDigest = digest(canonicalJson({ bookId: command.bookId, kind: command.kind, input: command.input }));
   return transact(db, () => {
-    const existing = db.prepare('SELECT input_digest, run_id FROM task_launch_snapshots WHERE client_command_id = ?').get(command.clientCommandId);
+    const existing = db.prepare('SELECT input_digest, run_id, canonical_json FROM task_launch_snapshots WHERE client_command_id = ?').get(command.clientCommandId);
     if (existing !== undefined) {
       if (existing.input_digest !== inputDigest) throw new TaskLaunchError('TASK_LAUNCH_COMMAND_CHANGED', '这次启动标识已用于另一项任务；请重新发起。');
-      return { runId: String(existing.run_id), repeated: true };
+      const notice = JSON.parse(String(existing.canonical_json)).notice;
+      return { runId: String(existing.run_id), repeated: true, ...(typeof notice === 'string' ? { notice } : {}) };
     }
     const choice = resolve();
     const snapshotId = randomUUID();
@@ -64,6 +66,6 @@ export function launchFromSnapshot(db: DatabaseSync, command: { clientCommandId:
       bookId: command.bookId, kind: command.kind, inputDigest, ...choice, ...created, createdAt });
     db.prepare('INSERT INTO task_launch_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(command.clientCommandId, snapshotId, command.bookId, command.kind, inputDigest, created.runId, createdAt, json, digest(json));
-    return { runId: created.runId, repeated: false };
+    return { runId: created.runId, repeated: false, ...(choice.notice === undefined ? {} : { notice: choice.notice }) };
   });
 }

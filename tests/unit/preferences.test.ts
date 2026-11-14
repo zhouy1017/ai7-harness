@@ -47,6 +47,20 @@ function refusal(operation: () => unknown): PreferenceError {
 }
 
 describe('the preferences registry', () => {
+  it('remembers each task kind on this instance and restores the role default without changing other kinds', async () => {
+    const store = createPreferenceStore(sandbox);
+    const review = { modelConnectionId: 'connection-review', modelId: 'account/review', reasoningEffort: 'high' };
+    const writing = { modelConnectionId: 'connection-writing', modelId: 'account/writing', reasoningEffort: 'medium' };
+    store.save({ key: 'model.dispatchChoices', value: { 'review-run': review, writing } });
+    const restarted = createPreferenceStore(sandbox);
+    expect(restarted.read().values['model.dispatchChoices']).toEqual({ 'review-run': review, writing });
+    restarted.save({ key: 'model.dispatchChoices', value: { ...restarted.read().values['model.dispatchChoices'], 'review-run': {} } });
+    expect(createPreferenceStore(sandbox).read().values['model.dispatchChoices']).toEqual({ 'review-run': {}, writing });
+    expect(await stored()).toMatchObject({ values: { 'model.dispatchChoices': { 'review-run': {}, writing } } });
+    for (const invalid of [{ unknown: {} }, { 'review-run': { endpoint: 'private' } }, { 'review-run': { reasoningEffort: 42 } }]) {
+      expect(PREFERENCE_KEYS['model.dispatchChoices'].validate(invalid)).toBe(false);
+    }
+  });
   it('persists channel-scoped model favourites across restart in preferences.json', async () => {
     const favourites = { 'openai-platform': ['account/model-149', 'gpt-5.6-sol'], 'opencode-zen': ['account/model-149'] };
     createPreferenceStore(sandbox).save({ key: 'model.favourites', value: favourites });
@@ -81,8 +95,8 @@ describe('the preferences registry', () => {
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
     expect(Object.keys(PREFERENCE_KEYS)).toEqual(['actions.defaults', 'usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
-      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency', 'model.favourites']);
-    expect(preferenceDefaults()).toEqual({ 'model.favourites': {}, 'actions.defaults': DEFAULT_QUICK_ACTIONS, 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency', 'model.favourites', 'model.dispatchChoices']);
+    expect(preferenceDefaults()).toEqual({ 'model.dispatchChoices': {}, 'model.favourites': {}, 'actions.defaults': DEFAULT_QUICK_ACTIONS, 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
       'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
       'editor.density': 'standard',
       'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' },

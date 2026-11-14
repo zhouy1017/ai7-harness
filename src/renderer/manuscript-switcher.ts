@@ -1,3 +1,4 @@
+import type { TaskLaunchRequest } from './task-drawer.js';
 import { menuPanel } from './components/controls.js';
 import type {
   ProductionDocumentProjection,
@@ -78,6 +79,7 @@ export interface MountManuscriptSwitcherOptions {
   /** Open one document in this editor; `notice` says what its creation did not carry. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }, notice?: string | null): Promise<void>;
   openWritingPlan(taskIntentId: string, note?: string): void;
+  openLaunch(request: TaskLaunchRequest): void;
 }
 
 export interface ManuscriptSwitcher {
@@ -171,6 +173,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
     errorMessage: options.errorMessage,
     awaitServiceJob: options.awaitServiceJob,
     openPlan: options.openWritingPlan,
+    openLaunch: options.openLaunch,
     openDocument: (document, type) => options.openDocument(document, type),
     documentsChanged: () => refresh(),
     onState: (state) => {

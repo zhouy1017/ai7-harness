@@ -1,3 +1,4 @@
+import type { TaskLaunchRequest } from './task-drawer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
@@ -78,6 +79,7 @@ export interface MountWritingTaskOptions {
   awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** The writing Task's plan in the Task Drawer, whose bar starts it; `note` says why a quick start stopped there. */
   openPlan(taskIntentId: string, note?: string): void;
+  openLaunch(request: TaskLaunchRequest): void;
   /** 打开草稿's document on its own surface, as 交付物's 打开 opens one. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void>;
   /** A document was made: 交付 · 生产文档 and 图书交付包 read again. */
@@ -479,6 +481,13 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const title = state.title.trim();
     if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
     else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
+    if (rule === null) {
+      options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {
+        typeId: state.typeId, audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds],
+      } });
+      sheet = null; paint(null); return;
+    }
     busy = true;
     options.setStatus(WRITING_STATUS.preparing, 'busy');
     paint(null);

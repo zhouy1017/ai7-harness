@@ -1,3 +1,4 @@
+import { LEDGER_TASK_LAUNCH_KINDS, type DispatchTaskKind, type RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import type { NativeFilePickers } from './file-pickers.js';
 import { enqueueQuickTasks } from './task-overview-quick-start.js';
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
@@ -178,6 +179,7 @@ export function registerDeliverablesHandlers(context: {
 }
 
 export function registerProductionAndPackageHandlers(context: {
+  rememberDispatchChoice(kind: DispatchTaskKind, choice: RuntimeExecutionConfig | undefined, notice?: string): void;
   chooseExportFolder: NativeFilePickers['chooseExportFolder'];
   choosePackageArchiveFile: NativeFilePickers['choosePackageArchiveFile'];
   requireSender: (event: IpcMainInvokeEvent | IpcMainEvent) => OwnedRendererWindow;
@@ -575,6 +577,11 @@ export function registerProductionAndPackageHandlers(context: {
     return serializeEffect(async () => {
       const generation = owned.routeGeneration;
       const result = await service.call(request.operation, { ...request.input, bookId: request.bookId });
+      if (request.operation === 'launchBaselineAnalysis' || request.operation === 'launchCustomAnalysis' || request.operation === 'launchWritingTask' ||
+          request.operation === 'launchInitialEvaluation' || request.operation === 'launchReadersReport' || request.operation === 'launchEvaluationRewrite') {
+        context.rememberDispatchChoice(LEDGER_TASK_LAUNCH_KINDS[request.operation], request.input.executionConfig,
+          result !== null && typeof result === 'object' && 'launchNotice' in result && typeof result.launchNotice === 'string' ? result.launchNotice : undefined);
+      }
       requireCurrentRouteGeneration(owned, generation);
       if (result && typeof result === 'object' && 'bookId' in result && result.bookId !== request.bookId) throw new ServiceCallError('TASK_OVERVIEW_INVALID', '任务结果不属于所选图书。');
       // Preparation jobs stay owned here until terminal; the overview never borrows a Book-route job capability.

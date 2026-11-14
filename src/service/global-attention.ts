@@ -118,6 +118,7 @@ export interface ConflictAttentionReading {
 
 /** The Book's latest baseline analysis Task, read by the baseline ledger. */
 export interface AnalysisTaskAttentionReading {
+  readonly modelLabel?: string;
   readonly bookId: string;
   readonly bookTitle: string;
   readonly taskIntentId: string;
@@ -186,6 +187,7 @@ export interface UnconfirmedAttentionReading {
  * kinds: their own surfaces follow them, and only the wait is one the editor may have left behind.
  */
 export interface WaitingTaskAttentionReading {
+  readonly modelLabel?: string;
   readonly control?: AnalysisTaskAttentionReading;
   readonly kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing' | 'review-run';
   readonly bookId: string;
@@ -202,6 +204,7 @@ export interface WaitingTaskAttentionReading {
 
 /** One completed baseline Task Outcome of the recent window. */
 export interface AnalysisOutcomeAttentionReading {
+  readonly modelLabel?: string;
   readonly bookId: string;
   readonly bookTitle: string;
   readonly taskIntentId: string;
@@ -510,6 +513,11 @@ function conflictItem(reading: ConflictAttentionReading): GlobalAttentionItemPro
 
 /** The analysis Task's item, if its latest state asks for one; a settled Run is 最近完成's, read from its outcome. */
 function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
+  const result = analysisTaskItemWithoutAttribution(reading, waitingFor);
+  return result === null || reading.modelLabel === undefined ? result : { ...result, modelLabel: reading.modelLabel };
+}
+
+function analysisTaskItemWithoutAttribution(reading: AnalysisTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
   const book = { bookId: reading.bookId, title: reading.bookTitle };
   const object: GlobalAttentionObjectProjection = { kind: 'analysis', mode: reading.mode };
   const target: GlobalAttentionTarget = { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId };
@@ -658,6 +666,10 @@ function unconfirmedItem(reading: UnconfirmedAttentionReading): GlobalAttentionI
 }
 
 function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
+  return { ...analysisOutcomeItemWithoutAttribution(reading), ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }) };
+}
+
+function analysisOutcomeItemWithoutAttribution(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
   const state = reading.classification === 'completed' ? 'analysis-completed'
     : reading.classification === 'cancelled' ? 'analysis-cancelled' : 'analysis-completed-with-gaps';
   return item('recent', state, {
@@ -773,6 +785,7 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
     object: { kind: 'task', taskKind: kind },
     target: { kind: 'task-plan', bookId: reading.bookId, taskKind: kind, ref: reading.taskIntentId } };
   const fields = {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `task:${reading.taskIntentId}`,
     at: reading.stateAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
@@ -1174,6 +1187,7 @@ function followedRun(run: NonNullable<AnalysisTaskAttentionReading['run']>): boo
  */
 function cancelledBeforeStartItem(reading: AnalysisTaskAttentionReading, run: NonNullable<AnalysisTaskAttentionReading['run']>): GlobalAttentionItemProjection {
   return item('recent', 'analysis-cancelled', {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `analysis:${reading.taskIntentId}`,
     blocked: false,
     at: run.stateAt,

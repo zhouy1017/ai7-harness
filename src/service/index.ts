@@ -464,6 +464,21 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
+    case 'launchBaselineAnalysis':
+    case 'launchCustomAnalysis':
+    case 'launchWritingTask':
+    case 'launchInitialEvaluation':
+    case 'launchReadersReport':
+    case 'launchEvaluationRewrite': {
+      const { ledger, repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy)
+        : request.op === 'launchCustomAnalysis' ? store.launchCustomAnalysis(request.input, launchPolicy)
+        : request.op === 'launchWritingTask' ? store.launchWritingTask(request.input, launchPolicy)
+        : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy)
+        : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy)
+        : store.launchEvaluationRewrite(request.input, launchPolicy);
+      if (!repeated || ledger.currentRunState(result.runRecordId) === 'authorized') analysisExecution.admitOrQueue(result.runRecordId, ledger);
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,
@@ -1150,7 +1165,8 @@ async function dispatch(
     case 'launchReviewRun': {
       const launched = store.launchReviewRun(request.input, launchPolicy);
       void driveLaunchedReviewRun(reviewRuns, launched);
-      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress) };
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
+        ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
     }
     case 'prepareReviewRun':
       return {

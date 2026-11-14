@@ -11,6 +11,12 @@ import type { GlobalAttentionTarget } from './protocol.js';
 
 import { isThemePreference, type ThemePreference } from './appearance.js';
 import { MODEL_SERVICE_CHANNELS, validModelServiceModelId, type ModelServiceChannelId } from './protocol/model-service.js';
+import { DISPATCH_TASK_KINDS, validRuntimeExecutionConfig, type DispatchTaskKind, type RuntimeExecutionConfig } from './runtime-execution-config.js';
+
+/** Last dispatch choice on this instance, separately for each task kind. */
+export type DispatchChoices = Readonly<Partial<Record<DispatchTaskKind, RuntimeExecutionConfig>>>;
+const isDispatchChoices = (value: unknown): value is DispatchChoices => isPlainObject(value) &&
+  Object.entries(value).every(([kind, config]) => DISPATCH_TASK_KINDS.includes(kind as DispatchTaskKind) && validRuntimeExecutionConfig(config));
 
 /** Local catalogue favourites, isolated by account channel; never part of the database. */
 export type ModelFavourites = Readonly<Partial<Record<ModelServiceChannelId, ReadonlyArray<string>>>>;
@@ -348,6 +354,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   'onboarding.state': preference((value: unknown): value is OnboardingState => value === null || value === 'skipped' || value === 'completed', null as OnboardingState),
   'learning.askFrequency': preference((value: unknown): value is LearningAskFrequency => value === 'often' || value === 'occasionally' || value === 'off', 'occasionally' as LearningAskFrequency),
   'model.favourites': preference(isModelFavourites, {} as ModelFavourites),
+  'model.dispatchChoices': preference(isDispatchChoices, {} as DispatchChoices),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

@@ -452,6 +452,22 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
   if (typeof op !== 'string') throw new ProtocolError(tentativeId);
 
   switch (op) {
+    case 'launchBaselineAnalysis':
+    case 'launchCustomAnalysis':
+    case 'launchWritingTask':
+    case 'launchInitialEvaluation':
+    case 'launchReadersReport':
+    case 'launchEvaluationRewrite': {
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const { clientCommandId, executionConfig, rememberedChoice, ...task } = value.input;
+      if (op === 'launchBaselineAnalysis' && Object.hasOwn(task, 'reconfirm')) throw new ProtocolError(tentativeId);
+      if (!validUuid(clientCommandId) || (executionConfig !== undefined && !validRuntimeExecutionConfig(executionConfig)) ||
+          (rememberedChoice !== undefined && typeof rememberedChoice !== 'boolean')) throw new ProtocolError(tentativeId);
+      // The task's existing input validator owns its editorial contract; launch metadata is validated above.
+      decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: op.replace(/^launch/u, 'prepare'),
+        input: op === 'launchBaselineAnalysis' ? { ...task, reconfirm: false } : task })));
+      break;
+    }
     case 'ready':
     case 'getStartup':
     case 'getImportStartup':
@@ -1803,7 +1819,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig'] : [])], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice'] : [])], tentativeId);
+      if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
       if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
@@ -2916,7 +2933,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'startScopedAiEdit': {
-      const input = requireInputWithOptional(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], ['clientCommandId', 'executionConfig'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], ['clientCommandId', 'executionConfig', 'rememberedChoice'], tentativeId);
+      if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
       if (input.clientCommandId !== undefined && !validUuid(input.clientCommandId)) throw new ProtocolError(tentativeId);
       if (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)) throw new ProtocolError(tentativeId);
       const scope = input.scope;

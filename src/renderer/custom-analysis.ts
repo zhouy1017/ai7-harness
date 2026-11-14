@@ -1,3 +1,4 @@
+import type { TaskLaunchRequest } from './task-drawer.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { oneActionStart, startPreparedTask } from './one-action-start.js';
@@ -70,11 +71,12 @@ function actionButton(label: string, tone: 'primary' | 'secondary' | 'quiet', ac
 
 export interface MountCustomAnalysisTabOptions {
   readonly bookId: string;
-  readonly api: Pick<RendererApi, 'inspectCustomAnalysisDimensions' | 'prepareCustomAnalysis'> & Partial<Pick<RendererApi, 'inspectTaskPlan' | 'authorizeBaselineAnalysis'>>;
+  readonly api: Pick<RendererApi, 'inspectCustomAnalysisDimensions'>;
   setStatus: Status;
   errorMessage(error: unknown, fallback: string): string;
-  /** The prepared Task's plan in the Task Drawer: ②A's ordinary Plan → Run Authorization path. */
+  /** Open a recorded Task's plan in the Task Drawer. */
   openPlan(taskIntentId: string): void;
+  openLaunch(request: TaskLaunchRequest): void;
   /** One answer's quotation in the manuscript, where its block stands now. */
   jump(blockId: string): void;
 }
@@ -106,28 +108,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
 
   const run = async (dimension: CustomAnalysisDimensionProjection): Promise<void> => {
     if (busy) return;
-    busy = true;
-    options.setStatus(CUSTOM_TAB_PREPARING, 'busy');
-    try {
-      const prepared = await api.prepareCustomAnalysis({ dimensionId: dimension.dimensionId, update: updateFor(dimension) });
-      readings.set(bookId, { projection: prepared.dimensions, at: Date.now() });
-      if (panel.isConnected) render(prepared.dimensions);
-      // 运行 runs (Issue #1410 item 13): the prepared plan is started at once unless its route waits for a decision, which the
-      // Task Drawer then asks for; 查看计划 stays beside a run.
-      const plan = api.inspectTaskPlan === undefined ? null : await api.inspectTaskPlan({ kind: 'baseline-analysis', ref: prepared.taskIntentId });
-      if (plan === null || oneActionStart(plan).kind === 'preview') {
-        options.openPlan(prepared.taskIntentId);
-        options.setStatus(technicalWords(CUSTOM_TAB_PREPARED, '自定义分析已准备好。'), 'success');
-      } else {
-        await startPreparedTask(api, 'baseline-analysis', prepared.taskIntentId);
-        options.setStatus(CUSTOM_TAB_STARTED, 'success');
-        if (panel.isConnected) void load();
-      }
-    } catch (error) {
-      options.setStatus(options.errorMessage(error, '无法准备自定义分析的任务计划。'), 'error');
-    } finally {
-      busy = false;
-    }
+    options.openLaunch({ bookId, operation: 'launchCustomAnalysis', title: '自定义分析',
+      input: { dimensionId: dimension.dimensionId, update: updateFor(dimension) } });
   };
 
   const renderRevision = (latest: CustomAnalysisRevisionSummaryProjection): HTMLElement => {

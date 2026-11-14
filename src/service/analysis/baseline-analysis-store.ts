@@ -1,3 +1,4 @@
+import { launchedRunModelLabels } from '../editorial-mark-source.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
 import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
@@ -1207,6 +1208,7 @@ export class BaselineAnalysisStore {
         const state = asString(row.last_state) as BaselineAnalysisRunState;
         tasks.push({
           ...base,
+          ...launchedRunModelLabels(this.#db, runRecordId),
           run: {
             runRecordId,
             state,
@@ -1258,6 +1260,7 @@ export class BaselineAnalysisStore {
         bookTitle: asString(row.book_title),
         taskIntentId: asString(row.task_intent_id),
         mode: asString(row.mode) as BaselineAnalysisTaskMode,
+        ...launchedRunModelLabels(this.#db, asString(row.run_record_id)),
         outcomeId: asString(row.outcome_id),
         runRecordId: asString(row.run_record_id),
         classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
@@ -1327,7 +1330,7 @@ export class BaselineAnalysisStore {
       resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       safeNextAction: asString(record.safeNextAction),
       stop,
-      report: report === null ? null : runReportProjection(report),
+      report: report === null ? null : { ...runReportProjection(report), ...launchedRunModelLabels(this.#db, report.runRecordId) },
       reportAbsentReason: report === null ? PRE_RUN_REPORT_REASON : null,
     };
   }

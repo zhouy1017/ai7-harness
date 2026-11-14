@@ -171,7 +171,7 @@ function shell(rendererApi = api) {
     renderEditorWindow: vi.fn(), renderBookAnalysis: vi.fn(),
     renderBookReview: vi.fn(), renderBookDeliverables: vi.fn(),
     renderProposalConflict: vi.fn(), renderProposalWorkspace: vi.fn(), returnToRecoveryComparison: vi.fn(),
-    openPrimaryManuscript: vi.fn(async () => undefined), openProductionDocument: vi.fn(async () => undefined), openWritingPlan: vi.fn(),
+    openPrimaryManuscript: vi.fn(async () => undefined), openProductionDocument: vi.fn(async () => undefined), openLaunch: vi.fn(), openWritingPlan: vi.fn(),
     ...extra,
   });
   return {

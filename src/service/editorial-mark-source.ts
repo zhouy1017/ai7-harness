@@ -6,6 +6,21 @@ import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuratio
 export interface MarkModelBinding { route: string; model: string; reasoningEffort?: string | null }
 type ModelLabels = Pick<EditorialMarkSourceProjection, 'modelLabel' | 'modelTechnicalLabel'>;
 
+/** A launched run's display attribution survives settings changes and exported snapshot removal. */
+export function launchedRunModelLabels(db: DatabaseSync, runRecordId: string): { modelLabel?: string } {
+  const row = db.prepare(`SELECT a.canonical_json authority, p.canonical_json plan, s.canonical_json snapshot
+    FROM analysis_run_records r JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+    JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
+    JOIN analysis_plan_records p ON p.task_intent_id = r.task_intent_id AND p.plan_version = v.ordinal AND p.component = 'provider-resolution-plan'
+    LEFT JOIN task_launch_snapshots s ON s.run_id = r.run_record_id WHERE r.run_record_id = ?`).get(runRecordId);
+  if (row === undefined || typeof JSON.parse(String(row.authority)).launchSnapshotId !== 'string') return {};
+  const binding = row.snapshot === null ? null : JSON.parse(String(row.snapshot)).binding;
+  const route = JSON.parse(String(row.plan)).executionRoute;
+  const labels = binding != null ? markModelLabels(binding) : route && typeof route.kind === 'string' && typeof route.model === 'string'
+    ? markModelLabels({ route: route.kind, model: route.model, reasoningEffort: route.reasoningEffort }) : {};
+  return labels.modelLabel == null ? {} : { modelLabel: labels.modelLabel };
+}
+
 /** Existing basis JSON remains readable; new marks freeze author labels alongside their evidence (#1379). */
 export function readMarkEvidence(json: string): { basis: ReadonlyArray<EditorialMarkBasisProjection>; source?: ModelLabels } {
   const value = JSON.parse(json);

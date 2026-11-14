@@ -10,6 +10,7 @@ import {
 } from '../../src/renderer/scoped-ai-edit.js';
 import type { DialogueSelectionInput, ManuscriptWindowProjection, ScopedAiEditProjection, StartScopedAiEditInput } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
+import { preferenceDefaults } from '../../src/shared/preferences.js';
 
 // 就选中部分让 AI 修改 and 🔒 锁定 as the manuscript surface mounts them (Issue #1412): the composer names the window's base and
 // lock set and the exact selected pins, reads the request again until it settles and has the surface reload; the lock calls
@@ -35,9 +36,11 @@ function host(overrides: Partial<ScopedAiEditHost['api']> = {}) {
   const value: ScopedAiEditHost = {
     api: {
       startScopedAiEdit: vi.fn(), inspectScopedAiEdit: vi.fn(), setAiEditLocks: vi.fn(),
+      getModelServiceSettings: vi.fn(async () => { throw new Error('settings unavailable'); }),
       inspectAiEditLocks: vi.fn(async () => ({ manuscriptId: 'doc', branchId: 'branch', blockIds: [], sectionHeadingBlockIds: [], digest: LOCKS, label: '' })),
       ...overrides,
     } as ScopedAiEditHost['api'],
+    preferences: async () => preferenceDefaults(),
     flush: flushed,
     current: () => window0,
     refresh: async (result) => { refreshed.push(result); },
@@ -78,7 +81,7 @@ it('sends the selected pins on the window base and lock set, reads the request u
   const result = await settled;
   expect(flushed).toHaveBeenCalled();
   expect(started).toEqual({ manuscriptId: 'doc', branchId: 'branch', baseRevisionId: 'rev', expectedJournalSequence: 7, expectedLocksDigest: LOCKS,
-    instruction: '改得更紧凑', scope: { mode: 'selected-only', span: span.span } });
+    instruction: '改得更紧凑', scope: { mode: 'selected-only', span: span.span }, clientCommandId: expect.any(String), executionConfig: {}, rememberedChoice: false });
   expect(result?.state).toBe('applied');
   expect(refreshed).toEqual([result]);
   expect(statuses.at(-1)).toEqual([result!.label, 'success']);

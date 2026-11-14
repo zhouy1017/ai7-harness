@@ -64,6 +64,7 @@ export type ScopedAiEditScope =
   | { readonly mode: 'unlocked-only'; readonly range: { readonly kind: 'document' } | { readonly kind: 'section'; readonly headingBlockId: string } };
 
 export interface StartScopedAiEditInput {
+  readonly rememberedChoice?: boolean;
   readonly clientCommandId?: string;
   readonly executionConfig?: RuntimeExecutionConfig;
   readonly manuscriptId: string;
@@ -85,6 +86,7 @@ export interface InspectScopedAiEditInput {
  * moved while it answered, so nothing was applied; `failed`: it did not complete.
  */
 export interface ScopedAiEditProjection {
+  readonly launchNotice?: string;
   readonly bookId: string;
   readonly requestId: string;
   readonly manuscriptId: string;
