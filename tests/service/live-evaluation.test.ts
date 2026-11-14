@@ -246,6 +246,9 @@ async function contractCase(kind: 'initial' | 'readers' | 'rewrite') {
 describe('evaluation on the Go execution path (#429)', () => {
 
   it.each(['Series', 'procedure instruction'])('prepares and completes ordinary-production 初评 with %s in unit and synthesis requests (#1453)', async (context) => {
+    const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+    store.selectSearchBackend('search-tinyfish');
     const seriesId = context === 'Series' ? makeJ13Series(store, bookId) : null;
     const instruction = '保留叙述中的短句。';
     if (seriesId === null) {
