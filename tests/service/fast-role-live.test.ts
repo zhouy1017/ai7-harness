@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { SCOPED_EDIT_AUTHORED_ANSWER, scopedEditJourneyInput } from '../support/scoped-edit.js';
+import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -348,5 +351,46 @@ it('uses Book memory in actual production polish and conflict regeneration', asy
     expect(regenerated.kind === 'conflict-regenerate' && regenerated.regeneration.outcome).toBe('drafted');
     expect(calls).toHaveLength(2);
     for (const call of calls) expect(JSON.parse(call.body).messages[0].content).toContain('本书保留合成叙述节奏。');
+  } finally { owner.dispose(); await fast.settled(); }
+});
+
+
+it('freezes separate scoped launch bindings and replays a command after role settings change (#1455)', async () => {
+  const second = await importSample1Book(store, roots.codeRoot, '并行局部修改');
+  const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
+  const connection = store.saveModelServiceConnection('局部修改连接', null, 'ready', binding.route);
+  store.selectFastRoleModel(binding.route, binding.model, 'medium');
+  const defaults = store.getConfiguredModelRoleBinding('fast-interaction')!;
+  const configured = { ...binding, credentialReference: connection.credentialReference };
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured, defaults);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+    live: { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' } });
+  const calls: StubCall[] = [];
+  const runtime = { scope: 'ordinary-production' as const, nativeFetch: stubTransport(calls, () => SCOPED_EDIT_AUTHORED_ANSWER) };
+  const secretResolver = { resolve: async () => 'synthetic-scoped-placeholder' };
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
+    () => connection.credentialReference, secretResolver) });
+  const fast = new FastRoleRequests(owner, store, () => new Date(), frozen => {
+    if (frozen === null) throw new Error('missing scoped binding');
+    const policy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', null, frozen);
+    return owner.fork(productionFastRoleRoutes(runtime, () => policy, () => frozen.credentialReference, secretResolver,
+      undefined, undefined, () => frozen.reasoningEffort));
+  });
+  try {
+    const input = { ...scopedEditJourneyInput(store, book, store.inspectAiEditLocks(book).digest), clientCommandId: randomUUID(),
+      executionConfig: { modelId: 'scoped-choice-one', reasoningEffort: 'high' } };
+    const one = fast.scopedEdit(book.bookId, input);
+    const two = fast.scopedEdit(second.bookId, { ...scopedEditJourneyInput(store, second, store.inspectAiEditLocks(second).digest),
+      clientCommandId: randomUUID(), executionConfig: { modelId: 'scoped-choice-two', reasoningEffort: 'low' } });
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toEqual(defaults);
+    store.selectFastRoleModel(binding.route, binding.model, 'off');
+    await fast.settled();
+    const first = fast.inspectScopedEdit(book.bookId, one.requestId), other = fast.inspectScopedEdit(second.bookId, two.requestId);
+    expect(first.state).toBe('applied'); expect(other.state).toBe('applied');
+    expect(fast.scopedEdit(book.bookId, input).requestId).toBe(one.requestId);
+    expect(calls.map(call => { const body = JSON.parse(call.body); return [body.model, body.reasoning_effort]; }).sort())
+      .toEqual([['scoped-choice-one', 'high'], ['scoped-choice-two', 'low']]);
+    expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, first.markIds[0]!).source.modelLabel).toContain('scoped-choice-one@high');
+    expect(store.getEditorialMarkCard(second.manuscriptId, second.branchId, other.markIds[0]!).source.modelLabel).toContain('scoped-choice-two@low');
   } finally { owner.dispose(); await fast.settled(); }
 });

@@ -218,6 +218,7 @@ export interface AnalysisOutcomeAttentionReading {
 
 /** One Review Run as the Review Run ledger reads it: the Book's latest, or one that completed recently. */
 export interface ReviewRunAttentionReading {
+  readonly modelLabel?: string;
   readonly control?: AnalysisTaskAttentionReading;
   readonly bookId: string;
   readonly bookTitle: string;
@@ -402,6 +403,7 @@ function item(
   group: GlobalAttentionGroupKey,
   state: GlobalAttentionStateKey,
   fields: {
+    modelLabel?: string;
     itemId: string;
     blocked: boolean;
     at: string;
@@ -414,6 +416,7 @@ function item(
   },
 ): GlobalAttentionItemProjection {
   return {
+    ...(fields.modelLabel === undefined ? {} : { modelLabel: fields.modelLabel }),
     itemId: fields.itemId,
     group,
     state,
@@ -696,6 +699,11 @@ function reviewObject(reading: ReviewRunAttentionReading): GlobalAttentionObject
 
 /** The Book's latest Review Run's item, if its state asks for one; a Run that reached the manuscript is 最近完成's. */
 function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFor = 'admitting'): GlobalAttentionItemProjection | null {
+  const result = reviewRunItemWithoutAttribution(reading, waitingFor);
+  return result === null || reading.modelLabel === undefined ? result : { ...result, modelLabel: reading.modelLabel };
+}
+
+function reviewRunItemWithoutAttribution(reading: ReviewRunAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
   const controlled = reading.control === undefined ? null : analysisTaskItem(reading.control, waitingFor);
   if (controlled !== null) return { ...controlled, itemId: `review:${reading.reviewRunId}`, object: reviewObject(reading),
     facts: { ...controlled.facts, categories: reading.categories.map(categoryFact) },
@@ -787,6 +795,7 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
 function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {
   const at = reading.lastEventAt ?? reading.authorizedAt ?? reading.createdAt;
   return item('recent', 'review-completed', {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `review:${reading.reviewRunId}`,
     blocked: false,
     at,
@@ -1136,6 +1145,7 @@ function preparedAnalysisItem(reading: AnalysisTaskAttentionReading): GlobalAtte
 /** A Review Run prepared and not started: its plan in the drawer, whose bar starts it. */
 function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {
   return item('decisions', 'review-prepared', {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `review:${reading.reviewRunId}`,
     blocked: false,
     at: reading.createdAt,

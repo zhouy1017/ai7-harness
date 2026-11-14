@@ -3124,7 +3124,8 @@ export function registerRendererHandlers(
         requireManuscriptCapability(owned, input);
         const result = await service.call('startScopedAiEdit', { bookId: route.bookId, manuscriptId: input.manuscriptId, branchId: input.branchId,
           baseRevisionId: input.baseRevisionId, expectedJournalSequence: input.expectedJournalSequence, expectedLocksDigest: input.expectedLocksDigest,
-          instruction: input.instruction, scope: input.scope });
+          instruction: input.instruction, scope: input.scope, ...(input.clientCommandId === undefined ? {} : { clientCommandId: input.clientCommandId }),
+          ...(input.executionConfig === undefined ? {} : { executionConfig: input.executionConfig }) });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
         return result;
@@ -3817,7 +3818,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 114, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 115, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

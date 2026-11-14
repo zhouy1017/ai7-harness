@@ -32,7 +32,14 @@ beforeEach(async () => {
   });
   expect(await maintenance.ready).toBe(true);
 });
-afterEach(async () => { reader?.close(); reader = undefined; await maintenance.stop(false); db.close(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  reader?.close(); reader = undefined;
+  await maintenance.stop(false);
+  // Production stop is bounded and may leave native termination pending after a worker error.
+  // The fixture owns that worker and must release its SQLite handles before deleting files on Windows.
+  await worker.terminate();
+  db.close(); await rm(root, { recursive: true, force: true });
+});
 function write(id: string): void {
   maintenance.admitJournalWrite();
   db.prepare('INSERT OR IGNORE INTO edits VALUES (?, ?)').run(id, 'x'.repeat(80 * 1024)); maintenance.journalWritten();

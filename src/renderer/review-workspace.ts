@@ -1,3 +1,5 @@
+import { createDispatchChooser } from './components/dispatch-chooser.js';
+import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -70,7 +72,6 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
-import { oneActionStart } from './one-action-start.js';
 import { mountHouseWordList } from './house-word-list.js';
 import { parseBookTerms, validBookTerms } from '../shared/protocol/deterministic.js';
 import type { BookTermEntry } from '../shared/protocol/procedures.js';
@@ -192,7 +193,6 @@ import {
   reviewLiveLine,
   reviewManuscriptLine,
   reviewPlanCategoriesLine,
-  reviewPreparationLine,
   reviewQuote,
   reviewReplacementLine,
   reviewReportAppendixLine,
@@ -219,7 +219,7 @@ import {
 /**
  * ②B 审阅 (Issue #417; editor-surfaces §4, V2-UX-REV-001 to REV-013, MARK-010, FIND-002): the Book-level
  * review destination. One card holds the coverage matrix, the 审阅记录 and 新建审阅, and below them the
- * opened Review Run — its plan before the one approval, then each category's progress, its findings as
+ * opened Review Run — each category's progress, its findings as
  * they become actionable (REV-008), and its versioned Report. 新建审阅 uses the shared non-modal sheet.
  *
  * Everything here reads the service's projection and asks the service again after every action: a
@@ -245,9 +245,9 @@ export interface ReviewWorkspaceSurface {
 
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
-  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
-  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'authorizeReviewRun' | 'searchReferableMaterials' |
-  'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
+  'getModelServiceSettings' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
+  'getTaskPlanPage' | 'searchReferableMaterials' |
+  'generateReviewReport' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
@@ -333,6 +333,14 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  estimate?: string;
+  launchInput?: string;
+  executionConfig?: RuntimeExecutionConfig;
+  chooser?: ReturnType<typeof createDispatchChooser>;
+  choicePending?: boolean;
+  choiceTicket?: number;
+  launchPending?: boolean;
+  clientCommandId?: string;
   dismissed: boolean;
   localOptions: import('../shared/protocol/procedures.js').LocalCheckOptions;
   houseWordListWanted: boolean;
@@ -351,12 +359,11 @@ interface SheetState {
   scope: ReviewScopeKind | null;
   from: string | null;
   to: string | null;
-  job: ServiceJobProjection | null;
   problem: string | null;
   /** Where focus returns when the sheet closes: the control that opened it. */
   readonly openerKey: string | null;
   /** The plan is on screen: focus goes to it instead of back to the opener. */
-  prepared: boolean;
+  launched: boolean;
   /** The enabled Captured Procedures 按已保存的工序 offers (Issue #65, S30), each as it applies to this Book (S31b), read when the sheet opens. */
   procedures: ReadonlyArray<CapturedProcedureApplicabilityEntryProjection>;
   /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
@@ -645,7 +652,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let excludedPages = 1;
   let excludedOpen = false;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
-    let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
+    let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
     if (first.bookId !== bookId) {
       if (!destroyed && ticket === generation) clearFactual(true);
       return first;
@@ -985,6 +992,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const details = el('span', 'review-run-details');
       details.append(el('span', 'review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`), ' · ', created);
       const line = el('p', 'review-run-line', reviewRunLine(summary));
+      if (summary.modelLabel) line.append(' · ', el('span', 'review-run-model', summary.modelLabel));
       line.append(' · ', details);
       item.append(line);
       // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
@@ -1109,7 +1117,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (run.state === 'prepared') {
       section.append(renderPlan(run));
     } else {
-      section.append(renderProgress(run));
+      const viewPlan = actionButton('view-plan', 'quiet', () => options.openPlan(run.reviewRunId), '查看计划');
+      viewPlan.dataset['taskPlanOpen'] = 'review-run';
+      section.append(viewPlan, renderProgress(run));
       if (run.canContinue) {
         const resume = el('div', 'review-continue');
         resume.append(el('p', 'attention-note', REVIEW_CONTINUE_NOTE), actionButton('continue', 'primary', () => void continueRun(run)));
@@ -1844,6 +1854,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function renderReport(run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
+    const modelLabel = run.report?.record.run.modelLabel ?? run.modelLabel;
+    if (modelLabel) section.append(el('p', 'review-report-model', modelLabel));
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
     section.append(el('h5', undefined, `${REVIEW_REPORT_HEADING} · 旧版保留`));
     // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).
@@ -2384,10 +2396,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       scope: prefill?.scope ?? (projection.scopeOptions[defaults.reviewScope].available && defaults.reviewScope !== 'selection' ? defaults.reviewScope : 'whole'),
       from: prefill?.from ?? defaults.reviewFrom ?? projection.scopeOptions.chapters.chapters[0]?.blockId ?? null,
       to: prefill?.to ?? defaults.reviewTo ?? projection.scopeOptions.chapters.chapters.at(-1)?.blockId ?? null,
-      job: null,
       problem: null,
       openerKey: focusKeyOf(opener),
-      prepared: false,
+      launched: false,
       procedures,
       procedure: null,
       requests: new ProcedureChoiceRequests(),
@@ -2395,7 +2406,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     renderSheet(projection, sheetState);
     sheet.show();
-    if (immediate) { await prepareRun(sheetState, 'start'); return; }
+    if (immediate) { await startOrEstimateRun(sheetState, 'start'); return; }
     if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
       await chooseDefinition(sheetState, procedureId);
       return;
@@ -2790,23 +2801,32 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const problem = el('p', 'review-problem review-sheet-problem');
     problem.id = uid('sheet-problem');
     problem.setAttribute('role', 'alert');
+    const estimateNotice = el('p', 'review-estimate'); estimateNotice.setAttribute('role', 'status');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
-    const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
-    const prepare = actionButton('prepare', 'quiet', () => void prepareRun(state));
+    const start = actionButton('start', 'primary', () => void startOrEstimateRun(state, 'start'));
+    const prepare = actionButton('prepare', 'quiet', () => void startOrEstimateRun(state));
     prepare.classList.add('text-link');
-    const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    const primaryActions = el('div', 'button-row'); primaryActions.append(start, prepare, cancelPreparation);
+    const newChooser = state.chooser === undefined;
+    const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
+    if (newChooser) void (async () => {
+      const [settings, preferences] = await Promise.all([api.getModelServiceSettings(), window.ai7.getPreferences()]);
+      if (!state.dismissed) chooser.render(settings, preferences.values['model.favourites'], state.executionConfig);
+    })().catch(() => { chooser.unavailable(); });
+    const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
-    form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, progress, actions);
+    form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
+    for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; estimateNotice.textContent = ''; estimateNotice.hidden = true; });
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
-      const preparing = state.job !== null;
+      estimateNotice.textContent = state.estimate ?? '';
+      estimateNotice.hidden = state.estimate === undefined;
+      const preparing = state.launchPending === true || state.choicePending === true;
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
       const effective = effectiveCategories(workspace, state);
@@ -2863,20 +2883,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       networkNotice.textContent = networkBlocked ? '联网检索尚未就绪，请到设置中配置后再开始。' : '';
       problem.textContent = blocked ?? state.problem ?? '';
       problem.hidden = state.problem === null && blocked === null;
-      progress.hidden = state.job === null;
-      progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
+      progress.hidden = !preparing;
+      progress.textContent = state.launchPending ? '正在启动审阅…' : state.choicePending ? '正在更新可用的审阅范围…' : '';
       prepare.disabled = preparing || loading || networkBlocked || blocked !== null || effective.length === 0 || state.scope === null;
       for (const control of [prepare, start]) {
         if (blocked !== null) control.setAttribute('aria-describedby', problem.id);
         else control.removeAttribute('aria-describedby');
       }
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
-      start.disabled = prepare.disabled;
-      close.disabled = preparing;
-      cancelPreparation.hidden = !preparing;
-      cancelPreparation.disabled = !preparing;
-      if (state.job !== null) cancelPreparation.dataset['serviceJobId'] = state.job.jobId;
-      else delete cancelPreparation.dataset['serviceJobId'];
+      start.disabled = prepare.disabled || state.launchPending === true;
+      close.disabled = state.launchPending === true;
+
     }
     sheetUpdate = updateSheet;
     sheetContent(sheet, bar, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== actions), actions, form);
@@ -2899,8 +2916,30 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
   }
 
-  async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
-    if (destroyed || state.job !== null || projection === null) return;
+  async function updateExecutionChoice(state: SheetState, config: RuntimeExecutionConfig): Promise<void> {
+    state.executionConfig = config;
+    delete state.clientCommandId;
+    const ticket = state.choiceTicket = (state.choiceTicket ?? 0) + 1;
+    state.choicePending = true;
+    sheetUpdate();
+    try {
+      const next = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, executionConfig: config });
+      if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
+      const focused = state.chooser?.element.contains(document.activeElement) ? document.activeElement : null;
+      state.choicePending = false;
+      projection = next;
+      renderSheet(next, state);
+      if (focused instanceof HTMLElement) focused.focus();
+    } catch (error) {
+      if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
+      state.choicePending = false;
+      state.problem = options.errorMessage(error, '无法读取本次模型可用的审阅范围。');
+      sheetUpdate();
+    }
+  }
+
+  async function startOrEstimateRun(state: SheetState, mode: 'preview' | 'start' = 'preview'): Promise<void> {
+    if (destroyed || state.launchPending || state.choicePending || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
     const shown = resolved === null ? null : sheet.querySelector<HTMLSelectElement>('[data-review-field="procedure-version"]')?.value ?? null;
@@ -2934,7 +2973,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const scope = asked.request;
     void rememberActionDefaults({ reviewCategories: categoryIds, reviewScope: scope.kind,
       reviewFrom: state.from, reviewTo: state.to }).catch(() => options.setStatus('未能记住本次审阅设置。', 'error'));
-    options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
       const preparationInput: Parameters<ReviewApi['prepareReviewRun']>[0] = {
         ...(categoryIds.includes('local-text-check') ? { localCheck: { ...state.localOptions, numeralsConfirmed: state.localOptions.numerals !== 'off' && state.localOptions.numeralsConfirmed } } : {}),
@@ -2945,63 +2983,33 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
         ...(state.definition?.composite !== true ? {} : { procedureDefinition: state.definition.pin }),
       };
-      const initial = await api.prepareReviewRun(preparationInput);
-      if (state.dismissed) {
-        await api.cancelServiceJob({ jobId: initial.jobId });
-        options.setStatus('已请求取消审阅准备。', 'success');
+      if (mode === 'preview') {
+        const bounds = chaptersOf(state);
+        const from = bounds.from;
+        const to = bounds.to;
+        const workspace = projection;
+        const estimates = workspace.categories.filter(category => categoryIds.includes(category.categoryId)).map(category => {
+          const count = estimateReviewCalls(category, state.scope, workspace.scopeUnitCounts, from && to ? { startPosition: from.position, endPosition: to.endPosition } : null);
+          return `${category.label}：${count === null ? '按所选范围估计' : `约 ${count} 次调用`}`;
+        });
+        state.estimate = estimates.join('；');
+        state.problem = null;
+        sheetUpdate();
+        options.setStatus('已显示审阅估计。', 'success');
         return;
       }
-      state.job = initial;
+      options.setStatus(REVIEW_STATUS_LINES.launching, 'busy');
+      state.launchPending = true;
+      const launchInput = JSON.stringify({ preparationInput, executionConfig: state.executionConfig ?? {} });
+      if (state.launchInput !== launchInput) delete state.clientCommandId;
+      state.launchInput = launchInput;
+      state.clientCommandId ??= crypto.randomUUID();
       sheetUpdate();
-      const completed = await options.awaitServiceJob(initial, (job) => {
-        if (destroyed || sheetState !== state) return;
-        state.job = job;
-        sheetUpdate();
-      });
-      if (destroyed) return;
-      state.job = null;
-      if (state.dismissed) {
-        options.setStatus(completed.state === 'cancelled' ? REVIEW_STATUS_LINES.preparationCancelled : '已关闭审阅配置。', 'success');
-        return;
-      }
-      if (completed.state === 'cancelled') {
-        sheetUpdate();
-        options.setStatus(REVIEW_STATUS_LINES.preparationCancelled, 'success');
-        return;
-      }
-      let result = completed.result;
-      if (completed.kind !== 'review-run-preparation' || result === null || !('scopeOptions' in result) || result.bookId !== bookId || result.run === null) {
-        throw new Error(REVIEW_STATUS_LINES.preparationFailed);
-      }
-      let quickNote: string | null = null;
-      if (mode === 'start') {
-        // 开始审阅 (ADR 0096 §3): the one explicit action records the Run Authorization for the plan exactly as its bar shows
-        // it; a plan that is editable, moved or needs a decision opens first, and a refused start says why there.
-        const decision = oneActionStart(await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId }));
-        if (decision.kind === 'authorize') {
-          try {
-            result = await api.authorizeReviewRun({ reviewRunId: result.run.reviewRunId, planDigests: decision.planDigests });
-            quickNote = REVIEW_STATUS_LINES.started;
-            if (result.run !== null) options.recorded?.(result.run.reviewRunId);
-          } catch (error) {
-            quickNote = options.errorMessage(error, REVIEW_STATUS_LINES.startFailed);
-          }
-        } else {
-          quickNote = REVIEW_STATUS_LINES.startNeedsPlan;
-        }
-      } else if (mode === 'quick') {
-        const plan = await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId });
-        const rule = plan.defaultRule.current;
-        const digest = plan.edit.planEnvelopeDigest;
-        if (rule === null || rule.state !== 'active' || digest === null) {
-          quickNote = plan.defaultRule.reason ?? '这本书没有匹配所选类别的默认执行规则；请先看计划，可以在完整计划里设为快速开始默认。';
-        } else {
-          const started = await api.quickStartReviewRun({ reviewRunId: result.run.reviewRunId, ruleVersionId: rule.ruleVersionId, planEnvelopeDigest: digest });
-          result = started.projection;
-          quickNote = started.outcome === 'started' ? '已按默认执行规则开始审阅。' : started.reasons.join('');
-        }
-      }
-      if (result.run === null) throw new Error(REVIEW_STATUS_LINES.preparationFailed);
+      const result = await api.launchReviewRun({ ...preparationInput, clientCommandId: state.clientCommandId,
+        ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }) });
+      state.launchPending = false;
+      if (result.run !== null) options.recorded?.(result.run.reviewRunId);
+      if (result.run === null) throw new Error(REVIEW_STATUS_LINES.launchFailed);
       query.reviewRunId = result.run.reviewRunId;
       query.filters = { ...NO_FILTERS };
       query.pages = 1;
@@ -3009,37 +3017,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       ui.convert = null;
       ui.batch = null;
       ui.capabilityFindingId = null;
-      state.prepared = true;
+      state.launched = true;
       if (sheet.open) sheet.close();
       generation += 1;
       clearFactual(true);
       stableKey = '';
       if (host.isConnected) show(result);
-      options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
-      // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
-      // it brings focus back to this Run's 查看计划. After 开始审阅 the drawer shows the started Run, its plan one step away.
-      if (mode === 'preview') options.openPlan(result.run.reviewRunId);
+      options.setStatus(REVIEW_STATUS_LINES.started, 'success');
+
     } catch (error) {
+      state.launchPending = false;
       if (destroyed) return;
-      state.job = null;
       if (state.dismissed) {
-        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
+        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.launchFailed), 'error');
         return;
       }
-      announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
+      announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.launchFailed), options.setStatus);
       sheetUpdate();
-    }
-  }
-
-  async function cancelJob(state: SheetState, control: HTMLButtonElement): Promise<void> {
-    const jobId = state.job?.jobId;
-    if (jobId === undefined) return;
-    control.disabled = true;
-    try {
-      await api.cancelServiceJob({ jobId });
-    } catch (error) {
-      control.disabled = false;
-      options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
     }
   }
 
@@ -3054,7 +3048,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetState = null;
     if (state) {
       state.dismissed = true;
-      if (state.job) void api.cancelServiceJob({ jobId: state.job.jobId }).catch((error: unknown) => options.setStatus(options.errorMessage(error, '取消准备未完成。'), 'error'));
     }
     sheet.replaceChildren();
     sheetUpdate = () => undefined;
@@ -3062,7 +3055,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // A choice still loading as the sheet closes would leave 「正在读取…」 on the status bar (Issue #705 item 2).
     const closing = procedureSheetCloseStatus(state.requests);
     if (closing !== null) options.setStatus(closing);
-    if (state.prepared) return;
+    if (state.launched) return;
     const opener = card === undefined ? undefined : Array.from(card.querySelectorAll<HTMLElement>('button'))
       .find((candidate) => focusKeyOf(candidate) === state.openerKey && !(candidate as HTMLButtonElement).disabled);
     (opener ?? card?.querySelector<HTMLElement>('[data-review-action="new-review"]:not(:disabled)'))?.focus();

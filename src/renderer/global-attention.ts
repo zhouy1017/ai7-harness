@@ -245,6 +245,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;
     title.append(' · ', pill);
+    if (projection.modelLabel) title.append(' · ', el('span', 'global-attention-model', projection.modelLabel));
     title.title = `${view.openName} · ${view.stateLabel}`;
     open.title = view.time;
     const reason = el('p', 'global-attention-reason', view.reason);

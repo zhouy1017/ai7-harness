@@ -1,3 +1,5 @@
+import { MODEL_SERVICE_CONNECTION_IDS } from '../../src/shared/protocol/model-service.js';
+import { createDispatchChooser } from '../../src/renderer/components/dispatch-chooser.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,8 +17,8 @@ beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(true); }
 afterEach(() => restore());
 
 function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelServiceRouteId | null = ready[0] ?? null, fast: ModelServiceRouteId | null = inUse): ModelServiceSettingsProjection {
-  const connection = (route: ModelServiceRouteId) => ({ connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
-  const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, roleLabel: roleId === 'main-editorial' ? '主编辑角色' : '快速交互角色', statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route] });
+  const connection = (route: ModelServiceRouteId) => ({ connectionId: MODEL_SERVICE_CONNECTION_IDS[route], connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
+  const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, roleLabel: roleId === 'main-editorial' ? '主编辑角色' : '快速交互角色', statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route], connection: route === null ? null : connection(route) });
   return {
     channels: modelServiceChannels(),
     roles: [role('fast-interaction', fast), role('main-editorial', inUse ?? 'opencode-go')],
@@ -678,4 +680,29 @@ it('scans connection-test feedback and the repainted model page when discovery u
       expect(root.textContent?.match(/查看技术详情/gu)).toHaveLength(1);
     } finally { vi.unstubAllGlobals(); }
   } finally { setTechnicalLayerVisible(true); }
+});
+
+
+it('offers ready channels, favourites first, and resets the task choice without saving role defaults (#1455)', () => {
+  const changed = vi.fn();
+  const projection = settings(['opencode-go', 'openai-platform']);
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed });
+  chooser.render(projection, { 'opencode-go': [projection.channels.find(channel => channel.channelId === 'opencode-go')!.models[0]!.modelId] });
+  const root = chooser.element as unknown as MiniElement;
+  expect(root.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label)).toEqual(['OpenCode Go', 'OpenAI 官方']);
+  const model = root.querySelector('select[aria-label="本次任务的模型"]')!;
+  const options = root.querySelectorAll('option');
+  expect(options.some(option => option.textContent.includes('★'))).toBe(true);
+  Object.assign(model, { selectedIndex: root.querySelectorAll('optgroup')[0]!.children.length });
+  model.dispatchEvent({ type: 'change' });
+  const effort = root.querySelector('select[aria-label="本次任务的思考强度"]')!;
+  const level = effort.children[1]!.value;
+  effort.value = level; effort.dispatchEvent({ type: 'change' });
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: level }));
+  expect(root.querySelector('summary')!.textContent).toContain(`@${level}`);
+  const selectedLabel = root.querySelector('summary')!.textContent;
+  chooser.render(projection, {}, changed.mock.lastCall![0]);
+  expect(root.querySelector('summary')!.textContent).toBe(selectedLabel);
+  root.querySelector('button')!.click();
+  expect(changed).toHaveBeenLastCalledWith({});
 });

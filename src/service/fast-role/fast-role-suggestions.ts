@@ -53,7 +53,7 @@ import type { ScopedAiEditProjection, StartScopedAiEditInput } from '../../share
  * on its own.
  */
 export type FastRoleStore = Pick<EditorialStore,
-  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory'>> &
+  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'> & Partial<Pick<EditorialStore, 'editorialMemory' | 'captureScopedAiEditLaunch'>> &
   // 就选中部分让 AI 修改 (Issue #1412) reads the working state and applies through the store; a store without them refuses it.
   Partial<Pick<EditorialStore, 'getManuscriptWindow' | 'scopedEditWorkingBlocks' | 'applyChangeSuggestion'>>;
 
@@ -370,7 +370,8 @@ export class FastRoleRequests {
   readonly #entries = new Map<string, RequestEntry>();
   readonly #running = new Set<Promise<void>>();
 
-  constructor(owner: FastRoleExecutionOwner, store: FastRoleStore, now: () => Date = () => new Date()) {
+  constructor(owner: FastRoleExecutionOwner, store: FastRoleStore, now: () => Date = () => new Date(),
+    private readonly scopedOwner?: (binding: import('../launch-policy.js').ConfiguredProviderBinding | null) => FastRoleExecutionOwner) {
     this.#owner = owner;
     this.#store = store;
     this.#now = now;
@@ -402,10 +403,29 @@ export class FastRoleRequests {
     require(store.getManuscriptWindow !== undefined && store.scopedEditWorkingBlocks !== undefined && store.applyChangeSuggestion !== undefined,
       'FAST_ROLE_ROUTE_UNAVAILABLE', '这次运行不能进行 AI 局部修改。');
     const scopedStore = store as ScopedEditStore;
-    const prepared = prepareScopedEdit(this.#owner, scopedStore, bookId, input);
+    let executionOwner = this.#owner;
+    let captured: ReturnType<typeof prepareScopedEdit> | null = null;
+    if (store.captureScopedAiEditLaunch !== undefined && (input.clientCommandId !== undefined || input.executionConfig !== undefined)) {
+      const launched = store.captureScopedAiEditLaunch({ ...input, bookId, clientCommandId: input.clientCommandId ?? randomUUID() }, binding => {
+        executionOwner = this.scopedOwner?.(binding) ?? this.#owner;
+        try { captured = prepareScopedEdit(executionOwner, scopedStore, bookId, input); }
+        catch (error) { if (executionOwner !== this.#owner) executionOwner.dispose(); throw error; }
+        return { runId: captured.requestId, manuscript: { manuscriptId: captured.manuscriptId, branchId: captured.branchId,
+          revisionId: input.baseRevisionId, journalSequence: input.expectedJournalSequence, scope: input.scope, locksDigest: input.expectedLocksDigest, targets: captured.targets.map(({ blockId, blockDigest, fromGrapheme, toGrapheme }) => ({ blockId, blockDigest, fromGrapheme, toGrapheme })) } };
+      });
+      if (launched.repeated) {
+        const entry = this.#entries.get(launched.runId);
+        if (entry?.kind === 'scoped-edit') return entry.projection;
+        return scopedEditProjection({ bookId, requestId: launched.runId, manuscriptId: input.manuscriptId, branchId: input.branchId, totalBlocks: 0 },
+          'failed', '这次修改请求已结束或中断；已应用的修改仍在稿件里。');
+      }
+    } else captured = prepareScopedEdit(executionOwner, scopedStore, bookId, input);
+    const prepared = captured;
+    require(prepared !== null, 'FAST_ROLE_REQUEST_INVALID', '局部修改未能启动。');
     const entry: RequestEntry = { kind: 'scoped-edit', projection: scopedEditProjection(prepared, 'requesting', '正在让 AI 修改所选部分…') };
     this.#start(prepared.requestId, entry, async () => {
-      entry.projection = await finishScopedEdit(this.#owner, scopedStore, prepared);
+      try { entry.projection = await finishScopedEdit(executionOwner, scopedStore, prepared); }
+      finally { if (executionOwner !== this.#owner) executionOwner.dispose(); }
     }, (message) => { entry.projection = scopedEditProjection(prepared, 'failed', message); });
     return entry.projection;
   }

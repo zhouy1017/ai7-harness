@@ -114,6 +114,7 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Proposed Policy Revision | 拟议规则修订 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Policy Revision Activation | 规则修订启用 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Task Intent | 任务意图 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Task Launch Snapshot | 任务启动快照 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Execution Plan | 执行计划 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Plan Preview | 计划预览 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Plan Envelope | 计划权限边界 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |

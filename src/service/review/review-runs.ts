@@ -1,4 +1,5 @@
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
+import { markModelLabels, recordedMarkModel } from '../editorial-mark-source.js';
 import { researchModelChannelLabel } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
@@ -82,7 +83,7 @@ import {
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
 } from '../../shared/protocol.js';
-import { RUN_WAITING_IDLE_LABEL, type BaselineAnalysisStore, type ProgressReader } from '../analysis/baseline-analysis-store.js';
+import { RUN_WAITING_IDLE_LABEL, type BaselineAnalysisStore, type LaunchBinding, type ProgressReader } from '../analysis/baseline-analysis-store.js';
 import { UNREAD_WALK_BOUND, type UnreadWalkCut } from '../analysis/unread-changes.js';
 import {
   AnalysisError,
@@ -759,6 +760,7 @@ function boundedTitle(title: string): string {
  * kind's, and the leads read the baseline's.
  */
 export interface ReviewRunLedgers {
+  executionFor?(binding: import('../launch-policy.js').ConfiguredProviderBinding): LaunchBinding;
   learningLedger?: () => import('../learning/ledger.js').EditorialLearningLedger;
   ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null, contractVersion?: 1 | 2): BaselineAnalysisStore;
   /**
@@ -1412,6 +1414,51 @@ export class ReviewRunStore {
       requireReview(work !== undefined, 'JOB_NOT_FOUND', '审阅准备不存在或已结束。');
       return this.#advance(work);
     }
+    const work = this.#buildWork(input);
+    if ('done' in work) return work;
+    this.#work.set(work.workId, work);
+    return this.#advance(work);
+  }
+
+  requiresModel(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
+    return this.#forBook(bookId, this.#configuration()).categories.some(entry => categoryIds.includes(entry.categoryId) &&
+      entry.executor !== 'baseline-leads' && entry.executor !== 'local-text-check' && entry.executor !== 'unavailable');
+  }
+
+  /** Direct launch freezes all category plans; the driver starts each from that choice at its turn. */
+  launch(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, snapshotId: string,
+    binding: import('../launch-policy.js').ConfiguredProviderBinding | null): { reviewRunId: string; manuscript: unknown } {
+    const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
+    if (this.requiresModel(input.bookId, input.categoryIds)) this.#ledgers.baseline().forkForLaunch(execution).checkpointAtLaunch(input.bookId);
+    const work = this.#buildWork(input, execution);
+    let reviewRunId: string;
+    if ('done' in work) {
+      requireReview(work.reviewRunId !== null, 'REVIEW_PLAN_UNAVAILABLE', '审阅未能启动。');
+      reviewRunId = work.reviewRunId;
+    } else {
+      for (const planned of work.planned) {
+        if (planned.plan.kind === 'leads') { work.prepared.push(this.#snapshotCategory(planned, null)); continue; }
+        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined,
+          undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
+        const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
+        const projection = ledger.launchTask({ ...request, reconfirm: false,
+          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution, true);
+        work.prepared.push(this.#snapshotCategory(planned, projection));
+      }
+      reviewRunId = this.#writeRun(work);
+    }
+    const snapshot = this.#runOfBook(input.bookId, reviewRunId);
+    const authorizedAt = new Date().toISOString();
+    const record = canonicalRecord({ schema: AUTHORIZATION_SCHEMA, reviewRunId, authorizedAt, actor: 'editor',
+      interaction: 'authorize-review-run', startWhen: 'now', launchSnapshotId: snapshotId,
+      approvals: snapshot.categories.flatMap<{ categoryId: string; taskIntentId: string | null; planEnvelopeDigest: string }>(category => category.task === null
+        ? snapshot.localPlan === undefined ? [] : [{ categoryId: category.categoryId, taskIntentId: null, planEnvelopeDigest: snapshot.localPlan.digest }]
+        : [{ categoryId: category.categoryId, taskIntentId: category.task.taskIntentId, planEnvelopeDigest: category.task.planEnvelopeDigest }]) });
+    this.#db.prepare('INSERT INTO review_run_authorizations VALUES (?, ?, ?, ?)').run(reviewRunId, authorizedAt, record.json, record.digest);
+    return { reviewRunId, manuscript: snapshot.manuscript };
+  }
+
+  #buildWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, execution?: LaunchBinding): PreparationWork | ReviewRunPreparationProgress {
     const bookId = input.bookId;
     this.#requireBook(bookId);
     const head = this.#head(bookId);
@@ -1462,9 +1509,9 @@ export class ReviewRunStore {
     const planned = configuration.categories
       .filter((entry) => categoryIds.includes(entry.categoryId))
       .map((entry, position): PlannedCategory => {
-        const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
+        const reading = this.#readCategory(bookId, head, entry, baseline, undefined, execution);
         requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
-        if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
+        if ((execution ?? this.#ledgers.baseline().launch).live !== null && entry.executor !== 'baseline-leads') {
           requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry, input.launchPolicy)}`);
         }
         const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts);
@@ -1498,8 +1545,7 @@ export class ReviewRunStore {
       index: 0,
       ledgerWorkId: null,
     };
-    this.#work.set(work.workId, work);
-    return this.#advance(work);
+    return work;
   }
 
   /**
@@ -2214,6 +2260,24 @@ export class ReviewRunStore {
   }
 
   #categoryLedger(category: SnapshotCategory): BaselineAnalysisStore {
+    const ledger = this.#categoryDefinitionLedger(category);
+    if (category.task === null || this.#ledgers.executionFor === undefined) return ledger;
+    // Only one-step launches inherit the launch choice. Retained prepared work keeps its existing drift checks.
+    const launched = this.#db.prepare(`SELECT 1 FROM review_runs r JOIN review_run_authorizations a USING(review_run_id),
+      json_each(r.canonical_json, '$.categories') c WHERE json_extract(a.canonical_json, '$.launchSnapshotId') IS NOT NULL
+      AND json_extract(c.value, '$.task.taskIntentId') = ? LIMIT 1`).get(category.task.taskIntentId);
+    if (launched === undefined) return ledger;
+    const frozen = ledger.frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
+    const provider = frozen.components['provider-resolution-plan'] as Record<string, unknown>;
+    const route = provider.executionRoute as Record<string, unknown>;
+    const remote = provider.remoteBinding as Record<string, unknown>;
+    if (!isRecord(remote?.providerProcessing) || remote.providerProcessing.operationalScope !== 'ordinary-production') return ledger;
+    const binding = { route: route.kind, model: route.model, endpoint: route.endpoint, credentialSlot: remote.credentialSlot,
+      credentialReference: remote.credentialReference, ...(typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}) } as import('../launch-policy.js').ConfiguredProviderBinding;
+    return ledger.forkForLaunch(this.#ledgers.executionFor(binding));
+  }
+
+  #categoryDefinitionLedger(category: SnapshotCategory): BaselineAnalysisStore {
     if (category.task === null || category.entry.executor !== 'review-category-contract') return this.#ledgers.ledgerOf(category.entry);
     const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const execution = frozen.components['execution-plan'] as Record<string, unknown>;
@@ -2724,7 +2788,7 @@ export class ReviewRunStore {
     if (this.#stopForWithdrawnInfluence(snapshot, category)) return null;
     const ledger = this.#categoryLedger(category);
     // House guideline text never reaches a live model before the Owner admits it, whenever the Run was prepared.
-    const withheld = this.#guidelineRefusal(category.entry);
+    const withheld = this.#guidelineRefusal(category.entry, ledger.launch);
     if (withheld !== null) {
       this.#recordEvent(reviewRunId, categoryId, 'refused', withheld, { extra: { code: HOUSE_GUIDELINE_NOT_TRANSMITTABLE } });
       return null;
@@ -3417,6 +3481,7 @@ export class ReviewRunStore {
     requireReview(bookWide || !view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
     const views = bookWide ? (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
       .map((row) => this.#runView(this.#snapshotOf(row))).filter((candidate) => candidate.authorization !== null) : [view];
+    const models = [...new Set(views.flatMap(candidate => this.#modelAttribution(candidate.snapshot).modelLabel ?? []))];
     // Views run newest first: a mark several Runs found is one finding as its latest Run states it, and a category is the
     // latest Run's, in that Run's order; a single Run's report reads exactly its own.
     const newestOf = <T>(values: ReadonlyArray<T>, key: (value: T) => string): T[] =>
@@ -3438,6 +3503,7 @@ export class ReviewRunStore {
         version,
         generatedAt,
         run: {
+          ...(models.length === 0 ? {} : { modelLabel: models.join('、') }),
           ordinal: snapshot.ordinal,
           label: `第 ${snapshot.ordinal} 次`,
           createdAt: snapshot.createdAt,
@@ -3598,14 +3664,14 @@ export class ReviewRunStore {
       category.entry.executor === 'review-category-contract' && liveMaterialRule(launch.policy, reviewCategoryKindId(category.categoryId)) === null);
   }
 
-  workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE): ReviewWorkspaceProjection {
+  workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE, execution?: LaunchBinding): ReviewWorkspaceProjection {
     this.#requireBook(bookId);
     requireReview(reviewRunId === null || (typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId)), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
     requireReview(validFindingPage(page), 'REVIEW_PAGE_INVALID', '发现的分页或筛选无效。');
     const head = this.#head(bookId);
     const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
     const house = this.#configuration();
-    const readings = this.#forBook(bookId, house).categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
+    const readings = this.#forBook(bookId, house).categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress, execution));
     const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
     // The 审阅记录 lists the newest Runs only; a Run beyond them is still opened when it is named.
     const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT ?')
@@ -3789,8 +3855,7 @@ export class ReviewRunStore {
     };
   }
 
-  #guidelineRefusal(entry: ReviewCategoryConfigurationEntry): string | null {
-    const launch = this.#ledgers.baseline().launch;
+  #guidelineRefusal(entry: ReviewCategoryConfigurationEntry, launch: LaunchBinding = this.#ledgers.baseline().launch): string | null {
     const admitted = entry.seriesKnowledge === undefined || launch.live === null || launch.policy === undefined ? false
       : liveKindAdmission(launch.policy, this.#ledgers.ledgerOf(entry).definition, launch.live) !== null;
     return houseGuidelineRefusal(entry, launch.live !== null, admitted);
@@ -4318,7 +4383,7 @@ export class ReviewRunStore {
   }
 
   /** What one category can do now: from its own ledger for a Task-backed one, from the baseline for the leads. */
-  #readCategory(bookId: string, head: ManuscriptHead | null, entry: ReviewCategoryConfigurationEntry, baseline: BaselineReading, progress: ProgressReader | undefined): CategoryReading {
+  #readCategory(bookId: string, head: ManuscriptHead | null, entry: ReviewCategoryConfigurationEntry, baseline: BaselineReading, progress: ProgressReader | undefined, execution?: LaunchBinding): CategoryReading {
     const none: ReviewCategoryLedgerFacts = { hasRevision: false, stale: false, syncUnavailableReason: null, baselineRevision: baseline.revision !== null };
     // The house's 书系一致性 is never read unresolved; were it, it could not run.
     if (entry.executor === 'unavailable' || entry.executor === 'series-knowledge') {
@@ -4329,9 +4394,9 @@ export class ReviewRunStore {
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };
     }
-    const withheld = this.#guidelineRefusal(entry);
+    const withheld = this.#guidelineRefusal(entry, execution);
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
-    const launch = this.#ledgers.baseline().launch;
+    const launch = execution ?? this.#ledgers.baseline().launch;
     if (launch.live !== null && (launch.policy === undefined || liveReviewRule(launch.policy, entry) === null)) {
       return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
@@ -4339,7 +4404,8 @@ export class ReviewRunStore {
     let modelChannelSearchLabel: string | undefined;
     let researchUnavailableReason: string | null = null;
     try {
-      const ledger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
+      const currentLedger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
+      const ledger = execution === undefined ? currentLedger : currentLedger.forkForLaunch(execution);
       projection = ledger.inspect(bookId, progress);
       if (entry.searchEngine) {
         try {
@@ -4695,6 +4761,7 @@ export class ReviewRunStore {
             (['pausing', 'paused', 'resumable', 'awaiting-clarification', 'cancelling'].includes(reading.run.state) || reading.run.progress !== null)))[0];
       return {
         ...(control === undefined ? {} : { control }),
+        ...this.#modelAttribution(view.snapshot),
         bookId: view.snapshot.bookId,
         bookTitle: text(row.book_title),
         reviewRunId: view.snapshot.reviewRunId,
@@ -4844,9 +4911,30 @@ export class ReviewRunStore {
     return row === undefined ? null : this.#versionView(row);
   }
 
+  /** Run attribution reads its launch choice, or the legacy frozen plan; never the current role selection. */
+  #modelAttribution(snapshot: RunSnapshot): { modelLabel?: string } {
+    if (localOnly(snapshot)) return { modelLabel: 'AI7 本地检查' };
+    const launch = this.#db.prepare('SELECT canonical_json, sha256 FROM task_launch_snapshots WHERE run_id = ?').get(snapshot.reviewRunId);
+    if (launch !== undefined) {
+      const choice = recordOf(text(launch.canonical_json), text(launch.sha256));
+      if (isRecord(choice.binding) && typeof choice.binding.route === 'string' && typeof choice.binding.model === 'string') {
+        const label = markModelLabels({ route: choice.binding.route, model: choice.binding.model,
+          ...(typeof choice.binding.reasoningEffort === 'string' ? { reasoningEffort: choice.binding.reasoningEffort } : {}) }).modelLabel;
+        return label ? { modelLabel: label } : {};
+      }
+    }
+    const labels = [...new Set(snapshot.categories.flatMap(category => {
+      if (category.task === null) return [];
+      const label = markModelLabels(recordedMarkModel(this.#db, category.task.taskIntentId, snapshot.createdAt)).modelLabel;
+      return label ? [label] : [];
+    }))];
+    return labels.length === 0 ? {} : { modelLabel: labels.join('、') };
+  }
+
   #summary(view: RunView): ReviewRunSummaryProjection {
     const reports = this.#db.prepare('SELECT max(version) latest FROM review_reports WHERE review_run_id = ?').get(view.snapshot.reviewRunId) as SqlRow;
     return {
+      ...this.#modelAttribution(view.snapshot),
       reviewRunId: view.snapshot.reviewRunId,
       ordinal: view.snapshot.ordinal,
       label: `第 ${view.snapshot.ordinal} 次`,
@@ -4984,6 +5072,7 @@ export class ReviewRunStore {
     const after = page.findingsAfterOrdinal;
     return {
       projection: {
+        ...this.#modelAttribution(snapshot),
         ...(snapshot.localPlan === undefined ? {} : { localCheck: (() => {
           const last = readLocalStageArtifacts(this.#db, snapshot.reviewRunId).at(-1)?.record;
           const result = last?.result;

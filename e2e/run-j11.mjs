@@ -1,3 +1,4 @@
+import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -3444,10 +3445,7 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'memory-governance-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open === true`, 'memory-governance-review-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(prepare.disabled)return false; prepare.click();return true; })()`, 'memory-governance-review-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'prepared'`, 'memory-governance-review-prepared', 120_000);
-    await clickSelector(renderer, '[data-review-action="view-plan"]', 'memory-governance-review-plan');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'memory-governance-review-start-ready');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'memory-governance-review-start');
+    await launchReviewFromSheet(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'settled'`, 'memory-governance-review-settled', 180_000);
     const memorySources = await renderer.evaluate(`(async () => { const run=(await window.ai7.inspectReviewWorkspace()).run; const findings=run.findings.filter(finding=>finding.categoryId==='typos-and-usage' && finding.markId!==null).slice(0,2); if(findings.length!==2)return null; for(const finding of findings) await window.ai7.recordChangeSuggestionDecision({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,windowStartBlockId:finding.blockId,markId:finding.markId,clientDecisionId:crypto.randomUUID(),disposition:'accepted-with-edit',editedText:'合成编辑记忆来源修订',reason:'保留有意的表达节奏'}); const page=await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}); return {ids:page.signals.filter(signal=>signal.source.bookId===${JSON.stringify(memorySourceBook)} && signal.memoryCandidate?.editorialDimension==='typos-and-usage').map(signal=>signal.signalId),influence:run.influence.length}; })()`);
     requireJourney(memorySources?.ids?.length === 2 && memorySources.influence === 0, 'memory-governance-real-sources');

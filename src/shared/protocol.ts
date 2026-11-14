@@ -628,6 +628,7 @@ export const IPC_CHANNELS = {
   inspectHouseWordList: 'ai7:inspect-house-word-list',
   saveHouseWordList: 'ai7:save-house-word-list',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
+  launchReviewRun: 'ai7:j04:launch-review-run',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
   continueReviewRun: 'ai7:j04:continue-review-run',
@@ -4614,6 +4615,8 @@ export interface GlobalAttentionFactsProjection {
 
 /** One Attention Projection Item (V2-UX-ATTN-007): a pointer to its record, never an authority of its own. */
 export interface GlobalAttentionItemProjection {
+  /** Frozen producing model and sent effort, when this item names a model-backed run. */
+  modelLabel?: string;
   /** Stable across reads: the record's kind and identity. */
   itemId: string;
   group: GlobalAttentionGroupKey;
@@ -4757,7 +4760,7 @@ export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', '
   'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
   'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
   'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
-  'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
+  'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
 export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
@@ -6394,6 +6397,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
+  launchReviewRun: { input: PrepareReviewRunInput & { clientCommandId: string; executionConfig?: RuntimeExecutionConfig }; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
@@ -7095,6 +7099,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
    */
   inspectReviewWorkspace(input?: Omit<InspectReviewWorkspaceInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   /** 先看计划: a `review-run-preparation` job, followed with `pollServiceJob` and stopped with `cancelServiceJob`. */
+  launchReviewRun(input: Omit<ServiceOperationMap['launchReviewRun']['input'], 'bookId'>): Promise<ServiceWireOutput<ReviewWorkspaceProjection>>;
   prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The one approval — the Task Drawer bar's 开始任务 since Issue #420 (S74a); the Run is already being driven

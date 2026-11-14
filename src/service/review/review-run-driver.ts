@@ -249,3 +249,13 @@ export class ReviewRunDriver {
     await this.#owner.whenDone(handOff.runRecordId);
   }
 }
+
+
+/** A replay ensures the committed run is driven; the driver's loop and ledger admissions are idempotent. */
+export function driveLaunchedReviewRun(driver: ReviewRunDriver, launched: {
+  projection: import('../../shared/protocol.js').ReviewWorkspaceProjection; repeated: boolean;
+}): Promise<void> {
+  const run = launched.projection.run;
+  if (run === null || run.state === 'settled' || run.state === 'cancelled') return Promise.resolve();
+  return driver.drive(run.reviewRunId, { resume: launched.repeated });
+}
