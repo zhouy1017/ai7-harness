@@ -549,10 +549,10 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     let changed = false;
     const deduplicated = new Map<string, unknown>();
     for (const original of body.entries) {
-      const entry = refreshRepeatedFinding(original);
+      let entry = refreshRepeatedFinding(original);
       if (entry !== original) changed = true;
       const next = refreshedRequests.get(entry.requestDigest);
-      if (next !== undefined && next !== entry.requestDigest) { entry.requestDigest = next; changed = true; }
+      if (next !== undefined && next !== entry.requestDigest) { entry = { ...entry, requestDigest: next }; changed = true; }
       deduplicated.set(`${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`, entry);
     }
     if (changed) await writeFile(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
