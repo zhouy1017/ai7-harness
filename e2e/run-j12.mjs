@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -878,7 +878,8 @@ async function main() {
     [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'sample-onboarding-window');
     await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'sample-onboarding-ready');
     const sampleBook = await importBook(onboardingPage, 'J12 示例图书', true);
-    await requireJourney(await onboardingPage.evaluate(`(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest==='b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483') && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`), 'sample-admitted-source-and-completion');
+    const onboardingSampleDigest = createHash('sha256').update(await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'))).digest('hex');
+    await requireJourney(await onboardingPage.evaluate(`(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest===${JSON.stringify(onboardingSampleDigest)}) && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`), 'sample-admitted-source-and-completion');
     at('guided-strip');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
     await requireJourney(await onboardingPage.evaluate(`(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`), 'guided-strip-navigation-only');

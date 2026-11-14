@@ -1,6 +1,6 @@
 # E2E journeys: what each admitted runner proves
 
-#1453 / ADR 0102 synchronizes J-03, J-04 and J-12's processing-boundary assertions with the fixed `no-policy-lock` marker. Historical pins remain readable; fixtures and SampleBook-based Journeys remain, without frozen manifest admission. This changes no layout or click stage. All Journeys cross the shared model execution seam, so PR A verifies `e2e:all` on a background guest.
+#1453 / ADR 0102 synchronizes J-03, J-04 and J-12's processing-boundary assertions with the fixed `no-policy-lock` marker. Historical pins remain readable; fixtures and SampleBook-based Journeys remain, without frozen manifest admission. J-05 now checks the available review choices for its frozen three-paragraph draft at both 1280×800 and 1008×681, then restores the native viewport; saving still creates no Task or Run. SampleBook source metadata is computed from the admitted input rather than a pinned file fingerprint. All Journeys cross the shared model execution seam, so PR A verifies `e2e:all` on a background guest.
 
 ## #1400 synchronized deltas (Batches 1–4, `codex/integration-1400`)
 

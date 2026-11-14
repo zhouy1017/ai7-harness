@@ -49,8 +49,9 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
-const SAMPLE1_BYTES = 29_550;
-const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+const SAMPLE1_INPUT = await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'));
+const SAMPLE1_BYTES = SAMPLE1_INPUT.length;
+const SAMPLE1_SHA256 = createHash('sha256').update(SAMPLE1_INPUT).digest('hex');
 /** The J-04 model adapter's base fixture: every unit, the reduction and the sample of exact `sample1` answered. */
 const FIXTURE_IDENTITY = 'sample1-baseline-happy';
 const FIRST = Object.freeze({ title: '待我处理旅程甲' });
