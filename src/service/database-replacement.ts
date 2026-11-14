@@ -1250,19 +1250,24 @@ export class DatabaseReplacements {
     let latestReplacement: StoredReplacement | null = null;
     const replacements = this.#replacementRecords();
     const merges = this.#mergeRecords();
-    let replacement = replacements.next();
-    let merge = merges.next();
-    while (!replacement.done || !merge.done) {
-      const takeReplacement = merge.done || (!replacement.done && replacement.value.recordedAt.localeCompare(merge.value.recordedAt) >= 0);
-      const record = takeReplacement ? replacement.value as StoredReplacement : merge.value as StoredReplacement;
-      if (takeReplacement) {
-        latestReplacement ??= record;
-        replacement = replacements.next();
-      } else {
-        merge = merges.next();
+    try {
+      let replacement = replacements.next();
+      let merge = merges.next();
+      while (!replacement.done || !merge.done) {
+        const takeReplacement = merge.done || (!replacement.done && replacement.value.recordedAt.localeCompare(merge.value.recordedAt) >= 0);
+        const record = takeReplacement ? replacement.value as StoredReplacement : merge.value as StoredReplacement;
+        if (takeReplacement) {
+          latestReplacement ??= record;
+          replacement = replacements.next();
+        } else {
+          merge = merges.next();
+        }
+        total += 1;
+        if (records.length < listed) records.push(record);
       }
-      total += 1;
-      if (records.length < listed) records.push(record);
+    } finally {
+      // Either validation stream can throw while the other still owns a SQLite read statement.
+      replacements.return(undefined); merges.return(undefined);
     }
     return { records, total, latestReplacement };
   }

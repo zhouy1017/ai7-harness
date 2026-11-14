@@ -9,7 +9,7 @@ export interface BuildIdentity {
 }
 
 /** Main binds these process/browser outputs before any application data is opened. */
-export const IDENTITY_BOUND_OUTPUTS = ['main/preload.cjs', 'service/index.mjs', 'renderer/index.html',
+export const IDENTITY_BOUND_OUTPUTS = ['main/preload.cjs', 'service/index.mjs', 'service/wal-checkpoint-worker.mjs', 'renderer/index.html',
   'renderer/renderer.js', 'renderer/styles.css', 'renderer/global-agent.css', 'renderer/manuscript-source.css', 'renderer/fonts.css',
   'renderer/fonts/NotoSansSC-Regular.woff2', 'renderer/fonts/NotoSansSC-Bold.woff2',
   'renderer/fonts/NotoSerifSC-Regular.woff2', 'renderer/fonts/NotoSerifSC-Bold.woff2'] as const;
