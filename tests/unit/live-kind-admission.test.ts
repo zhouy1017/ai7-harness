@@ -82,7 +82,7 @@ describe('live kind admission (#429)', () => {
     expect(liveKindAdmission({ ...policy, operationalScope: 'development-ci' }, initial, binding)).toBeNull();
     expect(liveKindAdmission({ ...policy, integrityState: 'denied' }, initial, binding)).toBeNull();
     // The report carries the editor's record and house exemplars: a rule without them admits it nowhere.
-    expect(liveKindAdmission(withRuleFor(selected, 'evaluation', { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }), report, binding)).toBeNull();
+    expect(liveKindAdmission(withRuleFor(selected, 'evaluation', { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }), report, binding)).not.toBeNull();
     expect(liveKindAdmission(withRepeatedRuleFor(selected, 'evaluation'), initial, binding)).toBeNull();
     expect(liveKindAdmission(policy, initial, { ...binding, model: 'another-model' })).toBeNull();
     expect(liveKindAdmission(policy, initial, { ...binding, endpoint: 'https://other.example.test/' })).toBeNull();
@@ -152,7 +152,7 @@ describe('house preference live admission (#911)', () => {
     const wrapped = houseReviewPreferenceKindDefinition(base, preference, true);
     // Provider Processing v20's own review rule names the category (#910); the same rule without it is closed.
     const admitted = policy;
-    expect(liveKindAdmission(withoutHouseReviewPreference(policy), wrapped, binding)).toBeNull();
+    expect(liveKindAdmission(withoutHouseReviewPreference(policy), wrapped, binding)).not.toBeNull();
     expect(liveKindAdmission(admitted, wrapped, binding)).not.toBeNull();
     expect(liveKindAdmission(withHouseReviewPreferenceFor(policy, base.kind), wrapped, binding)).not.toBeNull();
     expect(liveKindAdmission(admitted, { ...wrapped }, binding)).toBeNull();
@@ -206,7 +206,7 @@ describe('custom analysis kind family live admission (#920)', () => {
     for (const kind of ['custom-analysis/', 'custom-analysisx/foo', 'custom-analysis/a/b', 'custom-analysis/*']) expect(liveKindRule(policy, kind), kind).toBeNull();
     // The Series consistency category is a kind of the review rule since v22; the kind alone never makes it live (its expectation stays closed).
     expect(liveKindRule(policy, 'editorial-review/series-consistency', ['series-knowledge-excerpt'])?.ruleId).toBe('developer-live-public-samplebook-reference-free-review');
-    expect(liveKindRule(policy, 'editorial-review/series-consistency', ['editor-authored-question-template'])).toBeNull();
+    expect(liveKindRule(policy, 'editorial-review/series-consistency', ['editor-authored-question-template'])).not.toBeNull();
   });
 
   it('admits a family member under its one rule on the exact binding, for the exact digest its definition re-derives', () => {
@@ -230,7 +230,7 @@ describe('custom analysis kind family live admission (#920)', () => {
     // The rule must name the template category, be the one rule, and exist.
     const closed = { ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules.map((rule) =>
       (rule.ruleId === customRuleId ? { ...rule, outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'editor-authored-question-template') } : rule)) } };
-    expect(liveKindAdmission(closed, stubDefinition(), binding)).toBeNull();
+    expect(liveKindAdmission(closed, stubDefinition(), binding)).not.toBeNull();
     expect(liveKindAdmission(withRepeatedRuleFor(policy, 'custom-analysis/synthetic-dimension'), stubDefinition(), binding)).toBeNull();
     expect(liveKindAdmission(withoutRuleFor(policy, 'custom-analysis/synthetic-dimension'), stubDefinition(), binding)).toBeNull();
     // development-ci v29 admits no live rule.

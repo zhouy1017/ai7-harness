@@ -1,0 +1,1410 @@
+{
+  "ordinary": [
+    {
+      "ruleId": "ordinary-production-baseline-analysis",
+      "taskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 0,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-editorial-dialogue",
+      "taskKinds": [
+        "editorial-dialogue"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "editor-selected-manuscript-excerpt",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 0,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-review",
+      "taskKinds": [
+        "editorial-review/typos-and-usage",
+        "editorial-review/style-and-format",
+        "editorial-review/literary-expression",
+        "editorial-review/cross-deliverable-consistency",
+        "editorial-review/factual-review",
+        "editorial-review/academic-integrity",
+        "factual-review",
+        "editorial-review/series-consistency",
+        "editorial-review/publication-risk",
+        "editorial-review/plot-consistency"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "frozen-material-reference-excerpt",
+        "editorial-deliverable-excerpt",
+        "house-review-preference-excerpt",
+        "series-knowledge-excerpt",
+        "web-search-query",
+        "public-source-fetch",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "editor-task-instruction",
+        "house-review-guideline-clause"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "plusDeclaredContractRetryAdaptations": true,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": true,
+      "seriesKnowledgeAllowed": true,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": true,
+      "webSearchToolAllowed": true,
+      "platformTools": 0,
+      "localTools": 0,
+      "sourceTranslationAllowed": true,
+      "claimScopedFactualStages": {
+        "taskKind": "factual-review",
+        "taskMode": "whole-manuscript",
+        "evidenceAssuranceLevels": [
+          "standard",
+          "strict"
+        ],
+        "procedureId": "ai7-procedure/factual-claim-check",
+        "procedureVersion": 1,
+        "claimArtifactSchema": "ai7.factual-claim-ledger/1",
+        "exactProcedureContractCompositionAndSourcePinsRequired": true,
+        "legacyRuleFallbackAllowed": false,
+        "claimExtraction": {
+          "contractId": "ai7.factual-claim-extraction/1",
+          "stageId": "claim-extraction",
+          "maximumInitialSessionsPerCoverageUnit": 1,
+          "maximumModelRequestsPerSession": 1,
+          "maximumAssertionsPerCoverageUnit": 200,
+          "tools": [],
+          "automaticTransportRetryAllowed": false,
+          "contractRetryAllowed": false
+        },
+        "claimVerification": {
+          "contractId": "ai7.factual-claim-verification/1",
+          "stageId": "web-verification",
+          "maximumInitialSessionsPerEligibleClaim": 1,
+          "maximumModelRequestsPerSession": 129,
+          "maximumPlatformToolRoundsPerSession": 128,
+          "tools": [
+            "websearch",
+            "webfetch"
+          ],
+          "searchBudgetBasis": "run-ledger-digest-claim-id",
+          "maximumSearchSubmissionsPerClaim": 3,
+          "distinctCanonicalQueriesRequired": true,
+          "unknownSubmissionSpendsBudget": true,
+          "counterResetOnResumeAllowed": false,
+          "automaticTransportRetryAllowed": false,
+          "contractRetryAllowed": false,
+          "maximumMetadataUtf8Bytes": 16384,
+          "sourceUnitMessageMustEqualFrozenAuthorizedMessage": true
+        },
+        "newSamplingTurnsAllowed": false,
+        "newReflectionTurnsAllowed": false,
+        "newClarificationTurnsAllowed": false,
+        "newModelSynthesisTurnsAllowed": false
+      },
+      "taskKindOverrides": {
+        "editorial-review/publication-risk": {
+          "webSearch": false
+        },
+        "editorial-review/plot-consistency": {
+          "webSearch": false
+        }
+      },
+      "editorTaskInstruction": {
+        "category": "editor-task-instruction",
+        "maxGraphemes": 1200,
+        "attributedToProcedureVersion": true,
+        "contractFramingOverrideAllowed": false,
+        "textProcessing": {
+          "mode": "qualified-original-field-processing",
+          "qualificationRef": "ordinary-production-original-fields-adr0099",
+          "unqualified": {
+            "personNamesAllowed": false
+          },
+          "qualifiedOriginalWords": "preserve-within-existing-field-contract"
+        }
+      },
+      "houseReviewGuidelineClause": {
+        "category": "house-review-guideline-clause",
+        "maxClauses": 40,
+        "maxGraphemesPerClause": 300,
+        "attributedToImportedDocumentVersion": true,
+        "textProcessing": {
+          "mode": "qualified-original-field-processing",
+          "qualificationRef": "ordinary-production-original-fields-adr0099",
+          "unqualified": {
+            "personNamesAllowed": false
+          },
+          "qualifiedOriginalWords": "preserve-within-existing-field-contract"
+        }
+      },
+      "plusOneCrossUnitSynthesisTurn": true
+    },
+    {
+      "ruleId": "ordinary-production-writing",
+      "taskKinds": [
+        "writing"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "book-metadata-and-synopsis",
+        "house-exemplar-excerpt",
+        "frozen-material-reference-excerpt",
+        "web-search-query",
+        "public-source-fetch",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": true,
+      "platformTools": 0,
+      "localTools": 0,
+      "sourceTranslationAllowed": false,
+      "plusOneCrossUnitSynthesisTurn": true
+    },
+    {
+      "ruleId": "ordinary-production-evaluation",
+      "taskKinds": [
+        "evaluation",
+        "readers-report",
+        "evaluation-rewrite"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "editor-authored-evaluation-text",
+        "house-exemplar-excerpt",
+        "frozen-material-reference-excerpt",
+        "web-search-query",
+        "public-source-fetch",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": true,
+      "platformTools": 0,
+      "localTools": 0,
+      "sourceTranslationAllowed": false,
+      "plusOneCrossUnitSynthesisTurn": true
+    },
+    {
+      "ruleId": "ordinary-production-editorial-polish",
+      "taskKinds": [
+        "editorial-polish"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "editor-selected-manuscript-excerpt",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 0,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-conflict-regenerate",
+      "taskKinds": [
+        "conflict-regenerate"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "manuscript-conflict-region-excerpt",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 0,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "enrolled-background-manuscript-analysis-processing",
+      "taskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": true,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-material-translation",
+      "taskKinds": [
+        "material-translation"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "frozen-material-reference-excerpt",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-custom-analysis",
+      "taskKinds": [
+        "custom-analysis/*"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "editor-authored-question-template",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-global-agent-dialogue",
+      "taskKinds": [
+        "global-agent-dialogue"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "editor-selected-manuscript-excerpt",
+        "editor-authored-evaluation-text",
+        "house-exemplar-excerpt",
+        "book-metadata-and-synopsis",
+        "manuscript-conflict-region-excerpt",
+        "frozen-material-reference-excerpt",
+        "editorial-deliverable-excerpt",
+        "house-review-preference-excerpt",
+        "editor-authored-question-template",
+        "series-knowledge-excerpt",
+        "web-search-query",
+        "public-source-fetch",
+        "editor-task-instruction",
+        "house-review-guideline-clause"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false,
+      "globalAgentDialogue": {
+        "source": {
+          "bookRequired": false,
+          "explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly": true,
+          "eligibleRevisionPinsRequired": true,
+          "editorOwnWordsAllowed": true,
+          "unlistedSourcesAllowed": false
+        },
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "outboundCategoryRestriction": "none",
+        "outboundDataDisclosureRequired": true
+      }
+    },
+    {
+      "ruleId": "enrolled-background-processing",
+      "taskKinds": [
+        "material-index",
+        "review-reduction"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": true,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "ordinary-production-learning-curation",
+      "taskKinds": [
+        "learning-curation"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "editorial-learning-example",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": true,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false,
+      "enabledLearningEnvelope": {
+        "pins": [
+          "eligibleSourceAndCategoryContract",
+          "scope",
+          "supervision",
+          "model",
+          "provider",
+          "policy",
+          "mandatoryBudget",
+          "disableAndExclusionConsequences"
+        ],
+        "missingStaleRevokedOrExceededResult": "refuse",
+        "extraPerPassClickRequired": false,
+        "disableStopsLaterDispatchAndUse": true
+      }
+    },
+    {
+      "ruleId": "enrolled-background-factual-recheck",
+      "taskKinds": [
+        "factual-recheck"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "web-search-query",
+        "public-source-fetch",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": true,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": true,
+      "platformTools": 0,
+      "localTools": 1,
+      "sourceTranslationAllowed": false,
+      "factualRecheck": {
+        "decisionSchema": "ai7.factual-review-decision/1",
+        "decisionOwner": "factual_review_decisions",
+        "decisionPins": [
+          "decisionId",
+          "bookId",
+          "resultId",
+          "assertionKey",
+          "boundVersion",
+          "disposition",
+          "requestedLevel",
+          "canonicalJsonSha256"
+        ],
+        "decisionId": "existing-UUID-contract",
+        "boundVersion": "positive-integer",
+        "disposition": "request-evidence",
+        "requestedLevels": [
+          "standard",
+          "strict"
+        ],
+        "requestedLevelNoLowerThanResult": true,
+        "latestStillCurrentEditorDecisionRequired": true,
+        "claimArtifactSchema": "ai7.factual-claim-ledger/1",
+        "eligibleClaimClasses": [
+          "real-world-fact",
+          "quotation"
+        ],
+        "referenceIntegrityRequired": true,
+        "sameBookActiveMatchingEnrollmentRequired": true,
+        "exactCurrentResultVersionDecisionOccurrenceClaimAndSourceUnitPinsRequired": true,
+        "unchangedManuscriptRevisionAndDigestRequired": true,
+        "maximumClaims": 1,
+        "claimMembershipImmutable": true,
+        "missingStaleOrAmbiguousMappingResult": "refuse",
+        "onlyContractId": "ai7.factual-claim-verification/1",
+        "onlyStageId": "web-verification",
+        "maximumInitialSessions": 1,
+        "maximumModelSubmissions": 129,
+        "maximumPlatformToolRounds": 128,
+        "maximumSearchSubmissions": 3,
+        "automaticTransportRetryAllowed": false,
+        "contractRetryAllowed": false,
+        "onceKey": [
+          "enrollmentId",
+          "ledgerDigest",
+          "claimId",
+          "decisionId"
+        ],
+        "onceKeyPersistedBeforeDispatch": true,
+        "maximumAutomaticRunsPerOnceKey": 1,
+        "unknownOrFailedOutcomeConsumesSubmissionSlots": true,
+        "unresolvedResultCreatesDecisionOrLedgerVersion": false,
+        "laterFreshExplicitDecision": "evaluate-under-its-own-current-pins-and-enrollment",
+        "keepPendingModelRecommendationTimerOrUnresolvedResultQualifies": false,
+        "decisionReasonTransmitted": false,
+        "extractionAllowed": false,
+        "ledgerRefreshAllowed": false,
+        "appendOrReplaceClaimAllowed": false,
+        "newSamplingReflectionClarificationOrSynthesisAllowed": false,
+        "retainedExternalSourceReopeningAllowed": false,
+        "translationAuthorityAdded": false,
+        "revocationAndExclusionRecheckedBeforeAdmission": true,
+        "historicalResultsAndEvidenceImmutable": true,
+        "unknownRequestResendAllowed": false,
+        "countContract": {
+          "claims": "C=1",
+          "maximumInitialSessions": 1,
+          "maximumModelSubmissions": 129,
+          "maximumPlatformToolRounds": 128,
+          "maximumSearchSubmissions": 3,
+          "counterReservationBeforeTransportRequired": true,
+          "reservationsPersistedDurably": true,
+          "unknownOrFailedSubmissionConsumesSlot": true,
+          "resumeOrRestartResetsCounters": false,
+          "newStageRetryOverridesGeneralTransportRetry": true,
+          "extractionOrAdditionalStageAllowance": false,
+          "occurrenceMembershipImmutable": true,
+          "membershipFixedBeforeVerificationAdmission": true
+        },
+        "verificationContract": {
+          "contractId": "ai7.factual-claim-verification/1",
+          "stageId": "web-verification",
+          "maximumInitialSessionsPerEligibleClaim": 1,
+          "maximumModelRequestsPerSession": 129,
+          "maximumPlatformToolRoundsPerSession": 128,
+          "tools": [
+            "websearch",
+            "webfetch"
+          ],
+          "searchBudgetBasis": "run-ledger-digest-claim-id",
+          "maximumSearchSubmissionsPerClaim": 3,
+          "distinctCanonicalQueriesRequired": true,
+          "unknownSubmissionSpendsBudget": true,
+          "counterResetOnResumeAllowed": false,
+          "automaticTransportRetryAllowed": false,
+          "contractRetryAllowed": false,
+          "maximumMetadataUtf8Bytes": 16384,
+          "sourceUnitMessageMustEqualFrozenAuthorizedMessage": true
+        },
+        "assertionContract": {
+          "maximumAssertionsPerCoverageUnit": 200,
+          "maximumQuoteGraphemes": 80,
+          "maximumQuestionGraphemes": 120,
+          "maximumBasisGraphemes": 200,
+          "blockOrdinal": "existing-numbered-block",
+          "assertionClasses": [
+            "real-world-fact",
+            "quotation",
+            "report-about-manuscript",
+            "fictional-canon",
+            "judgment"
+          ],
+          "categories": [
+            "时间",
+            "地点",
+            "人物",
+            "机构",
+            "器物",
+            "数字",
+            "引文",
+            "史实",
+            "技术",
+            "其他"
+          ],
+          "severities": [
+            "A",
+            "B",
+            "C"
+          ]
+        },
+        "verificationInput": {
+          "exactFields": [
+            "schema",
+            "ledgerDigest",
+            "claimId",
+            "sourceUnitOrdinal",
+            "sourceUnitDigest",
+            "assertionOrdinal",
+            "assertionClass",
+            "category",
+            "severity",
+            "quote",
+            "question",
+            "basis",
+            "sourceUnitMessage"
+          ],
+          "schema": "ai7.factual-claim-verification/1",
+          "claimId": "sha256-of-canonical-occurrence-identity-lowercase-64-hex",
+          "allDigests": "lowercase-64-hex-sha256",
+          "sourceUnitOrdinal": "1..U",
+          "assertionOrdinal": "1..200",
+          "maximumMetadataUtf8Bytes": 16384,
+          "sourceUnitMessage": "byte-identical-already-authorized-frozen-producing-unit-message",
+          "sourceUnitByteCountAndDigestRequired": true,
+          "fullEncodedRequestByteCountAndDigestRequired": true,
+          "target1200IsHardMessageCap": false,
+          "silentTruncationAllowed": false,
+          "sourceRefreshAllowed": false,
+          "wholeLedgerTransmissionAllowed": false,
+          "modelSelectedClaimIdAllowed": false,
+          "ambientContextAllowed": false,
+          "metadataByteLimitExcludesSourceUnitMessage": true
+        },
+        "research": {
+          "searchReservationKey": [
+            "runId",
+            "ledgerDigest",
+            "claimId"
+          ],
+          "maximumDistinctCanonicalQuerySubmissions": 3,
+          "successfulSameQueryReuse": "attributed-replay-without-new-submission",
+          "unknownOutcomeReplayableAsSuccess": false,
+          "malformedOrLocalRefusal": "spends-platform-breaker-not-transport-reservation",
+          "maximumPlatformToolRoundsInclusiveOfRefusals": 128,
+          "webfetch": {
+            "maxBytes": 5242880,
+            "timeoutSeconds": 30,
+            "boundedByCitations": true,
+            "maximumPerUrlPerRun": 1,
+            "automaticRetryAllowed": false
+          },
+          "backendSelection": "exactly-the-websearch-backends-credential-slots-and-selection-of-ordinary-production-review.platformTools.websearch-in-this-document; no-endpoint-or-credential-addition",
+          "searchConnectionTestIsTaskBackend": false,
+          "localRetrievalAllowed": false,
+          "knownOrUnknownFailedSubmissionResendAllowed": false,
+          "oneQueryPerRunUnitOverriddenOnlyForThisVerificationContract": true
+        },
+        "foregroundKindOrProcedureGrantInherited": false,
+        "categoriesRestrictedToExactClaimUnitInputAndAdmittedResearchOutputs": true,
+        "otherClaimWholeLedgerAmbientBookOrHouseMaterialPreferenceGuidelineOrImportedSourceInherited": false,
+        "missingLedgerOrClaimResult": "disclosed-refusal-requiring-separately-authorized-upstream-work",
+        "alreadySentWorkSettlement": "existing-cancellation-and-settlement-rules",
+        "freshResearchCaptureProvenanceOwner": "existing-provenance-and-retention-owner",
+        "immutableDecisionNotInventedRevision": true
+      }
+    },
+    {
+      "ruleId": "ordinary-production-global-agent-scoped-dialogue",
+      "taskKinds": [
+        "global-agent-scoped-dialogue"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "editor-selected-manuscript-excerpt",
+        "editor-authored-evaluation-text",
+        "house-exemplar-excerpt",
+        "book-metadata-and-synopsis",
+        "manuscript-conflict-region-excerpt",
+        "frozen-material-reference-excerpt",
+        "editorial-deliverable-excerpt",
+        "house-review-preference-excerpt",
+        "editor-authored-question-template",
+        "series-knowledge-excerpt",
+        "web-search-query",
+        "public-source-fetch",
+        "editor-task-instruction",
+        "house-review-guideline-clause"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 2,
+      "sourceTranslationAllowed": false,
+      "globalAgentScopedDialogue": {
+        "source": {
+          "bookRequired": false,
+          "explicitEligibleBookSourcePinsRequired": true,
+          "eligibleMemoryPreferenceRevisionPinsRequired": true,
+          "procedureDefinitionVersionPinsRequired": true,
+          "currentExclusionsAndSupervisionRequired": true,
+          "completeRetainedInfluenceUnionRequired": true,
+          "editorOwnWordsAllowed": true,
+          "ambientWholeLibraryReadAllowed": false,
+          "lastOpenBookSuppliesAuthority": false,
+          "unlistedSourcesAllowed": false,
+          "editorNoteOrInternalNoteObjectsAllowed": false,
+          "structuredPersonnelListsAllowed": false,
+          "rawLearnedExamplesRequireSeparateTypedPurposeContract": true
+        },
+        "scopedTools": {
+          "names": [
+            "retrieve",
+            "exact_fetch",
+            "read_procedure",
+            "propose_learning_supervision"
+          ],
+          "scope": "explicitly-pinned-eligible-books-memory-preferences-and-procedure-library-only",
+          "callsPerAttempt": 5,
+          "candidatesPerRetrieval": 8,
+          "maxResultBytes": 65536,
+          "roundTripBreaker": 128,
+          "exactFetchRequiredBeforeCitation": true,
+          "readProcedureRequiresExactVersion": true,
+          "supervisionProposalIsNotDecision": true,
+          "editorConfirmationBeforeGovernanceRequired": true,
+          "directMemoryOrManuscriptMutationAllowed": false,
+          "shellFilesystemWebOrUnrestrictedNetworkAllowed": false,
+          "foreignBookProposalMustReturnToExactBookRevisionAndApplyChain": true,
+          "typedConsumerAndFinalPayloadGateRequired": true,
+          "missingTypedConsumerResult": "unavailable-no-fallback"
+        },
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "outboundCategoryRestriction": "none",
+        "outboundDataDisclosureRequired": true
+      }
+    },
+    {
+      "ruleId": "ordinary-production-model-connection-test",
+      "taskKinds": [
+        "model-connection-test"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "public-or-synthetic"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    }
+  ],
+  "developer": [
+    {
+      "ruleId": "developer-live-public-samplebook-analysis",
+      "taskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 2,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-editorial-dialogue",
+      "taskKinds": [
+        "editorial-dialogue"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "editor-selected-manuscript-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 2,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-reference-free-review",
+      "taskKinds": [
+        "editorial-review/typos-and-usage",
+        "editorial-review/style-and-format",
+        "editorial-review/literary-expression",
+        "editorial-review/cross-deliverable-consistency",
+        "editorial-review/factual-review",
+        "editorial-review/academic-integrity",
+        "factual-review",
+        "editorial-review/series-consistency"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "frozen-material-reference-excerpt",
+        "editorial-deliverable-excerpt",
+        "house-review-preference-excerpt",
+        "series-knowledge-excerpt",
+        "web-search-query",
+        "public-source-fetch"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": true,
+      "seriesKnowledgeAllowed": true,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": true,
+      "webSearchToolAllowed": true,
+      "platformTools": 1,
+      "localTools": 2,
+      "sourceTranslationAllowed": true
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-writing",
+      "taskKinds": [
+        "writing"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "book-metadata-and-synopsis",
+        "house-exemplar-excerpt",
+        "frozen-material-reference-excerpt",
+        "web-search-query",
+        "public-source-fetch"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": true,
+      "webSearchToolAllowed": true,
+      "platformTools": 1,
+      "localTools": 2,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-evaluation",
+      "taskKinds": [
+        "evaluation",
+        "readers-report",
+        "evaluation-rewrite"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "editor-authored-evaluation-text",
+        "house-exemplar-excerpt",
+        "frozen-material-reference-excerpt",
+        "web-search-query",
+        "public-source-fetch"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": true,
+      "platformTools": 1,
+      "localTools": 2,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-editorial-polish",
+      "taskKinds": [
+        "editorial-polish"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "editor-selected-manuscript-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 2,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-conflict-regenerate",
+      "taskKinds": [
+        "conflict-regenerate"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "manuscript-conflict-region-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 2,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "enrolled-background-manuscript-analysis-processing",
+      "taskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": true,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-material-translation",
+      "taskKinds": [
+        "material-translation"
+      ],
+      "modelRole": "Fast Interaction Role",
+      "outboundDataCategories": [
+        "public-or-synthetic"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": null,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-custom-analysis",
+      "taskKinds": [
+        "custom-analysis/*"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "editor-authored-question-template"
+      ],
+      "crossUnitSynthesisAllowed": false,
+      "materialReferencesAllowed": false,
+      "editorialDeliverablesAllowed": false,
+      "clarificationQuestionAllowed": true,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": false,
+      "webSearchToolAllowed": false,
+      "platformTools": null,
+      "localTools": 1,
+      "sourceTranslationAllowed": false
+    }
+  ],
+  "execution": {
+    "maxInFlightRequests": {
+      "configurable": true,
+      "default": 4
+    },
+    "perRunUnitParallelism": {
+      "configurable": true,
+      "default": 3
+    },
+    "backgroundShare": {
+      "configurable": true,
+      "default": 1
+    }
+  },
+  "transport": {
+    "requestDeadlineSeconds": 180,
+    "rateLimitRetry": {
+      "honourRetryAfter": true,
+      "maxRetries": 1
+    }
+  },
+  "research": {
+    "searchesPerClaim": 3
+  },
+  "searchConnectionTest": {
+    "ruleId": "ordinary-production-direct-search-connection-test",
+    "purpose": "fixed-public-search-connection-test",
+    "backendId": "search-deepseek",
+    "candidateId": "deepseek-direct-search-v1",
+    "endpoint": "https://api.deepseek.com/v1/tools/search",
+    "method": "POST",
+    "protocol": "deepseek-direct-search",
+    "credentialSlot": "search-deepseek",
+    "headerForm": "authorization-bearer",
+    "credentialFallbackSlot": "deepseek-api-key",
+    "candidates": [
+      {
+        "ruleId": "ordinary-production-direct-search-connection-test",
+        "purpose": "fixed-public-search-connection-test",
+        "backendId": "search-openai",
+        "candidateId": "openai-native-search-v1",
+        "endpoint": "https://api.openai.com/v1/responses",
+        "method": "POST",
+        "protocol": "openai-responses-web-search",
+        "credentialSlot": "openai-platform",
+        "headerForm": "authorization-bearer",
+        "arguments": {
+          "query": "UNESCO World Book and Copyright Day April 23",
+          "count": 3,
+          "need_content": false
+        },
+        "argumentsCanonicalSha256": "8177dfc58afe05f95b8388018c05f443eba66ec058c54ea36382daf7e0543d37",
+        "maximumRequests": 1,
+        "timeoutMilliseconds": 25000,
+        "responseMaxBytes": 2097152,
+        "resultsMaximum": 3,
+        "titleMaximumCharacters": 120,
+        "urlMaximumCharacters": 2048,
+        "rejectedOperationalScopes": [
+          "development-ci",
+          "fixture-recording",
+          "developer-live"
+        ]
+      },
+      {
+        "ruleId": "ordinary-production-direct-search-connection-test",
+        "purpose": "fixed-public-search-connection-test",
+        "backendId": "search-anthropic",
+        "candidateId": "anthropic-native-search-v1",
+        "endpoint": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "protocol": "anthropic-messages-web-search",
+        "credentialSlot": "anthropic-claude",
+        "headerForm": "x-api-key",
+        "arguments": {
+          "query": "UNESCO World Book and Copyright Day April 23",
+          "count": 3,
+          "need_content": false
+        },
+        "argumentsCanonicalSha256": "8177dfc58afe05f95b8388018c05f443eba66ec058c54ea36382daf7e0543d37",
+        "maximumRequests": 1,
+        "timeoutMilliseconds": 25000,
+        "responseMaxBytes": 2097152,
+        "resultsMaximum": 3,
+        "titleMaximumCharacters": 120,
+        "urlMaximumCharacters": 2048,
+        "rejectedOperationalScopes": [
+          "development-ci",
+          "fixture-recording",
+          "developer-live"
+        ]
+      }
+    ],
+    "arguments": {
+      "query": "UNESCO World Book and Copyright Day April 23",
+      "count": 10,
+      "need_content": false
+    },
+    "argumentsCanonicalSha256": "ae23d5c44e8eec9398f100d153f0f5042bd7fe388f50c6c57aba1825659f629c",
+    "maximumRequests": 1,
+    "timeoutMilliseconds": 25000,
+    "responseMaxBytes": 2097152,
+    "resultsMaximum": 3,
+    "titleMaximumCharacters": 120,
+    "urlMaximumCharacters": 2048,
+    "rejectedOperationalScopes": [
+      "development-ci",
+      "fixture-recording",
+      "developer-live"
+    ]
+  },
+  "searchFallback": {
+    "maximumChainItems": 1,
+    "eligibleBackendIds": [
+      "search-tinyfish",
+      "search-brave",
+      "search-parallel",
+      "search-deepseek",
+      "search-bochaai"
+    ],
+    "frozenInPlan": [
+      "backendId",
+      "host",
+      "configurationDigest",
+      "credentialReference"
+    ],
+    "ledgerAttribution": "fallback-from",
+    "maximumResendsPerFailedSubmission": 1,
+    "resendableFailureClasses": [
+      "transport-failure-before-any-response-byte",
+      "http-5xx",
+      "http-429"
+    ],
+    "http429RetryAfterHonoured": true,
+    "maximumDistinctCanonicalQuerySubmissions": 3
+  },
+  "subAgents": {
+    "declaredInPlanEnvelopeRequired": true,
+    "inheritsParentScopeBindingPolicyAndCeiling": true,
+    "countsInsideParentAttemptTransmissionBound": true,
+    "finalProviderPayloadEgressGateRequired": true,
+    "createsTaskRunOrDecisionRecordAllowed": false
+  },
+  "backgroundProcessingEnrollment": {
+    "enrollableKinds": [
+      {
+        "kind": "learning-curation",
+        "mandatoryCeiling": true
+      },
+      {
+        "kind": "material-index",
+        "mandatoryCeiling": true
+      },
+      {
+        "kind": "review-reduction",
+        "mandatoryCeiling": true
+      },
+      {
+        "kind": "factual-recheck",
+        "mandatoryCeiling": true
+      }
+    ],
+    "activeMatchingEnrollmentRequired": true,
+    "revocable": true,
+    "planEnvelopeRequired": true,
+    "exactProviderBindingRequired": true,
+    "runAuthorizationRequired": true,
+    "runSourceScopeRequired": true,
+    "ceilingEvaluatedBeforeEveryDispatch": true,
+    "finalProviderPayloadEgressGateRequired": true,
+    "openingPageOrImportCreatesEnrollment": false
+  },
+  "localTools": [
+    {
+      "targetedRetrieval": {
+        "allowed": true,
+        "source": "authorized-pinned-sources-only",
+        "callsPerUnit": 5,
+        "candidatesPerCall": 8,
+        "exactFetchRequiredBeforeCitation": true,
+        "scope": "no-egress"
+      },
+      "breaker": {
+        "roundTrips": 128,
+        "end": "检索未完成"
+      },
+      "declarations": [
+        {
+          "name": "retrieve",
+          "readOnly": true,
+          "concurrencySafe": true
+        },
+        {
+          "name": "exact_fetch",
+          "readOnly": true,
+          "concurrencySafe": true
+        },
+        {
+          "name": "read_blocks",
+          "readOnly": true,
+          "concurrencySafe": true
+        },
+        {
+          "name": "baseline_facts",
+          "readOnly": true,
+          "concurrencySafe": true
+        },
+        {
+          "name": "guideline_clause",
+          "readOnly": true,
+          "concurrencySafe": true
+        },
+        {
+          "name": "term_table",
+          "readOnly": true,
+          "concurrencySafe": true
+        },
+        {
+          "name": "search_manuscript",
+          "readOnly": true,
+          "concurrencySafe": true
+        }
+      ],
+      "parallelCallsAllowed": true
+    },
+    {
+      "targetedRetrieval": {
+        "allowed": false,
+        "source": "authorized-pinned-sources-only",
+        "callsPerUnit": 5,
+        "candidatesPerCall": 8,
+        "exactFetchRequiredBeforeCitation": true,
+        "scope": "no-egress"
+      },
+      "breaker": {
+        "roundTrips": 128,
+        "end": "检索未完成"
+      }
+    },
+    {
+      "targetedRetrieval": {
+        "allowed": true,
+        "source": "authorized-pinned-sources-only",
+        "callsPerUnit": 5,
+        "candidatesPerCall": 8,
+        "exactFetchRequiredBeforeCitation": true,
+        "scope": "no-egress"
+      },
+      "breaker": {
+        "roundTrips": 128,
+        "end": "检索未完成"
+      }
+    }
+  ],
+  "platformTools": [
+    {
+      "websearch": {
+        "selection": "user-configured",
+        "backends": [
+          {
+            "id": "search-tinyfish",
+            "host": "api.search.tinyfish.ai",
+            "credentialSlot": "search-tinyfish"
+          },
+          {
+            "id": "search-deepseek",
+            "host": "api.deepseek.com",
+            "credentialSlot": "search-deepseek"
+          },
+          {
+            "id": "search-brave",
+            "host": "api.search.brave.com",
+            "credentialSlot": "search-brave"
+          },
+          {
+            "id": "search-parallel",
+            "host": "api.parallel.ai",
+            "credentialSlot": "search-parallel"
+          },
+          {
+            "id": "search-bochaai",
+            "host": "api.bochaai.com",
+            "credentialSlot": "search-bochaai"
+          },
+          {
+            "id": "search-openai",
+            "host": "api.openai.com",
+            "credentialSlot": "search-openai"
+          },
+          {
+            "id": "search-anthropic",
+            "host": "api.anthropic.com",
+            "credentialSlot": "search-anthropic"
+          }
+        ],
+        "selectionRequiresCredential": true
+      },
+      "webfetch": {
+        "maxBytes": 5242880,
+        "timeoutSeconds": 30,
+        "boundedByCitations": true
+      },
+      "breaker": {
+        "roundTrips": 128,
+        "end": "联网核查未完成"
+      },
+      "oneQueryPerRunUnit": true,
+      "toolResultCategory": "public-or-synthetic"
+    },
+    {
+      "websearch": {
+        "selection": "user-configured",
+        "backends": [
+          {
+            "id": "search-tinyfish",
+            "host": "api.search.tinyfish.ai",
+            "credentialSlot": "search-tinyfish"
+          },
+          {
+            "id": "search-deepseek",
+            "host": "api.deepseek.com",
+            "credentialSlot": "search-deepseek"
+          },
+          {
+            "id": "search-brave",
+            "host": "api.search.brave.com",
+            "credentialSlot": "search-brave"
+          },
+          {
+            "id": "search-parallel",
+            "host": "api.parallel.ai",
+            "credentialSlot": "search-parallel"
+          },
+          {
+            "id": "search-bochaai",
+            "host": "api.bochaai.com",
+            "credentialSlot": "search-bochaai"
+          }
+        ],
+        "selectionRequiresCredential": false
+      },
+      "webfetch": {
+        "maxBytes": 5242880,
+        "timeoutSeconds": 30,
+        "boundedByCitations": true
+      },
+      "breaker": {
+        "roundTrips": 128,
+        "end": "联网核查未完成"
+      },
+      "oneQueryPerRunUnit": true,
+      "toolResultCategory": "public-or-synthetic"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../analysis/canonical.js';
-import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
+import { type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { admittedFastRoleRoute, type AdmittedFastRoleRoute } from '../dialogue/dialogue-route.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, modelServiceChannels, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
@@ -209,10 +209,6 @@ export function fastRoleRouteRefusal(deps: Pick<FastRoleExecutionDeps, 'fixture'
     const production = isOrdinaryProductionRuntime(deps.live.runtime);
     if (deps.live.routes[kindId] == null) {
       return production ? MODEL_SERVICE_SETUP_REQUIRED_REASON : `当前运行范围未允许${kind.label}：选定的模型处理规则没有准许它使用实时模型。`;
-    }
-    // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
-    if (!production && sourceDigest !== undefined && (sourceDigest === null || !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(sourceDigest))) {
-      return `当前运行范围未允许${kind.label}：这本书不在开发者实时可发送的公开样书范围内。`;
     }
     return null;
   }

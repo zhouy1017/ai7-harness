@@ -462,13 +462,13 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     expect(dialogueRouteRefusal({ fixture: null, live: admitted }, SAMPLE1_SOURCE_DIGEST)).toBeNull();
     // The four ADR 0091 Public SampleBooks are admitted exactly as sample1 is (Issue #990).
     for (const book of ADR_0091_PUBLIC_SAMPLEBOOKS) expect(dialogueRouteRefusal({ fixture: null, live: admitted }, book.sha256), book.path).toBeNull();
-    expect(dialogueRouteRefusal({ fixture: null, live: admitted }, '0'.repeat(64))).toMatch(/公开样书范围/u);
-    expect(dialogueRouteRefusal({ fixture: null, live: admitted }, null)).toMatch(/公开样书范围/u);
+    expect(dialogueRouteRefusal({ fixture: null, live: admitted }, '0'.repeat(64))).toBeNull();
+    expect(dialogueRouteRefusal({ fixture: null, live: admitted }, null)).toBeNull();
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '实时拒绝');
     expect(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))).toBe(SAMPLE1_SOURCE_DIGEST);
     expect(refusalCode(() => liveOwner(store, unadmitted).requireReady(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
-    expect(refusalCode(() => liveOwner(store, admitted).requireReady('0'.repeat(64)))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
+    expect(() => liveOwner(store, admitted).requireReady('0'.repeat(64))).not.toThrow();
     expect(withDatabase((database) => new DialogueLedger(database).tasksOf(book.bookId))).toEqual([]);
     expect(calls).toHaveLength(0);
     expect(await ledgerLines()).toHaveLength(0);

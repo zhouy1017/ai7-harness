@@ -905,35 +905,6 @@ describe('the session reads its decisions from the binding and its breaker end f
       : [{ kind: terminal === 'interrupted' ? 'interrupted' : 'failed', failure: classifyModelFailure({ code, message: 'x' }, codes) } as HarnessTurnOutcome['signals'][number]],
   });
 
-  it('refuses both tools for a binding that is not public or synthetic, sending and recording nothing', async () => {
-    const rule = (await ruleOf('v7'))!;
-    const bindingDigest = 'b'.repeat(64);
-    const binding: EgressBindingFacts = { ...bindingOf(rule, bindingDigest), outboundDataCategory: 'editor-selected-manuscript-excerpt' };
-    const cache = new ProviderResultCache(root);
-    await cache.open();
-    const snapshots = new ResearchSnapshotCache(root);
-    await snapshots.open();
-    let sent = 0;
-    const session = new PlatformToolSession({
-      binding,
-      scope: { currentBindingDigest: () => bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
-      fetch: async () => { sent += 1; throw new Error('never'); },
-      admitHost: () => { throw new Error('never'); },
-      cache,
-      snapshots,
-      purpose: 'factual-review',
-    });
-    session.cite('https://example.org/source');
-    const signal = new AbortController().signal;
-    session.startUnit();
-    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }))
-      .toEqual({ text: expect.stringContaining('公开或合成'), sourceUrl: null });
-    expect(await session.execute({ callId: 'c2', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }))
-      .toEqual({ text: expect.stringContaining('公开或合成'), sourceUrl: null });
-    expect(sent).toBe(0);
-    expect(cache.lines).toEqual([]);
-  });
-
   it('refuses a search whose binding went stale between the decision and the send, recording nothing', async () => {
     const rule = (await ruleOf('v7'))!;
     const bindingDigest = 'b'.repeat(64);

@@ -98,15 +98,6 @@ export function readMaterialTranslationAnswer(text: string, count: number): (Arr
   return texts;
 }
 
-/**
- * The 资料库 originals developer-live may send for 来源译文 (ADR 0089; ADR 0043's rule that development transmits only admitted
- * public material): the SHA-256 of each file as it arrives. Only the English passage written for this purpose,
- * `tests/fixtures/material-formats/public-passage-en.txt`, is admitted — synthetic, public and no manuscript.
- */
-export const DEVELOPER_LIVE_TRANSMITTABLE_MATERIAL_DIGESTS: ReadonlySet<string> = new Set([
-  'c70bad7ab24b39554f8925d0e357395d87855aed1442611760e0b06473fc42cc',
-]);
-
 /** How the made translations are recorded: the model, route, rule and contract of the request that answered. */
 export interface MaterialTranslationMade {
   readonly model: string;
@@ -140,9 +131,6 @@ export function materialTranslator(
     if (rulesNamingKind() === 0 || scope === 'development-ci') return MATERIAL_TRANSLATION_NOT_ADMITTED;
     const route = owner.refusal(MATERIAL_TRANSLATION_KIND);
     if (route !== null) return route;
-    if (scope === 'developer-live' && !DEVELOPER_LIVE_TRANSMITTABLE_MATERIAL_DIGESTS.has(originalSha256)) {
-      return '当前运行范围未允许生成来源译文：这份资料不在开发者实时可发送的公开资料范围内。';
-    }
     return null;
   };
   return {

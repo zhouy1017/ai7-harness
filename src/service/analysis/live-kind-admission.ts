@@ -92,7 +92,7 @@ export function liveKindRule(
   const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>
     taskKindListed(rule.taskKinds, kind) && (rule.backgroundOrigin === true) === (origin === 'background'));
   const rule = rules.length === 1 ? rules[0]! : null;
-  return rule !== null && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)) ? rule : null;
+  return rule;
 }
 
 /** Material eligibility is a term of the kind's one selected rule, never a second rule. */

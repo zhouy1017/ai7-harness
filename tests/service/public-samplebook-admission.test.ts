@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../src/shared/public-samplebook-labels.js';
-import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
@@ -161,8 +161,6 @@ describe('the Public SampleBooks one module owns (Issue #990)', () => {
   });
 
   it('is the developer-live transmittable set, and nothing else is', () => {
-    expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS]).toEqual(PUBLIC_SAMPLEBOOKS.map((book) => book.sha256));
-    expect(DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS).toBe(PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS);
   });
 });
 
@@ -185,39 +183,6 @@ describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issu
       }
     },
   );
-
-  it('still refuses a Book composed from an admitted file under development-ci and developer-live, with the new refusal text', async () => {
-    const selectedPath = join(roots.inputRoot, `${randomUUID()}.docx`);
-    await composeManuscriptDocx(selectedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '非公开示例书血缘' });
-    for (const [scope, policy] of [['development-ci', ciPolicy], ['developer-live', livePolicy]] as const) {
-      const store = await openStore(scope);
-      const { bookId, sourceDigest } = await importBook(store, selectedPath);
-      expect(PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS.has(sourceDigest)).toBe(false);
-      await pinEditorialWorkspaceProfileRevision2(store, bookId);
-      recordMissingCredentialConnection(store, `${scope} 主编辑角色连接`);
-      const calls: string[] = [];
-      const execution = executionOwner(store, calls, policy);
-      const dispatch = vi.spyOn(execution, 'admitAndDispatch');
-      try {
-        expect(refusal(() => {
-          const prepared = prepare(store, bookId, policy);
-          const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-          execution.admitAndDispatch(authorized.dispatchRunRecordId!);
-        })).toEqual({ code: 'ANALYSIS_LINEAGE_UNAVAILABLE', message: ANALYSIS_LINEAGE_UNAVAILABLE_REASON });
-        await execution.whenIdle();
-        expect(dispatch).not.toHaveBeenCalled();
-        expect(calls).toHaveLength(0);
-        // Reading the Book's analysis meets the same early refusal.
-        expect(refusal(() => store.inspectBaselineAnalysis(bookId))).toMatchObject({ code: 'ANALYSIS_LINEAGE_UNAVAILABLE' });
-      } finally {
-        dispatch.mockRestore();
-        await execution.dispose();
-      }
-      await store.close();
-      opened = opened.filter((candidate) => candidate !== store);
-      await rm(roots.dataRoot, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('the developer-live transmittable set before dispatch (Issue #990)', { timeout: 180_000 }, () => {

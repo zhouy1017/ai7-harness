@@ -18,7 +18,6 @@ import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type Factua
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { admitTicketHost } from '../../shared/network-denial.js';
-import { PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS } from '../../shared/public-samplebooks.js';
 import { randomUUID } from 'node:crypto';
 import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
 import { BASELINE_ANALYSIS_KIND, LEARNING_INFLUENCE_STOP_SUMMARY, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
@@ -534,7 +533,7 @@ export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSampli
  * the set is the one the analysis lineage check reads. Any other Book refuses before dispatch rather than at the gate, so
  * no unadmitted manuscript is ever assembled into a payload at all.
  */
-export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS;
+
 
 export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
@@ -1101,7 +1100,6 @@ export class BaselineAnalysisExecutionOwner {
     const live = this.#requireLaunchOf(ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
     const policy = this.#policyForRun(facts, live);
-    this.#requireTransmittable(facts, live);
     this.#requireOrigin(facts, live, ledger, policy);
     this.#requireRunRule(facts, ledger, live, policy);
     if (ledger.currentRunState(runRecordId) !== 'authorized') {
@@ -1128,14 +1126,6 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_LEDGER_LAUNCH_MISMATCH', '该分析账本绑定的可信区间与执行所有者不一致；未开始执行。');
     }
     return live;
-  }
-
-  /** The Public SampleBook check precedes admission, so an unadmitted Book never reaches a payload. */
-  #requireTransmittable(facts: ExecutionPlanFacts, live: LiveRuntime | null): void {
-    // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
-    if (live !== null && !isOrdinaryProductionRuntime(live) && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
-      throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
-    }
   }
 
   /**
@@ -1218,7 +1208,6 @@ export class BaselineAnalysisExecutionOwner {
       ? backgroundShareFullReason(executionBackgroundShare(this.#policy(), this.#capacity))
       : `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     const policy = this.#policyForRun(facts, live);
-    this.#requireTransmittable(facts, live);
     this.#requireOrigin(facts, live, ledger, policy);
     if (options.cancel !== true) this.#requireRunRule(facts, ledger, live, policy);
     const state = ledger.currentRunState(runRecordId);
@@ -1350,7 +1339,6 @@ export class BaselineAnalysisExecutionOwner {
         (!isOrdinaryProductionRuntime(live) && (ledger.launch.live !== null) !== (live !== null))) return false;
     try {
       const facts = ledger.loadExecutionPlan(runRecordId);
-      if (live !== null && !isOrdinaryProductionRuntime(live) && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) return false;
       const policy = this.#policyForRun(facts, live);
       this.#requireOrigin(facts, live, ledger, policy);
       this.#requireRunRule(facts, ledger, live, policy);

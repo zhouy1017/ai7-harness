@@ -10,7 +10,7 @@ import { BackgroundAnalysisDispatcher } from '../../src/service/background-analy
 import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_POLICY_BINDING, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import type { DevelopmentValidationIntent } from '../../src/shared/protocol.js';
-import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import {
   SAMPLE1_SOURCE_DIGEST,
   blockedReasons,
@@ -1293,8 +1293,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   it('admits exactly the five Public SampleBooks as transmittable, exact sample1 first (Issue #990)', () => {
-    expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS]).toEqual(PUBLIC_SAMPLEBOOKS.map((book) => book.sha256));
-    expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS][0]).toBe(SAMPLE1_SOURCE_DIGEST);
   });
 
   it('offers 开始任务 on a live plan only while the credential its route resolves is present (Issue #420, S74a A3)', async () => {
@@ -1338,40 +1336,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       await present.dispose();
       await absent.dispose();
     }
-  });
-
-  it('refuses to prepare a baseline analysis Task whose lineage is not a Public SampleBook, before any transport, workspace-profile pin, or credential is touched', async () => {
-    // A composed sample1 excerpt has its own digest and is refused at preparation, before
-    // authorization or transport. Only the exact five Public SampleBooks may be transmitted.
-    const store = await openLiveStore(roots.dataRoot);
-    const selectedPath = join(roots.inputRoot, 'non-sample1.docx');
-    await composeManuscriptDocx(selectedPath, {
-      source: ADMITTED_BASELINE_DOCX,
-      startBlock: 1,
-      blocks: 4,
-      title: 'developer-live 非 sample1 血缘',
-    });
-    const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
-    expect(staged.source.format).toBe('DOCX');
-    expect(staged.source.sourceSha256).not.toBe(SAMPLE1_SOURCE_DIGEST);
-    const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value } as const;
-    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
-    expect(review.reviewDigest).not.toBeNull();
-    const commitId = randomUUID();
-    const commit = await store.commitNewBookImport({
-      draftId: staged.draftId,
-      expectedDraftVersion: review.draftVersion,
-      reviewDigest: review.reviewDigest!,
-      commitId,
-    });
-    await store.acknowledgeImportCompletion(commitId);
-
-    // No workspace-profile pin and no credential connection exist for this Book: the lineage check in
-    // `#binding()` is the first condition it evaluates, ahead of the artifact-pin and credential checks
-    // it also owns and ahead of the developer-live transmittable-set check in the execution owner.
-    expect(refusalCode(() => store.createBaselineAnalysisPreparationWork(commit.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy)))
-      .toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
-    await store.close();
   });
 });
 

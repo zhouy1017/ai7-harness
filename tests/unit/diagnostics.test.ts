@@ -60,10 +60,7 @@ describe('pure diagnostics bundle', () => {
     expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
     expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 113, protocol: SERVICE_PROTOCOL_VERSION');
     expect(facts.buildIdentity!.dataVersion).toBe(DATA_VERSION);
-    // The summary reads the same built active policy set the service's launch policy verifies.
-    const activeSet = source('src/service/launch-policy.ts').match(/const ACTIVE_SET_PATH = 'docs\/policies\/([^']+)';/u)?.[1];
-    expect(activeSet).toBeDefined();
-    expect(application).toContain(`resolve(__dirname, '..', 'docs', 'policies', '${activeSet}')`);
+    expect(application).toContain("policySetVersion: 'no-policy-lock'");
     // The sandboxed preload cannot import the main module at runtime, so its literals must match the handler channels.
     const preload = source('src/main/preload.ts');
     for (const [member, channel] of Object.entries(DIAGNOSTICS_CHANNELS)) {

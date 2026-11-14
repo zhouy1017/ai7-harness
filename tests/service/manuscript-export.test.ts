@@ -1,3 +1,4 @@
+import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -435,6 +436,26 @@ describe('selected native Word reading through the actual export service', () =>
 });
 
 describe('④ 导出: the Export Fidelity Review, the preparation, the approval and its receipt', () => {
+  it('requires preparation and approval and retains the receipt after the policy fingerprint retires (#1453)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const available = (await resolveSourceCheckoutLaunchPolicy(roots.codeRoot)).externalExport.currentExportEffectAvailable;
+      const missing = randomUUID();
+      await expect(store.approveManuscriptExport({ bookId: book.bookId, preparationId: missing }, available)).rejects.toBeDefined();
+      const reviewed = await review(store, book);
+      const destination = join(outbox, 'export.docx');
+      const preparation = await store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId,
+        target: CURRENT, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, reviewDigest: reviewed.reviewDigest, destination }, available);
+      expect(existsSync(destination)).toBe(false);
+      const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, available);
+      expect(receipt.outcome).toBe('created');
+      expect(store.inspectManuscriptExportReceipt({ bookId: book.bookId, preparationId: preparation.preparationId })).toEqual(receipt);
+      expect(receipt.technical.fileSha256).toBe(preparation.technical.payloadDigest);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 300_000);
+
   it('exports the current revision with its 批注 and 修改建议, leaves 备注 out, and records one receipt', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

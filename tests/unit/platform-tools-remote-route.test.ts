@@ -1,3 +1,4 @@
+import { anonymousPlatformTools } from '../support/platform-tools.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -56,12 +57,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function v7Rule(): Promise<PlatformToolsRule> {
-  const document = JSON.parse(await readFile(resolve(REPO_ROOT, 'docs/policies/provider-processing-policy.v7.json'), 'utf8')) as {
-    decision: { providerAllowRules: unknown[] };
-  };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule;
-}
+async function v7Rule(): Promise<PlatformToolsRule> { return anonymousPlatformTools(); }
 
 /** The real composition on the remote route, its adapter answered only by the recorded exchanges. */
 async function compose(recorded: RecordedLoop, options: {

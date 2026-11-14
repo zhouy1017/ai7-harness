@@ -4,6 +4,8 @@ status: accepted — development operations amended by ADRs 0070 and 0089
 
 # Admit a developer-live Provider Processing scope
 
+Runtime policy-lock, selected-policy/content-admission and frozen-fixture clauses are superseded by [ADR 0102](0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) under the Owner’s 2026-11-12 and 2026-11-14 decisions. Unrelated authority, provenance, credential and effect boundaries remain; the dated decisions below retain their historical meaning.
+
 `developer-live` separates necessary real-model development from provider-free CI and ordinary product use. [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [Orca dispatch](../agents/orca-dispatch.md) own repository execution and the new delivery order. [ADR 0067](./0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) owns development-test reuse and the credential boundary.
 
 ## Effective scope rules

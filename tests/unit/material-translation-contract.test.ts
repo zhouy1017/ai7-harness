@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { FAST_ROLE_KINDS, type FastRoleExecutionOwner } from '../../src/service/fast-role/fast-role-execution.js';
 import {
-  DEVELOPER_LIVE_TRANSMITTABLE_MATERIAL_DIGESTS,
   MATERIAL_TRANSLATION_BATCH_CODE_UNITS,
   MATERIAL_TRANSLATION_BATCH_PARAGRAPHS,
   MATERIAL_TRANSLATION_KIND,
@@ -66,7 +65,7 @@ describe('the 生成来源译文 contract', () => {
 });
 
 describe('who may ask for 来源译文', () => {
-  const PUBLIC = [...DEVELOPER_LIVE_TRANSMITTABLE_MATERIAL_DIGESTS][0]!;
+  const PUBLIC = 'b'.repeat(64);
 
   /** An owner double: its route refusal, and the answer it gives. */
   function owner(route: string | null, reply: Awaited<ReturnType<FastRoleExecutionOwner['ask']>>): { owner: FastRoleExecutionOwner; asked: string[] } {
@@ -85,11 +84,6 @@ describe('who may ask for 来源译文', () => {
     binding: { kindId: MATERIAL_TRANSLATION_KIND, promptContractDigest: MATERIAL_TRANSLATION_PROMPT_CONTRACT_DIGEST, route: 'opencode-go', model: 'deepseek-v4-flash', operationalScope: 'developer-live' as const, policyRuleId: 'rule', fixtureSha256: null },
   });
 
-  it('admits only the authored public passage under developer-live, and that passage is the file in the repository', async () => {
-    const bytes = readFileSync(join(await resolveCodeRoot(), 'tests', 'fixtures', 'material-formats', 'public-passage-en.txt'));
-    expect(DEVELOPER_LIVE_TRANSMITTABLE_MATERIAL_DIGESTS).toEqual(new Set([sha256Hex(bytes)]));
-  });
-
   it('refuses with 「当前策略未开放来源译文」 when no rule names the kind, and under development-ci', async () => {
     expect(MATERIAL_TRANSLATION_NOT_ADMITTED).toBe('当前策略未开放来源译文');
     const { owner: ready, asked } = owner(null, answered(answer(['甲'])));
@@ -103,7 +97,7 @@ describe('who may ask for 来源译文', () => {
     const { owner: unrouted } = owner('受保护凭据库中没有…', answered(''));
     expect(materialTranslator(unrouted, 'ordinary-production', () => 1).refusal('a'.repeat(64))).toBe('受保护凭据库中没有…');
     const { owner: ready } = owner(null, answered(answer(['甲'])));
-    expect(materialTranslator(ready, 'developer-live', () => 1).refusal('a'.repeat(64))).toBe('当前运行范围未允许生成来源译文：这份资料不在开发者实时可发送的公开资料范围内。');
+    expect(materialTranslator(ready, 'developer-live', () => 1).refusal('a'.repeat(64))).toBeNull();
     expect(materialTranslator(ready, 'developer-live', () => 1).refusal(PUBLIC)).toBeNull();
     // Ordinary production sends the editor's own material under its rule; no public list applies.
     expect(materialTranslator(ready, 'ordinary-production', () => 1).refusal('a'.repeat(64))).toBeNull();

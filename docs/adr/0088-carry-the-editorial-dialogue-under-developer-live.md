@@ -4,6 +4,8 @@ status: accepted — development execution and product target amended by ADR 008
 
 # Carry editorial dialogue under developer-live and keep development separate from production
 
+Runtime policy-lock, selected-policy/content-admission and frozen-fixture clauses are superseded by [ADR 0102](0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) under the Owner’s 2026-11-12 and 2026-11-14 decisions. Unrelated authority, provenance, credential and effect boundaries remain; the dated decisions below retain their historical meaning.
+
 The Owner admits a real-model Interactive Editorial Dialogue on an exact editor-selected passage. This decision preserves the dialogue's product authority and persistence boundaries; [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) owns the new Go target, autonomous development testing and business-versus-test reuse.
 
 ## Dialogue contract

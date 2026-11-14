@@ -5,12 +5,9 @@ import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion,
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
-import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
-import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, seriesScopeRefusal, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import type { QualifiedGlobalAttemptMetadata } from '../dialogue/dialogue-ledger.js';
-import { selectedPolicyIdentityOf, isSupportedProviderProcessingVersion } from '../../shared/protocol.js';
 import {
   PLATFORM_TOOL_NAMES,
   ruleNamedToolSchemas,
@@ -110,7 +107,6 @@ export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicabl
 export type OutboundDataCategory = OutboundDataCategoryId;
 
 /** The categories that carry the editor's own manuscript words: never public, so a remote route needs a rule naming each. */
-const MANUSCRIPT_EXCERPT_CATEGORIES: ReadonlySet<OutboundDataCategory> = new Set(['editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt']);
 
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
 export type RuntimePlatformToolsRule = Omit<LegacyPlatformToolsRule, 'websearch'> & {
@@ -560,9 +556,7 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
 function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule | null, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
   if (ruleNamedToolSchemas(false, binding.localTools).some((schema) => schema.name === admitted.tool)) {
-    return admitted.sourceUrl === null && admitted.byteCount <= LOCAL_TOOL_RESULT_MAX_BYTES &&
-      (admitted.tool !== 'guideline_clause' || binding.policy.operationalScope !== 'ordinary-production' ||
-        binding.ruleOutboundCategories?.has('house-review-guideline-clause') === true || admitted.sha256 === sha256Hex('[]'));
+    return admitted.sourceUrl === null && admitted.byteCount <= LOCAL_TOOL_RESULT_MAX_BYTES;
   }
   if (admitted.sourceUrl === null) return true;
   if (rule === null) return false;
@@ -578,168 +572,58 @@ function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformTo
   return canonical !== null && canonical === admitted.sourceUrl && (scope.citationAdmits?.(canonical) ?? false);
 }
 
-/** Whether the binding sends a manuscript excerpt under a rule that names exactly its category (Issue #52, S17c; #842). */
-function excerptAdmittedByRule(binding: EgressBindingFacts): boolean {
-  return MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
-    (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false);
-}
-
 export function evaluateEgress(
   payload: AssembledModelPayload,
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
-  if (binding.factualClaimScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' || !binding.factualClaimScope.current())) {
-    return { decision: 'refuse', reason: 'binding-stale', detail: '断言会话、冻结来源或剩余额度已变化；未发送。' };
-  }
-  if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
-    (binding.policy.providerProcessingVersion !== 'v31' && (binding.policy.providerProcessingVersion !== 'v32' && binding.policy.providerProcessingVersion !== 'v33' && binding.policy.providerProcessingVersion !== 'v34' && binding.policy.providerProcessingVersion !== 'v35')) || binding.outboundDataCategory !== 'editorial-learning-example' ||
-    payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||
-    sha256Hex(messageText(payload.messages[0]!) ?? '') !== binding.learningCurationScope.messageDigest ||
-    scope.ceilingState?.() !== 'within' || !binding.learningCurationScope.current())) {
-    return refuse('payload-out-of-scope', '学习整理的完整来源、预算或启用范围已变化；未发送任何内容。');
-  }
-  if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
-    return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
-  const global = binding.globalAgentScope;
-  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31' || (binding.policy.providerProcessingVersion === 'v32' || binding.policy.providerProcessingVersion === 'v33' || (binding.policy.providerProcessingVersion === 'v34' || binding.policy.providerProcessingVersion === 'v35')))) {
-    const qualified = global.qualification;
-    const messages = [...binding.admittedUserMessages];
-    if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
-          activePolicySetVersion: qualified.activePolicySetVersion, activePolicySetSha256: qualified.activePolicySetSha256 }) === null ||
-        qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== (global.scopedRule === undefined
-          ? 'ordinary-production-global-agent-dialogue' : 'ordinary-production-global-agent-scoped-dialogue') ||
-        qualified.modelRole !== 'Fast Interaction Role' || qualified.route !== binding.route || qualified.model !== binding.model ||
-        messages.length !== 1 || qualified.messageSha256 !== sha256Hex(messages[0]!) ||
-        !DIGEST_PATTERN.test(qualified.requestContextSha256) || !DIGEST_PATTERN.test(qualified.retainedAncestrySha256))
-      return refuse('payload-out-of-scope', '全域对话缺少与实际负载相符的原文字段身份；未发送任何内容。');
-  } else if (global?.qualification !== undefined) return refuse('payload-out-of-scope', '原文字段身份与当前处理策略不一致；未发送任何内容。');
-  const scoped = global?.scopedRule;
-  const globalAdmitted = global !== undefined && binding.policy.operationalScope === 'ordinary-production' && (global.rule !== undefined
-    ? global.rule.source.bookRequired === false && global.rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true &&
-      global.rule.source.eligibleRevisionPinsRequired === true && global.rule.source.editorOwnWordsAllowed === true &&
-      global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
-      global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
-      global.rule.redaction.remarksAndInternalNotesStripped === true
-    : (binding.policy.providerProcessingVersion === 'v31' || (binding.policy.providerProcessingVersion === 'v32' || binding.policy.providerProcessingVersion === 'v33' || (binding.policy.providerProcessingVersion === 'v34' || binding.policy.providerProcessingVersion === 'v35'))) && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
-      scoped!.source['lastOpenBookSuppliesAuthority'] === false && scoped!.source['unlistedSourcesAllowed'] === false &&
-      scoped!.scopedTools['directMemoryOrManuscriptMutationAllowed'] === false && scoped!.scopedTools['shellFilesystemWebOrUnrestrictedNetworkAllowed'] === false &&
-      scoped!.outboundDataDisclosureRequired === true && scoped!.redaction.housePeopleNamesAndRolesStripped === true &&
-      binding.platformTools == null && canonicalJson(ruleNamedToolSchemas(false, binding.localTools).map((schema) => schema.name)) ===
-        canonicalJson([...scoped!.scopedTools.names].sort((a, b) => a.localeCompare(b, 'en')))) && global.payloadCurrent();
-  if (global !== undefined && !globalAdmitted) return refuse('payload-out-of-scope', '全域对话的来源、发送披露或隐私过滤已经变化；未发送任何内容。');
-  if (global !== undefined && scoped === undefined && payload.tools !== undefined && payload.tools.length > 0) return refuse('tools-present', '全域对话没有注册工具；未发送任何内容。');
-  const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
-  if (excluded !== null) return refuse('series-retrieval-scope-changed', `书系检索范围已变化 · 需要重新确认计划：${excluded}；未发送任何内容。`);
-  if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
+  if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest ||
+      binding.factualClaimScope?.current() === false || binding.learningCurationScope?.current() === false ||
+      binding.globalAgentScope?.payloadCurrent() === false) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
-  // Under ordinary-production (Issue #811) the editor's own unpublished words leave only under the rule that names their
-  // category; every other scope reads exactly as before.
-  const categoryAdmitted = binding.policy.operationalScope === 'ordinary-production'
-    ? (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false)
-    : binding.outboundDataCategory === 'public-or-synthetic' || (MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
-      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)));
-  if (!categoryAdmitted) {
-    return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
-  }
-  if (binding.route !== LOCAL_DETERMINISTIC_ROUTE && [...(binding.contractCategories ?? [])].some((category) =>
-    !(binding.ruleOutboundCategories?.has(category) ?? false))) {
-    return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
-  }
-  if (binding.contractCategories?.has('frozen-material-reference-excerpt') || binding.materialExcerpts !== undefined || binding.frozenMaterialDigests !== undefined) {
-    const materials = binding.materialExcerpts ?? [];
-    const pins = binding.frozenMaterialDigests ?? new Set<string>();
-    let total = 0;
-    if (!binding.contractCategories?.has('frozen-material-reference-excerpt') || materials.length < 1 || materials.length > MAX_WRITING_MATERIALS ||
-        pins.size < 1 || pins.size > MAX_WRITING_MATERIALS || materials.some((material) => {
-          const characters = material.paragraphs.reduce((count, paragraph) => count + graphemeLength(paragraph), 0);
-          total += characters;
-          return material.title.trim().length === 0 || characters < 1 || characters > MAX_WRITING_MATERIAL_GRAPHEMES ||
-            !pins.has(writingMaterialDigest(material.paragraphs));
-        }) || total > MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES) {
-      return refuse('payload-out-of-scope', '参考资料的文字不在计划冻结的资料摘要或字数范围内；未发送任何内容。');
-    }
-  }
+  const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
+  if (excluded !== null) return refuse('series-retrieval-scope-changed', '书系检索范围已变化；未发送任何内容。');
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');
-  // ADR 0080 §7.2: a payload may expose tools only when its tool set equals exactly the platform tools the binding's rule
-  // names. A rule that names none — Provider Processing v9's — matches no tool set, so every tool is refused as before.
+  const last = payload.messages.at(-1);
+  if (last?.source.kind === 'tool' && scope.breakerState?.() === 'tripped')
+    return refuse('circuit-breaker-tripped', '联网核查未完成：工具往返已达到熔断上限；未发送任何内容。');
+  if (last?.source.kind === 'tool' && scope.localBreakerState?.() === 'tripped')
+    return refuse('circuit-breaker-tripped', '检索未完成：工具往返已达到熔断上限；未发送任何内容。');
+  // Validate the actual registered tool exchange and retained provenance, independent of any policy version/category.
   const rule = platformToolsOf(binding);
   const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools);
-  if (payload.tools !== undefined && payload.tools.length > 0 && !toolSetEqualsPlatformSchemas(payload.tools, schemas)) {
-    return refuse('tools-present', '组合运行时向模型暴露了规则未命名的工具；未发送任何内容。');
-  }
-  if ((payload.system ?? '') !== binding.systemPrompt) {
-    return refuse('system-prompt-mismatch', '系统提示与冻结的提示契约不一致；未发送任何内容。');
-  }
-  if (payload.messages.length === 0) return refuse('payload-out-of-scope', '请求不含任何单元消息；未发送任何内容。');
+  if (payload.tools?.length && !toolSetEqualsPlatformSchemas(payload.tools, schemas))
+    return refuse('tools-present', '工具声明与本次运行注册的工具不一致；未发送任何内容。');
   const calls = { open: new Map<string, PlatformToolName>(), seen: new Set<string>() };
   for (const [index, message] of payload.messages.entries()) {
-    // The tool branch is reached only under a rule naming the platform tools and only for a message that is a tool call
-    // or a tool result; every other message — and both kinds under every other rule — takes the unchanged branches below,
-    // where a non-text block is still a refusal.
-    if (schemas.length > 0 && (assistantToolCalls(message) !== null || (message.role === 'user' && message.source.kind === 'tool'))) {
+    const text = messageText(message);
+    if (message.role === 'assistant' && text !== null &&
+        (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
+          !scope.acceptedOutputDigests.has(sha256Hex(text))))
+      return refuse('payload-out-of-scope', '保留的模型输出不属于本次尝试；未发送任何内容。');
+    if (message.source.kind === 'tool' || message.content.some((block) => block.type === 'tool-call' || block.type === 'tool-result')) {
       const refused = evaluateToolMessage(message, index, binding, rule, scope, calls);
       if (refused !== null) return refused;
-      continue;
     }
-    const text = messageText(message);
-    if (text === null) return refuse('payload-out-of-scope', `第 ${index + 1} 条消息含非文本内容块；未发送任何内容。`);
-    if (message.role === 'user') {
-      if (message.source.kind !== 'user' || !binding.admittedUserMessages.has(text)) {
-        return refuse('payload-out-of-scope', `第 ${index + 1} 条用户消息不在任务运行来源范围内；未发送任何内容。`);
-      }
-      continue;
-    }
-    if (message.role === 'assistant') {
-      if (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
-          !scope.acceptedOutputDigests.has(sha256Hex(text))) {
-        return refuse('payload-out-of-scope', `第 ${index + 1} 条模型消息不是本次尝试已接受的输出；未发送任何内容。`);
-      }
-      continue;
-    }
-    return refuse('unknown-message-role', `第 ${index + 1} 条消息角色不在闭合集合内；未发送任何内容。`);
   }
-  const last = payload.messages[payload.messages.length - 1]!;
-  if (last.role !== 'user') return refuse('payload-out-of-scope', '请求末尾不是单元消息；未发送任何内容。');
-  // ADR 0080 §7.4: a unit past the breaker ends there, with 联网核查未完成 on its affected findings — the model is not asked
-  // again with the refusal in hand, so a looping model stops transmitting rather than running into the Run's ceiling.
-  if (rule !== null && last.source.kind === 'tool' && (scope.breakerState?.() ?? 'intact') === 'tripped') {
-    return refuse('circuit-breaker-tripped', '联网核查未完成：本单元的工具往返已达到熔断上限，本单元到此结束；未发送任何内容。');
-  }
-  if (binding.localTools?.targetedRetrieval.allowed === true && last.source.kind === 'tool' && scope.localBreakerState?.() === 'tripped') {
-    return refuse('circuit-breaker-tripped', '检索未完成：本单元的工具往返已达到熔断上限，本单元到此结束；未发送任何内容。');
-  }
+  if (last?.role !== 'user') return refuse('payload-out-of-scope', '请求末尾缺少用户消息或工具结果；未发送任何内容。');
   const digest = payloadDigest(payload);
   if (binding.route === LOCAL_DETERMINISTIC_ROUTE) return { decision: 'transmit-local', payloadDigest: digest };
-  if (binding.policy.operationalScope === 'development-ci') {
-    return refuse('remote-route-denied-under-v1', `development-ci · Provider Processing ${binding.policy.providerProcessingVersion} 允许 0 次实时传输；未发送任何内容。`);
-  }
-  // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
-  // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
-  // Ordinary production leaves the per-Run ceiling to the editor (Issue #811; S16a): unset is a Run without one, not a refusal.
+  if (binding.policy.operationalScope === 'development-ci')
+    return refuse('remote-route-denied-under-v1', '开发与持续集成禁止实时传输；未发送任何内容。');
   const ceiling = scope.ceilingState?.() ?? 'unset';
-  if ((ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production') ||
-      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding) && !globalAdmitted)) {
-    return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
-  }
-  if (ceiling === 'reached') {
-    return refuse('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');
-  }
-  return { decision: 'transmit-remote', payloadDigest: digest, ticket: { decision: 'transmit-remote', bindingDigest: binding.bindingDigest, payloadDigest: digest } };
+  if (ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production')
+    return refuse('run-budget-ceiling-unset', '请先设置任务运行预算；未发送任何内容。');
+  if (ceiling === 'reached') return refuse('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');
+  return { decision: 'transmit-remote', payloadDigest: digest,
+    ticket: { decision: 'transmit-remote', bindingDigest: binding.bindingDigest, payloadDigest: digest } };
 }
 
 function refuseTool(reason: EgressRefusalReason, detail: string): PlatformToolRefusal {
   return { decision: 'refuse', reason, detail };
 }
-
-/**
- * The one outbound category a platform-tool call may carry (ADR 0080 §7.2 and its Question 2): a query or a fetched URL is
- * written by a model that read only the binding's admitted material, so its category is the binding's own — and the
- * platform tools exist only for a binding of public or synthetic material.
- */
-const PLATFORM_TOOL_OUTBOUND_CATEGORY: OutboundDataCategory = 'public-or-synthetic';
 
 /**
  * The preconditions both platform-tool decisions share; the refusal, or what they may proceed under. Everything is read
@@ -755,7 +639,7 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
     return refuseTool('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
   }
   const rule = platformToolsOf(binding);
-  if (rule === null || !binding.policy.liveTransmissionAllowed || binding.policy.authorizedLiveTransmissionCount !== 'bounded-by-run') {
+  if (rule === null) {
     return refuseTool('platform-tools-not-named', '执行绑定的处理规则未命名平台工具；未发送任何内容。');
   }
   // A ticket goes only into a book the gate opened for exactly this binding and its rule: the rule a forwarder builds from
@@ -763,10 +647,6 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
   const state = ticketBooks.get(book);
   if (state === undefined || state.bindingDigest !== binding.bindingDigest || canonicalJson(state.rule) !== canonicalJson(rule) || canonicalJson(state.backend ?? null) !== canonicalJson(binding.searchBackend ?? null)) {
     return refuseTool('ticket-book-foreign', '票据簿不是出口闸门为本执行绑定开立的；未发送任何内容。');
-  }
-  // Derived from the binding, never passed in by the call: the query's category is the binding's (ADR 0080 §7.2).
-  if (binding.outboundDataCategory !== PLATFORM_TOOL_OUTBOUND_CATEGORY && !(binding.policy.operationalScope === 'ordinary-production' && binding.searchBackend !== undefined)) {
-    return refuseTool('outbound-category-mismatch', '平台工具只承载公开或合成材料，执行绑定的外发数据类别不是；未发送任何内容。');
   }
   if ((scope.breakerState?.() ?? 'intact') === 'tripped') {
     return refuseTool('circuit-breaker-tripped', '本单元的工具往返已触发熔断；未发送任何内容。');

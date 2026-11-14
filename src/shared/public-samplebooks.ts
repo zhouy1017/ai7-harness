@@ -1,12 +1,7 @@
 /**
- * The Public SampleBooks (ADR 0043, ADR 0044, ADR 0091): the five manuscript files the repository admits, each only by its exact
- * bytes and SHA-256 as `SampleBooks/README.md` lists them. This module is the one owner of that set in code: the developer-live
- * transmittable set and the analysis lineage check read it, so a Book whose source is any of the five is treated exactly as
- * `sample1` is. Renaming identical source bytes preserves admission; altered source bytes or a composed file do not match.
- * This source check preserves the existing treatment of tester edits within an imported sample1 Book (ADR 0088).
- *
- * `sample1` stays separately named: it alone is the ADR 0044 compatibility and recording baseline, the development onboarding
- * sample and the source of every reviewed fixture.
+ * Owner-designated public test inputs. Recorded byte counts and digests describe the original sources and retained
+ * provenance; they no longer grant or refuse product processing. Repository tests and development calls still obey
+ * the public-material rules in AGENTS.md. SampleBook-based fixtures remain part of the test set under ADR 0102.
  */
 export interface PublicSampleBook {
   /** The exact path under `SampleBooks/`. */
