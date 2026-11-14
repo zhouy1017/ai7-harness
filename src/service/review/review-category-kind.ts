@@ -70,6 +70,7 @@ export const REVIEW_CATEGORY_REDUCER_DESCRIPTOR = {
   referenceIntegrity: 'declared-block-first-message-search-first-ambiguous-match-or-whole-block-annotation',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
   sourceRangeIntegrity: 'located-quotation-is-manuscript-grapheme-slice',
+  wholeBlockAnnotation: 'unmatched-model-quote-kept-distinct',
   occurrence: 'optional-one-based-invalid-falls-back-to-ambiguous',
   punctuation: 'equivalent-punctuation-alignment',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
@@ -323,7 +324,9 @@ export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: 
 export function pinnedReviewDefinition(definition: AnalysisKindDefinition, digest: string): AnalysisKindDefinition {
   const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;
   const predecessor = (definition as AnalysisKindDefinition & { toolPromptPredecessor?: AnalysisKindDefinition }).toolPromptPredecessor;
-  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract]) {
+  const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
+  const historical = input === undefined ? [] : historicalReviewCategoryDefinitions(input, 2);
+  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract, ...historical]) {
     if (candidate === undefined) continue;
     if (candidate.promptContractDigest === digest) return candidate;
     if (candidate.clarificationBase === undefined) {

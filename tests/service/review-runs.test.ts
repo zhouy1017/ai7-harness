@@ -860,7 +860,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       }
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(run.excludedTotal).toBe(0);
-      expect(run.findings.some((finding) => finding.note.includes('引文未逐字匹配') && finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'))).toBe(true);
+      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note === `【引文未逐字匹配】${'合成说明'.repeat(50)}`)).toBe(true);
     });
   }, 300_000);
 
@@ -883,7 +883,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       for (const suffix of [J04_EDIT_SUFFIX, '，J-04 计划版本形成后的确认编辑', '，J-04 快速开始前的确认编辑']) appendToBlockAt(session, book, 1, suffix);
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 0 });
-      expect(settled.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true);
+      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.unitOrdinal])).toEqual([['contract-retry', 1]]);
       expect(projection.resultSetRevision!.gaps).toEqual([]);
@@ -900,7 +900,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       runId = settled.reviewRunId;
       expect(settled.categories[0]!.state).toBe('settled');
       expect(settled.findings.length).toBeGreaterThan(0);
-      expect(settled.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true);
+      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
       const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       const projection = ledger.inspect(book.bookId);
       expect(projection.run!.adaptations).toHaveLength(1);
@@ -913,10 +913,10 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(frozen.contractIdentity).toMatchObject({ contractId: 'ai7.editorial-review', version: 2 });
       expect(projection.planEnvelope!.procedure?.version).toBe(2);
       expect(settled.excluded).toHaveLength(settled.excludedTotal!);
-      expect(settled.findings.some((finding) => finding.note.includes('引文未逐字匹配'))).toBe(true);
+      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(true);
     } finally { await close(session); }
     const reopened = await open('sample1-review-contract-v2-controls');
-    try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true); }
+    try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true); }
     finally { await close(reopened); }
   }, 300_000);
 
@@ -1411,7 +1411,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const repeatedText = workingText(session, book).get(pinnedRepeated.blockId)!;
       const second = repeatedText.indexOf('古怪', repeatedText.indexOf('古怪') + 2);
       expect(pinnedRepeated.fromGrapheme).toBe([...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(repeatedText.slice(0, second))].length);
-      for (const finding of whole.findings) {
+      for (const finding of whole.findings.filter((finding) => !finding.note.startsWith('【引文未逐字匹配】'))) {
         const text = workingText(session, book).get(finding.blockId)!;
         const slice = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].slice(finding.fromGrapheme, finding.toGrapheme).map((part) => part.segment).join('');
         expect(finding.quote).toBe(slice);

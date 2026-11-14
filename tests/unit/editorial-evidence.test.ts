@@ -260,7 +260,7 @@ const AUTHORED: Record<string, { category: typeof TYPOS_AND_USAGE; findings: Aut
   ] },
 };
 
-it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('authors the synthetic review fixture', async () => {
+it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1' || process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('authors the synthetic review fixture', async () => {
   const entries = new Map<string, ModelFixtureEntry>();
   const fixture: ResolvedModelFixture = { identity: SYNTHETIC_FIXTURE, description: 'generator', provenance: 'authored',
     lineage: [{ identity: SYNTHETIC_FIXTURE, sha256: 'e'.repeat(64) }], entries, sha256: 'f'.repeat(64) };

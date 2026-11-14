@@ -35,7 +35,7 @@ describe('Top-15 preference retrieval', () => {
     for (const [historical, base, wrapped] of frozen) {
       expect(historical.promptContractDigest).toBe(base);
       expect(houseReviewPreferenceKindDefinition(historical, LEGACY_USE, true).promptContractDigest).toBe(wrapped);
-      expect(historicalReviewCategoryDefinitions(input, historical.contractVersion.endsWith('/1') ? 1 : 2).some((entry) => entry.promptContractDigest === base)).toBe(true);
+      expect(pinnedReviewDefinition(current, base).promptContractDigest).toBe(base);
     }
     expect(current.promptContractDigest).not.toBe(numbered.promptContractDigest);
     for (const historical of [reviewCategoryKindDefinition(input, 1), numbered]) expect(liveKindAdmission(policy, historical, binding)).not.toBeNull();

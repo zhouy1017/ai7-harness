@@ -48,14 +48,13 @@ import { carryPositionalResult } from './reused-result.js';
  *
  * The reducer lists and locates; it never synthesizes across units (the Authority Ceiling). Its counts are the revision's summary.
  */
-// Describes occurrence selection and manuscript-slice quotation storage (#1471).
+// Describes quotation alignment and manuscript-slice storage; repeated quotes remain ambiguous.
 export const CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR = {
   schema: 'ai7.custom-analysis.reducers/1',
   stages: ['unit-validation', 'reference-integrity'],
   referenceIntegrity: 'deterministic-normalized-exact-match-in-committed-block',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
   sourceRangeIntegrity: 'located-quotation-is-manuscript-grapheme-slice',
-  occurrence: 'optional-one-based-invalid-falls-back-to-ambiguous',
   punctuation: 'equivalent-punctuation-alignment',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   anchorStates: ['located', 'not-found', 'ambiguous'],

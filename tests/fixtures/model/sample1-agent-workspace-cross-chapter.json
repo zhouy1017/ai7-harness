@@ -37,90 +37,6 @@
       }
     },
     {
-      "unitOrdinal": 2,
-      "requestDigest": "e21968e49bdc1fba94d0bf8df02cc5c672e64ec572235687a1d546c627533b5a",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"死亡年份与后文来信时间需要对照；先作为未解线索保留。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 1460,
-          "outputTokens": 130
-        }
-      }
-    },
-    {
-      "unitOrdinal": 3,
-      "requestDigest": "cfff72ac074e40cd702ab8b256cb3490fe3f5c71f7657a52bef11ff80b66f8f4",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"梦中的那一声沉雷\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"梦境与现场的界线尚待后文交代，请复核这条叙事线索。\",\"clauseId\":\"plot-consistency/1\"},{\"quote\":\"他将眼前的景物\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"此处观察与此前梦境的衔接需要后文核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 1490,
-          "outputTokens": 200
-        }
-      }
-    },
-    {
-      "unitOrdinal": 4,
-      "requestDigest": "ddb4daf2e4b552f388305c39a18f2ff3a89c74d29f00d56f0eb3619d8e55d585",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1520,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 5,
-      "requestDigest": "0725f3cc362ad381e9b3dc2d3d53c3a33a8343939b4715fde4ac85f971b59393",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1550,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 6,
-      "requestDigest": "ba95212627575c3488a309086b84c070a43131cf58dbca7e34054eec0f9e55be",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1580,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 7,
-      "requestDigest": "b94d661d0aee4ac74ef8adb4dbe306f457ba5079616af48c37a4924c8b79786f",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1610,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 8,
-      "requestDigest": "3d2ce70008b0399f43096aab44402a3ec5e0cf8ad78894c4bdb62f384529be31",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1640,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
       "unitOrdinal": 0,
       "requestDigest": "79ac790beaa6bcd3a4bc52b69cc379e7d2357c1ab50f82eb98933256bf8fa20d",
       "response": {
@@ -157,8 +73,92 @@
       }
     },
     {
+      "unitOrdinal": 2,
+      "requestDigest": "1d943494839591b8d49db20c9b8719bd4c4f2a384855b4cf8e3242777bb8cbda",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"死亡年份与后文来信时间需要对照；先作为未解线索保留。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "usage": {
+          "inputTokens": 1460,
+          "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "919580991fefd297dffd210924bef6b0dc8ee6e1bedd35b515120db7ce00da61",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"梦中的那一声沉雷\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"梦境与现场的界线尚待后文交代，请复核这条叙事线索。\",\"clauseId\":\"plot-consistency/1\"},{\"quote\":\"他将眼前的景物\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"此处观察与此前梦境的衔接需要后文核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "usage": {
+          "inputTokens": 1490,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "edff97a62790e4c38387180ed5aed19a8096b152e8a8d41824a0e2178063024e",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1520,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "be08bcd342e0e1a80b62d550dcaddda80c8d666cf2656e3a028e15ef4a33be77",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1550,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "2e707994d0244a41db802a02c44ca89d89cf621bc5ba36eb3e586cd42651693c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1580,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "d233790df97cc612ea9ff728826668ee9fe74f7b01e1d4c496e83fe079bb0ff3",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1610,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "89e85966127022fd9b807f11ae39198dd8440ec2bb24ff1f279e30c26cf25687",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1640,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
       "unitOrdinal": 1,
-      "requestDigest": "2e6ee37d054033f093efdb217b634d3d2a20ca83904a25854f398fe32d16fb45",
+      "requestDigest": "067810d11229a8c26b1f53844af8e462de419208ba9c53a214ce3b92f6903899",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"〔离开前刚写下的字〕\",\"blockOrdinal\":1,\"severity\":\"note\",\"clauseId\":\"plot-consistency/1\",\"note\":\"新增说明与正文的叙事关系需核对；保留为编辑判断的线索。\"}]}",
@@ -206,7 +206,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "27416031545b9ddc5fca0dca3998dd7fcb8cbf0372a187a81997b466b8368b86",
+      "requestDigest": "095cb6fd8319abcac7f27c8c06e41c7163c9165f92c849a5c47bf142302e20f9",
       "response": {
         "kind": "unit-result",
         "usage": {
@@ -218,7 +218,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "3abfd393c62afeed0e47e02fcf3479f507325ba7aca940e4dd406c30335a69b0",
+      "requestDigest": "9da2d266521bdb7e07d724f0539e6e1c051440d987c4c055f29da8d711af2013",
       "response": {
         "kind": "unit-result",
         "usage": {
@@ -230,7 +230,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "ba032e9d6a191fa998d50e5f3a7540104a89320796597ad7a766568265154fd5",
+      "requestDigest": "9d50f1e3dc23824d8208fb66dd98877838e6ee588edc60f1cdbcd5f42b85a72c",
       "response": {
         "kind": "unit-result",
         "usage": {

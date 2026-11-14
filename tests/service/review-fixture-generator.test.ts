@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
 import { graphemeCount } from '../../src/service/analysis/canonical.js';
 import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
@@ -525,7 +526,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
-    entries: ordered.filter(({ entry, order }) => !order.startsWith('j16') && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
+    entries: ordered.filter(({ entry, order }) => !j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)) && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
       .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
   await writeFile(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
@@ -627,3 +628,8 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the ov
   expect(closed).toBe(true);
   await writeFile(path, `${JSON.stringify({ ...body, entries: [...entries.values()].map(({ unitOrdinal, requestDigest, response }) => ({ unitOrdinal, requestDigest, response })) }, null, 2)}\n`, 'utf8');
 }, 600_000);
+
+it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('regeneration preserves committed fixtures byte for byte', () => {
+  const result = spawnSync('git', ['diff', '--quiet', '--', 'tests/fixtures/model'], { cwd: roots.codeRoot, windowsHide: true });
+  expect(result.status, 'Regeneration must leave the committed fixtures unchanged; review and commit deliberate updates first.').toBe(0);
+});

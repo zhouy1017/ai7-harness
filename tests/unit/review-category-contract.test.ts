@@ -236,7 +236,7 @@ it.each([undefined, 2, 0, 1.5, '2', 99])('admits optional occurrence without los
     { unitOrdinal: 1, blockCount: 1, output: 'change-suggestion', clauseIds: [] });
   expect(parsed.ok).toBe(true);
   if (parsed.ok) expect(parsed.result.findings[0]).toMatchObject({ quote: '目标', replacement: '替换',
-    ...(typeof occurrence === 'number' && Number.isInteger(occurrence) && occurrence > 0 ? { occurrence } : {}) });
+    ...(Number.isSafeInteger(Number(occurrence)) && Number(occurrence) > 0 ? { occurrence: Number(occurrence) } : {}) });
 });
 
 it('describes occurrence selection and manuscript slices in the reducer identity', () => {
