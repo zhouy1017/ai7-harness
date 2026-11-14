@@ -54,6 +54,18 @@
           "outputTokens": 40
         }
       }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "c36ca6368be87367e32a661be09ffb08b9714abcf0a1b20492dd408a56df69dd",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"合成引文在授权单元内唯一定位。\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
     }
   ]
 }

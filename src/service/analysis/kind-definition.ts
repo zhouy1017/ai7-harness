@@ -1,3 +1,4 @@
+import { preOccurrenceFactualPrompt } from './factual-review-contract.js';
 import { type SalvagedModelResult, graphemeCount, canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
@@ -614,16 +615,18 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
 
 // ---- factual review ------------------------------------------------------------------------------
 
-// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
+// Describes occurrence selection and manuscript-slice quotation storage (#1471).
 export const FACTUAL_REVIEW_REDUCER_DESCRIPTOR = {
   schema: 'ai7.factual-review.reducers/1',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'deterministic-normalized-exact-match-in-committed-block',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
-  sourceRangeIntegrity: 'sole-candidate-normalized-grapheme-slice-equals-quotation',
+  sourceRangeIntegrity: 'located-quotation-is-manuscript-grapheme-slice',
+  occurrence: 'optional-one-based-invalid-falls-back-to-ambiguous',
+  punctuation: 'equivalent-punctuation-alignment',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   findingClasses: ['real-world-fact', 'quotation'],
-  mergeRule: 'same-block-same-normalized-quotation',
+  mergeRule: 'same-block-same-range-same-normalized-quotation',
   exclusionReasons: ['quote-not-found', 'quote-ambiguous'],
   certaintyPolicy: 'list-and-locate-never-verify',
 } as const;
@@ -660,7 +663,9 @@ const FACTUAL_REVIEW_MODES: ReadonlyArray<AnalysisModeDefinition> = [...FACTUAL_
  * that is exactly what the slice ships, and its answer — `外部研究未获准` — is the same refusal every
  * other scope returns. A scope-bound capability arrives with the accepted egress (ADR 0074).
  */
-export function factualReviewKindDefinition(research: ResearchCapability = new FixtureReplayResearchCapability()): AnalysisKindDefinition {
+export function factualReviewKindDefinition(research: ResearchCapability = new FixtureReplayResearchCapability(), occurrencePrompt = true): AnalysisKindDefinition {
+  const contract = occurrencePrompt ? FACTUAL_REVIEW_PROMPT_CONTRACT : { ...FACTUAL_REVIEW_PROMPT_CONTRACT, systemPrompt: preOccurrenceFactualPrompt(FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt) };
+  const promptDigest = sha256Hex(canonicalJson(contract));
   return {
     kind: FACTUAL_REVIEW_KIND,
     contractVersion: FACTUAL_REVIEW_CONTRACT_VERSION,
@@ -670,12 +675,12 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     modes: FACTUAL_REVIEW_MODES,
     updateModes: ['review-again', 'review-range'],
     outOfScope: 'leave-unreviewed',
-    systemPrompt: FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt,
-    promptContractDigest: FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST,
+    systemPrompt: contract.systemPrompt,
+    promptContractDigest: promptDigest,
     unitResultSchema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
     revisionSchema: FACTUAL_REVIEW_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: FACTUAL_REVIEW_SUCCESSOR_REVISION_SCHEMA,
-    schemaDigest: FACTUAL_REVIEW_SCHEMA_DIGEST,
+    schemaDigest: sha256Hex(canonicalJson({ contractVersion: FACTUAL_REVIEW_CONTRACT_VERSION, unitResultSchema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, promptContractDigest: promptDigest })),
     reducerDigest: FACTUAL_REVIEW_REDUCER_DIGEST,
     reducerStages: FACTUAL_REVIEW_REDUCER_STAGES,
     executionSteps: FACTUAL_REVIEW_EXECUTION_STEPS,
@@ -714,7 +719,7 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     ],
     buildUnitMessage: buildFactualReviewUnitMessage,
     parseUnitMessageHeader: parseFactualReviewUnitMessageHeader,
-    requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, unitOrdinal, unitDigest),
+    requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(promptDigest, unitOrdinal, unitDigest),
     parseUnitResult: (text, unit) =>
       parseFactualReviewUnitResult(text, { unitOrdinal: unit.ordinal, blockCount: factualReviewMessageBlockIds(unit).length }),
     reduce: (input) => {
@@ -796,10 +801,11 @@ const FACTUAL_VERIFICATION_EXECUTION_STEPS = ['派生覆盖清单', '逐单元�
  * sampling, with the v2 system section, unit result and records. Whether a Run is handed the tools a v2 plan may declare is
  * still the selected rule's and the model's to say.
  */
-export function factualReviewLevelDefinition(level: EvidenceAssuranceLevel, research: ResearchCapability = new FixtureReplayResearchCapability()): AnalysisKindDefinition {
-  const base = factualReviewKindDefinition(research);
+export function factualReviewLevelDefinition(level: EvidenceAssuranceLevel, research: ResearchCapability = new FixtureReplayResearchCapability(), occurrencePrompt = true): AnalysisKindDefinition {
+  const base = factualReviewKindDefinition(research, occurrencePrompt);
   if (level === 'quick') return { ...base, evidenceAssuranceLevel: 'quick', researchDeclaration: { webSearch: false, searchEngine: null } };
-  const contract = factualReviewPromptContractV2(level);
+  const currentContract = factualReviewPromptContractV2(level);
+  const contract = occurrencePrompt ? currentContract : { ...currentContract, systemPrompt: preOccurrenceFactualPrompt(currentContract.systemPrompt) };
   const promptContractDigest = sha256Hex(canonicalJson(contract));
   const schemaDigest = sha256Hex(canonicalJson({
     contractVersion: FACTUAL_REVIEW_CONTRACT_VERSION,
@@ -836,5 +842,9 @@ export function factualReviewDefinitionsByDigest(research: ResearchCapability = 
     factualReviewLevelDefinition('strict', research),
     withFactualResearch(base),
     base,
+    factualReviewLevelDefinition('standard', research, false),
+    factualReviewLevelDefinition('strict', research, false),
+    withFactualResearch(factualReviewKindDefinition(research, false)),
+    factualReviewKindDefinition(research, false),
   ].map((definition) => [definition.promptContractDigest, definition] as const));
 }

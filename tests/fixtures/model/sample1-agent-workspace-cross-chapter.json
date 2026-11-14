@@ -9,126 +9,13 @@
   "entries": [
     {
       "unitOrdinal": 0,
-      "requestDigest": "aa5ef4594b21112d61aa6eb63d3c491db9efe0e2931b0c595467b74280193630",
-      "response": {
-        "kind": "answer-chunks",
-        "chunks": [
-          "{\"schema\":\"ai7.agent-workspace.change-set/1\",\"items\":[{\"anchor\":\"其存在的意义被视为国宝中的国宝\",\"proposedText\":\"被视为国宝中的国宝\",\"rationale\":\"删去「其存在的意义」，判断直接落在器物上，更凝练。\"},",
-          "{\"anchor\":\"用如此器物作为评价\",\"proposedText\":\"以如此重器作比\",\"rationale\":\"「作比」比「作为评价」更简洁，也点明器物之重。\"},{\"anchor\":\"这一句并不在所选范围之中\",\"proposedText\":\"这一句也不在\",\"rationale\":\"用来验证所选范围以外的提议会被拦下。\"}]}"
-        ],
-        "usage": {
-          "inputTokens": 260,
-          "outputTokens": 90
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "791d954ebc38a92562493357f6c557684a919e4603ac599ea88bff16bd20e67f",
-      "response": {
-        "kind": "answer-chunks",
-        "chunks": [
-          "{\"schema\":\"ai7.agent-workspace.change-set/1\",\"items\":[{\"anchor\":\"可见曾本之所谓七十小寿寿宴的确非同寻常\",\"proposedText\":\"可见曾本之这场七十小寿寿宴的确非同寻常\",\"rationale\":\"「这场」比「所谓」更贴合叙述者对寿宴的态度。\"}]}"
-        ],
-        "usage": {
-          "inputTokens": 250,
-          "outputTokens": 40
-        }
-      }
-    },
-    {
-      "unitOrdinal": 2,
-      "requestDigest": "f2d64e73838855d2d4d6abbd43268ecb5d83fd94d8b8eeaa6c3c13e13b4497b7",
+      "requestDigest": "299fddd755f1f36055e45d9cafadf987c1232becba6d2cdd2e634a0029f1c31b",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"死亡年份与后文来信时间需要对照；先作为未解线索保留。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"所选段落的新添说明需与原文区分，留给编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
-          "inputTokens": 1460,
-          "outputTokens": 130
-        }
-      }
-    },
-    {
-      "unitOrdinal": 3,
-      "requestDigest": "8e5f6c6b8a60f2727561e4cffb063f0041d4af7b9de7143adb216471bf99c80a",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"梦中的那一声沉雷\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"梦境与现场的界线尚待后文交代，请复核这条叙事线索。\",\"clauseId\":\"plot-consistency/1\"},{\"quote\":\"他将眼前的景物\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"此处观察与此前梦境的衔接需要后文核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 1490,
-          "outputTokens": 200
-        }
-      }
-    },
-    {
-      "unitOrdinal": 4,
-      "requestDigest": "dbd86e64c751a6a03dbcd26230c7acf8706e81175834a2c47d2e82c831944def",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1520,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 5,
-      "requestDigest": "f6e601e491bd4216e9c0e551f417fe8108b67039a281c5f5bcfb03d02ea7c408",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1550,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 6,
-      "requestDigest": "b4099c36e294a9fd763ba7600131b81fb412b70730413cc7ac929b4a3083659f",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1580,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 7,
-      "requestDigest": "b583ab37ce6d76fbcea6ca339dbd8725a4e1bf00e92cfd75359ce06dfdce4dd8",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1610,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 8,
-      "requestDigest": "828ec854e74b002c1bb5f7e552038292efa41884c04e3a60dd7bc804909355ae",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1640,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "79ac790beaa6bcd3a4bc52b69cc379e7d2357c1ab50f82eb98933256bf8fa20d",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
-        "usage": {
-          "inputTokens": 1660,
-          "outputTokens": 100
+          "inputTokens": 800,
+          "outputTokens": 80
         }
       }
     },
@@ -146,25 +33,51 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "eeec1a5ae34460b5991a9db001ad9026f0c4f87bb8b43d769ff37e1d16bda551",
+      "requestDigest": "641cd92d18b8aa8911ccf42bc2da4cade39332fb1d02ba06423a8263bd69cd58",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
         "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
+          "inputTokens": 1630,
+          "outputTokens": 100
         }
       }
     },
     {
-      "unitOrdinal": 1,
-      "requestDigest": "4caf32a39f7a553fd50f5af46cc06ae4be0d4e06c5a357d6b2a178682f1ac1b3",
+      "unitOrdinal": 0,
+      "requestDigest": "791d954ebc38a92562493357f6c557684a919e4603ac599ea88bff16bd20e67f",
+      "response": {
+        "chunks": [
+          "{\"schema\":\"ai7.agent-workspace.change-set/1\",\"items\":[{\"anchor\":\"可见曾本之所谓七十小寿寿宴的确非同寻常\",\"proposedText\":\"可见曾本之这场七十小寿寿宴的确非同寻常\",\"rationale\":\"「这场」比「所谓」更贴合叙述者对寿宴的态度。\"}]}"
+        ],
+        "kind": "answer-chunks",
+        "usage": {
+          "inputTokens": 250,
+          "outputTokens": 40
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "79ac790beaa6bcd3a4bc52b69cc379e7d2357c1ab50f82eb98933256bf8fa20d",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"〔离开前刚写下的字〕\",\"blockOrdinal\":1,\"severity\":\"note\",\"clauseId\":\"plot-consistency/1\",\"note\":\"新增说明与正文的叙事关系需核对；保留为编辑判断的线索。\"}]}",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
         "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 130
+          "inputTokens": 1660,
+          "outputTokens": 100
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "8dadf7c8f4ef77c9990dc1655bffac271be7efbd519fad5f7748cdc0988ecd15",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"所选段落的新添说明需与原文区分，留给编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "usage": {
+          "inputTokens": 800,
+          "outputTokens": 80
         }
       }
     },
@@ -182,19 +95,22 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "641cd92d18b8aa8911ccf42bc2da4cade39332fb1d02ba06423a8263bd69cd58",
+      "requestDigest": "aa5ef4594b21112d61aa6eb63d3c491db9efe0e2931b0c595467b74280193630",
       "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
+        "chunks": [
+          "{\"schema\":\"ai7.agent-workspace.change-set/1\",\"items\":[{\"anchor\":\"其存在的意义被视为国宝中的国宝\",\"proposedText\":\"被视为国宝中的国宝\",\"rationale\":\"删去「其存在的意义」，判断直接落在器物上，更凝练。\"},",
+          "{\"anchor\":\"用如此器物作为评价\",\"proposedText\":\"以如此重器作比\",\"rationale\":\"「作比」比「作为评价」更简洁，也点明器物之重。\"},{\"anchor\":\"这一句并不在所选范围之中\",\"proposedText\":\"这一句也不在\",\"rationale\":\"用来验证所选范围以外的提议会被拦下。\"}]}"
+        ],
+        "kind": "answer-chunks",
         "usage": {
-          "inputTokens": 1630,
-          "outputTokens": 100
+          "inputTokens": 260,
+          "outputTokens": 90
         }
       }
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "f95eb919f948cebede2451b853484bd69b75e1ffe60338d9b14c538058bf320d",
+      "requestDigest": "eeec1a5ae34460b5991a9db001ad9026f0c4f87bb8b43d769ff37e1d16bda551",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
@@ -205,39 +121,99 @@
       }
     },
     {
-      "unitOrdinal": 0,
-      "requestDigest": "96f182b6e14d3afa264c163d44e38e552db173551cea4da5f1f9e9fb5ea70b14",
+      "unitOrdinal": 1,
+      "requestDigest": "c6ffad25b9096338093b327c5089762309035e8bcc3b604e0f095b9c2f9414ea",
       "response": {
         "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"〔离开前刚写下的字〕\",\"blockOrdinal\":1,\"severity\":\"note\",\"clauseId\":\"plot-consistency/1\",\"note\":\"新增说明与正文的叙事关系需核对；保留为编辑判断的线索。\"}]}",
         "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        },
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}"
+          "inputTokens": 1430,
+          "outputTokens": 130
+        }
       }
     },
     {
-      "unitOrdinal": 0,
-      "requestDigest": "d512a5c298448e56442d7b8ced4348cd39407267281d83f180d5ecbcff3340d4",
+      "unitOrdinal": 2,
+      "requestDigest": "0cb03856a32de3c1cffa04b5b336e454ace11c7ce4e20268aad92a38415bb1a1",
       "response": {
         "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"死亡年份与后文来信时间需要对照；先作为未解线索保留。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        },
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"所选段落的新添说明需与原文区分，留给编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}"
+          "inputTokens": 1460,
+          "outputTokens": 130
+        }
       }
     },
     {
-      "unitOrdinal": 0,
-      "requestDigest": "18bb1736effb56d5738f6a14d4b8aea18e56f143bd58831e30ce03db9bde675a",
+      "unitOrdinal": 3,
+      "requestDigest": "b5844eec21d963dafb10b51203ae182cd32811640f2d1a50b750df792d703d98",
       "response": {
         "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"梦中的那一声沉雷\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"梦境与现场的界线尚待后文交代，请复核这条叙事线索。\",\"clauseId\":\"plot-consistency/1\"},{\"quote\":\"他将眼前的景物\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"此处观察与此前梦境的衔接需要后文核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        },
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"所选段落的新添说明需与原文区分，留给编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}"
+          "inputTokens": 1490,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "2abd5088b58105a5fdce06f2c504f20a8e82cf0e0bf7afcbdef08c004a6f9b68",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1520,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "5b74842c90926e0d5480f135750d3bce49d6a7d6a89ff6c14da4551819fc5aa6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1550,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "742df15844ff50877a1343d899667011e4d6e392b7fab1944a54587146df0319",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1580,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "82afc676f7177fdff62c79662704f43a962ddd5a14af7b2ca49b123ba93d472e",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1610,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "4f9e6cda69c01045a882400c05dd99d84cef04f5a8a8cffef9192f1032af8e83",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1640,
+          "outputTokens": 60
+        }
       }
     }
   ]

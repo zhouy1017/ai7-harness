@@ -1,6 +1,6 @@
 import { ModelResultReader, NO_USABLE_MODEL_ENTRIES, type SalvagedModelResult, canonicalJson, sha256Hex } from './canonical.js';
 import type { EvidenceAssuranceLevel } from '../../shared/protocol.js';
-import { FACTUAL_REVIEW_PROMPT_CONTRACT, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, parseFactualReviewUnitResult, type FactualUnitAssertion } from './factual-review-contract.js';
+import { FACTUAL_REVIEW_PROMPT_CONTRACT, preOccurrenceFactualPrompt, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, parseFactualReviewUnitResult, type FactualUnitAssertion } from './factual-review-contract.js';
 import { parseFactualEvidenceRelations, parseFactualCorrectionVariants, type FactualEvidenceRelation, type FactualCorrectionEntry } from './factual-review-contract-v2.js';
 import { FACTUAL_CLAIM_EXTRACTION_CONTRACT, FACTUAL_CLAIM_VERIFICATION_CONTRACT } from './factual-claim-ledger.js';
 import { factualReviewLevelDefinition, type AnalysisKindDefinition } from './kind-definition.js';
@@ -12,7 +12,7 @@ export const FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA = 'ai7.factual-claim-verif
 /** A new prompt pin; the existing v1/v2 prompts and fixture identities remain immutable. */
 export const FACTUAL_CLAIM_EXTRACTION_PROMPT = {
   schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT,
-  systemPrompt: FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt.replaceAll(FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, FACTUAL_CLAIM_EXTRACTION_CONTRACT),
+  systemPrompt: preOccurrenceFactualPrompt(FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt).replaceAll(FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, FACTUAL_CLAIM_EXTRACTION_CONTRACT),
   responseSchema: FACTUAL_CLAIM_EXTRACTION_CONTRACT,
   tools: [],
 } as const;

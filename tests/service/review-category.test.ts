@@ -81,7 +81,7 @@ it('reconstructs only the known historical review grammar with the actual v27 co
     else { expect(refreshed).not.toBe(mismatched); expect(refreshed[field]).toBe(actual[field]); }
   }
   const variants = historicalReviewCategoryDefinitions(TYPOS_AND_USAGE, 2);
-  expect(variants).toHaveLength(2);
+  expect(variants).toHaveLength(4);
   for (const expected of [plain, actual]) {
     const restored = variants.find((candidate) => candidate.promptContractDigest === expected.promptContractDigest)!;
     expect(restored).toBeDefined(); expect(restored.systemPrompt).toBe(expected.systemPrompt);
