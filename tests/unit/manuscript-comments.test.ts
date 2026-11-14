@@ -160,6 +160,7 @@ describe('comments command parity and refresh continuity', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
     Object.assign(miniDocument.body, { getBoundingClientRect: () => ({ top: 0, left: 0, right: 1000, bottom: 700, width: 1000, height: 700 }) });
+    vi.stubGlobal('getComputedStyle', () => ({ position: 'static' }));
     vi.stubGlobal('matchMedia', () => ({ matches: true }));
     vi.stubGlobal('HTMLDetailsElement', MiniElement);
     vi.stubGlobal('HTMLFormElement', MiniElement);
