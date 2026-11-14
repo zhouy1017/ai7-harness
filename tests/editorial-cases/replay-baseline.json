@@ -621,9 +621,9 @@
         "unmatched": 0
       },
       "recordedUsage": {
-        "requests": 22,
-        "inputTokens": 16300,
-        "outputTokens": 5670
+        "requests": 15,
+        "inputTokens": 10700,
+        "outputTokens": 3780
       },
       "contractsAgree": null,
       "fixtures": [
@@ -772,9 +772,9 @@
         "unmatched": 0
       },
       "recordedUsage": {
-        "requests": 22,
-        "inputTokens": 16300,
-        "outputTokens": 5670
+        "requests": 15,
+        "inputTokens": 10700,
+        "outputTokens": 3780
       },
       "contractsAgree": null,
       "fixtures": [
