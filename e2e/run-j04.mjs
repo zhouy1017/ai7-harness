@@ -1093,7 +1093,7 @@ async function main() {
     runRoot = await runRootAcquisition;
     cancellation.throwIfRequested();
     dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
-    const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    let shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
     // The bound fixture identity is a launch control; the Issue #48 stages relaunch with the transient-retry variant.
@@ -1831,9 +1831,11 @@ async function main() {
     cancellation.throwIfRequested();
     // Reconstruct the accepted reader-93 encoding on an isolated copy, using the migration suite's
     // predecessor writer. This is historical fixture construction, not damage to a product record.
+    at('historical-policy-fixture');
     const currentDataRoot = dataRoot;
+    const currentShellRoot = shellRoot;
     const historicalDataRoot = resolve(runRoot, 'historical-policy-reader');
-    await cp(currentDataRoot, historicalDataRoot, { recursive: true });
+    await cp(currentDataRoot, historicalDataRoot, { recursive: true, filter: (source) => source !== currentShellRoot });
     const historicalHelper = resolve(runRoot, 'historical-policy-fixture.mjs');
     await build({ entryPoints: [resolve(ROOT, 'tests/support/analysis-ledger-revisions.ts')], bundle: true,
       platform: 'node', format: 'esm', outfile: historicalHelper, logLevel: 'silent' });
@@ -1842,6 +1844,8 @@ async function main() {
     try { constructPre94PolicyEncoding(historicalDatabase); } finally { historicalDatabase.close(); }
     dataRoot = historicalDataRoot;
     try {
+      shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+      at('historical-policy-startup');
       await launchForCleanup();
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'historical-policy-ready');
       try {
@@ -1863,7 +1867,7 @@ async function main() {
         }
       } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
       await closeOwnedBrowser();
-    } finally { dataRoot = currentDataRoot; }
+    } finally { dataRoot = currentDataRoot; shellRoot = currentShellRoot; }
     at('restart-immutable');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');

@@ -986,6 +986,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'assurance-sampling',
     'run-report',
     'return-to-range',
+    'historical-policy-fixture',
+    'historical-policy-startup',
     'historical-policy-result-wide',
     'historical-policy-result-gate',
     'restart-immutable',
