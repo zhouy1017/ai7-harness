@@ -2198,6 +2198,7 @@ async function run(): Promise<void> {
     // change; a plan freezes whichever binding is configured when it is frozen, so a route switch reaches new Tasks only.
     const productionState: { live: OrdinaryProductionLaunchBinding | null; fast: ConfiguredProviderBinding | null } = { live: null, fast: null };
     const openedStore = store;
+    void openedStore.startCheckpointWorker();
     const modelServiceChanged = async (): Promise<LaunchPolicyProjection> => {
       if (production === null) return launchPolicy;
       const configured = configuredRoleBindingOf(openedStore);
@@ -2506,7 +2507,7 @@ async function run(): Promise<void> {
         if (serving.store.replacementWaiting()) throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
       },
       dispatch: async (request) => {
-        if (request.op === 'shutdown') await stopOwners();
+        if (request.op === 'shutdown') { await stopOwners(); await serving.store.stopCheckpointWorker(true); }
         let response: ServiceResponse;
         try {
           response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
@@ -2551,6 +2552,7 @@ async function run(): Promise<void> {
       // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
       // #434 review).
       await stopOwners();
+      await store?.stopCheckpointWorker();
     } finally {
       store?.close();
     }

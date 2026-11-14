@@ -604,12 +604,12 @@ export class WalCheckpointPolicy {
     this.#pageBytes = asNumber((db.prepare('PRAGMA page_size').get() as SqlRow).page_size) + 24;
   }
 
-  #logBytes(): number {
+  frames(): number {
     const row = this.db.prepare('PRAGMA wal_checkpoint(NOOP)').get() as SqlRow;
-    return Math.max(0, asNumber(row.log)) * this.#pageBytes;
+    return Math.max(0, asNumber(row.log));
   }
 
-  #fileBytes(): number {
+  fileBytes(): number {
     try { return statSync(`${this.path}-wal`).size; }
     catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return 0;
@@ -617,21 +617,23 @@ export class WalCheckpointPolicy {
     }
   }
 
+  needsMaintenance(): boolean { return this.frames() * this.#pageBytes >= this.limits.softBytes; }
+
   /** Refuse before BEGIN; the renderer retains and retries the exact command through its existing protection path. */
   admitJournalWrite(): void {
-    requireStore(this.#logBytes() < this.limits.hardBytes, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
+    requireStore(this.frames() * this.#pageBytes < this.limits.hardBytes, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
     const space = statfsSync(dirname(this.path));
     requireStore(space.bavail * space.bsize >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘剩余空间不足，请释放空间后重试保存。');
   }
 
   maintain(idle: boolean, force = false): { busy: boolean; beforeBytes: number; afterBytes: number } | null {
-    if (!force && this.#logBytes() < this.limits.softBytes) return null;
-    const beforeBytes = this.#fileBytes();
+    if (!force && this.frames() * this.#pageBytes < this.limits.softBytes) return null;
+    const beforeBytes = this.fileBytes();
     const timeout = asNumber((this.db.prepare('PRAGMA busy_timeout').get() as SqlRow).timeout);
     this.db.exec('PRAGMA busy_timeout = 0');
     try {
       const result = this.db.prepare(`PRAGMA wal_checkpoint(${idle ? 'TRUNCATE' : 'PASSIVE'})`).get() as SqlRow;
-      return { busy: asNumber(result.busy) !== 0, beforeBytes, afterBytes: this.#fileBytes() };
+      return { busy: asNumber(result.busy) !== 0, beforeBytes, afterBytes: this.fileBytes() };
     } finally {
       this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
     }

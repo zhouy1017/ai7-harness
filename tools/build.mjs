@@ -185,6 +185,7 @@ async function ensureClosedOutputs() {
     'notices/fonts/OFL-Sans.txt',
     'notices/fonts/OFL-Serif.txt',
     'service/index.mjs',
+    'service/wal-checkpoint-worker.mjs',
     'shared/data-root.mjs',
     'shared/network-denial.mjs',
   ]);
@@ -457,6 +458,12 @@ async function main() {
     entryPoints: [resolve(ROOT, 'src', 'service', 'index.ts')],
     format: 'esm',
     outfile: outputPath('service', 'index.mjs'),
+  });
+  await runEsbuild({
+    ...nodeBuild,
+    entryPoints: [resolve(ROOT, 'src', 'service', 'wal-checkpoint-worker.ts')],
+    format: 'esm',
+    outfile: outputPath('service', 'wal-checkpoint-worker.mjs'),
   });
   await runEsbuild({
     ...nodeBuild,

@@ -7,6 +7,7 @@ import type { JournalEditInput, JournalStructuralEdit } from '../../src/shared/p
 installNodeNetworkDenial();
 const [dataRoot, codeRoot, manuscriptId, branchId] = process.argv.slice(2);
 const store = await EditorialStore.open(dataRoot!, codeRoot!);
+if (!await store.startCheckpointWorker()) throw new Error('CHECKPOINT_WORKER_NOT_STARTED');
 let window = store.getManuscriptWindow(manuscriptId!, branchId!, null);
 const blockId = window.blocks.find(block => block.kind === 'paragraph' && block.text.length > 0)!.blockId;
 const newBlockId = newParagraphIdentity();

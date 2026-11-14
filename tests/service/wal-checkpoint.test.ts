@@ -16,14 +16,16 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
 const helper = join(codeRoot, '.cache', 'service', `wal-crash-child-${process.pid}.mjs`);
 let roots: ServiceTestRoots, store: EditorialStore | undefined, child: ChildProcess | undefined;
+let pinned: DatabaseSync | undefined;
 let book: { manuscriptId: string; branchId: string };
 const database = () => join(roots.dataRoot, 'store', 'ai7.sqlite');
 beforeAll(async () => {
   await mkdir(join(codeRoot, '.cache', 'service'), { recursive: true });
+  await build({ entryPoints: [join(codeRoot, 'src/service/wal-checkpoint-worker.ts')], outfile: join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24.18', logLevel: 'silent' });
   await build({ entryPoints: [join(codeRoot, 'tests/support/wal-crash-child.ts')], outfile: helper,
     bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24.18', logLevel: 'silent' });
 });
-afterAll(async () => { await rm(helper, { force: true }); });
+afterAll(async () => { await rm(helper, { force: true }); await rm(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), { force: true }); });
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-wal-recovery-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -39,7 +41,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   if (child && child.exitCode === null && child.signalCode === null) { const stopped = once(child, 'exit'); child.kill('SIGKILL'); await stopped; }
-  child = undefined; store?.close(); store = undefined; await roots.dispose();
+  child = undefined; pinned?.close(); pinned = undefined; store?.close(); store = undefined; await roots.dispose();
 });
 function edit() {
   const window = store!.getManuscriptWindow(book.manuscriptId, book.branchId, null);
@@ -52,6 +54,7 @@ function edit() {
 describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('recovers every acknowledged edit after killing the store process while the edits exist only in WAL', async () => {
     store!.markCleanShutdown(); store!.close(); store = undefined;
+    pinned = new DatabaseSync(database(), { readOnly: true }); pinned.exec('BEGIN'); pinned.prepare('SELECT * FROM branch_working_state').all();
     child = spawn(process.execPath, [helper, roots.dataRoot, roots.codeRoot, book.manuscriptId, book.branchId], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     let childError = ''; child.stderr?.on('data', bytes => { childError = (childError + String(bytes)).slice(-6000); });
     const [message] = await Promise.race([once(child, 'message'), once(child, 'exit').then(([code]) => { throw new Error('WAL child exited before acknowledgement: ' + String(code) + '\n' + childError); })]);
@@ -63,6 +66,7 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
     try { expect(disk.prepare('SELECT journal_sequence FROM branch_working_state WHERE branch_id = ?').get(book.branchId)).toMatchObject({ journal_sequence: 0 }); }
     finally { disk.close(); }
     const stopped = once(child, 'exit'); child.kill('SIGKILL'); await stopped;
+    pinned.close(); pinned = undefined;
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const recovered = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
     expect(recovered.journalSequence).toBe(ack.sequence);

@@ -1,3 +1,4 @@
+import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
@@ -2778,6 +2779,7 @@ export class EditorialStore {
   #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
   #recoveryObjectLifecycleTail: Promise<void> = Promise.resolve();
   readonly #checkpoint: WalCheckpointPolicy;
+  #checkpointWorker: WalCheckpointMaintenance | undefined;
   #cleanShutdownMarked = false;
   #poisoned = false;
   readonly #reimportPreparationWork = new Map<string, ReimportPreparationWork>();
@@ -3373,9 +3375,17 @@ export class EditorialStore {
     }
   }
 
+  /** The single checkpoint worker never writes data; authority/journal/ingest remain the only data writers. */
+  startCheckpointWorker(factory?: CheckpointWorkerFactory): Promise<boolean> {
+    this.#checkpointWorker ??= new WalCheckpointMaintenance(this.#checkpoint, join(this.#dataRoot, 'store', 'ai7.sqlite'), factory);
+    return this.#checkpointWorker.ready;
+  }
+
+  async stopCheckpointWorker(clean = false): Promise<void> { await this.#checkpointWorker?.stop(clean); }
+
   /** Called only after the service response frame has been written. */
   checkpointAfterResponse(idle: boolean): ReturnType<WalCheckpointPolicy['maintain']> {
-    return this.#checkpoint.maintain(idle);
+    return this.#checkpointWorker ? this.#checkpointWorker.maintain(idle) : this.#checkpoint.maintain(idle);
   }
 
   markCleanShutdown(): void {
@@ -5983,6 +5993,7 @@ export class EditorialStore {
   }
 
   close(): void {
+    this.#checkpointWorker?.abort();
     // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
     this.#indexStopped = true;
     this.#indexQueue.length = 0;
@@ -13314,9 +13325,12 @@ export class EditorialStore {
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
     this.#assertAvailable();
-    this.#checkpoint.admitJournalWrite();
-    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
+    if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite();
+    else this.#checkpoint.admitJournalWrite();
+    const ack = this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
       new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+    this.#checkpointWorker?.journalWritten();
+    return ack;
   }
 
   inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,
