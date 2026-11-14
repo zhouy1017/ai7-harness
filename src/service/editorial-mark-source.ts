@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { EditorialMarkBasisProjection, EditorialMarkSourceProjection } from '../shared/protocol.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, modelServiceChannelOf } from '../shared/protocol/model-service.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
+import { sentReasoningEffort } from '../shared/runtime-execution-config.js';
 
 export interface MarkModelBinding { route: string; model: string; reasoningEffort?: string | null }
 type ModelLabels = Pick<EditorialMarkSourceProjection, 'modelLabel' | 'modelTechnicalLabel'>;
@@ -33,7 +34,8 @@ export function markModelLabels(binding: MarkModelBinding | null): ModelLabels {
   const channel = modelServiceChannelOf(binding.route);
   const provider = channel === null ? binding.route : MODEL_SERVICE_ROUTE_BINDINGS[channel].providerLabel;
   const display = CONFIGURED_RUNTIME_MODEL_LABELS[`${binding.route}/${binding.model}`] ?? binding.model;
-  const effort = binding.model.includes('@') || !binding.reasoningEffort ? '' : `@${binding.reasoningEffort}`;
+  const sent = sentReasoningEffort(binding.reasoningEffort);
+  const effort = binding.model.includes('@') || sent === null ? '' : `@${sent}`;
   return {
     modelLabel: `${display}${effort}`,
     modelTechnicalLabel: `${provider} · ${binding.model}${effort}`,

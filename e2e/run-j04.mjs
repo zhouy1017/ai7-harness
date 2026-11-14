@@ -680,7 +680,12 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
 
 async function importSample1(renderer, cancellation, distinct = false) {
   await click(renderer, '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
+  try { await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target'); }
+  catch (error) {
+    const state = await renderer.evaluate(`({screen:document.querySelector('#screen')?.dataset.screen,status:document.querySelector('#persistence-status')?.textContent})`);
+    process.stderr.write(`J04_IMPORT_STATE/${JSON.stringify(state)}\n`);
+    throw error;
+  }
   at('sample1-import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
@@ -3947,7 +3952,6 @@ async function main() {
         await closeOwnedBrowser();
         await launchForCleanup();
         await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-restart-ready');
-        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-choice-library');
         await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-library-ready');
         // The stock unit-child fixture admits first reviews. Each viewport starts a fresh Book, rather than asking that
@@ -3958,6 +3962,7 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-import-library');
         await renderer.evaluate(`document.querySelector('button[data-book-id="${choiceBook.bookId}"]').click()`);
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'dispatch-choice-book');
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await openReviewDestination(renderer, 'dispatch-choice-review');
         await reviewAction(renderer, '[data-review-action="new-review"]', 'dispatch-choice-new');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet .dispatch-chooser select')?.options.length>1`, 'dispatch-choice-sheet');
