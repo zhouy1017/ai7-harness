@@ -28,10 +28,11 @@ async function commentsConnectorExposure(renderer, check, waitFor) {
       await renderer.evaluate(`(() => {
         const id=document.querySelector('[data-comment-card][data-selected="true"]').dataset.commentCard;
         const words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
-        globalThis.__connectorStyle ??= document.head.appendChild(document.createElement('style'));
-        __connectorStyle.textContent=''; const r=words.getClientRects()[0];
+        globalThis.__connectorStyle ??= {sheet:document.styleSheets[0],index:document.styleSheets[0].cssRules.length};
+        if(__connectorStyle.sheet.cssRules.length>__connectorStyle.index)__connectorStyle.sheet.deleteRule(__connectorStyle.index);
+        const r=words.getClientRects()[0];
         const offset=(${covered} ? p.left+8-r.left : p.left+8-r.right);
-        __connectorStyle.textContent='.editor-window [data-mark-id="'+CSS.escape(id)+'"] { position:relative; left:'+offset+'px; }';
+        __connectorStyle.sheet.insertRule('.editor-window [data-mark-id="'+CSS.escape(id)+'"] { position:relative; left:'+offset+'px; }',__connectorStyle.index);
         window.dispatchEvent(new Event('resize'));
       })()`);
       await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))`);
@@ -45,7 +46,7 @@ async function commentsConnectorExposure(renderer, check, waitFor) {
       else await waitFor(renderer, commentsConnectorVisible, 'comments-partial-connector-visible');
     }
   } finally {
-    await renderer.evaluate(`(() => { __connectorStyle.remove(); delete globalThis.__connectorStyle; window.dispatchEvent(new Event('resize')); })()`);
+    await renderer.evaluate(`(() => { __connectorStyle.sheet.deleteRule(__connectorStyle.index); delete globalThis.__connectorStyle; window.dispatchEvent(new Event('resize')); })()`);
   }
   await waitFor(renderer, commentsConnectorVisible, 'comments-connector-restored');
 }
