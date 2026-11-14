@@ -41,7 +41,7 @@ The Owner's 0.6.1 human test (#1400) found that the code still asked for a secon
 
 ### 4.1 The editor's own choice is the action
 
-When the choice the editor has just made already fixes the exact consequence, AI7 prepares, validates, approves and commits in that same step:
+When the choice the editor has just made already fixes the exact consequence, AI7 validates and commits in that same step. For the task starts migrated under [ADR 0104](0104-launch-tasks-with-an-immutable-execution-snapshot.md), start captures one execution snapshot and creates the runnable task atomically, without a prepared/awaiting-approval phase:
 
 - **Export.** Choosing the place in the system Save or folder dialog is the final export authorization — for a manuscript, a document, a review report, a 审稿意见 draft, the Book delivery package (folder or archive) and the database export. AI7 binds the Local Export Preparation to the returned target and records its Effect Approval and per-file receipt at once; native cancellation writes nothing, and `按上述方式导出` survives only as a retry after a refused write. A delivery package defaults to the purpose 常规交付打包 with every available file included.
 - **Series.** `加入书系`, `移出书系`, `添加检索排除` and `停止此排除` record in one click against the impact read at that click; the impact groups stay on the record. Knowledge and exclusion forms open on their first choice. `纳入书系知识` stays explicit, and a real knowledge conflict still requires editing the candidate or `保留已披露冲突`.
