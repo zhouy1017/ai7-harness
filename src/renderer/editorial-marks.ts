@@ -680,7 +680,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let suppressCommentSelection = false;
   let pendingMarkClick: { hitId: string | undefined; frame: number } | undefined;
   let markClickGeneration = 0;
-  Object.assign(window, { __connectorSelectionFlags: () => ({ pressed: pressedComment !== undefined, textPointerDown, suppressed: suppressCommentSelection, pendingClick: pendingMarkClick !== undefined }) });
   /** The card an applied revision's badge brought forward (Issue #1411), and whether it is still to be scrolled to. */
   let revealed: { readonly markId: string; readonly pending: boolean } | undefined;
   /** The pane position a reveal scrolled the text to: this surface's own movement, which never pages the window. */
@@ -1115,10 +1114,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       commentsReading++;
       void cardCache.read(mark.markId, () => {
         commentsCanvas.dataset['cardReads'] = String(++commentCardReads);
-        const probe = window as unknown as { __holdConnectorReads?: boolean; __connectorCases?: { cases: Array<{ id: string }> }; __releaseConnectorReads?: Array<() => void> };
-        if (probe.__holdConnectorReads && probe.__connectorCases?.cases.some(item => item.id === mark.markId)) {
-          return new Promise<EditorialMarkCardProjection>(resolve => { (probe.__releaseConnectorReads ??= []).push(() => { void api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId: mark.markId }).then(resolve); }); });
-        }
         return api.getEditorialMarkCard({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId: mark.markId });
       }, retryFailed)
         .catch((error) => { if (!destroyed && current === editor.currentWindow()) options.setStatus(options.errorMessage(error, '批注内容未能读取。'), 'error'); })

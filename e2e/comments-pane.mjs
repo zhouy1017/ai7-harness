@@ -59,24 +59,15 @@ async function commentsSeedConnectorCases(renderer, check, waitFor) {
     }
     return false;
   })()`), 'comments-seed-real-connector-ranges');
-  await renderer.evaluate('globalThis.__holdConnectorReads=true');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-connector-reload-overview');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'comments-connector-overview-ready');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('manuscript'))), 'comments-connector-reload-manuscript');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'comments-connector-editor-ready');
   await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]');if(entry.getAttribute('aria-expanded')!=='true')entry.click();document.querySelector('.editor-window [data-block-id="'+__connectorCases.blockId+'"]').scrollIntoView({block:'center',behavior:'instant'}); })()`);
   for(const index of [0,1,2]) {
-    await waitFor(renderer, `document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]')?.hidden===false`, 'comments-connector-case-card');
-    await renderer.evaluate(`(() => { const node=document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]');globalThis.__connectorFocusProbe={node,events:0,pending:node.hasAttribute('data-comment-pending')};node.addEventListener('focusin',()=>__connectorFocusProbe.events++);node.focus({preventScroll:true}); })()`);
-    if(index===0) {
-      for(const modifiers of [8,0]) { await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers});await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers}); }
-      await renderer.evaluate(`(() => { __connectorFocusProbe.before={focused:document.hasFocus(),active:document.activeElement===__connectorFocusProbe.node,selected:__connectorFocusProbe.node.dataset.selected==='true',flags:__connectorSelectionFlags()};__holdConnectorReads=false;(__releaseConnectorReads??[]).splice(0).forEach(done=>done()); })()`);
-    }
-    try { await waitFor(renderer, `document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]')?.dataset.selected==='true'`, 'comments-connector-case-selected'); }
-    catch {
-      const flags=await renderer.evaluate(`(() => { const node=document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]');return {before:__connectorFocusProbe.before,wasPending:__connectorFocusProbe.pending,focusEvents:__connectorFocusProbe.events,replaced:node!==__connectorFocusProbe.node,oldConnected:__connectorFocusProbe.node.isConnected,focused:document.hasFocus(),activeTag:document.activeElement?.tagName,activeCard:node===document.activeElement,selected:node?.dataset.selected==='true',pending:node?.hasAttribute('data-comment-pending'),flags:__connectorSelectionFlags()}; })()`);
-      check(false,'comments-connector-case-selected',flags);
-    }
+    // A loading row is focusable before its card has arrived. Select through the same
+    // ready-card and real mouse-input path as the rest of the editor interaction flow.
+    await commentsSelectMark(renderer, check, waitFor, await renderer.evaluate(`__connectorCases.cases[${index}].id`));
     const geometry=`(() => {
       const item=__connectorCases.cases[${index}], words=document.querySelector('.editor-window [data-mark-id="'+item.id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
       const rects=Array.from(words.getClientRects()).filter(r=>r.width>0&&r.height>0), first=rects[0], dot=document.querySelector('.manuscript-comments-leaders circle'), svg=dot?.ownerSVGElement;
