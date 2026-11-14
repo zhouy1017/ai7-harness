@@ -3109,13 +3109,24 @@ export class BaselineAnalysisStore {
       ? { ...binding, route: route.route, credentialSlot: route.credentialSlot, scope: 'ordinary-production', runBudgetCeiling: 'unset' } : this.#launch.live });
   }
 
-  /** A fresh task and its run authority are written together; no pending approval is observable. */
-  launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string,
-    execution: LaunchBinding): AnalysisProjection {
-    return this.forkForLaunch(execution).#launchTask(input, snapshotId);
+  /** Freeze the journal before a mixed review reads its local and model-backed members. */
+  checkpointAtLaunch(bookId: string): void {
+    const head = this.#binding(bookId);
+    const work = this.#checkpointOwner.createManuscriptCheckpointWork(head.manuscriptId, head.branchId, TASK_INPUT_CHECKPOINT_PURPOSE);
+    if (work.workId === null) return;
+    try {
+      while (!this.#checkpointOwner.advanceManuscriptCheckpointWork(work.workId).done) { /* Same launch transaction. */ }
+      this.#checkpointOwner.finalizeManuscriptCheckpointWork(work.workId, () => undefined);
+    } catch (error) { this.#checkpointOwner.cancelManuscriptCheckpointWork(work.workId); throw error; }
   }
 
-  #launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string): AnalysisProjection {
+  /** A fresh task and its run authority are written together; no pending approval is observable. */
+  launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string,
+    execution: LaunchBinding, deferred = false): AnalysisProjection {
+    return this.forkForLaunch(execution).#launchTask(input, snapshotId, deferred);
+  }
+
+  #launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string, deferred: boolean): AnalysisProjection {
     this.#requireDeniedPolicy(input.launchPolicy);
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     const existing = this.inspect(input.bookId);
@@ -3141,6 +3152,7 @@ export class BaselineAnalysisStore {
       this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy);
       const plan = this.inspect(input.bookId);
       requireAnalysis(plan.planEnvelope?.dispatchAllowed && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
+      if (deferred) return;
       const authorizationId = randomUUID(), runRecordId = randomUUID(), instant = new Date().toISOString();
       const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen: 'now',
         planEnvelopeDigest: plan.planEnvelope.digest, planVersionId: plan.planVersion.planVersionId, planVersionOrdinal: 1,

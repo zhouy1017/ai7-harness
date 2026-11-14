@@ -57,7 +57,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   store.factualReviewLedger.bindLaunch(launch);
   const unmatched: string[] = [];
   const requests: AnalysisRequestIdentity[] = [];
-  const wireRequests: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
+  const wireRequests: Array<{ model: string; reasoning_effort?: string; messages: Array<{ role: string; content: string }> }> = [];
   const nativeFetch: typeof fetch = async (url, init) => {
     const refuse = (reason = 'unmatched-request'): never => { unmatched.push(reason); throw new Error('CAPTURED_ORDINARY_UNMATCHED_REQUEST'); };
     if (String(url) !== allowed.endpoint || init === undefined) return refuse();

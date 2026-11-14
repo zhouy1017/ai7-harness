@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
@@ -115,7 +116,10 @@ describe('composite procedures and 全文审校 (#1173)', () => {
     const bookId = await book(target, '全文审校公开样书');
     const pin = fullReview(target);
     target.procedureLibrary({ action: 'select', bookId, procedure: pin });
-    const run = prepare(target, bookId, policy, pin);
+    const current = target.getManuscriptWindow(target.getBookOverview(bookId).manuscriptAnchor!.manuscriptId, target.getBookOverview(bookId).manuscriptAnchor!.branchId, null), first = current.blocks[0]!;
+    target.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: current.manuscriptId, branchId: current.branchId, baseRevisionId: current.revisionId, blockId: first.blockId, windowStartBlockId: first.blockId, baseBlockDigest: first.digest, expectedJournalSequence: current.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '公开样书修订。' });
+    const run = target.launchReviewRun({ bookId, clientCommandId: randomUUID(), categoryIds: MEMBERS, scope: WHOLE, localCheck: LOCAL, procedureDefinition: pin }, policy).projection.run!;
+    expect(run.manuscript.journalSequence).toBe(current.journalSequence + 1);
     expect(run.categories.map((category) => category.categoryId)).toEqual(MEMBERS);
     expect(run.preinstalledProcedures!.map((entry) => entry.procedure.procedureId)).toEqual(['ai7-procedure/local-text-check', ...Array(4).fill(FULL_REVIEW)]);
     const plan = target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId });
@@ -128,7 +132,6 @@ describe('composite procedures and 全文审校 (#1173)', () => {
       expect(envelopes).toEqual(['review-typos-and-usage', 'review-style-and-format', 'review-plot-consistency', 'factual-claim-check']
         .map((executor) => ({ pinned: FULL_REVIEW, executor: `ai7-procedure/${executor}` })));
     } finally { db.close(); }
-    target.authorizeReviewRun(bookId, run.reviewRunId, plan.start.categoryDigests);
     const order: string[] = [];
     const driver = new ReviewRunDriver(target.reviewRunDriveSteps, {
       // A stand-in owner that sends nothing: each member's Run ends at once, so the next member's turn comes.
@@ -200,11 +203,10 @@ describe('composite procedures and 全文审校 (#1173)', () => {
     const target = await open('ai7-procedure-deferred-run-');
     const policy = await ordinaryProduction(target);
     const bookId = await book(target, '全文审校空闲成员样书');
-    const run = prepare(target, bookId, policy, deferStyle(target, bookId));
+    const run = target.launchReviewRun({ bookId, clientCommandId: randomUUID(), categoryIds: MEMBERS, scope: WHOLE, localCheck: LOCAL, procedureDefinition: deferStyle(target, bookId) }, policy).projection.run!;
     const plan = target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId });
     expect(plan.steps.map((step) => step.label)).toContain('逐章审读：体例与格式（空闲时处理）');
     expect(run.categories.find((category) => category.categoryId === 'style-and-format')!.stateLabel).toBe('空闲时处理');
-    target.authorizeReviewRun(bookId, run.reviewRunId, plan.start.categoryDigests);
     const lane = idleLaneOwner();
     const driver = new ReviewRunDriver(target.reviewRunDriveSteps, lane.owner);
     const loop = driver.drive(run.reviewRunId);

@@ -33,7 +33,7 @@ import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factua
 import { resolveFixtureEntry, loadModelFixture, reviewFixtureContractVersion, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
-import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
+import { driveLaunchedReviewRun, ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import {
   NEVER_REVIEWED_REASON,
   MAX_SELECTION_BLOCKS,
@@ -2684,7 +2684,7 @@ describe('one-step review launch (#1455)', () => {
       expect(first.repeated).toBe(false);
       expect(repeated.repeated).toBe(true);
       expect(repeated.projection.run!.reviewRunId).toBe(first.projection.run!.reviewRunId);
-      expect(() => session.store.launchReviewRun({ ...input, categoryIds: [STYLE] }, launchPolicy)).toThrow();
+      expect(() => session.store.launchReviewRun({ ...input, categoryIds: [STYLE] }, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_LAUNCH_COMMAND_CHANGED', message: expect.stringContaining('请重新发起') }));
       await session.driver.drive(first.projection.run!.reviewRunId);
       const finished = workspace(session, book, first.projection.run!.reviewRunId).run!;
       expect(finished.state).toBe('settled');
@@ -2734,8 +2734,18 @@ describe('one-step review launch (#1455)', () => {
       expect(launched.manuscript.journalSequence).toBe(current.journalSequence);
       const second = await importSample1Book(session.store, roots.codeRoot, '选区检查');
       await pinEditorialWorkspaceProfileRevision2(session.store, second.bookId);
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(second.branchId);
+      const first = blocks.find((block, index) => block.kind === 'paragraph' && blocks[index + 1]?.kind === 'paragraph')!;
+      const gone = blocks.find(block => block.position === first.position + 1)!;
+      const window = session.store.getManuscriptWindowAt(second.manuscriptId, second.branchId, { kind: 'block', blockId: first.blockId });
+      session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: second.manuscriptId, branchId: second.branchId,
+        baseRevisionId: window.revisionId, blockId: first.blockId, windowStartBlockId: window.blocks[0]!.blockId,
+        baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: first.graphemes, toGrapheme: first.graphemes,
+        insertText: '', structure: { kind: 'merge', mergedBlockId: gone.blockId, mergedBlockDigest: gone.digest } });
+      expect(session.store.baselineAnalysisLedger.readWorkingBlocks(second.branchId).some(block => block.blockId === gone.blockId)).toBe(false);
       expect(() => session.store.launchReviewRun({ bookId: second.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
-        scope: { kind: 'selection', fromChapterBlockId: 'blk_missing', toChapterBlockId: 'blk_missing' } }, launchPolicy)).toThrow();
+        scope: { kind: 'selection', fromChapterBlockId: gone.blockId, toChapterBlockId: gone.blockId } }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'REVIEW_SCOPE_INVALID', message: expect.stringContaining('重新选择') }));
       expect(workspace(session, second).run).toBeNull();
     });
   });
@@ -2757,4 +2767,112 @@ describe('one-step review launch (#1455)', () => {
     });
   });
 
+});
+
+
+describe('launched review lifecycle regressions (#1455)', () => {
+  it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
+    let gated: GatedOwner | null = null;
+    const session = await open('sample1-review-cross-chapter-authored', inner => (gated = new GatedOwner(inner, 2)));
+    try {
+      const book = await importBook(session);
+      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const loop = session.driver.drive(run.reviewRunId);
+      await gated!.reached;
+      const stopped = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId, action });
+      if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
+      else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
+      gated!.release(); await loop;
+      expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(STYLE_AND_FORMAT)).run).toBeNull();
+      if (action === 'cancel') {
+        expect(workspace(session, book, run.reviewRunId).run!.categories[1]!.state).toBe('refused');
+        const next = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+        await session.driver.drive(next.reviewRunId);
+        expect(workspace(session, book, next.reviewRunId).run!.state).toBe('settled');
+      } else {
+        await session.driver.continue(run.reviewRunId);
+        expect(workspace(session, book, run.reviewRunId).run!.categories.every(category => category.state === 'settled')).toBe(true);
+      }
+    } finally { (gated as GatedOwner | null)?.release(); await close(session); }
+  });
+
+  it('cancels a launched run after restart and immediately launches an undispatched category again', async () => {
+    let book!: Book, reviewRunId!: string;
+    await withSession('sample1-review-cross-chapter-authored', async first => {
+      book = await importBook(first);
+      reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
+      const steps = first.store.reviewRunDriveSteps, handoff = steps.start(reviewRunId, TYPOS)!;
+      handoff.ledger.recordRunState(handoff.runRecordId, 'admitted', { detail: '测试中断前已进入调度。' });
+      handoff.ledger.recordRunState(handoff.runRecordId, 'executing', { detail: '测试中断前正在运行。' });
+      steps.recordDispatch(reviewRunId, TYPOS, handoff.runRecordId);
+    });
+    await withSession('sample1-review-cross-chapter-authored', async second => {
+      const cancelled = second.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'cancel' });
+      if (cancelled.runRecordId !== null) second.owner.cancelRun(cancelled.runRecordId, cancelled.ledger);
+      await second.driver.continue(reviewRunId);
+      expect(workspace(second, book, reviewRunId).run!.categories[1]!.state).toBe('refused');
+      const next = second.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      await second.driver.drive(next.reviewRunId);
+      expect(workspace(second, book, next.reviewRunId).run!.state).toBe('settled');
+    });
+  });
+
+  it('transmits a non-default channel and model with effort and stamps its card, report and task row', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const chosen = session.store.getModelServiceRouteConnection('opencode-go')!;
+      const defaultConnection = session.store.getModelServiceRouteConnection('deepseek-open-platform')!;
+      session.store.saveModelServiceConnection(defaultConnection.connectionName, defaultConnection.credentialReference, 'ready', 'deepseek-open-platform');
+      session.store.selectModelServiceRoute('deepseek-open-platform');
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial');
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        executionConfig: { modelConnectionId: chosen.connectionId, modelId: 'account-future-model', reasoningEffort: 'high' } };
+      const launched = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      await session.driver.drive(launched.reviewRunId);
+      expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(session.capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
+      const run = session.store.generateReviewReport(book.bookId, launched.reviewRunId).run!;
+      expect(run.state).toBe('settled');
+      expect(run.modelLabel).toBe('account-future-model@high');
+      expect(run.report!.record.run.modelLabel).toBe('account-future-model@high');
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings.find(finding => finding.markId !== null)!.markId!);
+      expect(card.source.modelLabel).toBe('account-future-model@high');
+      expect(session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items).find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === run.reviewRunId)!.item.modelLabel).toBe('account-future-model@high');
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+    });
+  });
+});
+
+
+it('replays a committed launch after restart and drives it once without a second send (#1455)', async () => {
+  let book!: Book;
+  const clientCommandId = randomUUID();
+  let reviewRunId!: string;
+  await withSession('sample1-review-cross-chapter-authored', async session => {
+    book = await importBook(session);
+    reviewRunId = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
+    // The process closes after commit, before it could acknowledge or start the driver.
+  });
+  await withSession('sample1-review-cross-chapter-authored', async session => {
+    const input = { bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE };
+    const repeated = session.store.launchReviewRun(input, launchPolicy);
+    expect(repeated.repeated).toBe(true);
+    expect(repeated.projection.run!.reviewRunId).toBe(reviewRunId);
+    await Promise.all([driveLaunchedReviewRun(session.driver, repeated), driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy))]);
+    const events = eventTrail(reviewRunId);
+    expect(events.filter(([, state]) => state === 'dispatched')).toHaveLength(2);
+    expect(workspace(session, book, reviewRunId).run!.state).toBe('settled');
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
+    expect(eventTrail(reviewRunId)).toEqual(events);
+  });
+});
+
+it('launches model-free baseline leads without a credential (#1455)', async () => {
+  await withBaselineBook(async (session, book) => {
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);
+    session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', live: null, policy });
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [PLOT], scope: WHOLE }, policy);
+    expect(launched.projection.run!.categories[0]!.taskIntentId).toBeNull();
+    await driveLaunchedReviewRun(session.driver, launched);
+    expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
+  });
 });

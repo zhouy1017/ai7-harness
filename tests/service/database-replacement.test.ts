@@ -1,3 +1,4 @@
+import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
 import { DialogueExecutionOwner } from '../../src/service/dialogue/dialogue-execution.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -1496,5 +1497,23 @@ it('adds launch snapshots to a revision-114 SampleBook in place (#1455)', async 
     expect(store.getBookOverview(book.bookId).book.title).toBe('启动快照迁移');
     expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.length).toBeGreaterThan(0);
     store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+
+it('replaces populated instance launch snapshots with the exported instance-free database (#1455)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await importSample1Book(store, roots.codeRoot, '启动快照替换样书');
+    launchLocalForSnapshot(store, roots.codeRoot, book.bookId);
+    expect(await inspectLaunchSnapshots(roots.dataRoot, db => db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n)).toBe(1);
+    const preview = await store.inspectDatabaseImport(await exported(store, 'launch-snapshot-replacement.ai7db'));
+    await store.prepareDatabaseReplacement(preview.previewId, T);
+    store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.getBookOverview(book.bookId).book.title).toBe('启动快照替换样书');
+    await inspectLaunchSnapshots(roots.dataRoot, db => {
+      expect(db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n).toBe(0);
+      expect(db.prepare("SELECT count(*) n FROM sqlite_schema WHERE type='trigger' AND tbl_name='task_launch_snapshots'").get()!.n).toBe(2);
+    });
   } finally { store.close(); }
 });

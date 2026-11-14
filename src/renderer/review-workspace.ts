@@ -72,7 +72,6 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
-import { oneActionStart } from './one-action-start.js';
 import { mountHouseWordList } from './house-word-list.js';
 import { parseBookTerms, validBookTerms } from '../shared/protocol/deterministic.js';
 import type { BookTermEntry } from '../shared/protocol/procedures.js';
@@ -334,6 +333,8 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  estimate?: string;
+  launchInput?: string;
   executionConfig?: RuntimeExecutionConfig;
   chooser?: ReturnType<typeof createDispatchChooser>;
   choicePending?: boolean;
@@ -2798,6 +2799,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const problem = el('p', 'review-problem review-sheet-problem');
     problem.id = uid('sheet-problem');
     problem.setAttribute('role', 'alert');
+    const estimateNotice = el('p', 'review-estimate'); estimateNotice.setAttribute('role', 'status');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
     const start = actionButton('start', 'primary', () => void startOrEstimateRun(state, 'start'));
@@ -2814,11 +2816,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
-    form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, progress, actions);
+    form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
+    for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; });
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
+      estimateNotice.textContent = state.estimate ?? '';
+      estimateNotice.hidden = state.estimate === undefined;
       const preparing = state.launchPending === true || state.choicePending === true;
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
@@ -2977,13 +2982,25 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ...(state.definition?.composite !== true ? {} : { procedureDefinition: state.definition.pin }),
       };
       if (mode === 'preview') {
-        state.problem = '预计调用次数与阅读范围见上方；开始审阅时按当前稿件启动。';
+        const bounds = chaptersOf(state);
+        const from = bounds.from;
+        const to = bounds.to;
+        const workspace = projection;
+        const estimates = workspace.categories.filter(category => categoryIds.includes(category.categoryId)).map(category => {
+          const count = estimateReviewCalls(category, state.scope, workspace.scopeUnitCounts, from && to ? { startPosition: from.position, endPosition: to.endPosition } : null);
+          return `${category.label}：${count === null ? '按所选范围估计' : `约 ${count} 次调用`}`;
+        });
+        state.estimate = estimates.join('；');
+        state.problem = null;
         sheetUpdate();
         options.setStatus('已显示审阅估计。', 'success');
         return;
       }
       options.setStatus(REVIEW_STATUS_LINES.launching, 'busy');
       state.launchPending = true;
+      const launchInput = JSON.stringify({ preparationInput, executionConfig: state.executionConfig ?? {} });
+      if (state.launchInput !== launchInput) delete state.clientCommandId;
+      state.launchInput = launchInput;
       state.clientCommandId ??= crypto.randomUUID();
       sheetUpdate();
       const result = await api.launchReviewRun({ ...preparationInput, clientCommandId: state.clientCommandId,

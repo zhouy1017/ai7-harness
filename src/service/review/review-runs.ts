@@ -760,6 +760,7 @@ function boundedTitle(title: string): string {
  * kind's, and the leads read the baseline's.
  */
 export interface ReviewRunLedgers {
+  executionFor?(binding: import('../launch-policy.js').ConfiguredProviderBinding): LaunchBinding;
   learningLedger?: () => import('../learning/ledger.js').EditorialLearningLedger;
   ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null, contractVersion?: 1 | 2): BaselineAnalysisStore;
   /**
@@ -1419,10 +1420,16 @@ export class ReviewRunStore {
     return this.#advance(work);
   }
 
-  /** Direct launch: plan and runnable categories share one transaction and one execution choice. */
+  requiresModel(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
+    return this.#forBook(bookId, this.#configuration()).categories.some(entry => categoryIds.includes(entry.categoryId) &&
+      entry.executor !== 'baseline-leads' && entry.executor !== 'local-text-check' && entry.executor !== 'unavailable');
+  }
+
+  /** Direct launch freezes all category plans; the driver starts each from that choice at its turn. */
   launch(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, snapshotId: string,
     binding: import('../launch-policy.js').ConfiguredProviderBinding | null): { reviewRunId: string; manuscript: unknown } {
     const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
+    this.#ledgers.baseline().checkpointAtLaunch(input.bookId);
     const work = this.#buildWork(input, execution);
     let reviewRunId: string;
     if ('done' in work) {
@@ -1435,7 +1442,7 @@ export class ReviewRunStore {
           undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
         const projection = ledger.launchTask({ ...request, reconfirm: false,
-          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution);
+          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution, true);
         work.prepared.push(this.#snapshotCategory(planned, projection));
       }
       reviewRunId = this.#writeRun(work);
@@ -2253,6 +2260,19 @@ export class ReviewRunStore {
   }
 
   #categoryLedger(category: SnapshotCategory): BaselineAnalysisStore {
+    const ledger = this.#categoryDefinitionLedger(category);
+    if (category.task === null || this.#ledgers.executionFor === undefined) return ledger;
+    const frozen = ledger.frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
+    const provider = frozen.components['provider-resolution-plan'] as Record<string, unknown>;
+    const route = provider.executionRoute as Record<string, unknown>;
+    const remote = provider.remoteBinding as Record<string, unknown>;
+    if (!isRecord(remote?.providerProcessing) || remote.providerProcessing.operationalScope !== 'ordinary-production') return ledger;
+    const binding = { route: route.kind, model: route.model, endpoint: route.endpoint, credentialSlot: remote.credentialSlot,
+      credentialReference: remote.credentialReference, ...(typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}) } as import('../launch-policy.js').ConfiguredProviderBinding;
+    return ledger.forkForLaunch(this.#ledgers.executionFor(binding));
+  }
+
+  #categoryDefinitionLedger(category: SnapshotCategory): BaselineAnalysisStore {
     if (category.task === null || category.entry.executor !== 'review-category-contract') return this.#ledgers.ledgerOf(category.entry);
     const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const execution = frozen.components['execution-plan'] as Record<string, unknown>;

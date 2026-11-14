@@ -1,3 +1,4 @@
+import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { asDraftRevision105 } from '../support/draft-revisions.js';
 import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
@@ -2135,4 +2136,23 @@ it('merges a custom derivative category and its document management state with i
     expect(target.inspectProductionDocuments(book.bookId).types.find((type) => type.typeId === category.typeId))
       .toMatchObject({ label: '活动文案', documents: [{ documentId: doc.documentId, finalized: true }] });
   } finally { target.close(); }
+});
+
+
+it('keeps destination launch snapshots and excludes populated source snapshots during a Book merge (#1455)', async () => {
+  const sourceBook = await withStore(roots.dataRoot, async store => {
+    const book = await importBook(store, await compose('来源启动快照样书', [1, 2]));
+    launchLocalForSnapshot(store, roots.codeRoot, book.bookId); return book;
+  });
+  const destinationCommand = await withStore(otherRoot, async store => {
+    const book = await importBook(store, await compose('本机启动快照样书', [3, 4]));
+    return launchLocalForSnapshot(store, roots.codeRoot, book.bookId);
+  });
+  withAttached(otherRoot, roots.dataRoot, db => mergeBooks(db, [sourceBook.bookId], { source: roots.dataRoot, target: otherRoot }));
+  await withStore(otherRoot, store => expect(store.getBookOverview(sourceBook.bookId).book.title).toBe('来源启动快照样书'));
+  await inspectLaunchSnapshots(otherRoot, db => {
+    expect(db.prepare('SELECT client_command_id FROM task_launch_snapshots').all()).toEqual([{ client_command_id: destinationCommand }]);
+    expect(() => db.exec('DELETE FROM task_launch_snapshots')).toThrow('TASK_LAUNCH_IMMUTABLE');
+  });
+  expect(await inspectLaunchSnapshots(roots.dataRoot, db => db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n)).toBe(1);
 });

@@ -405,7 +405,7 @@ export class FastRoleRequests {
     const scopedStore = store as ScopedEditStore;
     let executionOwner = this.#owner;
     let captured: ReturnType<typeof prepareScopedEdit> | null = null;
-    if (store.captureScopedAiEditLaunch !== undefined) {
+    if (store.captureScopedAiEditLaunch !== undefined && (input.clientCommandId !== undefined || input.executionConfig !== undefined)) {
       const launched = store.captureScopedAiEditLaunch({ ...input, bookId, clientCommandId: input.clientCommandId ?? randomUUID() }, binding => {
         executionOwner = this.scopedOwner?.(binding) ?? this.#owner;
         try { captured = prepareScopedEdit(executionOwner, scopedStore, bookId, input); }

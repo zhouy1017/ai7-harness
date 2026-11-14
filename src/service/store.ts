@@ -2911,6 +2911,8 @@ export class EditorialStore {
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#customAnalysisDimensions = new CustomAnalysisDimensions(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
+      executionFor: binding => this.#baselineAnalysis.withExecutionChoice(binding,
+        resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', binding)).launch,
       learningLedger: () => this.#learningLedger(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
@@ -4055,7 +4057,7 @@ export class EditorialStore {
     try {
       const { clientCommandId, executionConfig = {}, ...request } = input;
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
-        () => input.categoryIds.every(category => category === 'local-text-check') ? { executionConfig: {}, binding: null } : this.#launchChoice('main-editorial', executionConfig), (choice, snapshotId) => {
+        () => !this.#reviewRuns.requiresModel(input.bookId, input.categoryIds) ? { executionConfig: {}, binding: null } : this.#launchChoice('main-editorial', executionConfig), (choice, snapshotId) => {
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           const planned = this.#reviewRunRequest(input.bookId, input.categoryIds, input.scope, policy,

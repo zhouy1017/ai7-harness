@@ -77,7 +77,7 @@ import type { CooperativeJobOwner } from './cooperative-jobs.js';
 import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacementWaits } from './replacement-gate.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/baseline-analysis-store.js';
-import type { ReviewRunDriver } from './review/review-run-driver.js';
+import { driveLaunchedReviewRun, type ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
 // Session-only, scoped to the open store; never written into the device setting or database.
@@ -1149,7 +1149,7 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'launchReviewRun': {
       const launched = store.launchReviewRun(request.input, launchPolicy);
-      if (!launched.repeated && launched.projection.run !== null) driveReviewRun(reviewRuns, launched.projection.run.reviewRunId);
+      void driveLaunchedReviewRun(reviewRuns, launched);
       return { id: request.id, ok: true, op: request.op, result: store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress) };
     }
     case 'prepareReviewRun':
