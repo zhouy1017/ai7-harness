@@ -1,4 +1,5 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
+import { validReasoningEffort } from '../shared/runtime-execution-config.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
@@ -578,8 +579,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
     case 'testModelServiceConnection': {
-      const input = requireInput(value.input, ['route', 'modelId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
+      if (input.reasoningEffort !== undefined && !validReasoningEffort(input.reasoningEffort)) throw new ProtocolError(tentativeId);
+      if (input.fastReasoningEffort !== undefined && !validReasoningEffort(input.fastReasoningEffort)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'refreshModelServiceModels':

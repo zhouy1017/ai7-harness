@@ -2517,7 +2517,9 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .model-service-catalogue { width: 100%; max-height: 20rem; overflow-y: auto; }
 .model-service-catalogue-row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
 .model-service-catalogue-row[hidden] { display: none; }
-.model-service-filter { display: grid; gap: .3rem; }
+.model-service-filter, .model-service-effort { display: grid; gap: .3rem; min-width: 0; }
+.model-service-effort { margin-top: .6rem; }
+.model-service-effort input { width: 100%; min-width: 0; }
 [data-model-service-mode="ordinary"] > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 [data-model-service-mode="ordinary"] .model-service-flow-models { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 [data-model-service-mode="ordinary"] select { width: 100%; min-width: 0; }

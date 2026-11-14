@@ -127,7 +127,7 @@ describe('the persisted search settings and schema 74', () => {
       expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
       const terminal = new DatabaseSync(path);
       // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(113);
+      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(114);
       expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
       expect(() => terminal.prepare("INSERT INTO search_backend_connections (backend_id, credential_reference, credential_operation_state, selected, selected_at) VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow(/CHECK constraint failed: backend_id IN/u);
       terminal.exec('DROP TABLE search_backend_connections'); terminal.close();

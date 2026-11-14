@@ -100,12 +100,25 @@
             }
           }
         }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-responses",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "source": "https://developers.openai.com/api/docs/guides/reasoning",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [
     "Account/model access requires the editor-initiated exact-binding text test; no live access was tested by Issue #1044.",
-    "Function tools, opaque reasoning replay, structured outputs, reasoning control and native streaming remain unadmitted.",
+    "Function tools, native reasoning replay, effort control and streaming have provider-free family coverage (#1180, #1453); structured outputs remain unsupported. This does not establish live account/model access.",
     "429/account denial is classified by the existing adapter; AI7 does not automatically retry or choose another binding."
   ]
 }

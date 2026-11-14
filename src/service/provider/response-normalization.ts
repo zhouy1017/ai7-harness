@@ -197,8 +197,7 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
     truncated = body.stop_reason === 'max_tokens';
     entries = body.content.filter((part) => isBlockOfType(part, 'tool_use'));
     reasoningPresent = profile.capabilities.reasoningChannel === 'content-thinking-blocks' && body.content.some((part) => isBlockOfType(part, 'thinking'));
-    executable &&= body.stop_reason === 'tool_use' && !body.content.some((part) => isRecord(part) &&
-      (part.type === 'thinking' || part.type === 'redacted_thinking' || part.signature !== undefined || part.thoughtSignature !== undefined));
+    executable &&= body.stop_reason === 'tool_use';
     read = (part) => isRecord(part) && typeof part.id === 'string' && typeof part.name === 'string' && isRecord(part.input)
       ? { id: part.id, name: part.name, arguments: JSON.stringify(part.input) } : null;
   } else if (channel === 'output-message-text') {
@@ -209,7 +208,7 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
     truncated = body.status !== undefined && body.status !== 'completed';
     entries = output.filter((part) => isBlockOfType(part, 'function_call'));
     reasoningPresent = profile.capabilities.reasoningChannel === 'output-reasoning-items' && output.some((part) => isBlockOfType(part, 'reasoning'));
-    executable &&= body.status === 'completed' && !output.some((part) => isBlockOfType(part, 'reasoning'));
+    executable &&= body.status === 'completed';
     read = (part) => isRecord(part) && typeof part.call_id === 'string' && typeof part.name === 'string' && typeof part.arguments === 'string' && (part.status === undefined || part.status === 'completed')
       ? { id: part.call_id, name: part.name, arguments: part.arguments } : null;
   } else if (channel === 'candidate-parts-text') {
@@ -221,7 +220,7 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
     truncated = candidate.finishReason !== undefined && candidate.finishReason !== 'STOP';
     entries = parts.filter((part) => isRecord(part) && part.functionCall !== undefined);
     reasoningPresent = profile.capabilities.reasoningChannel === 'candidate-thought-parts' && parts.some((part) => isRecord(part) && part.thought === true);
-    executable &&= candidate.finishReason === 'STOP' && !parts.some((part) => isRecord(part) && (part.thought === true || part.thoughtSignature !== undefined));
+    executable &&= candidate.finishReason === 'STOP';
     read = (part, index) => {
       const call = isRecord(part) && isRecord(part.functionCall) ? part.functionCall : null;
       if (call === null || typeof call.name !== 'string' || (call.args !== undefined && !isRecord(call.args))) return null;

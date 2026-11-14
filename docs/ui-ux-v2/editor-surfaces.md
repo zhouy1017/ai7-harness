@@ -4,6 +4,10 @@ Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-reposito
 
 [ADR 0102](../adr/0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) retires runtime policy-lock refusals. 模型服务 uses the editor's configured channel and model; ordinary cards retain their frozen「模型@思考强度」mark. Historical policy identities remain historical technical metadata and are never a prerequisite for opening results.
 
+## #1453：模型服务的角色思考强度
+
+设置 › 模型服务为主执行、快速交互各保存一个思考强度默认值。两个输入框分别显示和保存本角色的默认值；保存其中一个不会覆盖另一个。建议值来自服务自身文档，Gemini 按模型区分等级与数值预算；没有已核实声明的渠道不提供建议值。手填值由服务验证，并提示可能不被接受；清空表示服务默认。未保存输入在连接测试、刷新与轮询后保留。保存模型时一并保存对应强度，重新打开分别显示原值；两个连接测试分别使用对应角色的输入值。普通模式只在角色摘要、卡片和任务结果显示「模型@思考强度」，不展示协议或思考内容。任务准备时冻结实际发送的强度；后来修改角色默认值不改变旧任务或旧结果。未指定强度时由服务决定，不补写历史标记。协议版本 202、应用版本 0.7.0 不变；数据库 114 原位增加两个可空角色默认值，保留 113 的连接、模型选择、缓存和凭据引用，并从配置记录保留旧版角色原本隐含的 high，其余旧角色留空。
+
 ## 2026-11-04 Owner 决定
 
 本节记录 [#1314](https://github.com/zhouy1017/ai7-harness/issues/1314) 对 [主 Issue #1313](https://github.com/zhouy1017/ai7-harness/issues/1313) 的决定；实施 PR 的 Change closure 应回链 #1314。对应实施切片如下：

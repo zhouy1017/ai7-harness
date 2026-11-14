@@ -133,6 +133,7 @@ export function productionDialogueRoute(
   policy: () => LaunchPolicyProjection,
   credentialReference: () => string | null,
   secretResolver: SecretResolver,
+  reasoningEffort: () => string | undefined = () => undefined,
 ): DialogueLiveRoute {
   return {
     runtime,
@@ -146,7 +147,8 @@ export function productionDialogueRoute(
     broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
     get route() {
       const admitted = admittedDialogueRoute(policy());
-      return admitted !== null && credentialReference() !== null ? admitted : null;
+      return admitted !== null && credentialReference() !== null ? { ...admitted,
+        ...(reasoningEffort() === undefined ? {} : { reasoningEffort: reasoningEffort()! }) } : null;
     },
     get credentialReference() {
       return credentialReference() ?? '';
@@ -408,6 +410,7 @@ export class DialogueExecutionOwner {
         (turn.globalRoute !== undefined ? turn.sourceGuard?.() === true : live.current?.(credentialReference, route) ?? true));
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
+      const effortConfig = route?.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort };
       const composition = describeComposition(executionRoute, model, promptContractDigest, workspace && localRule === null ? AGENT_WORKSPACE_COMPOSITION_OPTIONS
         : scoped !== null ? { version: 2, sessionLog: true, localTools: scoped } : { sessionLog: true, localTools: localRule !== null });
       const localRuntime = live === null ? records.localFixtureRuntime?.() : null;
@@ -420,11 +423,12 @@ export class DialogueExecutionOwner {
           kind: null, purpose: workspace ? 'agent-workspace' : 'editorial-dialogue',
           contractId: workspace ? null : 'ai7.editorial-dialogue/1', composition, categories: [DIALOGUE_OUTBOUND_CATEGORY],
         } };
-      const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}`);
+      const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}${route?.reasoningEffort === undefined ? '' : `\u0000${route.reasoningEffort}`}`);
       const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
         bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference, isCurrent,
       };
       const bindingFacts: EgressBindingFacts = {
+        ...effortConfig,
         bindingDigest,
         route: executionRoute,
         model,
@@ -469,6 +473,7 @@ export class DialogueExecutionOwner {
       // The single-use ticket the gate issued for the turn in flight; the live adapter takes it or refuses.
       let pendingTicket: TransmitTicket | null = null;
       const harness: PrimaryAgentHarnessHandle = await prepareExecution({
+        ...effortConfig,
         ...(active.producer === null ? {} : { acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, turnSignal: AbortSignal) => {
           const combined = AbortSignal.any([active.requestAbort.signal, turnSignal]);
           const permit = await this.#deps.requestGovernor.acquire(active.producer!, combined)
@@ -512,6 +517,7 @@ export class DialogueExecutionOwner {
           // A scoped Global turn keeps the whole-answer request tool rounds use elsewhere: the SSE shape admits no Global tools.
           const streamShape = scoped === null && streamingDeclared(route.modelProfile) ? 'editorial-dialogue-sse' as const : null;
           const adapter = new DeepSeekOpenAiCompatibleAdapter({
+            ...effortConfig,
             broker: live.broker,
             slotBinding,
             tickets: { take: () => { const ticket = pendingTicket; pendingTicket = null; return ticket; } },
@@ -583,6 +589,7 @@ export class DialogueExecutionOwner {
             harnessSessionId: sessionId,
             route: route.profile.route as OrdinaryProductionRouteId,
             model,
+            reasoningEffort: route.reasoningEffort === 'off' ? null : route.reasoningEffort ?? null,
             operationalScope: route.operationalScope,
             behaviorCompositionSha256: harness.composition.digest,
             promptContractSha256: promptContractDigest,

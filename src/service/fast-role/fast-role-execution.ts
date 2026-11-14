@@ -163,10 +163,12 @@ export function productionFastRoleRoutes(
   secretResolver: SecretResolver,
   current?: (reference: string, route: AdmittedFastRoleRoute) => boolean,
   credentialGeneration?: () => string | null,
+  reasoningEffort: () => string | undefined = () => undefined,
 ): FastRoleLiveRoutes {
   const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => {
     const admitted = admittedFastRoleRoute(policy(), kind.kindId, categoryIn(kind, 'ordinary-production'));
-    return admitted !== null && credentialReference() !== null ? admitted : null;
+    return admitted !== null && credentialReference() !== null ? { ...admitted,
+      ...(reasoningEffort() === undefined ? {} : { reasoningEffort: reasoningEffort()! }) } : null;
   };
   return {
     runtime,
@@ -322,6 +324,7 @@ export class FastRoleExecutionOwner {
        (live.credentialGeneration === undefined || (credentialGeneration !== null && live.credentialGeneration() === credentialGeneration)));
     const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
     const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
+    const effortConfig = route?.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort };
     const promptContractDigest = editorialMemoryDigest(kind.promptContractDigest, memory);
     const systemPrompt = editorialMemoryPrompt(kind.systemPrompt, memory);
     const sessionId = randomUUID();
@@ -333,11 +336,12 @@ export class FastRoleExecutionOwner {
       execution: { selectedPolicyIdentity: localRuntime.selectedPolicyIdentity, profile: localProfile, kind: kind.kindId, purpose: null,
         contractId: kind.kindId === 'editorial-polish' ? 'ai7.editorial-polish/1' : kind.kindId === 'conflict-regenerate' ? 'ai7.conflict-regenerate/1' : null,
         composition, categories: [kind.category] } satisfies LocalFixtureExecutionContext };
-    const bindingDigest = sha256Hex(`${kind.kindId}\u0000${sessionId}\u0000${composition.digest}`);
+    const bindingDigest = sha256Hex(`${kind.kindId}\u0000${sessionId}\u0000${composition.digest}${route?.reasoningEffort === undefined ? '' : `\u0000${route.reasoningEffort}`}`);
     const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
       bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference, isCurrent,
     };
     const bindingFacts: EgressBindingFacts = {
+      ...effortConfig,
       bindingDigest,
       route: executionRoute,
       model,
@@ -383,6 +387,7 @@ export class FastRoleExecutionOwner {
       }
       let pendingTicket: TransmitTicket | null = null;
       const harness: PrimaryAgentHarnessHandle = await prepareExecution({
+        ...effortConfig,
         ...(producer === null ? {} : { acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, turnSignal: AbortSignal) => {
           const combined = AbortSignal.any([signal, turnSignal]);
           const permit = await this.#deps.requestGovernor.acquire(producer, combined);
@@ -413,6 +418,7 @@ export class FastRoleExecutionOwner {
             return nativeFetch(url, init);
           };
           adapter = new DeepSeekOpenAiCompatibleAdapter({
+            ...effortConfig,
             broker: live.broker,
             slotBinding,
             tickets: { take: () => { const ticket = pendingTicket; pendingTicket = null; return ticket; } },
@@ -505,7 +511,7 @@ export class FastRoleExecutionOwner {
             promptContractDigest,
             route: executionRoute,
             model,
-            ...(route === null ? {} : { reasoningEffort: effectiveModelReasoningEffort(route.modelProfile) }),
+            ...(route === null ? {} : { reasoningEffort: effectiveModelReasoningEffort(route.modelProfile, route.reasoningEffort) }),
             operationalScope: route === null ? 'development-ci' : route.operationalScope,
             policyRuleId: route?.ruleId ?? null,
             fixtureSha256: route === null ? this.#deps.fixture!.sha256 : null,
@@ -581,7 +587,7 @@ export async function testModelServiceConnection(
   };
   const owner = new FastRoleExecutionOwner({ requestGovernor: execution.requestGovernor, producer, fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
     () => unchanged() ? connection.credentialReference : null, secretResolver, () => unchanged(),
-    () => store.getModelServiceRouteConnection(input.route)?.credentialUpdatedAt ?? null) });
+    () => store.getModelServiceRouteConnection(input.route)?.credentialUpdatedAt ?? null, () => input.reasoningEffort) });
   const stop = (): void => owner.dispose();
   signal?.addEventListener('abort', stop, { once: true });
   if (cancelled()) stop();

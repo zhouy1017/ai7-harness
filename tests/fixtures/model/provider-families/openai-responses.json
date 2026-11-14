@@ -28,7 +28,8 @@
           "instructions": "合成系统提示。",
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
-          "store": false
+          "store": false,
+          "include": ["reasoning.encrypted_content"]
         }
       },
       "response": {
@@ -139,6 +140,7 @@
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
           "store": false,
+          "include": ["reasoning.encrypted_content"],
           "stream": true
         }
       },
@@ -228,6 +230,7 @@
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
           "store": false,
+          "include": ["reasoning.encrypted_content"],
           "tools": [
             {
               "description": "合成查询工具。",
@@ -398,6 +401,7 @@
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
           "store": false,
+          "include": ["reasoning.encrypted_content"],
           "tools": [
             {
               "description": "合成查询工具。",
@@ -516,6 +520,7 @@
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
           "store": false,
+          "include": ["reasoning.encrypted_content"],
           "stream": true,
           "tools": [
             {
@@ -666,7 +671,8 @@
           "instructions": "合成系统提示。",
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
-          "store": false
+          "store": false,
+          "include": ["reasoning.encrypted_content"]
         }
       },
       "response": {
@@ -716,7 +722,8 @@
           "instructions": "合成系统提示。",
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
-          "store": false
+          "store": false,
+          "include": ["reasoning.encrypted_content"]
         }
       },
       "response": {
@@ -770,6 +777,7 @@
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
           "store": false,
+          "include": ["reasoning.encrypted_content"],
           "stream": true
         }
       },
@@ -843,6 +851,7 @@
           "max_output_tokens": 8192,
           "model": "gpt-5.6-luna",
           "store": false,
+          "include": ["reasoning.encrypted_content"],
           "stream": true
         }
       },

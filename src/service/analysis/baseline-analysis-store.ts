@@ -3632,8 +3632,8 @@ export class BaselineAnalysisStore {
           },
       executionRoute: live !== null
         ? { kind: live.route, model: live.model, endpoint: live.endpoint,
-            ...(effectiveModelReasoningEffort(modelProfileFor(live.route, live.model)) === null ? {} :
-              { reasoningEffort: effectiveModelReasoningEffort(modelProfileFor(live.route, live.model)) }) }
+            ...(effectiveModelReasoningEffort(modelProfileFor(live.route, live.model), live.reasoningEffort) === null ? {} :
+              { reasoningEffort: effectiveModelReasoningEffort(modelProfileFor(live.route, live.model), live.reasoningEffort) }) }
         : this.#route === null
           ? { kind: 'none', reason: 'j04-model-adapter-control-absent' }
           : {
@@ -4559,7 +4559,8 @@ export class BaselineAnalysisStore {
         UUID_PATTERN.test(reference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()),
       'ANALYSIS_ROUTE_STALE', '冻结计划不是正式使用下可执行的模型服务路线。');
       requireAnalysis('model' in route, 'ANALYSIS_ROUTE_STALE', '冻结计划缺少模型。');
-      productionBinding = { route: allowed.route, model: route.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot };
+      productionBinding = { route: allowed.route, model: route.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot,
+        ...('reasoningEffort' in route && typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}) };
     } else if (live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');

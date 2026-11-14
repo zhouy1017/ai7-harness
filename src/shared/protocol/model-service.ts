@@ -30,6 +30,8 @@ export interface ModelServiceBindingProjection {
   providerLabel: string;
   modelId: string;
   modelLabel: string;
+  /** Role default; absent/off means no explicit upstream effort control. */
+  reasoningEffort?: string;
   adapterRevision: 1;
   configurationRevision: 1;
   approvedFallbackChain: readonly [];
