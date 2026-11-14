@@ -692,7 +692,13 @@ it('offers ready channels, favourites first, and resets the task choice without 
   const model = root.querySelector('select[aria-label="本次任务的模型"]')!;
   const options = root.querySelectorAll('option');
   expect(options.some(option => option.textContent.includes('★'))).toBe(true);
+  Object.assign(model, { selectedIndex: root.querySelectorAll('optgroup')[0]!.children.length });
   model.dispatchEvent({ type: 'change' });
+  const effort = root.querySelector('select[aria-label="本次任务的思考强度"]')!;
+  const level = effort.children[1]!.value;
+  effort.value = level; effort.dispatchEvent({ type: 'change' });
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: level }));
+  expect(root.querySelector('summary')!.textContent).toContain(`@${level}`);
   root.querySelector('button')!.click();
   expect(changed).toHaveBeenLastCalledWith({});
 });
