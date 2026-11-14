@@ -50,7 +50,7 @@ Production uses the editor's own data and credentials. It never reads the develo
 
 ## Scope, policy and model boundaries
 
-[The policy index](../policies/README.md) owns current selection. At the reviewed baseline, [source launch authority](../../config/source-checkout-launch-authority.json) selects active-policy-set v16: development/CI v1, fixture-recording v2, developer-live v24 and ordinary-production v23. A JSON record's internal lifecycle status does not select it; trusted launch authority does. Fixture-recording is not selectable from this source launcher.
+[The policy index](../policies/README.md) records historical policies. [ADR 0102](../adr/0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) retires source-launch policy selection and fingerprint verification; trusted scope still selects the transport boundary. Fixture-recording is not selectable from this source launcher.
 
 The product Go binding is `deepseek-v4.1-flash`; DeepSeek 官方 is an independent production route. The generated [provider support](provider-support.md) distinguishes declared configuration, runtime implementation and recorded capability. Configuring a model or search backend grants no transmission authority. Old V4 captures remain V4 evidence, and the observed Go `zen/go` binding does not prove equivalence with a separately documented endpoint.
 

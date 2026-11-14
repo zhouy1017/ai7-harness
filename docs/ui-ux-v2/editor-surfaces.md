@@ -2,6 +2,8 @@
 
 Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), adopted as the execution standard for every editor-facing surface by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) on 2026-09-09.** 本文是实现编辑面时的执行标准：它规定每一屏的最终形态、状态、措辞、需要的数据与对应的后端能力。它不是实现证据；实现状态只记在根 `PROGRESS.md` 与 [E2E journeys](../development/e2e-journeys.md)。交付顺序只记在 [development plan](../development/development-plan.md)。
 
+[ADR 0102](../adr/0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) retires runtime policy-lock refusals. 模型服务 uses the editor's configured channel and model; ordinary cards retain their frozen「模型@思考强度」mark. Historical policy identities remain historical technical metadata and are never a prerequisite for opening results.
+
 ## 2026-11-04 Owner 决定
 
 本节记录 [#1314](https://github.com/zhouy1017/ai7-harness/issues/1314) 对 [主 Issue #1313](https://github.com/zhouy1017/ai7-harness/issues/1313) 的决定；实施 PR 的 Change closure 应回链 #1314。对应实施切片如下：

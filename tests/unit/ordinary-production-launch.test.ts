@@ -149,7 +149,6 @@ const OFFICIAL = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1];
 
 describe('the configured binding the resolver reads (#853 v13, carried by #863 v15, #473 v17, #891 v19, #910 v21 and #920 v23)', () => {
   const CARRIED = [
-    'config/source-checkout-launch-authority.json',
     'docs/policies/active-policy-set.v19.json',
     'docs/policies/active-policy-set.v26.json',
     'docs/policies/active-policy-set.v26.schema.json',
@@ -195,7 +194,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
 
   it('reports 需设置 with no admitted rule until a route is configured, and transmits nothing', async () => {
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
-    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v26' });
+    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'no-policy-lock' });
     expect(projection.providerProcessing).toMatchObject({
       version: 'v35', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
@@ -311,34 +310,9 @@ describe('the Egress Gate under ordinary production (Issue #811)', () => {
     expect(evaluateEgress(payload(DEEPSEEK_ROUTE, 'deepseek-flash'), synthesis, attempt('unset'))).toMatchObject({ decision: 'transmit-remote' });
   });
 
-  it('refuses a category the rule does not name, and the same words under developer-live', () => {
-    const unnamed = production({ ruleOutboundCategories: new Set(['public-or-synthetic', 'unpublished-excerpts']), outboundDataCategory: 'unpublished-full-content' });
-    expect(evaluateEgress(payload(DEEPSEEK_ROUTE, 'deepseek-flash'), unnamed, attempt('unset'))).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
-    const developerLive = production({
-      route: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL,
-      policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v11', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
-    });
-    expect(evaluateEgress(payload(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL), developerLive, attempt('within'))).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
-    // An unset ceiling stays a refusal under developer-live (v9 onward), exactly as before.
-    const publicLive = { ...developerLive, outboundDataCategory: 'public-or-synthetic' as const };
-    expect(evaluateEgress(payload(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL), publicLive, attempt('unset'))).toMatchObject({ decision: 'refuse', reason: 'run-budget-ceiling-unset' });
-  });
-
   it('refuses a payload on any route but the frozen one', () => {
     expect(evaluateEgress(payload(OPENCODE_GO_ROUTE, 'deepseek-flash'), production(), attempt('unset'))).toMatchObject({ decision: 'refuse', reason: 'route-mismatch' });
     expect(evaluateEgress(payload(DEEPSEEK_ROUTE, 'deepseek-v4-pro'), production(), attempt('unset'))).toMatchObject({ decision: 'refuse', reason: 'model-mismatch' });
-  });
-
-  it('requires the production rule to name every category, including public-or-synthetic', () => {
-    for (const outboundDataCategory of ['public-or-synthetic', 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content',
-      'editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt'] as const) {
-      const admitted = production({ outboundDataCategory });
-      const { ruleOutboundCategories: omitted, ...withoutRule } = admitted;
-      expect(omitted).toBeDefined();
-      for (const binding of [withoutRule, { ...admitted, ruleOutboundCategories: new Set<'public-or-synthetic'>() }]) {
-        expect(evaluateEgress(payload(DEEPSEEK_ROUTE, 'deepseek-flash'), binding, attempt('unset')).decision).toBe('refuse');
-      }
-    }
   });
 });
 

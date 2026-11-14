@@ -1,3 +1,4 @@
+import { anonymousPlatformTools } from '../support/platform-tools.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -39,12 +40,7 @@ afterEach(async () => {
   for (const root of roots) await rm(root, { recursive: true, force: true });
 });
 
-async function v7Rule(): Promise<PlatformToolsRule> {
-  const document = JSON.parse(await readFile(resolve(REPO_ROOT, 'docs/policies/provider-processing-policy.v7.json'), 'utf8')) as {
-    decision: { providerAllowRules: unknown[] };
-  };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule;
-}
+async function v7Rule(): Promise<PlatformToolsRule> { return anonymousPlatformTools(); }
 
 /** A gate both fetches wait at, so that each is in flight — its host held — while the other is too. */
 function barrier(parties: number): { arrive: () => Promise<void> } {

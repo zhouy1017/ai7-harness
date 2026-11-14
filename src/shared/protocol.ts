@@ -2755,16 +2755,16 @@ export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' 
 export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
 
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
+export type ActivePolicySetVersion = 'no-policy-lock' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
 
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
 /** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
 export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
 
-export const CURRENT_ACTIVE_SET_SHA256 = '20ce6301a65f5a661117d66d1c5f9d185d8211c65c65c660f5ad3d2976809eaa';
+export const RECORDED_V26_ACTIVE_SET_SHA256 = '20ce6301a65f5a661117d66d1c5f9d185d8211c65c65c660f5ad3d2976809eaa';
 
-export const CURRENT_PRODUCTION_POLICY_SHA256 = 'ca506c18c7d84308be2cb69f08400187a6ae49d595d32211356ea987dfbe3bcb';
+export const RECORDED_V35_PRODUCTION_POLICY_SHA256 = 'ca506c18c7d84308be2cb69f08400187a6ae49d595d32211356ea987dfbe3bcb';
 
 export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
 
@@ -2786,7 +2786,7 @@ export function isSupportedProviderProcessingVersion(scope: unknown, version: un
 export interface SelectedPolicyIdentity {
   readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
   readonly providerProcessingSha256: string;
-  readonly activePolicySetVersion: 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
+  readonly activePolicySetVersion: 'no-policy-lock' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
   readonly activePolicySetSha256: string;
 }
 
@@ -2824,7 +2824,7 @@ const SELECTED_PROVIDER_DIGESTS = {
   v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
   v29: LOCAL_FIXTURE_POLICY_SHA256,
   v30: ORIGINAL_FIELDS_POLICY_SHA256,
-  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5', v35: CURRENT_PRODUCTION_POLICY_SHA256,
+  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5', v35: RECORDED_V35_PRODUCTION_POLICY_SHA256,
 } as const;
 
 const LOCAL_FIXTURE_REGISTERED_PROFILES: readonly LocalFixtureRegisteredProfile[] = [
@@ -2839,9 +2839,12 @@ export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
 /** A closed persisted interpretation, without substituting today's selection for an absent historical field. */
 export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
+  if (value['activePolicySetVersion'] === 'no-policy-lock' && ['v1', 'v24', 'v35'].includes(String(value['providerProcessingVersion'])) &&
+      value['providerProcessingSha256'] === '0'.repeat(64) && value['activePolicySetSha256'] === '0'.repeat(64))
+    return value as unknown as SelectedPolicyIdentity;
   const version = value['providerProcessingVersion'];
   const set = value['activePolicySetVersion'];
-  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d' : set === 'v26' ? CURRENT_ACTIVE_SET_SHA256 : null;
+  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d' : set === 'v26' ? RECORDED_V26_ACTIVE_SET_SHA256 : null;
   if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31' && (version !== 'v32' && version !== 'v33' && version !== 'v34' && version !== 'v35')) ||
       value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] || setSha256 === null || value['activePolicySetSha256'] !== setSha256 ||
       !((set === 'v21' && ['v24', 'v29', 'v30'].includes(version)) || (set === 'v22' && ['v1', 'v24', 'v31'].includes(version)) || (set === 'v23' && ['v1', 'v24', 'v32'].includes(version)) || (set === 'v24' && ['v1', 'v24', 'v33'].includes(version)) || (set === 'v25' && ['v1', 'v24', 'v34'].includes(version)) || (set === 'v26' && ['v1', 'v24', 'v35'].includes(version)))) return null;
@@ -2946,7 +2949,8 @@ export function isResultSetPolicyPin(value: unknown): value is ResultSetPolicyPi
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['operationalScope', 'providerProcessingVersion', 'activePolicySetVersion', 'liveTransmissions'])) return false;
   const scope = value.operationalScope;
   return (scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production') &&
-    RECORDED_POLICY_PINS[scope].some(([version, set]) => version === value.providerProcessingVersion && set === value.activePolicySetVersion) &&
+    (RECORDED_POLICY_PINS[scope].some(([version, set]) => version === value.providerProcessingVersion && set === value.activePolicySetVersion) ||
+      value.activePolicySetVersion === 'no-policy-lock' && value.providerProcessingVersion === (scope === 'development-ci' ? 'v1' : scope === 'developer-live' ? 'v24' : 'v35')) &&
     value.liveTransmissions === (scope === 'development-ci' ? 0 : 'bounded-by-run');
 }
 
@@ -3396,7 +3400,7 @@ export interface AdmittedLocalTools {
 }
 
 export interface LaunchPolicyProjection {
-  /** Present only after the resolver verified the exact selected document bytes. */
+  /** Historical document identity, or the fixed no-policy-lock compatibility marker. */
   selectedPolicyIdentity?: SelectedPolicyIdentity;
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
@@ -3485,11 +3489,11 @@ export interface LaunchPolicyProjection {
     version: 'v2' | null;
     policyEligibilityIsEffectApproval: false;
     /**
-     * Whether a local export Effect can be offered (Issue #413): only once External Export Policy v2 verified at
-     * this launch; policy eligibility is still no approval.
+     * Whether the existing local export capability can be offered. Preparation, approval and receipt authority
+     * remain with the export owner; no policy fingerprint participates.
      */
     currentExportEffectAvailable: boolean;
-    label: '对外导出策略独立；当前未提供导出受控动作' | '对外导出策略 v2 已校验：只导出到本机所选位置，每个文件单独批准';
+    label: '对外导出策略独立；当前未提供导出受控动作' | '对外导出：只导出到本机所选位置，每个文件单独批准';
   };
   publicReleasePermission: {
     present: false;

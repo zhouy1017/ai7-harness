@@ -115,7 +115,6 @@ import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provi
 import { freezeSearchFallback, readSearchOverride } from '../provider/search-backend-settings.js';
 import {
   STOCK_TYPOS_LEAF_FIXTURE,
-  STOCK_TYPOS_LEAF_FIXTURE_SHA256,
   STOCK_TYPOS_LEAF_LOCAL_TOOLS,
   localFixtureRegisteredProfile,
 } from '../provider/model-fixture.js';
@@ -2159,8 +2158,7 @@ export class BaselineAnalysisStore {
         canonicalJson(options.sources) === canonicalJson({ baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] }) &&
         procedure !== null && canonicalJson(options.procedure) === canonicalJson(procedure.pin) &&
         canonicalJson(options.stages) === canonicalJson(procedure.document.stages.map((stage, index) => ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) }))) &&
-        (route.kind !== LOCAL_DETERMINISTIC_ROUTE || route.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE &&
-          route.fixtureSha256 === sha256Hex(`${STOCK_TYPOS_LEAF_FIXTURE}:${STOCK_TYPOS_LEAF_FIXTURE_SHA256}`)),
+        (route.kind !== LOCAL_DETERMINISTIC_ROUTE || route.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE),
       'ANALYSIS_CHILD_PROFILE_REFUSED', '冻结的单元子代理配置不属于固定标准审阅。');
       requireAnalysis(describeComposition(route.kind as ExecutionRouteId, route.model, definition.promptContractDigest, options).digest === envelope.behaviorCompositionDigest,
         'ANALYSIS_CHILD_PROFILE_REFUSED', '冻结的单元子代理组合摘要不一致。');
@@ -3509,7 +3507,7 @@ export class BaselineAnalysisStore {
     if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
     if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null) {
       requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
-        'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '当前模型处理策略尚未允许编辑任务说明。');
+        'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '这项任务暂不支持带编辑指令的工序。');
     }
     let reusePlan: AnalysisPlanRecord | null = null;
     if (this.#carriesPlan(intent.mode)) {
@@ -5052,10 +5050,10 @@ export class BaselineAnalysisStore {
        WHERE m.book_id = ? AND ${checkpoint !== undefined || this.#definition.manuscriptTarget !== undefined ? 'm.manuscript_id = ? AND mb.branch_id = ?' : "m.role = 'primary'"}`,
     ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId]),
       ...(checkpoint !== undefined ? [checkpoint.manuscriptId, checkpoint.branchId] : this.#definition.manuscriptTarget === undefined ? [] : [this.#definition.manuscriptTarget.manuscriptId, this.#definition.manuscriptTarget.branchId])) as SqlRow | undefined;
-    requireAnalysis(row !== undefined && (production
-      ? typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest)
-      : isPublicSampleBookSourceDigest(row.source_digest)),
+    requireAnalysis(row !== undefined && typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest),
     'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
+    requireAnalysis(this.#launch.operationalScope !== 'developer-live' || isPublicSampleBookSourceDigest(row.source_digest),
+      'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
     // Ordinary production with no connection yet: 模型服务需设置, naming both routes (Issue #811).
     requireAnalysis(!production || (typeof row.credential_operation_state === 'string' && typeof row.credential_reference === 'string'),
       'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
