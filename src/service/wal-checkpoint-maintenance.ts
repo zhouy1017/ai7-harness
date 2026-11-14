@@ -17,7 +17,7 @@ export class WalCheckpointMaintenance {
   #truncatePending = false;
   #nextId = 0;
   #lastWrite = Date.now();
-  #lastFrames: number;
+  #lastFrames = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #flight: { id: number; mode: Mode; done: Promise<void>; resolve: () => void } | undefined;
   #termination: Promise<number> | undefined;
@@ -30,8 +30,8 @@ export class WalCheckpointMaintenance {
     path: string,
     createWorker: CheckpointWorkerFactory = path => new Worker(new URL('./wal-checkpoint-worker.mjs', import.meta.url), { workerData: { databasePath: path } }),
   ) {
-    this.#lastFrames = policy.frames();
     try {
+      this.#lastFrames = policy.frames();
       this.#worker = createWorker(path);
       this.#worker.on('message', (packet: Result | { ready: true }) => {
         if ('ready' in packet) {
@@ -45,7 +45,10 @@ export class WalCheckpointMaintenance {
         this.#pump(); this.#scheduleIdle();
       });
       this.#worker.on('error', () => this.#fail());
-      this.#worker.on('exit', () => { if (!this.#stopping) this.#fail(); });
+      this.#worker.on('exit', () => {
+        if (this.#flight || !this.#stopping) this.#fail();
+        this.#available = false; this.#resolveReady(false);
+      });
     } catch { this.#fail(); }
   }
 

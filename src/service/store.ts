@@ -3375,7 +3375,7 @@ export class EditorialStore {
     }
   }
 
-  /** The single checkpoint worker never writes data; authority/journal/ingest remain the only data writers. */
+  /** The checkpoint worker runs only pragmas; data transactions stay on the service's existing serial writer lane. */
   startCheckpointWorker(factory?: CheckpointWorkerFactory): Promise<boolean> {
     this.#checkpointWorker ??= new WalCheckpointMaintenance(this.#checkpoint, join(this.#dataRoot, 'store', 'ai7.sqlite'), factory);
     return this.#checkpointWorker.ready;

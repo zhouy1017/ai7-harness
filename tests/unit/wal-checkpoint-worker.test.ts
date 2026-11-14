@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { once } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -70,7 +71,10 @@ describe('store-owned checkpoint worker', () => {
 
   it('uses the fallback after a busy checkpoint, then resumes after the reader releases its snapshot', async () => {
     reader = new DatabaseSync(path, { readOnly: true }); reader.exec('BEGIN'); reader.prepare('SELECT * FROM edits').all();
+    const stopped = once(worker, 'exit');
     write('first'); maintenance.maintain(false); await maintenance.settled();
+    expect(maintenance.available).toBe(true); // A partial PASSIVE checkpoint is normal while a reader pins its snapshot.
+    await stopped; // The later write-idle TRUNCATE returns busy without waiting for that reader.
     expect(maintenance.available).toBe(false);
     reader.exec('ROLLBACK'); expect(maintenance.maintain(true)?.afterBytes).toBe(0);
     write('second'); expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
@@ -94,6 +98,15 @@ describe('store-owned checkpoint worker', () => {
     await truncated;
     expect(sent.mock.calls.some(([request]) => request.mode === 'TRUNCATE')).toBe(true);
     expect(policy.fileBytes()).toBe(0);
+  });
+
+  it('finishes clean shutdown through the fallback if the worker dies while shutdown starts', async () => {
+    write('acknowledged');
+    const terminated = worker.terminate();
+    const stopped = maintenance.stop(true);
+    await terminated; await stopped;
+    expect(policy.fileBytes()).toBe(0);
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 2 });
   });
 
 });

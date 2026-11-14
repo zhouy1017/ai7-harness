@@ -21,9 +21,9 @@ parentPort.on('message', (request: { id: number; mode: 'PASSIVE' | 'TRUNCATE' | 
     }
     if (request.mode !== 'PASSIVE' && request.mode !== 'TRUNCATE') throw new Error('CHECKPOINT_MODE_INVALID');
     const result = db.prepare(`PRAGMA wal_checkpoint(${request.mode})`).get()!;
-    const busy = Number(result['busy']) !== 0 || Number(result['checkpointed']) < Number(result['log']);
+    const busy = Number(result['busy']) !== 0;
     if (request.close) db.close();
-    parentPort!.postMessage({ id: request.id, ok: true, busy, beforeBytes, afterBytes: bytes() });
+    parentPort!.postMessage({ id: request.id, ok: true, busy, beforeBytes, afterBytes: bytes(), logFrames: Number(result['log']), checkpointedFrames: Number(result['checkpointed']) });
   } catch {
     if (request.close) { try { db.close(); } catch {} }
     parentPort!.postMessage({ id: request.id, ok: false, busy: true, beforeBytes, afterBytes: bytes() });
