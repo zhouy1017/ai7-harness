@@ -529,12 +529,18 @@ describe('registered raw-wire failures before the DSH body', () => {
       const retrieve = retrieval.retrieve.bind(retrieval);
       const started: string[] = []; const settled: string[] = [];
       let active = 0; let peak = 0;
+      const allStarted = Promise.withResolvers<void>();
+      const releases = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+      const finished = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
       vi.spyOn(retrieval, 'retrieve').mockImplementation(async (...args) => {
-        // A read that starts earlier settles later, so completion runs against model order.
-        const delay = (8 - started.push(args[0])) * 4;
-        active++; peak = Math.max(peak, active);
-        await new Promise<void>((done) => setTimeout(done, delay));
-        try { return await retrieve(...args); } finally { active--; settled.push(args[0]); }
+        started.push(args[0]); active++; peak = Math.max(peak, active);
+        // The rejected second call is a DSH scheduling barrier; q0 finishes before the next parallel batch.
+        if (args[0] === 'q0') { try { return await retrieve(...args); } finally { active--; settled.push(args[0]); } }
+        const release = Promise.withResolvers<void>(), done = Promise.withResolvers<void>();
+        releases.set(args[0], release); finished.set(args[0], done);
+        if (started.length === 3) allStarted.resolve();
+        await release.promise;
+        try { return await retrieve(...args); } finally { active--; settled.push(args[0]); done.resolve(); }
       });
       const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
       const model = new RawToolModel((request) => request === 1 ? Array.from({ length: 8 }, (_, index) => ({ name: 'retrieve',
@@ -542,14 +548,17 @@ describe('registered raw-wire failures before the DSH body', () => {
       const { handle } = await rawHarness(session, binding, model, true);
       try {
         session.startUnit();
-        expect((await handle.submitUnit(UNIT)).terminal).toBe('completed');
+        const submitted = handle.submitUnit(UNIT);
+        await allStarted.promise;
+        for (const query of [...releases.keys()].reverse()) { releases.get(query)!.resolve(); await finished.get(query)!.promise; }
+        expect((await submitted).terminal).toBe('completed');
         const results = model.requests[1]!.messages.filter((message) => message.source.kind === 'tool');
         expect(results.map((message) => message.source)).toEqual(Array.from({ length: 8 }, (_, index) => ({ kind: 'tool', callId: `raw_1_${index}` })));
         expect(results.map((message, index) => started.includes(`q${index}`) ? 'read' : JSON.stringify(message).includes('调用次数已用完') ? 'quota' : 'rejected'))
           .toEqual(['read', 'rejected', 'read', 'read', 'rejected', 'quota', 'quota', 'quota']);
         expect(started).toEqual(['q0', 'q2', 'q3']);
-        expect(settled).not.toEqual(started);
-        expect(peak).toBeLessThanOrEqual(5);
+        expect(settled).toEqual([started[0], ...started.slice(1).reverse()]);
+        expect(peak).toBe(2);
         expect(session.usage).toMatchObject({ retrievalCalls: 8, refusedRetrievalCalls: 5 });
         expect(session.egressScope.admittedToolResults!.size).toBe(8);
       } finally { await handle.finish(); retrieval.dispose(); }
