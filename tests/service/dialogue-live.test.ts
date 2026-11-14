@@ -20,7 +20,7 @@ import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
@@ -392,6 +392,11 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       dialogues.begin(turn);
       await waitFor(() => releaseGap, (value) => value !== undefined, 'held between tool rounds');
       expect(calls).toHaveLength(1);
+      const oldSession = readBinding(turn.attemptId)!.harnessSessionId;
+      // The next model request can await capacity before the append queue finishes its preceding tool result.
+      // A real process death preserves exactly the prefix that reached disk, so freeze that durable checkpoint first.
+      await waitFor(() => readHarnessSessionLog(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), oldSession),
+        (log) => log?.events.some((event) => event.type === 'tool/result') === true, 'tool result durable before process death');
       const durableFragments = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]!.fragments;
       expect(durableFragments.map((entry) => entry.text).join('')).toContain('先核对公开样书。');
       // Reconstruct abrupt process death: close only the store, with no owner settlement or terminal event.
@@ -403,7 +408,6 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       expect(interrupted.actions).toMatchObject({ continue: true, regenerate: true, convert: false });
       expect(interrupted.attempts[0]!.fragments).toEqual(durableFragments);
       expect(calls).toHaveLength(1); // Opening and reconciliation never resume the old SDK tool loop.
-      const oldSession = readBinding(turn.attemptId)!.harnessSessionId;
       spy.mockRestore();
       const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-dialogue');
       const fresh = new DialogueExecutionOwner({ requestGovernor: new ModelRequestGovernor(), records: store, fixture, live: null,
