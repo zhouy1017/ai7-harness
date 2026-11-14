@@ -6,7 +6,7 @@ import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-
 import { testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, DEEPSEEK_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
-import { EgressTicketBook, evaluateEgress, evaluatePublicSourceFetch, DEEPSEEK_ROUTE, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
+import { EgressTicketBook, evaluateEgress, evaluatePublicSourceFetch, DEEPSEEK_ROUTE, DEEPSEEK_MODEL, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import { refreshModelServiceModels } from '../../src/service/provider/model-discovery.js';
 import { toolArgumentsDigest } from '../../src/service/provider/platform-tools.js';
 import { fetchPublicSource } from '../../src/service/provider/public-source-fetch.js';
@@ -31,7 +31,7 @@ const readConnection = vi.fn((): never => { throw new Error('unexpected connecti
 const store = { getModelServiceRouteConnection: readConnection } as unknown as EditorialStore;
 const digest = 'a'.repeat(64);
 const binding: EgressBindingFacts = { bindingDigest: digest, route: DEEPSEEK_ROUTE,
-  model: 'synthetic-model', systemPrompt: '', admittedUserMessages: new Set(['公开合成测试']), outboundDataCategory: 'public-or-synthetic',
+  model: DEEPSEEK_MODEL, systemPrompt: '', admittedUserMessages: new Set(['公开合成测试']), outboundDataCategory: 'public-or-synthetic',
   policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 },
   platformTools: platformToolsFromProjection(developer.providerProcessing.admittedRules.find((recipe) => recipe.platformTools !== null)) };
 const scope = { currentBindingDigest: () => digest, acceptedOutputDigests: new Set<string>() };
@@ -53,7 +53,7 @@ describe('development-ci entry points block every live path without a socket (#1
       codes: { QUOTA_EXCEEDED_CODE: 'quota', INVALID_CREDENTIAL_CODE: 'credential', CONTEXT_WINDOW_EXCEEDED_CODE: 'context' }, transport: send });
     const chunks = [];
     for await (const chunk of adapter.stream(request)) chunks.push(chunk);
-    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error' } });
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'AI7_TRANSMIT_TICKET_ABSENT' } } });
     expect(adapter.transmissions).toBe(0);
     untouched();
   });
