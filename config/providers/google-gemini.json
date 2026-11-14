@@ -70,7 +70,18 @@
           "capabilities": { "requestShape": { "value": "google-generate-content", "evidence": "gemini-models-page" }, "answerChannel": { "value": "candidate-parts-text", "evidence": "gemini-text-answer-docs" } },
           "context": { "tokens": 1048576, "evidence": "gemini-models-page" }
         }
-      ]
+      ],
+      "reasoning": {
+        "control": "google-generate-content",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "source": "https://ai.google.dev/gemini-api/docs/thinking",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [

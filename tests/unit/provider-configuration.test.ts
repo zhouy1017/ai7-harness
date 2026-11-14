@@ -547,15 +547,19 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     expect(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE).toBe('a7c0de00-5040-4f27-9e13-6b1f2c8d4a55');
   });
 
-  it('retains official and historical profile bytes while binding the exact V4.1 profile', () => {
+  it('retains transport fields and adds documentary family effort metadata', () => {
+    const { reasoning: officialReasoning, ...officialTransport } = DEEPSEEK_ROUTE_PROFILE;
+    const { reasoning: goReasoning, ...goTransport } = OPENCODE_GO_ROUTE_PROFILE;
+    expect(officialReasoning).toMatchObject({ control: 'deepseek-thinking', efforts: ['low', 'high', 'max'] });
+    expect(goReasoning).toMatchObject({ control: 'openai-chat-completions', efforts: expect.arrayContaining(['low', 'high']) });
     // The route profiles exactly as they were hand-written before Issue #435, plus the two fields it adds.
-    expect(DEEPSEEK_ROUTE_PROFILE).toEqual({
+    expect(officialTransport).toEqual({
       route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', credentialSlot: 'deepseek-api-key',
       credentialHeader: 'authorization-bearer', anthropicVersion: null, limitPolicy: 'rate-limit-retryable', dshAttribution: true,
       sessionHeader: false, maxOutputTokens: null, credentialHeaderEvidence: { kind: 'frozen-request-baseline', since: 'adapter revision 1' },
       displayName: 'DeepSeek 开放平台（官方）',
     });
-    expect(OPENCODE_GO_ROUTE_PROFILE).toEqual({
+    expect(goTransport).toEqual({
       route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', credentialSlot: 'opencode-go',
       credentialHeader: 'authorization-bearer', anthropicVersion: null, limitPolicy: 'account-limit-terminal', dshAttribution: false,
       sessionHeader: true, maxOutputTokens: null,

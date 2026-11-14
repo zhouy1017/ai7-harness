@@ -262,7 +262,7 @@ export interface HarnessRequestAdmission {
 /** Validated against the live registry before capacity and again immediately before final admission. */
 export interface HarnessRequestIdentity { readonly sessionId: string; readonly parentSessionId: string; readonly child: boolean }
 
-export interface HarnessExecutionRequest {
+export interface HarnessExecutionRequest extends Pick<import('../../shared/runtime-execution-config.js').RuntimeExecutionConfig, 'reasoningEffort'> {
   readonly compositionOptions?: CompositionOptions;
   readonly localToolsRule?: LocalToolsRule;
   readonly sessionId: string;
@@ -370,6 +370,12 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     localTools: selectedLocal,
   });
   const context: Context = new cordis.Context();
+  const selectBoundModel = (candidate: Agent): void => {
+    agent.installModelSelection(candidate.ctx, { assembled: undefined, current: {
+      provider: request.route, model: request.model,
+      ...(request.reasoningEffort === undefined || request.reasoningEffort === 'off' ? {} : { reasoningEffort: llm.ReasoningEffortId(request.reasoningEffort) }),
+    } });
+  };
   let bound = false;
   // The Interactive Answer Stream's reader for the turn in flight, if one streams (Issue #52, S17a).
   let streamReader: ((delta: string) => void) | null = null;
@@ -428,6 +434,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
         requireHarness(childSlot !== null && childSlot.child === null && !childSlot.controller.signal.aborted,
           'HARNESS_CHILD_SLOT_UNAVAILABLE', '当前没有可用的单元子代理位置。');
         childSlot.child = child;
+        selectBoundModel(child);
         activeAgent = child;
         identityOf(child); // Synchronous veto before native start can publish or submit its first request.
       });
@@ -441,9 +448,11 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       if (activeAgent === null || session.id !== activeAgent.id) return;
       // An assistant message asking for platform tools is accepted for this attempt's history the moment DSH records it,
       // before its calls run and before the next model call carries it back through the gate (Issue #473).
-      if (toolOwner !== null && event.type === 'assistant/message' && assistantToolCalls(event.data.message) !== null) {
-        toolOwner.acceptToolCallMessage(assistantToolCallDigest(event.data.message.content));
-        if (request.localTools !== undefined && request.localTools !== toolOwner) request.localTools.acceptToolCallMessage(assistantToolCallDigest(event.data.message.content));
+      if (toolOwner !== null && event.type === 'assistant/message' &&
+          (assistantToolCalls(event.data.message) !== null || event.data.message.source.replayState !== undefined)) {
+        const digest = assistantToolCallDigest(event.data.message.content, event.data.message.source.replayState);
+        toolOwner.acceptToolCallMessage(digest);
+        if (request.localTools !== undefined && request.localTools !== toolOwner) request.localTools.acceptToolCallMessage(digest);
       }
       if (streamReader === null || event.type !== 'assistant/chunk') return;
       const { chunk } = event.data;
@@ -504,6 +513,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       sessionId: sessions.SessionId(request.sessionId),
       agentOptions: { provider: request.route, model: request.model },
     });
+    selectBoundModel(handle.agent);
     requireHarness(context.agents.list().length === 1 && context.sessions.list().length === 1 &&
       handle.agent.session.id === request.sessionId, 'HARNESS_COMPOSITION_INVALID', 'PrimaryAgentHarness 未建立唯一的技术会话。');
   } catch (error) {
@@ -596,6 +606,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       sessionId: sessions.SessionId(nextId),
       agentOptions: { provider: request.route, model: request.model },
     });
+    selectBoundModel(next.agent);
     requireHarness(next.agent.session.id === nextId, 'HARNESS_COMPOSITION_INVALID', 'PrimaryAgentHarness 未建立本单元的技术会话。');
     live = next;
     currentSessionId = nextId;

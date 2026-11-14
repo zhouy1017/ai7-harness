@@ -163,6 +163,18 @@
         },
         "requestShape": { "enum": ["openai-chat-completions", "anthropic-messages", "openai-responses", "google-generate-content"] },
         "requestShapeEvidence": { "$ref": "#/definitions/evidenceKey" },
+        "reasoning": {
+          "description": "Wire encoding and suggested effort identifiers, never model or effort admission. Unlisted identifiers reach the vendor unchanged.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["control", "efforts", "source", "readOn"],
+          "properties": {
+            "control": { "enum": ["openai-chat-completions", "deepseek-thinking", "openai-responses", "anthropic-messages", "google-generate-content"] },
+            "efforts": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}$" } },
+            "source": { "$ref": "#/definitions/prose" },
+            "readOn": { "$ref": "#/definitions/day" }
+          }
+        },
         "limitPolicy": { "enum": ["rate-limit-retryable", "account-limit-terminal"] },
         "limitPolicyEvidence": {
           "description": "How the limit reading was established; `unverified` where no page states the endpoint's limit shape, recorded as such on the support page.",

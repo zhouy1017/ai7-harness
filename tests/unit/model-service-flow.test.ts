@@ -77,6 +77,25 @@ function mountSettings(calls: ReturnType<typeof api>) {
 }
 
 describe('the one model-service flow', () => {
+  it.each([true, false])('chooses and reopens a role effort default, including a custom identifier (technical=%s, #1453)', async (technical) => {
+    setTechnicalLayerVisible(technical);
+    const projection = settings(['anthropic-claude']);
+    const { node, calls } = flow(projection);
+    const effort = node.querySelector('input[aria-label="思考强度"]')!;
+    expect(effort.value).toBe('');
+    effort.value = 'high'; effort.dispatchEvent({ type: 'input' });
+    expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
+    button(node, 'select-main-role-model').click();
+    await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'high' }));
+    const saved = { ...projection, roles: projection.roles.map((role) => ({ ...role,
+      binding: role.binding === null ? null : { ...role.binding, reasoningEffort: role.roleId === 'main-editorial' ? 'high' : 'low' } })) };
+    const reopened = flow(saved).node;
+    expect(reopened.querySelector('input[aria-label="思考强度"]')!.value).toBe('high');
+    effort.value = 'vendor-future-level'; effort.dispatchEvent({ type: 'input' });
+    button(node, 'select-fast-role-model').click();
+    await vi.waitFor(() => expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'vendor-future-level' }));
+  });
+
   // A manual model ID is the developer layer's (#1431 item 97), so only the technical layer offers it.
   it.each([true])('restores the last explicit catalogue choice after clearing a manual ID (technical=%s, #1374)', async (technical) => {
     setTechnicalLayerVisible(technical);
@@ -95,7 +114,7 @@ describe('the one model-service flow', () => {
     expect(technical ? choices.find((radio) => radio.value === modelId)!.checked : selector!.value).toBe(technical ? true : modelId);
     expect(button(node, 'test-flow-connection').disabled).toBe(false);
     button(node, 'use-model-for-both-roles').click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId }));
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId, reasoningEffort: 'off' }));
   });
 
   it('restores the selected model and filter after channel round trips, refresh and two changed polls', async () => {
@@ -194,7 +213,7 @@ describe('the one model-service flow', () => {
     await vi.waitFor(() => expect(toggleFavourite).toHaveBeenCalledWith('opencode-go', 'model-148'));
     await vi.waitFor(() => expect(node.querySelector('[data-favorite-model="model-148"]')!.getAttribute('aria-pressed')).toBe('true'));
     button(node, 'use-model-for-both-roles').click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: technical ? 'model-42' : 'model-148' }));
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: technical ? 'model-42' : 'model-148', reasoningEffort: 'off' }));
   });
   it.each(['deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen'] as const)(
     'keeps ordinary channel %s through credential save, model selection and connection test', async (route) => {
@@ -233,10 +252,10 @@ describe('the one model-service flow', () => {
         expect(model.disabled).toBe(false);
         model.value = model.children.at(-1)!.value; model.dispatchEvent({ type: 'change' });
         button(page, 'use-model-for-both-roles').click();
-        await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route, modelId: model.value }));
+        await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route, modelId: model.value, reasoningEffort: 'off' }));
         await vi.waitFor(() => expect(page.querySelector('select[aria-label="AI7 使用的模型"]')!.value).toBe(model.value));
         button(page, 'test-flow-connection').click();
-        await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route, modelId: model.value }));
+        await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route, modelId: model.value, reasoningEffort: 'off' }));
       } finally { vi.unstubAllGlobals(); setTechnicalLayerVisible(true); }
     });
 
@@ -267,9 +286,9 @@ describe('the one model-service flow', () => {
     const custom = node.querySelector('[data-custom-model-id]')!;
     custom.value = 'account/custom-opus'; custom.dispatchEvent({ type: 'input' });
     button(node, 'select-main-role-model').click();
-    await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'account/custom-opus' }));
+    await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'account/custom-opus', reasoningEffort: 'off' }));
     button(node, 'select-fast-role-model').click();
-    await vi.waitFor(() => expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'account/custom-opus' }));
+    await vi.waitFor(() => expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'account/custom-opus', reasoningEffort: 'off' }));
     expect(node.querySelector('[data-action="refresh-model-list"]')).toBeNull();
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
@@ -453,7 +472,7 @@ describe('the one model-service flow', () => {
     expect([use.disabled, use.textContent]).toEqual([false, USE_FOR_BOTH_ROLES_LABEL]);
     use.click();
     await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
-    expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash' });
+    expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash', reasoningEffort: 'off' });
   });
 
   it('offers every Claude model without a connection test and saves both bindings atomically', async () => {
@@ -463,7 +482,7 @@ describe('the one model-service flow', () => {
     expect(modelServiceChoices(projection).filter((choice) => choice.route === 'anthropic-claude')).toHaveLength(4);
     expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
     button(node, 'use-model-for-both-roles').click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5' }));
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'off' }));
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
 
@@ -473,7 +492,7 @@ describe('the one model-service flow', () => {
     expect(node.textContent).toContain('尚未测试；保存凭据不等于连接成功');
     button(node, 'test-flow-connection').click();
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
-    expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash' });
+    expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash', reasoningEffort: 'off' });
   });
 
   it('shows busy immediately and keeps testing disabled through model changes until the request returns', async () => {
@@ -553,7 +572,7 @@ it('offers one ordinary model view and saves both underlying roles without a tes
   expect(node.querySelector('[data-custom-model-id]')).toBeNull();
   expect(node.textContent).toContain('AI7 使用的模型');
   button(node, 'use-model-for-both-roles').click();
-  await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+  await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash', reasoningEffort: 'off' }));
   expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
 });
 

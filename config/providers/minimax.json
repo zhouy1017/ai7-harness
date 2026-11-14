@@ -45,7 +45,21 @@
         { "modelId": "MiniMax-M3", "displayName": "MiniMax M3", "context": { "tokens": 1000000, "evidence": "minimax-platform-docs" } },
         { "modelId": "MiniMax-M2.7", "displayName": "MiniMax M2.7", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "MiniMax-M2.5", "displayName": "MiniMax M2.5", "context": { "tokens": null, "evidence": "unverified" } }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-chat-completions",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [

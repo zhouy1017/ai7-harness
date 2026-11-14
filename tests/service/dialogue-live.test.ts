@@ -503,13 +503,15 @@ describe('就这段提问… on the live route (provider-free)', () => {
         text: scope.kind === 'book' ? '本书保留合成短句。' : '全社统一合成标点。', effect: 'guide' });
     const calls: StubCall[] = [];
     const dialogues = liveOwner(store, productionDialogueRoute({ scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => ANSWER) },
-      () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-dialogue-memory' }));
+      () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-dialogue-memory' }, () => 'high'));
     try {
       const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION }, new Date(), workspace ? 'agent-workspace' : undefined);
       if (workspace) dialogues.beginWorkspaceTurn({ ...turn, settled: () => {} }); else dialogues.begin(turn);
       const result = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), settled, 'memory turn settled');
       expect(result.attempts[0]!.state).toBe('completed');
       expect(calls).toHaveLength(1);
+      expect(JSON.parse(calls[0]!.body).reasoning_effort).toBe('high');
+      expect(readBinding(turn.attemptId)).toMatchObject({ reasoningEffort: 'high' });
       const prompt = JSON.parse(calls[0]!.body).messages[0].content as string;
       expect(prompt).toContain('本书保留合成短句。'); expect(prompt).toContain('全社统一合成标点。');
       expect(prompt.indexOf('本书保留合成短句。')).toBeLessThan(prompt.indexOf('全社统一合成标点。'));

@@ -1,8 +1,8 @@
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent, ProviderRouteProfile } from './deepseek-adapter.js';
 import { conversationMessages, strictFunctionTools, systemPromptOf } from './family-payload.js';
-import type { ProviderModelProfile } from './model-profile.js';
-import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
+import { effectiveModelReasoningEffort, type ProviderModelProfile } from './model-profile.js';
+import { assistantToolCalls, familyReplayItems, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { sseFrames, streamFailure } from './stream-frames.js';
 
 /** The methods the generateContent family appends to the model id it addresses in the path. */
@@ -24,14 +24,15 @@ export const GEMINI_SYNTHETIC_CALL_PREFIX = 'gemini-call-' as const;
  * The body is `{ systemInstruction?, contents, generationConfig?, tools? }`.
  *
  * The system prompt is the top-level `systemInstruction` with one text part and never a `contents` entry. `assistant` is
- * `model` here, mapped in this arm alone. `generationConfig` travels only when the route declares a cap. The model id is
+ * `model` here, mapped in this arm alone. `generationConfig` carries a declared cap and/or selected thinking level. The model id is
  * not in the body: this shape addresses it in the URL. Function tools travel as one `functionDeclarations` tool whose
- * schemas are the payload's JSON Schemas as `parametersJsonSchema`; structured output and reasoning control refuse, as on
- * the two shapes before it.
+ * schemas are the payload's JSON Schemas as `parametersJsonSchema`; structured output remains unsupported.
+ * #1453 uses thinkingConfig.thinkingLevel and exact native thought signatures (official generate-content thinking
+ * and thought-signatures guides, read 2026-11-14). It does not translate levels into older token-budget controls.
  */
 export function googleGenerateContentBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload): string {
   if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  const effort = effectiveModelReasoningEffort(model, payload.reasoningEffort);
   const toolCalling = model.capabilities.toolCalling === 'function';
   if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   const tools = strictFunctionTools(payload, 64);
@@ -42,7 +43,10 @@ export function googleGenerateContentBody(profile: ProviderRouteProfile, model: 
       parts: [{ text: message.content }],
     })),
     ...(systemInstruction === null ? {} : { systemInstruction: { parts: [{ text: systemInstruction }] } }),
-    ...(profile.maxOutputTokens === null ? {} : { generationConfig: { maxOutputTokens: profile.maxOutputTokens } }),
+    ...(profile.maxOutputTokens === null && effort === null ? {} : { generationConfig: {
+      ...(profile.maxOutputTokens === null ? {} : { maxOutputTokens: profile.maxOutputTokens }),
+      ...(effort === null ? {} : { thinkingConfig: { thinkingLevel: effort } }),
+    } }),
     ...(tools.length > 0 ? { tools: [{ functionDeclarations: tools.map(({ name, description, parameters }) =>
       ({ name, description, parametersJsonSchema: parameters })) }] } : {}),
   });
@@ -68,9 +72,10 @@ function geminiConversation(payload: AssembledModelPayload, offeredNames: Readon
   const contents: Array<Record<string, unknown>> = [];
   for (let index = 0; index < payload.messages.length; index += 1) {
     const message = payload.messages[index]!;
+    const replay = familyReplayItems(message, 'google-generate-content');
     const calls = assistantToolCalls(message);
     if (calls !== null) {
-      if (calls.reasoning.length > 0 || message.content.some((block) => block.type === 'reasoning')) throw new Error('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
+      if (calls.reasoning.length > 0 || message.content.some((block) => block.type === 'reasoning')) throw new Error('PROVIDER_REASONING_REPLAY_ABSENT');
       const parts: Array<Record<string, unknown>> = calls.text.length > 0 ? [{ text: calls.text }] : [];
       const pending = new Map<string, string>();
       for (const call of calls.calls) {
@@ -80,7 +85,7 @@ function geminiConversation(payload: AssembledModelPayload, offeredNames: Readon
         pending.set(call.id, call.name);
         parts.push({ functionCall: { name: call.name, args, ...(providerIssued(call.id) ? { id: call.id } : {}) } });
       }
-      contents.push({ role: 'model', parts });
+      contents.push({ role: 'model', parts: replay ?? parts });
       const responses: Array<Record<string, unknown>> = [];
       while (pending.size > 0) {
         index += 1;
@@ -99,9 +104,23 @@ function geminiConversation(payload: AssembledModelPayload, offeredNames: Readon
     const text = messageText(message);
     if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
     if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
-    contents.push({ role: message.role === 'assistant' ? 'model' : message.role, parts: [{ text }] });
+    contents.push({ role: message.role === 'assistant' ? 'model' : message.role, parts: replay ?? [{ text }] });
   }
   return contents;
+}
+
+/** Exact native part order and thoughtSignature bytes, including the signature on the first parallel call. */
+export function geminiReplayItems(body: unknown, callIds: ReadonlySet<string>): Record<string, unknown>[] | null {
+  const candidate = isRecord(body) && Array.isArray(body.candidates) ? body.candidates[0] : null;
+  if (!isRecord(candidate) || !isRecord(candidate.content) || !Array.isArray(candidate.content.parts)) return null;
+  if (!candidate.content.parts.some((part) => isRecord(part) && (part.thought === true || part.thoughtSignature !== undefined))) return null;
+  let ordinal = 0;
+  return candidate.content.parts.filter(isRecord).filter((part) => {
+    if (!isRecord(part.functionCall)) return true;
+    const id = part.functionCall.id;
+    ordinal += 1;
+    return typeof id === 'string' ? callIds.has(id) : [...callIds].some((callId) => callId.startsWith(GEMINI_SYNTHETIC_CALL_PREFIX) && callId.endsWith(`-${ordinal}`));
+  });
 }
 
 function providerIssued(callId: string): boolean {
@@ -143,17 +162,9 @@ export async function* generateContentSseEvents(response: DeepSeekTransportRespo
       const incoming: unknown[] = isRecord(candidate.content) && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
       for (const part of incoming) {
         if (!isRecord(part)) throw new Error('AI7_OUTCOME_UNKNOWN');
-        const last = parts[parts.length - 1];
-        const keys = Object.keys(part).sort().join(',');
+        parts.push({ ...part });
         if (part.thought !== true && typeof part.text === 'string' && part.functionCall === undefined) {
-          if (part.thoughtSignature === undefined && last !== undefined && Object.keys(last).join(',') === 'text') last.text = `${last.text as string}${part.text}`;
-          else parts.push({ text: part.text, ...(part.thoughtSignature === undefined ? {} : { thoughtSignature: true }) });
           if (part.text.length > 0) yield { kind: 'text', text: part.text };
-        } else if (keys === 'text,thought' && part.thought === true) {
-          // Presence only: the reasoning text is never kept.
-          if (last === undefined || last.thought !== true || Object.keys(last).length !== 2) parts.push({ text: '', thought: true });
-        } else {
-          parts.push(part.thought === true ? { ...part, text: '' } : { ...part });
         }
       }
       if (candidate.finishReason !== undefined && candidate.finishReason !== null) finishReason = candidate.finishReason;

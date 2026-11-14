@@ -141,14 +141,13 @@ const SHAPE_RULES = Object.freeze({
  * fixtures under `tests/fixtures/model/provider-families/`. A family states `supported` or `unsupported`; a declared model is
  * `supported` for `text`, `stream` or `functionTools` only where its own capability is declared on evidence, and
  * `untested` otherwise (`src/service/provider/family-dispositions.ts` refuses every demand that is not `supported`).
- * Structured output and reasoning control are the chat-completions spellings alone; reasoning continuation is the
- * chat-completions `reasoning_content` round trip, because the other families' reasoning is opaque and the payload cannot
- * carry it back; no family exposes a provider's own server tools.
+ * Structured output retains the chat-completions spelling. Reasoning control and native opaque continuation are
+ * implemented by each family's encoder; no family exposes a provider's own server tools.
  */
 const FAMILY_ASPECTS = Object.freeze(['text', 'stream', 'functionTools', 'usage', 'cancellation', 'accountLimit', 'rateLimit',
   'structuredOutput', 'reasoningControl', 'reasoningContinuation', 'providerTools']);
 const MODEL_ASPECTS = Object.freeze(['text', 'stream', 'functionTools']);
-const CHAT_ONLY_ASPECTS = new Set(['structuredOutput', 'reasoningControl', 'reasoningContinuation']);
+const CHAT_ONLY_ASPECTS = new Set(['structuredOutput']);
 export const FAMILY_DISPOSITIONS = Object.freeze(Object.fromEntries(Object.keys(SHAPE_RULES).map((shape) => [shape,
   Object.freeze(Object.fromEntries(FAMILY_ASPECTS.map((aspect) => [aspect,
     aspect === 'providerTools' || (CHAT_ONLY_ASPECTS.has(aspect) && shape !== 'openai-chat-completions') ? 'unsupported' : 'supported'])))])));
@@ -492,6 +491,12 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
       refuse(!RESERVED_ROUTE_IDS.has(route.routeId) && !routeIds.has(route.routeId), `PROVIDER_CONFIGURATION/route-duplicate: ${where}`);
       routeIds.add(route.routeId);
       const shape = SHAPE_RULES[route.requestShape];
+      if (route.reasoning !== undefined) {
+        refuse(route.reasoning.control === route.requestShape ||
+          route.requestShape === 'openai-chat-completions' && route.reasoning.control === 'deepseek-thinking',
+        `PROVIDER_CONFIGURATION/reasoning-family: ${where}`);
+        refuse(isCalendarDay(route.reasoning.readOn), `PROVIDER_CONFIGURATION/reasoning-day: ${where}`);
+      }
       refuse(shape.headerForms.includes(credential.headerForm),
         `PROVIDER_CONFIGURATION/header-form: ${where} (${route.requestShape} is not spoken with ${credential.headerForm})`);
       refuse(!shape.requiresOutputCap || route.maxOutputTokens !== null,
@@ -591,6 +596,7 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
           dshAttribution: route.dshAttribution,
           sessionHeader: route.sessionHeader,
           maxOutputTokens: route.maxOutputTokens,
+          ...(route.reasoning === undefined ? {} : { reasoning: route.reasoning }),
           credentialHeaderEvidence: headerEvidence,
           displayName: route.displayName,
         },
@@ -767,6 +773,9 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
     ...routes.map((route) => `  ${literal(route.id)},`),
     '] as const;',
     'export type ConfiguredRouteId = (typeof CONFIGURED_ROUTE_IDS)[number];',
+    '',
+    '/** Protocol effort controls and suggested levels; custom identifiers are sent to the vendor (#1453). */',
+    `export const CONFIGURED_ROUTE_REASONING = ${renderValue(Object.fromEntries(providers.flatMap((provider) => provider.routes.map((route) => [route.profile.route, route.profile.reasoning ?? null]))), 0)} as const;`,
     '',
     '/** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */',
     `export const CONFIGURED_RUNTIME_MODEL_TABLE = ${renderValue(runtimeModelTable, 0)} as const;`,
@@ -985,11 +994,11 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
     '',
     '## Three senses of "supported"',
     '',
-    'Provider documents and the runtime model table supply catalogue defaults and labels. The selected ordinary-production policy admits channels, rather than individual model IDs (#1281). Unknown model IDs receive a profile from their route protocol; optional context limits and model-specific reasoning or structured-output settings remain unknown unless declared. Developer-live retains its exact approved binding. Live model discovery and role selection are tracked separately in #1282.',
+    'Provider documents and the runtime model table supply catalogue defaults and labels. Unknown model IDs inherit their configured route protocol. Role defaults select the effort actually sent, independently of historical per-model capability observations. Suggested effort identifiers are editable suggestions, never model admission lists: another bounded identifier reaches the provider, which decides whether that model accepts it. Unset or off omits the control and uses the service default; it does not promise that provider thinking is disabled. Developer-live retains its exact approved binding.',
     '',
     '- **Declared** — catalogue metadata and historical evidence for a model. Runtime text, stream and function tools inherit the implemented route protocol; optional model-specific settings remain recorded separately.',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',
-    '- **Bindable** — a selected policy channel permits its route, endpoint host, protocol family and credential slot. The editor chooses the exact model ID, and each Run freezes that binding. An account can still reject a model; adapter support is not live validation or account availability. CI and ordinary regression use no provider credentials.',
+    '- **Bindable** — a configured channel supplies its route, endpoint, protocol family and credential slot. The editor chooses the exact model ID and effort, and each Run freezes that binding. An account can still reject a model or effort; adapter support is not live validation or account availability. CI and ordinary regression use no provider credentials.',
     '',
     'Task research declarations resolve to `webSearch: true` only when the task declares research, the selected rule admits platform tools, and model/search setup is ready. All four implemented protocol families support AI7 websearch/webfetch and local function tools without per-model live evidence. Existing source scopes, task research declarations, frozen search bindings and final egress checks remain enforced. Provider-free tests establish adapter behavior; they do not claim a live account result.',
     '',
@@ -1016,6 +1025,11 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
       lines.push(`| DSH attribution headers | ${route.profile.dshAttribution ? 'sent' : 'not sent'} — ${describeEvidence(route.routeEvidence.dshAttribution)} |`);
       lines.push(`| OpenCode session header | ${route.profile.sessionHeader ? 'sent' : 'not sent'} — ${describeEvidence(route.routeEvidence.sessionHeader)} |`);
       lines.push(`| Per-turn output cap | ${route.profile.maxOutputTokens === null ? 'none' : grouped(route.profile.maxOutputTokens)} |`);
+      if (route.profile.reasoning !== undefined) {
+        const reasoning = route.profile.reasoning;
+        lines.push(`| Reasoning control / suggestions | \`${reasoning.control}\` / ${reasoning.efforts.map((effort) => `\`${effort}\``).join(', ')} |`);
+        lines.push(`| Reasoning protocol source | ${reasoning.source}, read ${reasoning.readOn} |`);
+      }
       lines.push('');
       if (route.note !== null) lines.push(route.note, '');
       lines.push('| Model id | Display name | Context | Tool calling | Web search tool |');

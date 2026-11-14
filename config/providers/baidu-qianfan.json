@@ -46,7 +46,21 @@
         { "modelId": "ERNIE-5.1", "displayName": "ERNIE 5.1", "context": { "tokens": 128000, "evidence": "qianfan-docs" } },
         { "modelId": "ERNIE-5.0", "displayName": "ERNIE 5.0", "context": { "tokens": 128000, "evidence": "qianfan-docs" } },
         { "modelId": "ERNIE-4.5-Turbo-128K", "displayName": "ERNIE 4.5 Turbo 128K", "context": { "tokens": 128000, "evidence": "qianfan-docs" } }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-chat-completions",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [

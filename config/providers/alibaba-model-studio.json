@@ -45,7 +45,21 @@
         { "modelId": "qwen3.8-max", "displayName": "Qwen3.8 Max", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "qwen3.7-plus", "displayName": "Qwen3.7 Plus", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "qwen3.8-flash", "displayName": "Qwen3.8 Flash", "context": { "tokens": null, "evidence": "unverified" } }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-chat-completions",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [

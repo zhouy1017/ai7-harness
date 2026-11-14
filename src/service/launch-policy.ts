@@ -247,6 +247,7 @@ export function taskKindListed(taskKinds: readonly string[], kind: string): bool
 
 export const BACKGROUND_ANALYSIS_RULE_ID = 'enrolled-background-manuscript-analysis-processing';
 export interface ConfiguredProviderBinding {
+  readonly reasoningEffort?: string;
   readonly route: string;
   readonly endpoint: string;
   readonly model: string;

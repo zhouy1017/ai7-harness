@@ -24,6 +24,112 @@ export const CONFIGURED_ROUTE_IDS = [
 ] as const;
 export type ConfiguredRouteId = (typeof CONFIGURED_ROUTE_IDS)[number];
 
+/** Protocol effort controls and suggested levels; custom identifiers are sent to the vendor (#1453). */
+export const CONFIGURED_ROUTE_REASONING = {
+  'alibaba-model-studio': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'anthropic-claude': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort',
+    readOn: '2026-11-14',
+  },
+  'baidu-qianfan': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'deepseek-open-platform': {
+    control: 'deepseek-thinking',
+    efforts: ['low', 'high', 'max'],
+    source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+    readOn: '2026-11-14',
+  },
+  'google-gemini': {
+    control: 'google-generate-content',
+    efforts: ['minimal', 'low', 'medium', 'high'],
+    source: 'https://ai.google.dev/gemini-api/docs/thinking',
+    readOn: '2026-11-14',
+  },
+  minimax: {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'moonshot-kimi': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'openai-platform': {
+    control: 'openai-responses',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/guides/reasoning',
+    readOn: '2026-11-14',
+  },
+  'opencode-go': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'opencode-go-messages': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort',
+    readOn: '2026-11-14',
+  },
+  'opencode-go-responses': {
+    control: 'openai-responses',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/guides/reasoning',
+    readOn: '2026-11-14',
+  },
+  'opencode-zen': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'opencode-zen-messages': {
+    control: 'anthropic-messages',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://platform.claude.com/docs/en/build-with-claude/effort',
+    readOn: '2026-11-14',
+  },
+  'opencode-zen-responses': {
+    control: 'openai-responses',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/docs/guides/reasoning',
+    readOn: '2026-11-14',
+  },
+  'tencent-hunyuan': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'xiaomi-mimo': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+  'zhipu-glm': {
+    control: 'openai-chat-completions',
+    efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    source: 'https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create',
+    readOn: '2026-11-14',
+  },
+} as const;
+
 /** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */
 export const CONFIGURED_RUNTIME_MODEL_TABLE = {
   developerLive: {

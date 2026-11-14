@@ -80,14 +80,14 @@ const head = (family: string): ReadonlyArray<string> => {
 };
 
 describe('capability dispositions per family and per model', () => {
-  it('states what each family implements, and that only chat completions carries the DeepSeek-spelled extras', () => {
+  it('states family-owned reasoning controls and continuation, while structured output stays Chat-only', () => {
     for (const family of ['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generate-content'] as const) {
       const table = GENERATED_FAMILY_DISPOSITIONS[family];
       for (const aspect of ['text', 'stream', 'functionTools', 'usage', 'cancellation', 'accountLimit', 'rateLimit'] as const) expect(table[aspect], `${family} ${aspect}`).toBe('supported');
       expect(table.providerTools).toBe('unsupported');
-      for (const aspect of ['structuredOutput', 'reasoningControl', 'reasoningContinuation'] as const) {
-        expect(table[aspect], `${family} ${aspect}`).toBe(family === 'openai-chat-completions' ? 'supported' : 'unsupported');
-      }
+      expect(table.structuredOutput).toBe(family === 'openai-chat-completions' ? 'supported' : 'unsupported');
+      expect(table.reasoningControl).toBe('supported');
+      expect(table.reasoningContinuation).toBe('supported');
     }
   });
 
@@ -283,7 +283,7 @@ describe('Gemini function calls (Issue #1180)', () => {
       { functionCall: { id: 'bad', name: 'unoffered', args: {} } },
     ]) expect(normalizeModelResponse(gemini, body([bad, { functionCall: { id: 'valid', name: TOOL.name, args: {} } }]), offered)).toMatchObject({ kind: 'tool-calls', calls: [{ id: 'valid' }], salvaged: [{ index: 0 }] });
     const opaque = normalizeModelResponse(gemini, body([{ text: 'retained' }, { functionCall: { name: TOOL.name, args: {} }, thoughtSignature: 'opaque' }]), offered);
-    expect(opaque).toMatchObject({ kind: 'answer', text: 'retained', truncated: true });
+    expect(opaque).toMatchObject({ kind: 'tool-calls', text: 'retained', calls: [{ name: TOOL.name }] });
     expect(JSON.stringify(opaque)).not.toContain('opaque');
     expect(normalizeModelResponse(gemini, body([{ text: 'partial' }, { functionCall: { name: TOOL.name } }], 'MAX_TOKENS'), offered)).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
   });
@@ -297,6 +297,6 @@ describe('Gemini function calls (Issue #1180)', () => {
       { id: 'm2' as never, role: 'assistant', source: { kind: 'model', provider: gemini.route, model: gemini.model }, content: [{ type: 'reasoning', text: '合成推理' }, { type: 'tool-call', id: 'c1' as never, name: TOOL.name, arguments: '{}' }] },
       { id: 'm3' as never, role: 'user', source: { kind: 'tool', callId: 'c1' as never }, content: [{ type: 'tool-result', toolCallId: 'c1' as never, content: [{ type: 'text', text: '合成' }] }] }] };
     expect(() => assembleProviderRequest(PROVIDER_ROUTE_PROFILES['google-gemini'], gemini, withReasoning, { attribution: {}, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST }))
-      .toThrow('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
+      .toThrow('PROVIDER_REASONING_REPLAY_ABSENT');
   });
 });

@@ -37,7 +37,7 @@ describe('the /2 dialogue SSE boundary', () => {
       { tool_calls: [{ index: 1, id: 'b', type: 'function', function: { name: 'exact_', arguments: '{' } }, { index: 0, id: 'a', type: 'function', function: { name: 're', arguments: '{' } }] },
       { tool_calls: [{ index: 0, function: { name: 'trieve', arguments: '}' } }, { index: 1, function: { name: 'fetch', arguments: '}' } }] },
     ], 'tool_calls');
-    expect(events).toEqual([{ kind: 'complete', response: { model: model.model, choices: [{ message: { content: '', tool_calls: [
+    expect(events).toEqual([{ kind: 'complete', response: { model: model.model, choices: [{ message: { content: null, tool_calls: [
       { id: 'a', type: 'function', function: { name: 'retrieve', arguments: '{}' } },
       { id: 'b', type: 'function', function: { name: 'exact_fetch', arguments: '{}' } },
     ] }, finish_reason: 'tool_calls' }], usage: null } }]);

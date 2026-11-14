@@ -1,3 +1,5 @@
+import type { RuntimeExecutionConfig } from './runtime-execution-config.js';
+export type { RuntimeExecutionConfig } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
@@ -2727,7 +2729,7 @@ export interface ModelTextAttemptProvenance {
   readonly failureCode: string | null;
 }
 
-export interface FastModelSelectionInput {
+export interface FastModelSelectionInput extends Pick<RuntimeExecutionConfig, 'reasoningEffort'> {
   route: ModelServiceRouteId;
   modelId: string;
 }

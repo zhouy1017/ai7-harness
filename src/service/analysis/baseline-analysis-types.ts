@@ -443,6 +443,7 @@ export interface ExecutionPlanFacts {
 
 /** One frozen ordinary-production binding: one of the two allowed routes, exactly (Issue #811). */
 export interface ProductionPlanBinding {
+  readonly reasoningEffort?: string;
   readonly route: OrdinaryProductionAllowedBinding['route'];
   readonly model: OrdinaryProductionAllowedBinding['model'];
   readonly endpoint: string;
@@ -554,6 +555,7 @@ export interface LaunchBinding {
 
 /** The developer-live binding: the one Go route, its fixed development Credential Reference, and the launch's ceiling. */
 export interface DeveloperLiveLaunchBinding {
+  readonly reasoningEffort?: string;
   readonly scope?: undefined;
   readonly route: 'opencode-go';
   readonly model: 'deepseek-v4.1-flash';

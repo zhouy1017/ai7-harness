@@ -192,7 +192,21 @@
             "evidence": "unverified"
           }
         }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-chat-completions",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+        "readOn": "2026-11-14"
+      }
     },
     {
       "routeId": "opencode-zen-messages",
@@ -367,7 +381,19 @@
             "evidence": "unverified"
           }
         }
-      ]
+      ],
+      "reasoning": {
+        "control": "anthropic-messages",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://platform.claude.com/docs/en/build-with-claude/effort",
+        "readOn": "2026-11-14"
+      }
     },
     {
       "routeId": "opencode-zen-responses",
@@ -630,7 +656,21 @@
             "evidence": "unverified"
           }
         }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-responses",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://developers.openai.com/api/docs/guides/reasoning",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [

@@ -116,7 +116,7 @@ describe('assembleProviderRequest · openai-responses', () => {
         content: [{ type: 'reasoning', text }, { type: 'tool-call', id: 'call_raw_1' as never, name: TOOL.name, arguments: '{}' }],
       }];
       expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...toolPayload(), messages: history }, context))
-        .toThrowError('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
+        .toThrowError('PROVIDER_REASONING_REPLAY_ABSENT');
     }
   });
 
@@ -199,7 +199,7 @@ describe('assembleProviderRequest · openai-responses', () => {
     ]);
   });
 
-  it('refuses the capability spellings that belong to another shape', () => {
+  it('still refuses unimplemented structured-output spellings and unknown shapes', () => {
     // `json-object` and `deepseek-thinking` are chat-completions fields. This shape has mechanisms
     // of its own for both — `text.format` and `reasoning.effort` — and neither is implemented, so
     // declaring either here refuses rather than sending the endpoint a spelling nobody documented.
@@ -207,8 +207,6 @@ describe('assembleProviderRequest · openai-responses', () => {
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, responsesModel({ structuredOutput: 'json-schema' }), payload(), context))
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
-    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, responsesModel({ reasoningControl: 'deepseek-thinking' }), payload(), context))
-      .toThrowError(/PROVIDER_REASONING_CONTROL_UNSUPPORTED/u);
     // A shape no profile in the table declares still refuses: a profile is data, and the union
     // cannot rule one out at runtime.
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, responsesModel({ requestShape: 'a-shape-nobody-declared' as ProviderModelProfile['capabilities']['requestShape'] }), payload(), context))
@@ -272,10 +270,10 @@ describe('normalizeModelResponse · output-message-text', () => {
     for (const status of ['incomplete', 'failed', null]) expect(normalizeModelResponse(functionModel(), { status, output: [functionCall(), message(outputText('partial'))] }, { toolCallsOffered: true })).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
   });
 
-  it('rejects reasoning beside calls whether or not the reasoning channel was declared', () => {
+  it('accepts complete reasoning-bearing calls while replay remains the native family owner', () => {
     for (const model of [functionModel(), responsesModel({ toolCalling: 'function', reasoningChannel: 'output-reasoning-items' })]) {
       expect(normalizeModelResponse(model, { status: 'completed', output: [functionCall(), REASONING_ITEM] }, { toolCallsOffered: true }))
-        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+        .toMatchObject({ kind: 'tool-calls', calls: [{ name: 'synthetic_lookup' }] });
     }
   });
 

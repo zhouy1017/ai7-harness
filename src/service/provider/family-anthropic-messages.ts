@@ -1,8 +1,8 @@
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent, ProviderRouteProfile } from './deepseek-adapter.js';
 import { strictFunctionTools, systemPromptOf } from './family-payload.js';
-import type { ProviderModelProfile } from './model-profile.js';
-import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
+import { effectiveModelReasoningEffort, type ProviderModelProfile } from './model-profile.js';
+import { assistantToolCalls, familyReplayItems, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { sseFrames, streamFailure } from './stream-frames.js';
 
 /**
@@ -11,13 +11,13 @@ import { sseFrames, streamFailure } from './stream-frames.js';
  * stream (Issue #1180).
  *
  * The system prompt is a top-level field and never a message. `max_tokens` is mandatory, so it is taken from the route's
- * declaration or the request refuses: a cap the assembler invented would be a bound nobody authorized. The reasoning and
- * structured-output spellings this adapter implements are the chat-completions ones, so a profile that declares either
- * on this shape refuses rather than sending a field the endpoint never documented.
+ * declaration or the request refuses: a cap the assembler invented would be a bound nobody authorized.
+ * Selected effort uses output_config.effort with adaptive thinking; signed/redacted blocks replay unchanged
+ * (official effort and thinking-tool-workflows guides, read 2026-11-14). Structured output remains unsupported.
  */
 export function anthropicMessagesBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload): string {
   if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  const effort = effectiveModelReasoningEffort(model, payload.reasoningEffort);
   if (profile.maxOutputTokens === null) throw new Error('PROVIDER_MAX_OUTPUT_TOKENS_ABSENT');
   const toolCalling = model.capabilities.toolCalling === 'function';
   if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
@@ -26,6 +26,7 @@ export function anthropicMessagesBody(profile: ProviderRouteProfile, model: Prov
   const system = systemPromptOf(payload);
   return canonicalJson({
     model: model.model,
+    ...(effort === null ? {} : { output_config: { effort }, thinking: { type: 'adaptive' } }),
     max_tokens: profile.maxOutputTokens,
     ...(system === null ? {} : { system }),
     messages: anthropicMessagesConversation(payload, names),
@@ -48,6 +49,7 @@ function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNa
   const seenIds = new Set<string>();
   for (let index = 0; index < payload.messages.length; index += 1) {
     const message = payload.messages[index]!;
+    const replay = familyReplayItems(message, 'anthropic-messages');
     // Shared history readers intentionally project a wider canonical shape for Chat/Responses.
     // Messages cannot replay opaque fields, including those on otherwise ordinary text blocks.
     // Results are checked where they are consumed; every other block type keeps its existing refusal below.
@@ -77,7 +79,7 @@ function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNa
         pending.add(block.id);
         content.push({ type: 'tool_use', id: block.id, name: block.name, input });
       }
-      messages.push({ role: 'assistant', content });
+      messages.push({ role: 'assistant', content: replay ?? content });
       const results: Array<Record<string, unknown>> = [];
       while (pending.size > 0) {
         index += 1;
@@ -103,9 +105,17 @@ function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNa
     const text = messageText(message);
     if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
     if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
-    messages.push({ role: message.role, content: text });
+    messages.push({ role: message.role, content: replay ?? text });
   }
   return messages;
+}
+
+/** Keep the complete thinking/signature and redacted blocks; only a rejected tool call is omitted. */
+export function messagesReplayItems(body: unknown, callIds: ReadonlySet<string>): Record<string, unknown>[] | null {
+  if (!isRecord(body) || !Array.isArray(body.content)) return null;
+  if (!body.content.some((block) => isRecord(block) && (block.type === 'thinking' || block.type === 'redacted_thinking'))) return null;
+  return body.content.filter(isRecord).filter((block) => ['text', 'thinking', 'redacted_thinking'].includes(String(block.type)) ||
+    block.type === 'tool_use' && typeof block.id === 'string' && callIds.has(block.id));
 }
 
 /** The HTTP status an Anthropic error type stands for, so an in-stream failure classifies as the same refusal would. */
@@ -151,7 +161,7 @@ export async function* messagesSseEvents(response: DeepSeekTransportResponse): A
         if (!Number.isSafeInteger(value.index) || (value.index as number) < 0 || (value.index as number) >= 128 || !isRecord(value.content_block) || typeof value.content_block.type !== 'string') continue;
         const block = value.content_block;
         blocks[value.index as number] = block.type === 'text' ? { type: 'text', text: typeof block.text === 'string' ? block.text : '' }
-          : block.type === 'tool_use' ? { type: 'tool_use', id: block.id, name: block.name, input: block.input, json: '' } : { type: block.type };
+          : block.type === 'tool_use' ? { type: 'tool_use', id: block.id, name: block.name, input: block.input, json: '' } : { ...block };
         if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) yield { kind: 'text', text: block.text };
         continue;
       }
@@ -167,6 +177,10 @@ export async function* messagesSseEvents(response: DeepSeekTransportResponse): A
           block.json += value.delta.partial_json;
           argumentBytes += value.delta.partial_json.length;
           if (argumentBytes > 1024 * 1024) throw new Error('AI7_OUTCOME_UNKNOWN');
+        } else if (value.delta.type === 'thinking_delta' && block.type === 'thinking' && typeof value.delta.thinking === 'string') {
+          block.thinking = `${typeof block.thinking === 'string' ? block.thinking : ''}${value.delta.thinking}`;
+        } else if (value.delta.type === 'signature_delta' && block.type === 'thinking' && typeof value.delta.signature === 'string') {
+          block.signature = `${typeof block.signature === 'string' ? block.signature : ''}${value.delta.signature}`;
         }
         // Thinking and signature deltas are never read: presence is the block's type.
         continue;

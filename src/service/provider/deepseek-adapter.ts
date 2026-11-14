@@ -1,4 +1,5 @@
 import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
+import { CONFIGURED_ROUTE_REASONING } from '../../shared/provider-configuration.generated.js';
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isRecord, sha256Hex } from '../analysis/canonical.js';
 import { validModelServiceModelId, type DiscoveredModel } from '../../shared/protocol/model-service.js';
@@ -13,11 +14,11 @@ import {
   type RemoteExecutionRoute,
   type TransmitTicket,
 } from './egress-gate.js';
-import { anthropicMessagesBody, anthropicMessagesStreamBody, messagesSseEvents } from './family-anthropic-messages.js';
-import { chatCompletionsBody, chatCompletionsStreamBody, dialogueSseEvents } from './family-chat-completions.js';
+import { anthropicMessagesBody, anthropicMessagesStreamBody, messagesReplayItems, messagesSseEvents } from './family-anthropic-messages.js';
+import { chatCompletionsBody, chatCompletionsStreamBody, chatReplayItems, dialogueSseEvents } from './family-chat-completions.js';
 import { providerPreflight, streamingDeclared } from './family-dispositions.js';
-import { generateContentSseEvents, googleGenerateContentBody, googleGenerateContentUrl } from './family-gemini.js';
-import { openaiResponsesBody, openaiResponsesStreamBody, responsesSseEvents } from './family-openai-responses.js';
+import { geminiReplayItems, generateContentSseEvents, googleGenerateContentBody, googleGenerateContentUrl } from './family-gemini.js';
+import { openaiResponsesBody, openaiResponsesStreamBody, responsesReplayItems, responsesSseEvents } from './family-openai-responses.js';
 import {
   DEEPSEEK_V4_PRO_PROFILE,
   type CapabilityEvidence,
@@ -28,7 +29,7 @@ import { GENERATED_ROUTE_PROFILES } from './provider-profiles.generated.js';
 import { LOCAL_TOOL_NAMES, LEGACY_LOCAL_TOOL_SCHEMAS, toolSetEqualsPlatformSchemas } from './platform-tools.js';
 import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, type NormalizeOptions } from './response-normalization.js';
 
-export { DEEPSEEK_REASONING_EFFORT, dialogueSseEvents } from './family-chat-completions.js';
+export { dialogueSseEvents } from './family-chat-completions.js';
 export { streamingDeclared } from './family-dispositions.js';
 
 /**
@@ -40,7 +41,7 @@ export { streamingDeclared } from './family-dispositions.js';
  * Every route profile is generated from the provider documents under `config/providers/` (ADR 0073
  * §2, Issue #435): the endpoint, the credential slot and its header form, the limit reading and the
  * output cap are configuration, never constants of this module. `deepseek-open-platform` is the
- * unchanged production route (model `deepseek-v4-pro`, thinking enabled at high reasoning effort).
+ * official production route; its selected effort is sent by the family's declared control.
  * `opencode-go` is the developer-live route of Provider Processing v9 (bare model id
  * `deepseek-v4.1-flash`, a standard chat-completions body with no DeepSeek-specific parameters, and the
  * technical Session id in `x-opencode-session` for the gateway's prompt cache).
@@ -97,6 +98,7 @@ export interface ProviderRouteProfile {
    * declaring `null` refuses to assemble rather than inventing a number.
    */
   readonly maxOutputTokens: number | null;
+  readonly reasoning?: { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string };
   /**
    * The header the credential travels in, as the vendor documents it (ADR 0073 §2): `authorization:
    * Bearer` for every route before this field existed, `x-api-key` beside `anthropic-version` for
@@ -189,12 +191,12 @@ function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelP
 }
 
 /** The stream reader of one model's family, aggregating to that family's buffered body. */
-function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile): AsyncIterable<DialogueStreamEvent> {
+function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile, preserveReasoning = false): AsyncIterable<DialogueStreamEvent> {
   switch (model.capabilities.requestShape) {
     case 'openai-responses': return responsesSseEvents(response);
     case 'anthropic-messages': return messagesSseEvents(response);
     case 'google-generate-content': return generateContentSseEvents(response);
-    default: return dialogueSseEvents(response, model.model);
+    default: return dialogueSseEvents(response, model.model, preserveReasoning);
   }
 }
 
@@ -391,7 +393,7 @@ function errorTextOf(body: unknown): string {
   return errorRecord === null
     ? ''
     // Gemini names its class in `status` (`RESOURCE_EXHAUSTED`) where the other families name it in `code` or `type`.
-    : [errorRecord.code, errorRecord.type, errorRecord.status, errorRecord.message].filter((part) => typeof part === 'string').join(' ').toLocaleLowerCase('en-US');
+    : [errorRecord.code, errorRecord.type, errorRecord.status, errorRecord.param, errorRecord.message].filter((part) => typeof part === 'string').join(' ').toLocaleLowerCase('en-US');
 }
 
 /**
@@ -426,6 +428,10 @@ export function parseProviderResponse(
     return { kind: 'failure', code: codes.QUOTA_EXCEEDED_CODE, message: '模型服务账户限额或余额不足。', status };
   }
   if (status === 429) return { kind: 'failure', code: AI7_FAILURE_CODES.RATE_LIMIT, message: '模型服务速率限制。', status };
+  if ((status === 400 || status === 422) && /reasoning[_ .]?effort|thinking(?:config|_config)?[._ ](?:level|budget|type)|thinkingconfig.*thinkinglevel|output_config.?effort/iu.test(errorText)) {
+    return { kind: 'failure', code: AI7_FAILURE_CODES.REASONING_EFFORT_REJECTED,
+      message: '模型服务没有接受所选思考强度；请换一个强度后再试。', status };
+  }
   if (status === 400 && /context|maximum length|too long|tokens/u.test(errorText)) {
     return { kind: 'failure', code: codes.CONTEXT_WINDOW_EXCEEDED_CODE, message: '请求超出模型上下文窗口。', status };
   }
@@ -512,7 +518,7 @@ export type DeepSeekTransport = (
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ) => Promise<DeepSeekTransportResponse>;
 
-export interface DeepSeekAdapterDependencies {
+export interface DeepSeekAdapterDependencies extends Pick<import('../../shared/runtime-execution-config.js').RuntimeExecutionConfig, 'reasoningEffort'> {
   /** Settings supplies the channel's credential-scoped metadata discovery; task adapters need none. */
   readonly discoverModels?: () => Promise<readonly DiscoveredModel[]>;
   readonly transportSettings?: {
@@ -622,7 +628,11 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   }
 
   resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    return Promise.resolve({ provider, id: model, name: this.#modelProfile.displayName, inputModalities: ['text'] });
+    // Include the bound custom identifier as wire data; the suggestions are never model/level admission.
+    const efforts = [...new Set([...(CONFIGURED_ROUTE_REASONING[this.#profile.route]?.efforts ?? []),
+      ...(this.#deps.reasoningEffort === undefined ? [] : [this.#deps.reasoningEffort])])];
+    return Promise.resolve({ provider, id: model, name: this.#modelProfile.displayName, inputModalities: ['text'],
+      reasoning: { efforts: efforts.map((id) => ({ id: id as NonNullable<GenerateOptions['reasoningEffort']>, name: id })) } });
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -670,6 +680,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       return;
     }
     let outcome: ProviderResponseOutcome;
+    let replayState: unknown;
     let streamed = '';
     let blockStarted = false;
     let sent = false;
@@ -710,7 +721,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         let completed = false;
         // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
         // reading, so the transmission still records its possibly billed request as unknown.
-        for await (const event of response.stream?.() ?? familyStreamEvents(response, this.#modelProfile)) {
+        for await (const event of response.stream?.() ?? familyStreamEvents(response, this.#modelProfile, (options.tools ?? []).length > 0)) {
           if (event.kind === 'text') {
             if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
             blockStarted = true;
@@ -745,6 +756,13 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
           ...(shape === 'google-generate-content' ? { callIdSeed: assembly.requestDigest.slice(0, 16) } : {}),
         });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
+      if ((options.tools ?? []).length > 0 && (parsed.kind === 'tool-calls' || parsed.kind === 'answer' || parsed.kind === 'empty-answer')) {
+        const ids = new Set(parsed.kind === 'tool-calls' ? parsed.calls.map((call) => call.id) : []);
+        const items = shape === 'openai-chat-completions' ? chatReplayItems(body, ids)
+          : shape === 'openai-responses' ? responsesReplayItems(body, ids)
+            : shape === 'anthropic-messages' ? messagesReplayItems(body, ids) : geminiReplayItems(body, ids);
+        if (items !== null) replayState = { family: shape, items };
+      }
       if ((outcome.kind === 'failure' || outcome.kind === 'malformed') && streamed.length > 0) {
         outcome = { kind: 'partial', text: streamed, usage: 'usage' in outcome ? outcome.usage ?? null : null,
           code: outcome.kind === 'failure' ? outcome.code : AI7_FAILURE_CODES.INVALID_RESPONSE,
@@ -818,7 +836,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         index += 1;
       }
       if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
-      yield { type: 'finish', reason: { kind: 'tool-calls' } };
+      yield { type: 'finish', reason: { kind: 'tool-calls' }, ...(replayState === undefined ? {} : { replayState }) };
       return;
     }
     // An empty answer streams exactly what it streamed before — the harness composition and every
@@ -829,6 +847,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     if (streamed.length === 0) yield { type: 'text-delta', index: 0, text };
     yield { type: 'block-end', index: 0, block: { type: 'text', text } };
     if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
-    yield { type: 'finish', reason: { kind: 'stop' } };
+    yield { type: 'finish', reason: { kind: 'stop' }, ...(replayState === undefined ? {} : { replayState }) };
   }
 }

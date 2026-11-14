@@ -6,6 +6,8 @@ import {
   type RemoteExecutionRoute,
 } from './egress-gate.js';
 import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from './provider-profiles.generated.js';
+import { CONFIGURED_ROUTE_REASONING } from '../../shared/provider-configuration.generated.js';
+import { sentReasoningEffort } from '../../shared/runtime-execution-config.js';
 
 /**
  * Provider documents retain optional model-specific settings and historical evidence. Runtime text,
@@ -30,15 +32,16 @@ export type RequestShape =
   | 'google-generate-content';
 
 /** What parameters control reasoning. `deepseek-thinking` is the production route's `thinking` plus `reasoning_effort`. */
-export type ReasoningControl = 'none' | 'deepseek-thinking';
+export type ReasoningControl = 'none' | 'deepseek-thinking' | RequestShape;
 
-/** The explicit wire effort of the implemented deepseek-thinking request control. */
-export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
+/** The family's wire spelling, independent of whether a particular upstream model accepts the chosen effort. */
+export function modelReasoningControl(profile: ProviderModelProfile): ReasoningControl {
+  return CONFIGURED_ROUTE_REASONING[profile.route]?.control ?? profile.capabilities.reasoningControl;
+}
 
 /** Capture at execution binding time; never infer an old record's effort from today's profile. */
-export function effectiveModelReasoningEffort(profile: ProviderModelProfile | null): string | null {
-  return profile?.capabilities.requestShape === 'openai-chat-completions' &&
-    profile.capabilities.reasoningControl === 'deepseek-thinking' ? DEEPSEEK_REASONING_EFFORT : null;
+export function effectiveModelReasoningEffort(_profile: ProviderModelProfile | null, requested?: string | null): string | null {
+  return sentReasoningEffort(requested);
 }
 
 /**

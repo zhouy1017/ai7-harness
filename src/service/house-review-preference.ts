@@ -1594,7 +1594,8 @@ export function curationEnvelope(host: EditorialLearningStoreHost, budget: Learn
     policy?.integrityState !== 'verified' || (identity?.providerProcessingVersion !== 'v31' && (identity?.providerProcessingVersion !== 'v32' && identity?.providerProcessingVersion !== 'v33' && identity?.providerProcessingVersion !== 'v34' && identity?.providerProcessingVersion !== 'v35')) || rule?.enabledLearningEnvelope === undefined ||
     rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
   return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
-    binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+    binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference,
+      ...(live.reasoningEffort === undefined ? {} : { reasoningEffort: live.reasoningEffort }) },
     sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
     supervisionDigest: host.learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
     disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };

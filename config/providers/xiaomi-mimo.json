@@ -46,7 +46,21 @@
       "models": [
         { "modelId": "mimo-v2.5-pro", "displayName": "MiMo-V2.5-Pro", "context": { "tokens": 1000000, "evidence": "mimo-docs" } },
         { "modelId": "mimo-v2.5", "displayName": "MiMo-V2.5", "context": { "tokens": 1000000, "evidence": "mimo-docs" } }
-      ]
+      ],
+      "reasoning": {
+        "control": "openai-chat-completions",
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [
