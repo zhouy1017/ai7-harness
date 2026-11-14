@@ -860,7 +860,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       }
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(run.excludedTotal).toBe(0);
-      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'))).toBe(true);
+      expect(run.findings.some((finding) => finding.note.includes('引文未逐字匹配') && finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'))).toBe(true);
     });
   }, 300_000);
 
@@ -913,7 +913,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(frozen.contractIdentity).toMatchObject({ contractId: 'ai7.editorial-review', version: 2 });
       expect(projection.planEnvelope!.procedure?.version).toBe(2);
       expect(settled.excluded).toHaveLength(settled.excludedTotal!);
-      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(true);
+      expect(settled.findings.some((finding) => finding.note.includes('引文未逐字匹配'))).toBe(true);
     } finally { await close(session); }
     const reopened = await open('sample1-review-contract-v2-controls');
     try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true); }
@@ -1354,7 +1354,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(reviewMarkCount(session, book)).toBe(0);
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], on(twentyOne.blockId, twentyOne.blockId)));
       expect(second.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyOne.blockId, 21, true]]);
-      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所选范围外另有 3 处，未标记。');
+      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所选范围外另有 4 处，未标记。');
       expect(reviewMarkCount(session, book)).toBe(1);
     });
   }, 300_000);

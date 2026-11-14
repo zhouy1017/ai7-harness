@@ -466,6 +466,12 @@ async function pass(): Promise<boolean> {
       note((await run(context, categoryId, { mode: 'review-first', selectedRange: null }, 'g-j04-end', 'j')).closed);
     }
   });
+  await withBook(async (context) => {
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, '，J-04 快速开始前的确认编辑');
+    note((await run(context, 'typos-and-usage', { mode: 'review-first', selectedRange: null }, 'g-j04-third', 'j')).closed);
+  });
   // Current category Runs with no baseline, a matching baseline, and selection/chapter scope.
   await withBook(async (context) => {
     note((await run(context, 'plot-consistency', { mode: 'review-first', selectedRange: null }, 'h-no-baseline', 'a')).closed);

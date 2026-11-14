@@ -28,7 +28,7 @@ describe('Top-15 preference retrieval', () => {
     const binding = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes(numbered.kind))!;
     // [base, the same base wrapped by a pin made before Issue #1109 (no selection)], computed at a770eb1e and pinned here.
     const frozen = [
-      [historicalReviewCategoryDefinitions(input, 1)[1]!, '99b46482ce3af27256d940adaecdd4db7067b8f3eb12950bf748be1a2950f81a', '7cb5d20b792a28798f9e12a1e6b80d97917ac05134e275a809a852405cd8e8c3'],
+      [historicalReviewCategoryDefinitions(input, 1)[0]!, '99b46482ce3af27256d940adaecdd4db7067b8f3eb12950bf748be1a2950f81a', '7cb5d20b792a28798f9e12a1e6b80d97917ac05134e275a809a852405cd8e8c3'],
       [historicalReviewCategoryDefinitions(input, 2)[2]!, '5660446214273b9996a9cd96f89830ef706ccdfb401230b6e713fd9e3e11cb93', '8537270b1c7a3c412647835ea049567328e93c2ba7ffcb27652a0de83f29c9ca'],
       [historicalReviewCategoryDefinitions(input, 2)[3]!, 'acac7d3b01926f8d4f8a3b45c7bbca59ae35ee7e2c5a9abdd9081d96c1920e6d', '42512e294f9d6333b1240af706889ce444586b4484c2701c841ef47a6a2604fc'],
     ] as const;

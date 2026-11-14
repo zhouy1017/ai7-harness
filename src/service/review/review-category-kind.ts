@@ -124,7 +124,7 @@ const HISTORICAL_REVIEW_TOOL_NAMES = Object.freeze([
 
 /** Reconstruct known prompt bytes only; none of these objects grants tool or transmission authority. */
 export function historicalReviewCategoryDefinitions(input: ReviewCategoryContractInput, version: 1 | 2): readonly AnalysisKindDefinition[] {
-  if (version === 1) return [compileReviewCategory(input, 1, []), compileReviewCategory(input, 1, [], false)];
+  if (version === 1) return [compileReviewCategory(input, 1, [])];
   if (version !== 2) throw new Error('REVIEW_CONTRACT_VERSION_UNSUPPORTED');
   return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES), compileReviewCategory(input, 2, [], false), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES, false)];
 }
