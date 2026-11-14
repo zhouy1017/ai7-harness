@@ -4007,8 +4007,13 @@ export class EditorialStore {
   captureScopedAiEditLaunch(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput & { bookId: string; clientCommandId: string },
     create: (binding: ConfiguredProviderBinding | null) => { runId: string; manuscript: unknown }): { runId: string; repeated: boolean } {
     const { clientCommandId, ...request } = input;
-    return launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'scoped-ai-edit', input: request },
-      () => this.#launchChoice('fast-interaction', input.executionConfig ?? {}), choice => create(choice.binding));
+    try {
+      return launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'scoped-ai-edit', input: request },
+        () => this.#launchChoice('fast-interaction', input.executionConfig ?? {}), choice => create(choice.binding));
+    } catch (error) {
+      if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   #launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig): import('./task-launch-snapshots.js').LaunchChoice {

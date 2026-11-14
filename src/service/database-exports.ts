@@ -476,6 +476,7 @@ export async function writeDatabasePackage(
     const exportedCopy = new DatabaseSync(snapshotPath);
     try {
       if (exportedCopy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'task_launch_snapshots'").get() !== undefined) {
+        exportedCopy.exec('PRAGMA secure_delete = ON');
         exportedCopy.exec('BEGIN IMMEDIATE');
         for (const name of Object.keys(TASK_LAUNCH_TRIGGER_SQL)) exportedCopy.exec(`DROP TRIGGER ${name}`);
         exportedCopy.exec('DELETE FROM task_launch_snapshots');

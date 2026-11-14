@@ -408,7 +408,8 @@ export class FastRoleRequests {
     if (store.captureScopedAiEditLaunch !== undefined) {
       const launched = store.captureScopedAiEditLaunch({ ...input, bookId, clientCommandId: input.clientCommandId ?? randomUUID() }, binding => {
         executionOwner = this.scopedOwner?.(binding) ?? this.#owner;
-        captured = prepareScopedEdit(executionOwner, scopedStore, bookId, input);
+        try { captured = prepareScopedEdit(executionOwner, scopedStore, bookId, input); }
+        catch (error) { if (executionOwner !== this.#owner) executionOwner.dispose(); throw error; }
         return { runId: captured.requestId, manuscript: { manuscriptId: captured.manuscriptId, branchId: captured.branchId,
           revisionId: input.baseRevisionId, journalSequence: input.expectedJournalSequence, scope: input.scope, locksDigest: input.expectedLocksDigest, targets: captured.targets.map(({ blockId, blockDigest, fromGrapheme, toGrapheme }) => ({ blockId, blockDigest, fromGrapheme, toGrapheme })) } };
       });

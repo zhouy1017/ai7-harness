@@ -2693,7 +2693,8 @@ describe('one-step review launch (#1455)', () => {
   });
   it('keeps concurrent launch choices and replay independent of later role settings', async () => {
     await withCapturedReviewBook(async (session, firstBook) => {
-      const secondBook = await importBook(session);
+      const secondBook = await importSample1Book(session.store, roots.codeRoot, '并行审阅');
+      await pinEditorialWorkspaceProfileRevision2(session.store, secondBook.bookId);
       const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
       const input = { bookId: firstBook.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
         executionConfig: { modelId: defaults.model, reasoningEffort: 'high' } };
@@ -2725,7 +2726,8 @@ describe('one-step review launch (#1455)', () => {
       expect(current.journalSequence).toBeGreaterThan(shown.journalSequence);
       const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
       expect(launched.manuscript.journalSequence).toBe(current.journalSequence);
-      const second = await importBook(session);
+      const second = await importSample1Book(session.store, roots.codeRoot, '选区检查');
+      await pinEditorialWorkspaceProfileRevision2(session.store, second.bookId);
       expect(() => session.store.launchReviewRun({ bookId: second.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
         scope: { kind: 'selection', fromChapterBlockId: 'blk_missing', toChapterBlockId: 'blk_missing' } }, launchPolicy)).toThrow();
       expect(workspace(session, second).run).toBeNull();
