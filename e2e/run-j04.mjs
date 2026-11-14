@@ -3932,6 +3932,12 @@ async function main() {
     credentialMutationReached = true; credentialRemoved = false;
     await click(renderer, '保存并获取模型', 'dispatch-choice-enroll');
     await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-choice-ready');
+    // The official channel currently declares one offline model. As J-12 does, add an independently selected custom
+    // fast-role model through Settings, so the chooser has a real second catalogue entry before taking the defaults below.
+    await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-choice-custom-model');
+    await fill(renderer, '[data-custom-model-id]', 'account-future-model', 'dispatch-choice-catalogue-model');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true; })()`, 'dispatch-choice-catalogue-add');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='account-future-model')`, 'dispatch-choice-catalogue-ready');
     const dispatchDefaults = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
@@ -3942,7 +3948,7 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'dispatch-choice-book');
         await openReviewDestination(renderer, 'dispatch-choice-review');
         await reviewAction(renderer, '[data-review-action="new-review"]', 'dispatch-choice-new');
-        await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('.dispatch-chooser select')?.options.length>1`, 'dispatch-choice-sheet');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet .dispatch-chooser select')?.options.length>1`, 'dispatch-choice-sheet');
         const chosenLabel = await renderer.evaluate(`(() => {
           const sheet=document.querySelector('dialog.review-sheet');
           for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='typos-and-usage')&&!box.disabled)box.click();
