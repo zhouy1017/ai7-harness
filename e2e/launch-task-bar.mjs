@@ -1,5 +1,5 @@
 /** Start through the ordinary product bar. Opening its estimate never creates or authorizes a prepared task. */
-export async function launchTaskFromBar(renderer, waitFor, name) {
+export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
   await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-launch-ready`);
   try {
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
@@ -15,7 +15,10 @@ export async function launchTaskFromBar(renderer, waitFor, name) {
       })()`);
       if (reachable !== true) throw new Error(`task-launch-bar-unreachable-${width}x${height}`);
     }
-  } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+  } finally {
+    if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');
+    else await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+  }
   const started = await renderer.evaluate(`(() => {const button=document.querySelector('#task-drawer [data-task-drawer-control="launch"]');if(!button||button.disabled)return false;button.click();return true;})()`);
   if (started !== true) throw new Error('task-launch-button-unavailable');
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef`, `${name}-launched`, 120_000);

@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -533,10 +534,10 @@ async function createEmptyBook(renderer, title) {
   return bookId;
 }
 
-async function importBook(renderer, title, bundled = false) {
+async function importBook(renderer, title, bundled = false, distinct = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -873,6 +874,7 @@ async function main() {
     }), { flag: 'wx' });
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
+    let dispatchFixture = false;
     const launch = async (picker, savePath, startupDataRoot = dataRoot) => {
       const startupShellRoot = await ensureCanonicalDataDirectory(startupDataRoot, 'shell');
       const args = [
@@ -882,6 +884,7 @@ async function main() {
         '--j12-observe-reveal', 'true', '--launcher-pid', String(process.pid),
         '--j12-diagnostics-folder', diagnosticsDestination,
       ];
+      if (dispatchFixture) args.push('--j04-model-adapter', 'sample1-baseline-happy');
       if (picker) args.splice(args.length - 4, 0, '--j12-picker-path', picker);
       // 导出数据库's Save dialog, answered once (Issue #434, S86a).
       if (savePath) args.splice(args.length - 4, 0, '--j12-save-path', savePath);
@@ -2554,6 +2557,72 @@ async function main() {
     const refusedPrediction = await primary.evaluate(`window.ai7.setEvaluationPreferences({ expectedEntries: 2, predictionEnabled: true, calibrationEnabled: true }).then(() => ({ recorded: true }), (error) => ({ code: error?.code ?? null, message: error?.message ?? null }))`);
     requireJourney(refusedPrediction?.code === 'PREDICTION_UNAVAILABLE' && refusedPrediction.message === '至少 30 本已发稿图书录入实际数据后，才能打开定价与首印预测。', 'prediction-refused', refusedPrediction);
 
+    // #1455: reuse the existing local fixture composition for starts; the process network denial remains in force.
+    dispatchFixture = true;
+    let rememberedLabel;
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        at(width === 1280 ? 'dispatch-model-wide' : 'dispatch-model-gate');
+        await close();
+        manager = await launch(resolve(ROOT, 'SampleBooks', 'sample1.docx'));
+        [primary] = await waitForRendererCount(manager, 1, 'dispatch-window');
+        await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-landing');
+        await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-settings');
+        await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dispatch-settings-ready');
+        await click(primary, '帮助', 'dispatch-help');
+        await assertRenderer(primary, `(() => {const toggle=document.querySelector('.help-developer-mode input');if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false;if(!toggle.checked)toggle.click();return true;})()`, 'dispatch-development-controls');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-model-settings');
+        await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dispatch-model-settings-ready');
+        await click(primary, '模型服务', 'dispatch-model-settings-entry');
+        await waitFor(primary, `document.querySelector('[data-model-channel="deepseek-open-platform"] input')`, 'dispatch-channel');
+        await primary.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
+        await fill(primary, '#main-editorial-credential', secretTwo, 'dispatch-placeholder-credential');
+        credentialMutationReached = true; productCredentialCleanupSucceeded = false;
+        await click(primary, '保存并获取模型', 'dispatch-credential-save');
+        await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-credential-ready');
+        await fill(primary, '[data-custom-model-id]', 'j12-ordinary-fast', 'dispatch-alternative-model');
+        await assertRenderer(primary, `(() => {const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-alternative-save');
+        await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j12-ordinary-fast')`, 'dispatch-alternative-ready');
+        const defaults = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
+        const otherKinds = await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(Object.entries(preferences.values['model.dispatchChoices']).filter(([kind])=>kind!=='baseline-analysis')))`);
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-ordinary-settings');
+        await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dispatch-ordinary-settings-ready');
+        await click(primary, '帮助', 'dispatch-ordinary-help');
+        await assertRenderer(primary, `(() => {const toggle=document.querySelector('.help-developer-mode input');if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false;if(toggle.checked)toggle.click();return true;})()`, 'dispatch-ordinary-mode');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-library');
+        await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-library-ready');
+        const imported = await importBook(primary, `J12 本次模型 ${width}`, false, true);
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-import-return');
+        await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-import-library');
+        await clickBook(primary, imported.bookId, 'dispatch-book');
+        await waitFor(primary, `document.querySelector('[data-screen="editor"]')`, 'dispatch-manuscript');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('analysis')), 'dispatch-analysis');
+        await waitFor(primary, `document.querySelector('.baseline-analysis-card [data-analysis-action="prepare"]')?.disabled===false`, 'dispatch-analysis-ready');
+        await assertRenderer(primary, `(() => {document.querySelector('.baseline-analysis-card [data-analysis-action="prepare"]').click();return true;})()`, 'dispatch-open-bar');
+        await waitFor(primary, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false && document.querySelector('#task-drawer .dispatch-chooser select')?.options.length>1`, 'dispatch-bar-ready');
+        requireJourney(await primary.evaluate(`window.ai7.inspectBaselineAnalysis().then(reading=>reading.taskIntent===null && reading.run===null)`), 'dispatch-preview-creates-no-task');
+        const beforeChoice = await primary.evaluate(`document.querySelector('#task-drawer .dispatch-chooser summary').textContent`);
+        if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
+        const chosen = await primary.evaluate(`(() => {
+          const chooser=document.querySelector('#task-drawer .dispatch-chooser');chooser.open=true;
+          if(${width}===1008)chooser.querySelector('button').click();
+          else {const models=chooser.querySelector('select[aria-label="本次任务的模型"]');models.selectedIndex=Array.from(models.options).findIndex(option=>option.textContent==='j12-ordinary-fast');models.dispatchEvent(new Event('change',{bubbles:true}));const effort=chooser.querySelector('select[aria-label="本次任务的思考强度"]');effort.value=Array.from(effort.options).find(option=>option.value!=='off').value;effort.dispatchEvent(new Event('change',{bubbles:true}));}
+          chooser.querySelector('summary').focus();const focused=document.activeElement===chooser.querySelector('summary');
+          const label=chooser.querySelector('summary').textContent;chooser.open=false;return {label,focused};
+        })()`);
+        requireJourney(chosen.focused && (width===1008 || chosen.label.includes('j12-ordinary-fast@')), 'dispatch-chosen-model-and-level');
+        if (width === 1280) rememberedLabel = chosen.label;
+        await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });
+        await waitFor(primary, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'dispatch-settled', 180_000);
+        const label = chosen.label.replace(/^模型 /u, '').replace(/ ▾$/u, '');
+        requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`) === defaults, 'dispatch-keeps-role-defaults');
+        requireJourney(await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(Object.entries(preferences.values['model.dispatchChoices']).filter(([kind])=>kind!=='baseline-analysis')))` ) === otherKinds, 'dispatch-keeps-other-task-choices');
+        if (width === 1008) requireJourney(await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(preferences.values['model.dispatchChoices']['baseline-analysis'])==='{}')`), 'dispatch-restores-default');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-tasks');
+        await waitFor(primary, `Array.from(document.querySelectorAll('.task-overview-model')).some(node=>node.textContent===${JSON.stringify(label)})`, 'dispatch-frozen-task-row');
+      }
+    } finally { await primary.send('Emulation.clearDeviceMetricsOverride'); }
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');
     await close();
     await loopback.close();

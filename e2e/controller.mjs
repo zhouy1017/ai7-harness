@@ -824,6 +824,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-service-first-save',
     'model-effort-defaults-wide',
     'model-effort-defaults-gate',
+    'dispatch-model-wide',
+    'dispatch-model-gate',
     'model-service-openai-text-contract',
     'model-service-openai-restart-removal',
     'model-service-search-backends',
