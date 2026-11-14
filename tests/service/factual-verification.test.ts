@@ -553,7 +553,11 @@ describe('factual claim occurrence ledger', () => {
     expect(ledger.currentRunState(runRecordId)).toBe('paused');
     const frozen = ledger.factualVerification.claims(runRecordId)!;
     expect(frozen.claims[0]!.occurrence.quote).toBe('1900年');
-    await reopen();
+    const launch = ledger.launch;
+    await owner.dispose();
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
     owner = reopenExecutionOwner();
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
     try { await driver.continue(reviewRunId); } finally { await driver.dispose(); }

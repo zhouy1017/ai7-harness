@@ -1,3 +1,4 @@
+import { LOCAL_TOOL_DECLARATION_NAMES } from '../../src/service/provider/local-tools.js';
 import { spawnSync } from 'node:child_process';
 import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
 import { canonicalJson, graphemeCount } from '../../src/service/analysis/canonical.js';
@@ -31,7 +32,7 @@ import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionReques
 import type { AnalysisKindDefinition, AnalysisReductionResult } from '../../src/service/analysis/kind-definition.js';
 import { locateQuotation } from '../../src/service/analysis/factual-review-contract.js';
 import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, reviewCategoryContract, reviewCategoryContractDigest, reviewCategoryRequestDigest, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { fixtureEntryKey, loadModelFixture, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -145,6 +146,7 @@ const byCategory = new Map(DEFINITIONS.map((entry) => [entry.input.categoryId, e
 interface Labelled { entry: ModelFixtureEntry; group: number; order: string }
 const entries = new Map<string, Labelled>();
 const refreshedRequests = new Map<string, string>();
+const controlRequests = new Set<string>();
 const j16Keys = new Set<string>();
 let additions = 0;
 
@@ -161,7 +163,7 @@ function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
   entry = refreshRepeatedFinding(entry);
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
-  if (order.startsWith('j16')) j16Keys.add(key);
+  if (order.startsWith('j16') && !entries.has(key)) j16Keys.add(key);
   if (entries.has(key)) return;
   entries.set(key, { entry, group, order });
   fixture.entries.set(key, entry);
@@ -187,11 +189,24 @@ function authoredFindings(categoryId: string, unitOrdinal: number, variant: stri
 
 function unitEntry(categoryIndex: number, categoryId: string, definition: AnalysisKindDefinition, unitOrdinal: number, unitDigest: string, variant: string): void {
   const findings = authoredFindings(categoryId, unitOrdinal, variant);
+  if (categoryId === 'typos-and-usage' && unitOrdinal === 1) controlRequests.add(definition.requestDigest(unitOrdinal, unitDigest));
   const category = DEFINITIONS.find((entry) => entry.input.categoryId === categoryId)!.input;
   const variants = historicalReviewCategoryDefinitions(category, 2);
   for (let index = 0; index < 2; index += 1) {
     refreshedRequests.set(variants[index + 2]!.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
     refreshedRequests.set(withModelClarification(variants[index + 2]!).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+    // Authored fixtures also contain the earlier, unshipped #1471 prompt (4f46c0e8).
+    // Reconstruct its exact request pin so retry stimuli remain attached after wording repairs.
+    const contract = reviewCategoryContract(category, 2, index === 0 ? [] : [...LOCAL_TOOL_DECLARATION_NAMES].sort((left, right) => left.localeCompare(right, 'en')));
+    const previousContract = { ...contract, systemPrompt: contract.systemPrompt
+      .replace('只覆盖有问题的文字，并且在该内容块中只出现一次。', '只覆盖有问题的文字，避免无关文字。')
+      .replace('优先选用在该内容块中只出现一次的引文；无法做到时，必须给出 occurrence 整数，表示第几次出现', '若引文在该内容块中出现多次，必须给出 occurrence，表示第几次出现') };
+    const previousDigest = reviewCategoryContractDigest(previousContract);
+    const previous = { ...variants[index]!, systemPrompt: previousContract.systemPrompt, promptContractDigest: previousDigest,
+      requestDigest: (ordinal: number, digest: string) => reviewCategoryRequestDigest(previousDigest, categoryId, ordinal, digest) };
+    refreshedRequests.set(previous.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
+    refreshedRequests.set(withModelClarification(previous).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+
   }
 
   add({
@@ -555,11 +570,16 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     if (body.provenance !== 'authored' || !Array.isArray(body.entries)) continue;
     let changed = false;
     const deduplicated = new Map<string, unknown>();
+    const originalKeys = new Set(body.entries.map((entry: ModelFixtureEntry) => `${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`));
     for (const original of body.entries) {
       let entry = refreshRepeatedFinding(original);
       if (entry !== original) changed = true;
       const next = refreshedRequests.get(entry.requestDigest);
-      if (next !== undefined && next !== entry.requestDigest) { entry = { ...entry, requestDigest: next }; changed = true; }
+      if (next !== undefined && next !== entry.requestDigest) {
+        changed = true;
+        if (originalKeys.has(`${entry.unitOrdinal}:${next}:${entry.attempt ?? ''}`)) continue;
+        entry = { ...entry, requestDigest: next };
+      }
       deduplicated.set(`${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`, entry);
     }
     if (changed) await writeFile(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
@@ -572,6 +592,11 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     body.entries.sort((left: ModelFixtureEntry, right: ModelFixtureEntry) => left.unitOrdinal - right.unitOrdinal || left.requestDigest.localeCompare(right.requestDigest, 'en') || (left.attempt ?? 0) - (right.attempt ?? 0));
     for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
     await writeFile(path, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  }
+  const generatedControls = parseModelFixture(JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8')));
+  for (const requestDigest of controlRequests) for (const attempt of [1, 2]) {
+    expect(generatedControls.entries.some((entry) => entry.unitOrdinal === 1 && entry.requestDigest === requestDigest && entry.attempt === attempt),
+      'Each generated typos unit-1 request must retain its authored retry stimulus').toBe(true);
   }
   // eslint-disable-next-line no-console
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
