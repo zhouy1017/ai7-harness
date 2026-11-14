@@ -55,16 +55,19 @@ async function book(kind: Kind) {
   const imported = await importSample1Book(store, roots.codeRoot, 'sample1 任务派发');
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
   let recordId = '';
-  if (kind === 'evaluation-rewrite') {
-    recordMissingCredentialConnection(store, '初评本地检查');
+  if (kind === 'evaluation-rewrite' || kind === 'readers-report') {
+    if (store.getModelServiceConnection() === null) recordMissingCredentialConnection(store, '初评本地检查');
     await runInitialEvaluationToEnd(store, setupOwner!, imported.bookId, policy);
     finalizeAsJ11(store, imported.bookId);
-    recordId = beginRewriteAsJ11(store, imported.bookId).recordId;
-  } else if (kind === 'readers-report') finalizeAsJ11(store, imported.bookId);
+    if (kind === 'evaluation-rewrite') recordId = beginRewriteAsJ11(store, imported.bookId).recordId;
+  }
   return { ...imported, recordId };
 }
 
 function ordinary(): void {
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+  store.selectSearchBackend('search-tinyfish');
   capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined);
 }
 

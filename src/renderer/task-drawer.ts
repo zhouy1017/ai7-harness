@@ -1,10 +1,10 @@
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
-import type { RuntimeExecutionConfig, DispatchTaskKind, TaskExecutionLaunchResult } from '../shared/runtime-execution-config.js';
+import type { RuntimeExecutionConfig, LedgerTaskLaunchOperation, TaskExecutionLaunchResult } from '../shared/runtime-execution-config.js';
 import type { ServiceOperationMap } from '../shared/protocol.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
-import { evaluationPlanReferenceField } from './evaluation.js';
+import { evaluationPlanReferenceField, evaluationMaterialsField } from './evaluation.js';
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { taskPlanWording } from './task-drawer-labels.js';
@@ -188,7 +188,7 @@ export interface TaskPlanRequest {
   readonly ref: string | null;
 }
 
-export type TaskLaunchOperation = 'launchBaselineAnalysis' | 'launchCustomAnalysis' | 'launchWritingTask' | 'launchInitialEvaluation' | 'launchReadersReport' | 'launchEvaluationRewrite';
+export type TaskLaunchOperation = LedgerTaskLaunchOperation;
 export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; operation: K; title: string;
   input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
 
@@ -2808,6 +2808,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ticket += 1; const current = ticket;
       clearPoll(); panel.stop(); dialogueSurface.stop();
       view = 'launch'; panelBookId = next.bookId; request = null; plan = null;
+      for (const key of ['taskPlanKind', 'taskPlanRef', 'taskPlanStart', 'taskPlanState', 'taskDetailView']) delete root.dataset[key];
       returnFocus = finder;
       root.hidden = false; root.dataset['taskDrawer'] = 'open'; shell.dataset['taskDrawer'] = 'open';
       showView(); title.textContent = next.title; modes.hidden = true;
@@ -2818,15 +2819,39 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       body.replaceChildren(description, estimate);
       let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
       let commandId = crypto.randomUUID();
+      const references = el('div', 'task-launch-references');
+      body.append(references);
+      const readReferences = next.operation !== 'launchInitialEvaluation' && next.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
+        if (ticket !== current || page.bookId !== next.bookId) return;
+        const selected = new Set(next.input.materialIds ?? []);
+        const materials = el('div'); references.append(materials);
+        const paintReferences = (): void => {
+          materials.replaceChildren(evaluationMaterialsField(page, next.operation === 'launchInitialEvaluation' ? 'initial' : 'readersReport', selected, true, false, () => {
+            next.input = { ...next.input, materialIds: [...selected] };
+            commandId = crypto.randomUUID(); paintReferences();
+          }));
+        };
+        paintReferences();
+        if (next.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
+          const label = el('label', undefined, '书系参考');
+          const select = el('select'); select.setAttribute('aria-label', '本次任务的书系参考');
+          for (const [value, title] of [['', '仅本书'], ...page.market.series.map(series => [series.seriesId, `书系《${series.title}》`])]) {
+            const option = el('option', undefined, title); option.value = value!; select.append(option);
+          }
+          select.value = next.input.seriesId ?? '';
+          select.addEventListener('change', () => { next.input = { ...next.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
+          label.append(select); references.append(label);
+        }
+      });
       const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); } });
       const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
       const start = control('开始任务', 'primary', 'launch'); start.disabled = true;
       start.addEventListener('click', () => { void (async () => {
         if (start.disabled) return;
         start.disabled = true;
-        if (!(await options.settle())) { start.disabled = false; return; }
         problem.textContent = '';
         try {
+          if (!(await options.settle())) { start.disabled = false; return; }
           let result: TaskExecutionLaunchResult;
           switch (next.operation) {
             case 'launchBaselineAnalysis': result = await api.launchBaselineAnalysis({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
@@ -2844,7 +2869,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       })(); });
       bar.hidden = false; bar.replaceChildren(chooser.element, start, problem);
       options.onOpen(); title.focus();
-      void Promise.all([api.getModelServiceSettings(), api.getPreferences()]).then(([settings, preferences]) => {
+      void Promise.all([api.getModelServiceSettings(), api.getPreferences(), readReferences]).then(([settings, preferences]) => {
         if (ticket !== current) return;
         executionConfig = preferences.values['model.dispatchChoices'][kinds[next.operation]] ?? {};
         rememberedChoice = Object.keys(executionConfig).length > 0;
@@ -2853,6 +2878,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (interrupted) disableAll();
     },
     open(next, finder, note, how) {
+      delete root.dataset['taskLaunchKind'];
       ticket += 1;
       panel.stop();
       view = 'plan';

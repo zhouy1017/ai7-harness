@@ -1,3 +1,4 @@
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1265,11 +1266,12 @@ async function main() {
     at('coverage-manifest');
     cancellation.throwIfRequested();
     await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', 'prepare-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'prepared', 120_000);
+    await launchTaskFromBar(renderer, waitFor, 'baseline');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'prepared', 120_000);
     cancellation.throwIfRequested();
     const prepared = await readBaseline(renderer);
     const manifest = prepared?.coverageManifest;
-    requireJourney(prepared?.state === 'prepared' && prepared.bookId === imported.bookId && prepared.kind === 'baseline-manuscript-analysis' &&
+    requireJourney(prepared?.state === 'settled' && prepared.bookId === imported.bookId && prepared.kind === 'baseline-manuscript-analysis' &&
       prepared.contractVersion === 'ai7.baseline-manuscript-analysis/1' && UUID_PATTERN.test(prepared.taskIntent?.taskIntentId) &&
       prepared.taskIntent?.goal === TASK_GOAL && prepared.checkpoint?.revisionId === imported.revisionId &&
       prepared.checkpoint?.revisionLabel === 'r1' && prepared.checkpoint?.createdForDirtyJournal === false && prepared.checkpoint?.journalSequence === 0 &&

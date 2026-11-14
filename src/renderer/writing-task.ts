@@ -1,6 +1,5 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
-import { startPreparedTask } from './one-action-start.js';
 import type {
   DefaultExecutionRuleReference,
   ProductionDocumentProjection,
@@ -370,7 +369,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null, true));
+    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null));
     const start = action('开始写作', 'primary', 'start', () => void prepare(null));
     plan.disabled = busy || page.unavailable !== null;
     start.disabled = plan.disabled;
@@ -463,7 +462,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null, preview = false): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null): Promise<void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -516,21 +515,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       sheet = null;
       const ref = result.task?.taskIntentId ?? null;
       const planEnvelopeDigest = result.task?.planEnvelopeDigest ?? null;
-      if (rule === null || ref === null) {
-        options.setStatus(WRITING_STATUS.prepared, 'success');
-        paint(null);
-        if (ref !== null) {
-          if (preview) options.openPlan(ref);
-          else {
-            awaitDraft(state.typeId);
-            await startPreparedTask(api, 'writing', ref);
-            projection = await api.inspectWritingTask();
-            paint(null);
-            follow();
-          }
-        }
-        return;
-      }
+      if (ref === null) throw new Error(WRITING_STATUS.failed);
       if (planEnvelopeDigest === null) {
         // A quick start whose preparation froze no plan stops at it, and says so (#701 review P3-5).
         const note = taskPlanQuickStartFellBack([WRITING_STATUS.quickNoPlan]);

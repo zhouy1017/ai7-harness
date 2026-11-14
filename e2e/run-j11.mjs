@@ -1,3 +1,4 @@
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -612,14 +613,12 @@ async function openAnalysisOf(renderer, bookId, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, `${name}-analysis`);
 }
 
-/** The first baseline prepared from ②A's card and its plan open in the drawer, ready to start, as J-16 does. */
+/** Open the ordinary launch bar without creating a prepared task. */
 async function prepareFirstBaseline(renderer, readiness, name) {
+  void readiness;
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
-  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`, 120_000);
-  const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
-  if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='baseline-analysis' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart===${JSON.stringify(readiness)} && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
+  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-launch-ready`);
 }
 
 /**
@@ -1677,7 +1676,7 @@ async function main() {
     // adapter; the drawer then closes, leaving ②A the width.
     await openAnalysisOf(renderer, thirdId, 'feedback-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'feedback-analysis');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'feedback-analysis-start');
+    await launchTaskFromBar(renderer, waitFor, 'feedback-analysis');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-analysis-ended', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-analysis-settled-state');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-drawer-close');
@@ -1892,9 +1891,9 @@ async function main() {
     'initial-evaluation-offered-words', beforeInitial.initial);
     await assertRenderer(renderer, `!document.querySelector('.evaluation-sheet') && !document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-reference-location');
     await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'initial-evaluation-plan', 120_000);
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-launch-references [data-evaluation-materials="initial"]')`, 'initial-evaluation-launch-references');
+    await launchTaskFromBar(renderer, waitFor, 'initial-evaluation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'initial-evaluation-full-plan');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-evaluation-plan-references] [data-evaluation-materials="initial"]')`, 'initial-evaluation-plan-references');
     await assertRenderer(renderer, `!document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-page-no-references');
     // The plan in the editor's words, as the drawer reads it: its task, its two steps, its 工序, and that it scores nothing for
     // the editor; no button of the drawer carries 授权.
@@ -1903,10 +1902,6 @@ async function main() {
     requireJourney(planWords === JSON.stringify(['按本社评估方案为这本书做 AI7 初评：各评分项的初评分数与评语，供你打分时参考', ['逐章读取，记下各评分项的依据', '全书综合'], true, '审稿评估方案 第 1 版']),
       'initial-evaluation-plan-words', planWords);
     await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes('按本社评估方案为这本书做 AI7 初评') && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'initial-evaluation-plan-shown');
-    const prepared = await readEvaluation(renderer, (page) => page.initial?.state === 'prepared', 'initial-evaluation-prepared');
-    requireJourney(JSON.stringify(prepared.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]) &&
-      prepared.initial.task === 'AI7 评估报告 · 尚未开始', 'initial-evaluation-prepared-words', prepared.initial);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'initial-evaluation-run');
     const settledInitial = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.initial?.state), 'initial-evaluation-ended');
     requireJourney(settledInitial.initial.state === 'settled', 'initial-evaluation-settled', settledInitial.initial);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'initial-evaluation-drawer-settled', 30_000);
@@ -2086,6 +2081,7 @@ async function main() {
       ]), 'readers-report-offered-words', reportOffered);
     // 起草 prepares the plan and starts it at once (Issue #1410 item 11); the plan stays one disclosure away (查看任务).
     await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]', 'readers-report-prepare');
+    await launchTaskFromBar(renderer, waitFor, 'readers-report');
     const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
     requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
     // The plan in the editor's words: the 定稿 version and template it drafts from, no exemplar, its two steps, and that it writes
@@ -2179,6 +2175,7 @@ async function main() {
     // and the house's active editorial memory; the plan stays one disclosure away — the version and the save it follows, its two
     // steps, and that it moves no score and writes nothing into the version by itself. It runs on the J-04 adapter's fixture.
     await clickSelector(renderer, '[data-evaluation-action="prepare-rewrite"]', 'evaluation-rewrite-prepare');
+    await launchTaskFromBar(renderer, waitFor, 'evaluation-rewrite');
     const endedRewrite = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.rewrite?.state), 'evaluation-rewrite-ended');
     requireJourney(endedRewrite.rewrite.state === 'settled' && endedRewrite.view === 'record', 'evaluation-rewrite-settled', endedRewrite.rewrite);
     const rewritePlan = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => window.ai7.inspectTaskPlan({ kind: 'evaluation-rewrite', ref: page.rewrite.task.taskIntentId }))
@@ -2876,7 +2873,7 @@ async function main() {
     // so the follower hold below is in place before the drawer's 开始任务 runs it.
     await waitFor(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); const plan=whole?.querySelector('[data-analysis-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && plan instanceof HTMLButtonElement && !plan.disabled && plan.textContent==='查看计划' && document.querySelector('.baseline-analysis-card [data-analysis-action^="choose-"]')===null; })()`, 'feedback-pending-mode', 10_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-update-action="reanalyze-book"] [data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
-    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'feedback-pending-plan-ready');
     // ②A arms its 250 ms follower only when a draw finds the Run under way. Unheld, the J-04 adapter's Run can end before
     // the card's first read after 开始任务 answers on a slow runner, leaving no follower to hold (#641). J-10's unit hold
     // keeps the Run's first unit in flight until the follower is held; nothing else in the stage waits on the hold.
@@ -2893,7 +2890,7 @@ async function main() {
         }
         return original(callback,delay,...args);
       };
-      document.querySelector('#task-drawer [data-task-drawer-control="start"]').click();
+      document.querySelector('#task-drawer [data-task-drawer-control="launch"]').click();
       return true;
     })()`, 'feedback-pending-hold-follow');
     await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function' && ['admitted','executing'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-pending-follow-held', 60_000);
@@ -3228,6 +3225,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('.evaluation-more') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'poll-evaluation-empty-ready');
       await writeFile(unitHoldPath, '0', 'utf8');
       await clickSelector(renderer, '[data-evaluation-action="start-initial"]', `${name}-start`);
+      await launchTaskFromBar(renderer, waitFor, name);
       await waitFor(renderer, `document.querySelector('.evaluation-initial')?.dataset.initialState==='executing'`, 'poll-evaluation-running', 120_000);
       const taskId=await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>page.initial.task.taskIntentId)`);
       await assertRenderer(renderer, `(() => { const more=document.querySelector('.evaluation-more');more.open=true;more.querySelector('summary').focus();globalThis.__j11PollInitial=document.querySelector('.evaluation-initial');return true;})()`, 'poll-evaluation-more');

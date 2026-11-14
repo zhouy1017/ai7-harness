@@ -4,6 +4,14 @@ Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317
 
 Only owner-accepted decisions are requirements here. Future feature requirements must enter as an explicit decision delta; they do not revive the V1 freeze package as a screen baseline.
 
+## #1455：本次任务的模型与思考强度
+
+[ADR 0104](../adr/0104-launch-tasks-with-an-immutable-execution-snapshot.md) records the Owner's accepted decision. For 审阅、分析（基线与自定义）、写作、评估（初评、审稿意见、按我的修改重新生成）and 让 AI 修改, the start surface shows `模型 <名称>@<思考强度> ▾`. The editor may choose a ready channel's model and its provider-declared effort, or restore the role default; a model without reasoning control has no level or `@…` suffix. Opening or selecting performs no connection test or provider call.
+
+Start sends one launch request. Inside one store transaction the service pins the manuscript current at launch and resolves one execution snapshot for the run; there is no prepared record awaiting editor approval. Changed selected block identities or scoped-edit locks retain their existing refusal guidance, and apply-time drift checks remain. Every category and unit uses the frozen binding; cards, reports and task rows retain producing attribution after role settings change. A repeated command returns the original run; changed inputs under that identity are refused.
+
+The last choice is remembered per task kind in this instance's `preferences.json`, beside favourite models; it is absent from Book data, exports and synchronization. An unavailable remembered connection or model falls back to the role default with one line of notice and does not block start. Choosing, starting and restoring defaults never edit role defaults in 设置 › 模型服务. 快速开始、快速修订、润色这段 and global dialogue retain their role-default owners; reconnect, resume, queued starts and captured procedures retain their existing control paths.
+
 ## Supported-platform product contract
 
 - **V2-UX-PLAT-001**: AI7 V1 is one Chinese-first Standalone product on Windows and macOS, not separate platform editions.
