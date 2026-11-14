@@ -176,7 +176,7 @@ export function initializeAdmittedChannelsSchema(db: DatabaseSync): void {
     for (const row of db.prepare('SELECT connection_id, provider_id, model_id, fast_model_id, selected, fast_selected FROM model_service_connections').all() as SqlRow[]) {
       const key = `${asString(row.provider_id)}/`;
       seed.run(row.selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + asString(row.model_id)] ?? null : null,
-        row.fast_selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + asString(row.fast_model_id)] ?? null : null, asString(row.connection_id));
+        row.fast_selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + (asString(row.fast_model_id) || asString(row.model_id))] ?? null : null, asString(row.connection_id));
     }
     db.exec('DROP TABLE temp.admitted_channels_migration');
     requireStore(total() === before, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表迁移未保留全部记录。');

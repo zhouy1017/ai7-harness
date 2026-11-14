@@ -349,11 +349,12 @@ describe('导入数据库 over the real store', () => {
     } finally { store.close(); }
   });
 
-  it.each(['main', 'fast'] as const)('seeds the predecessor DeepSeek effective high for the selected %s role, preserving its wire bytes (#1453 review)', async (role) => {
+  it.each([['main', false], ['fast', false], ['fast', true]] as const)('seeds the predecessor DeepSeek effective high for selected %s (legacy Fast fallback=%s), preserving its wire bytes (#1453 review)', async (role, legacyFastFallback) => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.saveModelServiceConnection('Predecessor thinking role', null, 'ready', 'deepseek-open-platform');
     if (role === 'main') store.selectMainRoleModel('deepseek-open-platform', 'deepseek-v4-pro');
     else store.selectFastRoleModel('deepseek-open-platform', 'deepseek-v4-pro');
+    if (legacyFastFallback) store.selectMainRoleModel('deepseek-open-platform', 'deepseek-v4-pro');
     store.markCleanShutdown(); store.close();
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
@@ -361,6 +362,7 @@ describe('导入数据库 over the real store', () => {
       db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_105_SQL);
       db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, cached_models)
         SELECT old_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, cached_models FROM old_connections`);
+      if (legacyFastFallback) db.prepare("UPDATE model_service_connections SET fast_model_id = '' WHERE provider_id = ?").run('deepseek-open-platform');
       db.exec('DROP TABLE old_connections; PRAGMA user_version = 113');
     } finally { db.close(); }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
