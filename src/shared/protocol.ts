@@ -4580,7 +4580,7 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
-  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
+  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode; customTitle?: string }
   // A ledger Task of another kind whose Run waits to start once online, or whose plan moved meanwhile (Issue #760, S74c).
   | { kind: 'task'; taskKind: Exclude<StartWhenOnlineTaskKind, 'review-run'> }
   // A Review Run; `onSelection` for one that reads only the selection 就这段发起任务… handed over (Issue #423, S77b).

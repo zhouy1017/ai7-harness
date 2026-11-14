@@ -118,6 +118,7 @@ export interface ConflictAttentionReading {
 
 /** The Book's latest baseline analysis Task, read by the baseline ledger. */
 export interface AnalysisTaskAttentionReading {
+  readonly customTitle?: string;
   readonly modelLabel?: string;
   readonly bookId: string;
   readonly bookTitle: string;
@@ -204,6 +205,7 @@ export interface WaitingTaskAttentionReading {
 
 /** One completed baseline Task Outcome of the recent window. */
 export interface AnalysisOutcomeAttentionReading {
+  readonly customTitle?: string;
   readonly modelLabel?: string;
   readonly bookId: string;
   readonly bookTitle: string;
@@ -519,7 +521,7 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
 
 function analysisTaskItemWithoutAttribution(reading: AnalysisTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
   const book = { bookId: reading.bookId, title: reading.bookTitle };
-  const object: GlobalAttentionObjectProjection = { kind: 'analysis', mode: reading.mode };
+  const object: GlobalAttentionObjectProjection = { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) };
   const target: GlobalAttentionTarget = { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId };
   const run = reading.run;
   if (run === null) {
@@ -677,7 +679,7 @@ function analysisOutcomeItemWithoutAttribution(reading: AnalysisOutcomeAttention
     blocked: false,
     at: reading.recordedAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'analysis', mode: reading.mode },
+    object: { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) },
     facts: { revisionOrdinal: reading.revisionOrdinal, ...(reading.completion === undefined ? {} : { completion: reading.completion }) },
     nextStep: 'view-run',
     target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
@@ -1145,7 +1147,7 @@ function preparedAnalysisItem(reading: AnalysisTaskAttentionReading): GlobalAtte
     blocked: false,
     at: reading.createdAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'analysis', mode: reading.mode },
+    object: { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) },
     nextStep: 'view-plan',
     target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
     technical: [
@@ -1192,7 +1194,7 @@ function cancelledBeforeStartItem(reading: AnalysisTaskAttentionReading, run: No
     blocked: false,
     at: run.stateAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'analysis', mode: reading.mode },
+    object: { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) },
     facts: { revisionOrdinal: null },
     nextStep: 'view-run',
     target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },

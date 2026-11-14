@@ -1,5 +1,6 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validReasoningEffort, validRuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { canonicalPlanEdits } from './analysis/plan-edits.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
@@ -459,7 +460,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReadersReport':
     case 'launchEvaluationRewrite': {
       if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
-      const { clientCommandId, executionConfig, rememberedChoice, ...task } = value.input;
+      const { clientCommandId, executionConfig, rememberedChoice, planEdits, ...task } = value.input;
+      if (planEdits !== undefined && (!isRecord(planEdits) ||
+          !Object.keys(planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling', 'evidenceAssuranceLevel'].includes(key)) || canonicalPlanEdits({
+            removedSteps: planEdits.removedSteps, disallowedAdaptations: planEdits.disallowedAdaptations, askFirstAdaptations: planEdits.askFirstAdaptations,
+            runBudgetCeiling: planEdits.runBudgetCeiling, evidenceAssuranceLevel: planEdits.evidenceAssuranceLevel,
+          }) === null)) throw new ProtocolError(tentativeId);
       if (op === 'launchBaselineAnalysis' && Object.hasOwn(task, 'reconfirm')) throw new ProtocolError(tentativeId);
       if (!validUuid(clientCommandId) || (executionConfig !== undefined && !validRuntimeExecutionConfig(executionConfig)) ||
           (rememberedChoice !== undefined && typeof rememberedChoice !== 'boolean')) throw new ProtocolError(tentativeId);

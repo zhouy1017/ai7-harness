@@ -1,4 +1,5 @@
 import { launchedRunModelLabels } from './editorial-mark-source.js';
+import { transact as transactLaunch } from './analysis/run-state.js';
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -4066,6 +4067,7 @@ export class EditorialStore {
 
   #launchInitialHost(execution: import('./analysis/baseline-analysis-store.js').LaunchBinding): initialEvaluationOperations.InitialEvaluationOperationsHost {
     const host: initialEvaluationOperations.InitialEvaluationOperationsHost = { ...this.#initialEvaluationOperationsHost,
+      transaction: transactLaunch,
       baselineAnalysis: this.#baselineAnalysis.forkForLaunch(execution), initialEvaluation: this.#initialEvaluation.forkForLaunch(execution),
       initialEvaluationLedgerForBook: (bookId, materials) => initialEvaluationOperations.initialEvaluationLedgerForBook(host, bookId, materials),
       inspectInitialEvaluation: (bookId, progress, revisionId) => initialEvaluationOperations.inspectInitialEvaluation(host, bookId, progress, revisionId) };
@@ -4083,7 +4085,7 @@ export class EditorialStore {
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
-          const projection = create({ snapshotId, execution }, policy);
+          const projection = create({ snapshotId, execution, ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
           requireStore(projection.run !== null && projection.checkpoint !== null, 'TASK_LAUNCH_FAILED', '这次任务未能启动。');
           return { runId: projection.run.runRecordId, manuscript: projection.checkpoint };
         });
@@ -4100,7 +4102,8 @@ export class EditorialStore {
 
   launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection) {
     return this.#launchLedgerTask('baseline-analysis', input, policy, (context, launchPolicy) => this.#baselineAnalysis.launchTask({
-      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy }, context.snapshotId, context.execution));
+      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy,
+      ...(context.planEdits === undefined ? {} : { launchEdits: context.planEdits }) }, context.snapshotId, context.execution));
   }
 
   launchCustomAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchCustomAnalysis']['input'], policy: LaunchPolicyProjection) {
@@ -4110,7 +4113,7 @@ export class EditorialStore {
 
   launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection) {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context));
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context));
   }
 
   launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection) {
@@ -4121,7 +4124,7 @@ export class EditorialStore {
   launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection) {
     return this.#launchLedgerTask('readers-report', input, policy, (context, launchPolicy) => {
       const evaluation = this.#launchInitialHost(context.execution);
-      return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, baselineAnalysis: evaluation.baselineAnalysis,
+      return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
         input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
@@ -4131,7 +4134,7 @@ export class EditorialStore {
   launchEvaluationRewrite(input: import('../shared/protocol.js').ServiceOperationMap['launchEvaluationRewrite']['input'], policy: LaunchPolicyProjection) {
     return this.#launchLedgerTask('evaluation-rewrite', input, policy, (context, launchPolicy) => {
       const evaluation = this.#launchInitialHost(context.execution);
-      return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, baselineAnalysis: evaluation.baselineAnalysis,
+      return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
         input.bookId, input.recordId, launchPolicy, null, context);
     });
@@ -15308,7 +15311,8 @@ export class EditorialStore {
       if (version === null) continue;
       const ledger = this.customAnalysisLedger(customAnalysisOperations.customAnalysisDefinition(this.#customAnalysisHost, version));
       const reading = ledger.attentionReadings(progress, since, limit, { bookId: asString(row.book_id), cancelled: scope?.cancelled ?? false });
-      result.tasks.push(...reading.tasks); result.outcomes.push(...reading.outcomes);
+      result.tasks.push(...reading.tasks.map(task => ({ ...task, customTitle: version.document.title })));
+      result.outcomes.push(...reading.outcomes.map(outcome => ({ ...outcome, customTitle: version.document.title })));
     }
     return result;
   }

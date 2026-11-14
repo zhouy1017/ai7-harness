@@ -6,8 +6,11 @@ import { BaselineAnalysisExecutionOwner, driveLaunchedLedgerRun, ModelRequestGov
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore } from '../../src/service/store.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, BASELINE_ANALYSIS_MODE_GOALS, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import type { RuntimeExecutionConfig } from '../../src/shared/runtime-execution-config.js';
+import type { PlanEditsProjection } from '../../src/shared/protocol/analysis-plan.js';
 import { capturedMapAnswer, capturedOrdinaryExecution, type CapturedOrdinaryAnswer } from '../support/captured-ordinary-transport.js';
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
 import { beginRewriteAsJ11, EVALUATION_REWRITE_FIXTURE_IDENTITY } from '../support/evaluation-rewrite.js';
@@ -79,8 +82,8 @@ async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
   ordinary(answer);
 }
 
-function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false) {
-  const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice };
+function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection) {
+  const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice, ...(planEdits === undefined ? {} : { planEdits }) };
   switch (kind) {
     case 'baseline-analysis': return () => store.launchBaselineAnalysis({ ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy);
     case 'custom-analysis': {
@@ -108,11 +111,13 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       fromGrapheme: 0, toGrapheme: 0, insertText: '。' });
     const current = store.getManuscriptWindow(a.manuscriptId, a.branchId, null);
     const clientCommandId = randomUUID();
-    const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId);
+    const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId, false,
+      { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } });
     const secondCommand = command(kind, b, { modelId: 'account-future-model', reasoningEffort: 'low' });
     const [first, second] = await Promise.all([Promise.resolve().then(firstCommand), Promise.resolve().then(secondCommand)]);
     expect(first.runRecordId).not.toBe(second.runRecordId);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.journalSequence).toBe(current.journalSequence);
+    expect(first.ledger.loadExecutionPlan(first.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 50_000 });
     expect(first.ledger.loadExecutionPlan(first.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
     expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
     expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
@@ -120,6 +125,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       const task = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
         .find(entry => entry.item.technical.some(line => line.key === 'run-record' && line.value.includes(launched.runRecordId)));
       expect(task?.item.modelLabel).toContain(`@${effort}`);
+      if (kind === 'custom-analysis') expect(task?.item.object).toMatchObject({ kind: 'analysis', customTitle: CUSTOM_DIMENSION_TITLE });
     }
     store.selectMainRoleModel('opencode-go', defaults.model, 'off');
     expect(firstCommand()).toMatchObject({ repeated: true, runRecordId: first.runRecordId, taskIntentId: first.taskIntentId });
@@ -159,8 +165,16 @@ it('drives a committed baseline launch after restart once and retains actual req
   const committed = launch();
   const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
   store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+  const changedDefaults = store.getConfiguredModelRoleBinding('main-editorial');
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-happy');
-  await restart(capturedMapAnswer(fixture.entries));
+  await restart((request, message) => {
+    // The ordinary clarification wrapper has its own physical digest; reuse the existing baseline response schedule
+    // under the frozen unit identity, as the real-store composite transport tests do.
+    const unit = parseUnitMessageHeader(message);
+    return request.stage === 'units' && unit !== null
+      ? resolveFixtureEntry(fixture.entries, unit.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.unitDigest), request.attemptIndex)?.response
+      : capturedMapAnswer(fixture.entries)(request, message);
+  });
   store.reconcileStoppedBaselineAnalysisRuns();
   const replay = launch();
   expect(replay).toMatchObject({ repeated: true, runRecordId: committed.runRecordId });
@@ -173,8 +187,23 @@ it('drives a committed baseline launch after restart once and retains actual req
   const sent = capture!.wireRequests.length;
   driveLaunchedLedgerRun(capture!.owner, launch()); await capture!.owner.whenIdle();
   expect(capture!.wireRequests).toHaveLength(sent);
-  expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: defaults.model, reasoningEffort: 'off' });
+  expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual(changedDefaults);
   const row = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
     .find(entry => entry.item.modelLabel === report.modelLabel);
   expect(row).toBeDefined();
+  const blocks = store.baselineAnalysisLedger.readWorkingBlocks(target.branchId);
+  const first = blocks.find((block, index) => block.kind === 'paragraph' && blocks[index + 1]?.kind === 'paragraph')!;
+  const gone = blocks.find(block => block.position === first.position + 1)!;
+  const window = store.getManuscriptWindowAt(target.manuscriptId, target.branchId, { kind: 'block', blockId: first.blockId });
+  store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: target.manuscriptId, branchId: target.branchId,
+    baseRevisionId: window.revisionId, blockId: first.blockId, windowStartBlockId: window.blocks[0]!.blockId,
+    baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: first.graphemes, toGrapheme: first.graphemes,
+    insertText: '', structure: { kind: 'merge', mergedBlockId: gone.blockId, mergedBlockDigest: gone.digest } });
+  expect(store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).some(block => block.blockId === gone.blockId)).toBe(false);
+  const moved = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
+  expect(() => store.launchBaselineAnalysis({ bookId: target.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
+    update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: gone.blockId, toBlockId: gone.blockId } } }, policy))
+    .toThrowError(expect.objectContaining({ code: 'ANALYSIS_SELECTED_RANGE_INVALID', message: expect.stringContaining('请重新选择') }));
+  expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest).toBe(moved.workingDigest);
+  expect(capture!.wireRequests).toHaveLength(sent);
 });

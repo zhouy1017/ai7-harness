@@ -3152,7 +3152,15 @@ export class BaselineAnalysisStore {
       ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }) };
     const persist = (checkpoint: ManuscriptCheckpointBinding): void => {
       this.#insertIntent(intent);
-      this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy);
+      const edits = input.launchEdits === undefined ? undefined : canonicalPlanEdits(input.launchEdits);
+      requireAnalysis(edits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
+      requireAnalysis(input.launchEdits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
+        'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
+      requireAnalysis(this.#definition.assurance !== null || (edits?.removedSteps.length ?? 0) === 0,
+        'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (edits?.askFirstAdaptations ?? []).length === 0,
+        'ANALYSIS_PLAN_EDIT_INVALID', '这项任务暂不能把安全重试改成先问你。');
+      this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy, edits);
       const plan = this.inspect(input.bookId);
       requireAnalysis(plan.planEnvelope?.dispatchAllowed && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
       if (deferred) return;
@@ -3453,7 +3461,7 @@ export class BaselineAnalysisStore {
     return { done: true, workId: null, completed: progress.total, total: progress.total, projection: this.inspect(asString(intent.book_id)) };
   }
 
-  #persistPrepared(taskIntentId: string, checkpoint: ManuscriptCheckpointBinding, purpose: CheckpointPurpose, launchPolicy: LaunchPolicyProjection): void {
+  #persistPrepared(taskIntentId: string, checkpoint: ManuscriptCheckpointBinding, purpose: CheckpointPurpose, launchPolicy: LaunchPolicyProjection, launchEdits?: PlanEdits): void {
     requireAnalysis(purpose === TASK_INPUT_CHECKPOINT_PURPOSE, 'ANALYSIS_CHECKPOINT_INVALID', '任务输入固定点用途无效。');
     this.#requireDeniedPolicy(launchPolicy);
     const intentRow = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
@@ -3482,7 +3490,7 @@ export class BaselineAnalysisStore {
       checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
       checkpointRecord.json, checkpointRecord.digest, instant);
     this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange,
-      planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
+      planRevisionId: null, instant, edits: launchEdits ?? this.#redoPlanEdits(intent), policy: launchPolicy });
   }
 
   /** Derive the search pins for both fresh preparation reuse and plan freezing. */

@@ -2,6 +2,7 @@ import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js'
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig, LedgerTaskLaunchOperation, TaskExecutionLaunchResult } from '../shared/runtime-execution-config.js';
 import type { ServiceOperationMap } from '../shared/protocol.js';
+import type { PlanEditsProjection } from '../shared/protocol/analysis-plan.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField, evaluationMaterialsField } from './evaluation.js';
@@ -2819,6 +2820,29 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       body.replaceChildren(description, estimate);
       let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
       let commandId = crypto.randomUUID();
+      const runOptions = el('details', 'task-launch-options');
+      runOptions.append(el('summary', undefined, '本次运行选项'));
+      const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text';
+      budget.value = String(next.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? '');
+      budget.dataset['taskLaunchOption'] = 'budget';
+      budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
+      const budgetLabel = el('label', undefined, '本次预算上限 · 词元（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
+      runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
+      const baselineOptions = next.operation === 'launchBaselineAnalysis';
+      const retry = el('select'); retry.dataset['taskLaunchOption'] = 'retry'; retry.setAttribute('aria-label', '遇到可重试的失败');
+      for (const [value, label] of [['auto', '自动重试'], ['ask-first', '先问我'], ['never', '不重试']]) {
+        const option = el('option', undefined, label); option.value = value!; retry.append(option);
+      }
+      retry.value = next.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : next.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
+      const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
+      sampling.checked = !next.input.planEdits?.removedSteps.includes('assurance-sampling');
+      if (baselineOptions) {
+        const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
+        const samplingLabel = el('label', undefined, '完成后核对与抽检'); samplingLabel.prepend(sampling);
+        runOptions.append(retryLabel, samplingLabel);
+      }
+      for (const event of ['input', 'change']) runOptions.addEventListener(event, () => { commandId = crypto.randomUUID(); });
+      body.append(runOptions);
       const references = el('div', 'task-launch-references');
       body.append(references);
       const readReferences = next.operation !== 'launchInitialEvaluation' && next.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
@@ -2850,8 +2874,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (start.disabled) return;
         start.disabled = true;
         problem.textContent = '';
+        const controls = [...body.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button'),
+          ...chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button')].map(control => ({ control, disabled: control.disabled }));
+        for (const { control } of controls) control.disabled = true;
+        const restore = (): void => { for (const { control, disabled } of controls) control.disabled = disabled; };
         try {
-          if (!(await options.settle())) { start.disabled = false; return; }
+          const tokens = budget.value.trim() === '' ? null : parseBudgetCeiling(budget.value);
+          if (tokens === null && budget.value.trim() !== '') { restore(); start.disabled = false; problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return; }
+          const planEdits: PlanEditsProjection = {
+            removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : next.input.planEdits?.removedSteps ?? [],
+            disallowedAdaptations: baselineOptions ? retry.value === 'never' ? ['safe-retry'] : [] : next.input.planEdits?.disallowedAdaptations ?? [],
+            ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
+            ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
+          };
+          next.input = { ...next.input, planEdits };
+          if (!(await options.settle())) { restore(); start.disabled = false; return; }
           let result: TaskExecutionLaunchResult;
           switch (next.operation) {
             case 'launchBaselineAnalysis': result = await api.launchBaselineAnalysis({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
@@ -2865,7 +2902,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           options.onRecorded(kind, next.bookId, result.taskIntentId);
           options.setStatus(result.launchNotice ?? '已开始任务', 'success');
           if (ticket === current) surface.open({ bookId: next.bookId, kind, ref: result.taskIntentId }, finder, result.launchNotice, { view: 'run' });
-        } catch (error) { if (ticket === current) { start.disabled = false; problem.textContent = options.errorMessage(error, '无法开始任务。'); } }
+        } catch (error) { if (ticket === current) { restore(); start.disabled = false; problem.textContent = options.errorMessage(error, '无法开始任务。'); } }
       })(); });
       bar.hidden = false; bar.replaceChildren(chooser.element, start, problem);
       options.onOpen(); title.focus();

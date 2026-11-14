@@ -2,6 +2,8 @@
  * Missing fields inherit the role default; `off` explicitly omits the effort control on the wire.
  * Effort identifiers are vendor data, not a model/level admission list.
  */
+import type { PlanEditsProjection } from './protocol/analysis-plan.js';
+
 export interface RuntimeExecutionConfig {
   readonly modelConnectionId?: string;
   readonly modelId?: string;
@@ -23,6 +25,8 @@ export interface TaskExecutionLaunchInput {
   readonly executionConfig?: RuntimeExecutionConfig;
   /** A remembered catalogue choice may fall back; an explicit choice keeps upstream validation. */
   readonly rememberedChoice?: boolean;
+  /** Existing optional budget/retry controls, frozen in the first plan rather than a later plan revision. */
+  readonly planEdits?: PlanEditsProjection;
 }
 
 export interface TaskExecutionLaunchResult {

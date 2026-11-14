@@ -40,8 +40,11 @@ describe('one-step drawer launch frames (#1455)', () => {
     const input = { bookId, ...task, clientCommandId: randomUUID(), executionConfig: { modelConnectionId: 'instance-reference', modelId: 'account/model', reasoningEffort: 'high' }, rememberedChoice: true };
     const frame = { id: randomUUID(), op, input };
     expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    const options = { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } };
+    expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, planEdits: options } })))).toMatchObject({ input: { planEdits: options } });
     for (const invalid of [{ ...input, clientCommandId: 'broken' }, { ...input, executionConfig: { endpoint: 'private' } },
-      { ...input, rememberedChoice: 'yes' }, { ...input, authorize: true }]) {
+      { ...input, rememberedChoice: 'yes' }, { ...input, authorize: true },
+      { ...input, planEdits: { ...options, endpoint: 'private' } }, { ...input, planEdits: { ...options, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 0 } } }]) {
       expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
     }
     if (op === 'launchBaselineAnalysis') expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, reconfirm: false } })))).toThrow(ProtocolError);
