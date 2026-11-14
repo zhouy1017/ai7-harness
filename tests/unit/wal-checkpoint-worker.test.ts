@@ -141,24 +141,78 @@ describe('store-owned checkpoint worker', () => {
     expect(policy.fileBytes()).toBe(0);
   });
 
-  it('bounds a missing worker response and settles without a synthetic cleanup response', async () => {
+  it('keeps a slow PASSIVE flight on the healthy worker beyond sixty seconds', async () => {
     vi.useFakeTimers();
-    const diagnostic = vi.spyOn(process.stderr, 'write');
-    let heldId = 0;
     const send = worker.postMessage.bind(worker);
-    const held = vi.spyOn(worker, 'postMessage').mockImplementation(request => {
-      if (request.mode === 'PASSIVE') { heldId = request.id; return; }
-      send(request);
-    });
+    const held = vi.spyOn(worker, 'postMessage').mockImplementation(request => { if (request.mode !== 'PASSIVE') send(request); });
+    const fallback = vi.spyOn(policy, 'maintain');
     try {
       write('first'); maintenance.maintain(false);
-      expect(heldId).toBeGreaterThan(0);
-      const settled = maintenance.settled();
-      await vi.advanceTimersByTimeAsync(60_000); await settled;
-      expect(maintenance.available).toBe(false);
-      expect(diagnostic.mock.calls.some(([line]) => String(line).includes('"reason":"flight-timeout","mode":"PASSIVE"'))).toBe(true);
-      await maintenance.stop(false);
-    } finally { vi.useRealTimers(); held.mockRestore(); diagnostic.mockRestore(); await worker.terminate(); }
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(maintenance.available).toBe(true);
+      expect(maintenance.maintain(true)).toBeNull();
+      expect(fallback).not.toHaveBeenCalled();
+      write('second');
+      expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
+      const stopped = maintenance.stop(false);
+      await vi.advanceTimersByTimeAsync(5_000); await vi.runOnlyPendingTimersAsync(); await stopped;
+    } finally { vi.useRealTimers(); held.mockRestore(); fallback.mockRestore(); await worker.terminate(); }
+  });
+
+  it('accepts an already queued TRUNCATE reply after the real main loop was blocked past its bound', async () => {
+    await maintenance.stop(false);
+    const signal = new Int32Array(new SharedArrayBuffer(8));
+    maintenance = new WalCheckpointMaintenance(policy, path, databasePath => {
+      worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads'); const signal=new Int32Array(workerData.signal);
+        const post=parentPort.postMessage.bind(parentPort); parentPort.postMessage=packet=>{
+          post(packet); if(packet.id) { Atomics.store(signal,0,1); Atomics.notify(signal,0); }
+        }; import(${JSON.stringify(new URL('file:///' + script.replaceAll('\\', '/')).href)});`,
+      { eval: true, workerData: { databasePath, signal: signal.buffer } }); return worker;
+    });
+    expect(await maintenance.ready).toBe(true);
+    let replyQueued = false, queuedMs = 0, blockedMs = 0, finish!: () => void;
+    const observed = new Promise<void>(resolve => { finish = resolve; });
+    const diagnostic = vi.spyOn(process.stderr, 'write').mockImplementation(line => { if (String(line).includes('flight-timeout')) finish(); return true; });
+    const send = worker.postMessage.bind(worker);
+    vi.spyOn(worker, 'postMessage').mockImplementation(request => {
+      if (request.mode !== 'TRUNCATE') { send(request); return; }
+      const sentAt = Date.now();
+      setImmediate(() => {
+        // A block in the check phase makes expired timers run before the queued MessagePort reply.
+        worker.once('message', () => finish()); Atomics.store(signal,0,0); send(request);
+        Atomics.wait(signal,0,0,10_000); replyQueued = Atomics.load(signal,0) === 1; queuedMs = Date.now() - sentAt;
+        const began = Date.now(); Atomics.wait(signal,1,0,5_100); blockedMs = Date.now() - began;
+      });
+    });
+    try {
+      write('first'); await observed;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(replyQueued).toBe(true); expect(queuedMs).toBeLessThan(5_000); expect(blockedMs).toBeGreaterThanOrEqual(5_000);
+      expect(maintenance.available).toBe(true);
+      expect(diagnostic.mock.calls.some(([line]) => String(line).includes('flight-timeout'))).toBe(false);
+    } finally { diagnostic.mockRestore(); }
+  });
+
+  it('skips a conditional TRUNCATE when a commit invalidates the complete PASSIVE frame count', async () => {
+    const checkpoint = (id: number, mode: string, expectedFrames?: number) => new Promise<{busy:boolean;logFrames:number;checkpointedFrames:number;afterBytes:number}>(resolve => {
+      const receive = (packet: {id:number;busy:boolean;logFrames:number;checkpointedFrames:number;afterBytes:number}) => {
+        if (packet.id === id) { worker.off('message', receive); resolve(packet); }
+      };
+      worker.on('message', receive); worker.postMessage({ id, mode, expectedFrames });
+    });
+    db.prepare('INSERT INTO edits VALUES (?, ?)').run('first', 'x'.repeat(80 * 1024));
+    const before = await checkpoint(-1, 'PASSIVE');
+    expect(before.logFrames).toBe(before.checkpointedFrames);
+    db.prepare('INSERT INTO edits VALUES (?, ?)').run('between', 'x'.repeat(160 * 1024));
+    expect((await checkpoint(-2, 'TRUNCATE', before.logFrames)).busy).toBe(true);
+    expect(policy.fileBytes()).toBeGreaterThan(0);
+    const after = await checkpoint(-3, 'PASSIVE');
+    expect(after.logFrames).toBe(after.checkpointedFrames); expect(after.logFrames).not.toBe(before.logFrames);
+    expect((await checkpoint(-4, 'TRUNCATE', before.logFrames)).busy).toBe(true);
+    expect(policy.fileBytes()).toBeGreaterThan(0);
+    expect((await checkpoint(-5, 'TRUNCATE', after.logFrames)).busy).toBe(false);
+    expect(policy.fileBytes()).toBe(0);
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
   });
 
   it('does not run synchronous fallback while a healthy thread is still starting', async () => {
@@ -177,7 +231,7 @@ describe('store-owned checkpoint worker', () => {
     fallback.mockRestore();
   });
 
-  it('finishes shutdown unreferenced after close acknowledgement even if thread termination never settles', async () => {
+  it('settles worker cleanup unreferenced after close acknowledgement even if native termination never settles', async () => {
     let referenced = true;
     const ref = vi.spyOn(worker, 'ref').mockImplementation(() => { referenced = true; });
     const unref = vi.spyOn(worker, 'unref').mockImplementation(() => { referenced = false; });

@@ -1772,10 +1772,10 @@ async function dispatch(
   }
 }
 
-/** The clean lifetime marker is durable before potentially slow checkpoint/close work starts. */
+/** The clean lifetime marker precedes potentially slow owner/checkpoint cleanup. */
 async function prepareCleanShutdown(store: EditorialStore, stopOwners: () => Promise<void>): Promise<void> {
-  await stopOwners();
   store.markCleanShutdown(false);
+  await stopOwners();
   await store.stopCheckpointWorker(true);
 }
 

@@ -66,6 +66,31 @@ function edit() {
     expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '甲' };
 }
 
+/** Hold a real PASSIVE result before delivery so overlap does not depend on disk speed. */
+function heldPassiveWorker(databasePath: string, signal: SharedArrayBuffer): Worker {
+  return new Worker(`const {parentPort,workerData}=require('node:worker_threads');
+    const {DatabaseSync}=require('node:sqlite'); const signal=new Int32Array(workerData.signal);
+    const prepare=DatabaseSync.prototype.prepare;
+    DatabaseSync.prototype.prepare=function(sql){ const statement=prepare.call(this,sql), get=statement.get.bind(statement), db=this;
+      statement.get=(...args)=>{
+        if(sql==='PRAGMA wal_checkpoint(TRUNCATE)') {
+          const row=prepare.call(db,'PRAGMA wal_checkpoint(NOOP)').get();
+          if(Number(row.log)>Number(row.checkpointed)) Atomics.add(signal,2,1);
+        }
+        if(sql==='PRAGMA wal_checkpoint(PASSIVE)') {
+          const count=Atomics.add(signal,3,1)+1; parentPort.postMessage({passiveStarted:count});
+        }
+        const result=get(...args);
+        if(sql==='PRAGMA wal_checkpoint(PASSIVE)' && Atomics.compareExchange(signal,0,0,1)===0) {
+          parentPort.postMessage({passiveHeld:true}); Atomics.wait(signal,1,0); Atomics.store(signal,0,2);
+        }
+        return result;
+      }; return statement;
+    };
+    import(${JSON.stringify(pathToFileURL(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs')).href)});`,
+  { eval: true, workerData: { databasePath, signal } });
+}
+
 describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('recovers every acknowledged edit after killing the store process while the edits exist only in WAL', async () => {
     store!.markCleanShutdown(); store!.close(); store = undefined;
@@ -174,39 +199,45 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
     } finally { WAL_CHECKPOINT_LIMITS.emergencyBytes = ceiling; await store!.stopCheckpointWorker(false); }
   });
 
-  it('acknowledges a non-journal annotation while idle PASSIVE backfills a large WAL', async () => {
-    const writer = new DatabaseSync(database()); configureDatabase(writer);
-    // Isolated zero padding creates WAL pressure without adding manuscript content or changing any product row.
+  it('overlaps an annotation with an idle PASSIVE flight and defers TRUNCATE until full backfill', async () => {
+    store!.checkpointAfterResponse(true);
+    const writer = new DatabaseSync(database()), reader = new DatabaseSync(database(), { readOnly: true }); configureDatabase(writer);
+    reader.exec('BEGIN'); reader.prepare('SELECT * FROM branch_working_state').all();
     writer.exec('CREATE TABLE checkpoint_test_padding(bytes BLOB); INSERT INTO checkpoint_test_padding VALUES (zeroblob(33554432))');
-    const modes: string[] = [];
-    let started!: () => void;
-    const checkpointStarted = new Promise<void>(resolve => { started = resolve; });
+    const signal = new Int32Array(new SharedArrayBuffer(16)), modes: string[] = [];
+    let held!: () => void, retried!: () => void, drained!: () => void;
+    const heldReply = new Promise<void>(resolve => { held = resolve; }), retry = new Promise<void>(resolve => { retried = resolve; });
+    const zeroWal = new Promise<void>(resolve => { drained = resolve; });
     try {
       expect(await store!.startCheckpointWorker(databasePath => {
-        const worker = new Worker(`const {parentPort}=require('node:worker_threads');
-          parentPort.on('message', request => { if(request.mode==='PASSIVE') parentPort.postMessage({checkpointStarted:true}); });
-          import(${JSON.stringify(pathToFileURL(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs')).href)});`,
-        { eval: true, workerData: { databasePath } });
-        worker.on('message', packet => { if (packet.checkpointStarted) started(); });
+        const worker = heldPassiveWorker(databasePath, signal.buffer);
+        worker.on('message', packet => { if (packet.passiveHeld) held(); if (packet.passiveStarted >= 2) retried(); if (packet.id && packet.afterBytes === 0) drained(); });
         const send = worker.postMessage.bind(worker);
-        vi.spyOn(worker, 'postMessage').mockImplementation(request => { modes.push(request.mode); send(request); });
-        return worker;
+        vi.spyOn(worker, 'postMessage').mockImplementation(request => { modes.push(request.mode); send(request); }); return worker;
       })).toBe(true);
-      await checkpointStarted;
-      expect(modes[0]).toBe('PASSIVE');
+      await heldReply; expect(Atomics.load(signal,0)).toBe(1);
       const window = store!.getManuscriptWindow(book.manuscriptId, book.branchId, null);
       const block = window.blocks.find(value => value.kind === 'paragraph' && value.text.length > 0)!;
       const card = store!.createEditorialMark({ ...book, windowStartBlockId: window.blocks[0]!.blockId,
         clientMarkId: randomUUID(), baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence,
         blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1,
         selectedText: Array.from(block.text)[0]!, kind: 'annotation', highlightColor: null, body: '核对用语。', proposedText: null, rationale: null }).card!;
-      expect(card.kind).toBe('annotation');
       expect(store!.getEditorialMarkCard(book.manuscriptId, book.branchId, card.markId).body).toBe('核对用语。');
       expect(store!.flushJournalEdit(edit()).sequence).toBe(1);
-    } finally { await store!.stopCheckpointWorker(false); writer.exec('DROP TABLE checkpoint_test_padding'); writer.close(); }
+      expect(Atomics.load(signal,0)).toBe(1); // Both writes completed before the PASSIVE result could return.
+      Atomics.store(signal,1,1); Atomics.notify(signal,1);
+      await retry;
+      expect(modes.slice(0,2)).toEqual(['PASSIVE','PASSIVE']); // A partial backfill must not request TRUNCATE.
+      expect(modes).not.toContain('TRUNCATE');
+      reader.exec('ROLLBACK'); await zeroWal;
+      expect(Atomics.load(signal,2)).toBe(0); // The real SQLite TRUNCATE never backfilled a backlog.
+    } finally {
+      Atomics.store(signal,1,1); Atomics.notify(signal,1); if (reader.isTransaction) reader.exec('ROLLBACK');
+      await store!.stopCheckpointWorker(false); writer.exec('DROP TABLE checkpoint_test_padding'); reader.close(); writer.close();
+    }
   });
 
-  it('marks a normal quit clean before a checkpoint exceeds the shutdown bound', async () => {
+  it('marks a normal quit clean before a slow owner and bounded checkpoint cleanup', async () => {
     const adapter = await import(pathToFileURL(serviceAdapter).href);
     store!.flushJournalEdit(edit());
     let worker!: Worker;
@@ -214,6 +245,10 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
       worker = new Worker(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), { workerData: { databasePath } }); return worker;
     })).toBe(true);
     const events: string[] = [];
+    let finishOwners!: () => void;
+    const owners = new Promise<void>(resolve => { finishOwners = resolve; });
+    const cleanup = store!.stopCheckpointWorker.bind(store!);
+    vi.spyOn(store!, 'stopCheckpointWorker').mockImplementation(clean => { events.push('cleanup'); return cleanup(clean); });
     const mark = store!.markCleanShutdown.bind(store!);
     vi.spyOn(store!, 'markCleanShutdown').mockImplementation(checkpoint => { events.push('clean'); mark(checkpoint); });
     const send = worker.postMessage.bind(worker);
@@ -223,10 +258,14 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
     });
     vi.useFakeTimers();
     try {
-      const stopped = adapter.prepareCleanShutdown(store!, async () => { events.push('owners-stopped'); });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(events).toEqual(['owners-stopped', 'clean', 'checkpoint']);
-      await vi.advanceTimersByTimeAsync(5_000); await stopped;
+      const stopped = adapter.prepareCleanShutdown(store!, async () => { events.push('owners-stopping'); await owners; events.push('owners-stopped'); });
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(events.slice(0,2)).toEqual(['clean','owners-stopping']);
+      expect(events).not.toContain('owners-stopped');
+      finishOwners(); await vi.advanceTimersByTimeAsync(0);
+      expect(events.indexOf('clean')).toBeLessThan(events.indexOf('owners-stopped'));
+      expect(events.indexOf('owners-stopped')).toBeLessThan(events.indexOf('cleanup'));
+      await vi.advanceTimersByTimeAsync(5_000); await vi.runOnlyPendingTimersAsync(); await stopped;
     } finally { vi.useRealTimers(); await worker.terminate(); }
     store!.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect((await store.getStartup()).state).not.toBe('manuscript-recovery');

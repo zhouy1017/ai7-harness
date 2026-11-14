@@ -1,11 +1,9 @@
 import { Worker } from 'node:worker_threads';
 import { recordCheckpointSkip, type WalCheckpointPolicy } from './store-schema.js';
-import { requireStore, StoreError } from './store-records.js';
+import { requireStore } from './store-records.js';
 
 const WRITE_IDLE_MS = 1_000;
-const JOURNAL_CHECKPOINT_WAIT_MS = 20_000;
-// PASSIVE can outlast a request on a slow disk, but it never owns the data-writer lock.
-const PASSIVE_TIMEOUT_MS = 60_000;
+// Slow PASSIVE work stays on the worker: it never owns the data-writer lock.
 const TRUNCATE_TIMEOUT_MS = 5_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 type Mode = 'PASSIVE' | 'TRUNCATE' | 'close';
@@ -31,7 +29,7 @@ export class WalCheckpointMaintenance {
   #waitingWriters = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #startupTimer: ReturnType<typeof setTimeout> | undefined;
-  #flight: { id: number; mode: Mode; idle: boolean; version: number; done: Promise<void>; resolve: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
+  #flight: { id: number; mode: Mode; idle: boolean; version: number; done: Promise<void>; resolve: () => void; timer: ReturnType<typeof setTimeout> | undefined } | undefined;
   #lastResult: Result | undefined;
   #termination: Promise<number> | undefined;
   #stopPromise: Promise<void> | undefined;
@@ -46,7 +44,9 @@ export class WalCheckpointMaintenance {
     this.#observeWrites();
     try {
       this.#worker = createWorker(path);
-      this.#startupTimer = setTimeout(() => this.#fail('start-timeout', 'startup'), 10_000);
+      this.#startupTimer = setTimeout(() => { setImmediate(() => {
+        if (!this.#available && !this.#failed && !this.#stopping) this.#fail('start-timeout', 'startup');
+      }); }, 10_000);
       this.#startupTimer.unref();
       this.#worker.on('message', (packet: Result | { ready: true }) => {
         if ('ready' in packet) {
@@ -108,14 +108,11 @@ export class WalCheckpointMaintenance {
     const checkpoint = this.#flight;
     if (checkpoint?.mode !== 'TRUNCATE') return;
     this.#waitingWriters++;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([checkpoint.done, new Promise<void>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new StoreError('JOURNAL_CHECKPOINT_WAIT_TIMEOUT', '本机存储仍在整理，请稍候重试保存。')), JOURNAL_CHECKPOINT_WAIT_MS);
-        timeout.unref();
-      })]);
-    } finally { if (timeout !== undefined) clearTimeout(timeout); this.#waitingWriters--; }
+    // The owned TRUNCATE flight already has the five-second bound; a second timer cannot win.
+    try { await checkpoint.done; }
+    finally { this.#waitingWriters--; }
   }
+
   admitJournalWrite(): void {
     requireStore(!this.#stopping, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
     this.policy.admitJournalWrite();
@@ -158,7 +155,11 @@ export class WalCheckpointMaintenance {
     const id = ++this.#nextId;
     let resolve!: () => void;
     const done = new Promise<void>(yes => { resolve = yes; });
-    const timer = setTimeout(() => this.#fail('flight-timeout', mode), mode === 'PASSIVE' ? PASSIVE_TIMEOUT_MS : TRUNCATE_TIMEOUT_MS); timer.unref();
+    const timer = mode === 'PASSIVE' ? undefined : setTimeout(() => { setImmediate(() => {
+      // A busy main loop may have delayed an already-queued reply until after the timer became due.
+      if (this.#flight?.id === id) this.#fail('flight-timeout', mode);
+    }); }, TRUNCATE_TIMEOUT_MS);
+    timer?.unref();
     this.#flight = { id, mode, idle, version: this.#writeVersion, done, resolve, timer };
     try { this.#worker!.postMessage({ id, mode, close, ...(expectedFrames === undefined ? {} : { expectedFrames }) }); }
     catch (error) { this.#fail('send-error', mode, sqliteCodeOf(error)); }
@@ -169,7 +170,10 @@ export class WalCheckpointMaintenance {
   async #stop(clean: boolean): Promise<void> {
     this.#stopping = true; this.#pending = false; this.#clearIdle();
     clearTimeout(this.#startupTimer); this.#startupTimer = undefined; this.#resolveReady(false);
-    const deadline = setTimeout(() => this.#fail('shutdown-timeout', this.#flight?.mode ?? 'none'), SHUTDOWN_TIMEOUT_MS); deadline.unref();
+    let completed = false;
+    const deadline = setTimeout(() => { setImmediate(() => {
+      if (!completed) this.#fail('shutdown-timeout', this.#flight?.mode ?? 'none');
+    }); }, SHUTDOWN_TIMEOUT_MS); deadline.unref();
     try {
       await this.settled();
       if (this.#available && !this.#failed && clean) {
@@ -178,10 +182,11 @@ export class WalCheckpointMaintenance {
         if (!this.#failed && result && !result.busy && result.logFrames === result.checkpointedFrames) await this.#send('TRUNCATE', false, false, result.logFrames);
       }
       if (this.#available && !this.#failed) await this.#send('close', true);
-      // A thread stuck in native I/O may not terminate promptly. Detach it; never await that unbounded native work.
+      // Native I/O can keep the process alive despite unref; the main process kill bounds its lifetime.
+      // Stop waiting here; do not await that unbounded native work.
       // A healthy close acknowledgement already proves the database connection closed.
       this.#terminate();
-    } finally { clearTimeout(deadline); }
+    } finally { completed = true; clearTimeout(deadline); }
   }
   abort(): void {
     this.#stopping = true; this.#clearIdle(); clearTimeout(this.#startupTimer);
