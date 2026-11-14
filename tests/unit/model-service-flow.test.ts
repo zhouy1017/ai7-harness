@@ -77,6 +77,27 @@ function mountSettings(calls: ReturnType<typeof api>) {
 }
 
 describe('the one model-service flow', () => {
+  it('keeps an unsaved effort when a catalogue poll finishes after focus moves to Save (#1453)', async () => {
+    setTechnicalLayerVisible(false);
+    const projection = completeSettings(), calls = api(projection);
+    const { screen, node, poll } = mountSettings(calls);
+    try {
+      await screen.renderModelServiceSettings();
+      const effort = node.querySelector('input[aria-label="思考强度"]')!;
+      effort.value = 'vendor-future-level'; effort.dispatchEvent({ type: 'input', bubbles: true });
+      button(node, 'select-main-role-model').focus();
+      const changed = structuredClone(projection);
+      Object.assign(changed.channels[0]!, { channelLabel: 'Updated public catalogue' });
+      vi.mocked(calls.getModelServiceSettings).mockResolvedValue(changed);
+      poll();
+      await vi.waitFor(() => expect(calls.getModelServiceSettings).toHaveBeenCalledTimes(2));
+      expect(node.querySelector('input[aria-label="思考强度"]') === effort).toBe(true);
+      expect(effort.value).toBe('vendor-future-level');
+      button(node, 'select-main-role-model').click();
+      await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'vendor-future-level' })));
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it.each([true, false])('chooses and reopens a role effort default, including a custom identifier (technical=%s, #1453)', async (technical) => {
     setTechnicalLayerVisible(technical);
     const projection = settings(['anthropic-claude']);

@@ -231,7 +231,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     restoreInteraction(content);
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
-    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
+    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form, .model-service-effort') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
     content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form')) draftEdited = true; });
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);
