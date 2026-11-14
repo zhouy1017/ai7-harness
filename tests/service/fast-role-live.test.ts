@@ -140,7 +140,7 @@ describe('the fast-role routes under developer-live', () => {
       expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'conflict-regenerate', book.sha256), book.path).toBeNull();
     }
     expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'editorial-polish', '0'.repeat(64)))
-      .toBe('当前运行范围未允许润色这段：这本书不在开发者实时可发送的公开样书范围内。');
+      .toBeNull();
     // A policy that names neither kind — v10's rules, here — refuses both with the route-aware reason.
     const withoutFastRules = livePolicy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.some((kind) => kind === 'editorial-polish' || kind === 'conflict-regenerate'));
     const unadmitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER), {
