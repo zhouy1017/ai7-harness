@@ -1117,7 +1117,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (run.state === 'prepared') {
       section.append(renderPlan(run));
     } else {
-      section.append(renderProgress(run));
+      const viewPlan = actionButton('view-plan', 'quiet', () => options.openPlan(run.reviewRunId), '查看计划');
+      viewPlan.dataset['taskPlanOpen'] = 'review-run';
+      section.append(viewPlan, renderProgress(run));
       if (run.canContinue) {
         const resume = el('div', 'review-continue');
         resume.append(el('p', 'attention-note', REVIEW_CONTINUE_NOTE), actionButton('continue', 'primary', () => void continueRun(run)));

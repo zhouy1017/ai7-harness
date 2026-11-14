@@ -13,7 +13,7 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   }
   const started = await renderer.evaluate(`(() => { const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'); if(!button||button.disabled)return false; button.click(); return true; })()`);
   if (started !== true) throw new Error('REVIEW_SHEET_START_UNAVAILABLE');
-  await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open !== true && document.querySelector('.review-workspace-card')?.dataset.reviewState !== 'prepared'`, 'review-sheet-launched', 120_000);
+  await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open !== true && !!document.querySelector('.review-workspace-card') && document.querySelector('.review-workspace-card').dataset.reviewState !== 'prepared' && document.querySelector('[data-review-action="view-plan"]')?.disabled === false`, 'review-sheet-launched', 120_000);
   const runId = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.run?.reviewRunId)`);
   if (typeof runId !== 'string') throw new Error('REVIEW_SHEET_RUN_MISSING');
   await renderer.evaluate(`(() => { const button=document.querySelector('[data-review-action="view-plan"]'); if(!button||button.disabled)return false;button.click();return true; })()`);
