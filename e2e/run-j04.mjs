@@ -1859,7 +1859,7 @@ async function main() {
           const historical = await readBaseline(renderer);
           requireJourney(historical.resultSetRevision.revisionId === revision.revisionId &&
             sameRecord(historical.resultSetRevision.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v19', liveTransmissions: 0 }) &&
-            sameRecord(historical.resultSetRevision.units, revision.units) && loopback.observedRequests() === 0, `historical-policy-read-${viewport}`);
+            sameValue(historical.resultSetRevision.units, revision.units) && loopback.observedRequests() === 0, `historical-policy-read-${viewport}`);
         }
       } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
       await closeOwnedBrowser();
