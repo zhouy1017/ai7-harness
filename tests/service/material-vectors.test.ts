@@ -595,8 +595,9 @@ describe('来源译文 over the real store', () => {
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
       expect(store.inspectLibraryMaterial(other.materialId).index.translation?.request).toEqual({
-        available: true, reason: null,
+        available: false, reason: '当前运行范围未允许生成来源译文：这份资料不在开发者实时可发送的公开资料范围内。',
       });
+      expect(await refusal(() => store.requestMaterialTranslation(other.materialId))).toBe('MATERIAL_TRANSLATION_NOT_ADMITTED');
       store.requestMaterialTranslation(passage.materialId);
       await store.settleMaterialLayers();
       const index = store.inspectLibraryMaterial(passage.materialId).index;

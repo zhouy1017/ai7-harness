@@ -1330,7 +1330,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(calls).toHaveLength(1);
   });
 
-  it('lifts exact-sample1 lineage only in production, with development-ci and developer-live still refusing', async () => {
+  it('accepts editor manuscripts in production and local CI, while developer-live retains its Public SampleBook boundary', async () => {
     const selectedPath = join(roots.inputRoot, `${randomUUID()}.docx`);
     await composeManuscriptDocx(selectedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 12, title: '编辑自己的书稿' });
     const importOwn = async (store: EditorialStore): Promise<string> => {
@@ -1350,7 +1350,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.manuscriptPin?.sourceDigest).not.toBe('b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
     store.close();
     opened = opened.filter((candidate) => candidate !== store);
-    // The same Book under development-ci: the exact-sample1 requirement stands.
+    // The same Book is available to the local development-ci fixture route, which has no live transport.
     const ci = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     opened.push(ci);
     ci.saveModelServiceConnection('L2 官方', null, 'needs-attention');
@@ -1360,7 +1360,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     ci.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: livePolicy, live: {
       ...GO, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
     } });
-    expect(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, livePolicy)).not.toThrow();
+    expect(code(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, livePolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
   });
 });
 
