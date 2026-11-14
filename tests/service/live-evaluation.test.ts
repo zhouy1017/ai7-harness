@@ -245,20 +245,11 @@ async function contractCase(kind: 'initial' | 'readers' | 'rewrite') {
 
 describe('evaluation on the Go execution path (#429)', () => {
 
-  it.each(['Series', 'procedure instruction'])('prepares and completes ordinary-production 初评 with %s in unit and synthesis requests (#1453)', async (context) => {
+  it('prepares and completes ordinary-production 初评 with Series in unit and synthesis requests (#1453)', async () => {
     const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
     store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
     store.selectSearchBackend('search-tinyfish');
-    const seriesId = context === 'Series' ? makeJ13Series(store, bookId) : null;
-    const instruction = '保留叙述中的短句。';
-    if (seriesId === null) {
-      const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'evaluation')!;
-      const basedOn = { procedureId: original.procedureId, version: original.version, digest: original.digest };
-      const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId, basedOn,
-        title: original.document.title, editorInstruction: instruction, stages: original.document.stages } })
-        .procedures.find((entry) => entry.procedureId === original.procedureId)!;
-      store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
-    }
+    const seriesId = makeJ13Series(store, bookId);
     activeFamily = 'evaluation-initial';
     const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor,
       (_request, message) => ({ kind: 'unit-result', ...answerOf(message) }),
@@ -267,7 +258,7 @@ describe('evaluation on the Go execution path (#429)', () => {
     let progress = store.createInitialEvaluationPreparationWork(bookId, capture.policy, [], null, seriesId);
     while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
     const prepared = progress.projection!;
-    if (seriesId !== null) expect(prepared.runSourceScope!.seriesScopes![0]!.title).toBe(J13_SERIES_TITLE);
+    expect(prepared.runSourceScope!.seriesScopes![0]!.title).toBe(J13_SERIES_TITLE);
     const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
     expect(capture.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger)).toBe('admitted');
     await capture.owner.whenIdle();
@@ -279,12 +270,27 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(evaluationRequests).toHaveLength(SAMPLE1_UNITS + 1);
     for (const body of evaluationRequests) {
       const system = body.messages.find((message) => message.role === 'system')!.content;
-      if (seriesId !== null) {
-        expect(system).toContain(J13_SERIES_TITLE);
-        expect(system).toContain(J13_EDITOR_WORDS);
-        expect(system).toContain('仅作背景，只读');
-      } else expect(system).toContain(instruction);
+      expect(system).toContain(J13_SERIES_TITLE);
+      expect(system).toContain(J13_EDITOR_WORDS);
+      expect(system).toContain('仅作背景，只读');
     }
+    capture.assertMatched();
+  });
+
+  it('explains that 初评 with a procedure editor instruction is not yet supported, before sending (#1476)', () => {
+    const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+    store.selectSearchBackend('search-tinyfish');
+    const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'evaluation')!;
+    const basedOn = { procedureId: original.procedureId, version: original.version, digest: original.digest };
+    const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId, basedOn,
+      title: original.document.title, editorInstruction: '保留叙述中的短句。', stages: original.document.stages } })
+      .procedures.find((entry) => entry.procedureId === original.procedureId)!;
+    store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
+    const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, () => undefined);
+    owners.push(capture.owner);
+    expect(() => store.createInitialEvaluationPreparationWork(bookId, capture.policy)).toThrow('这项任务暂不支持带编辑指令的工序。');
+    expect(capture.wireRequests).toHaveLength(0);
     capture.assertMatched();
   });
 

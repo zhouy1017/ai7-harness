@@ -226,7 +226,7 @@ export function liveKindAdmission(
     const { base, document, pin } = definition.procedureBinding;
     const expected = withProcedureDefinition(base, document, pin);
     const rule = liveKindRule(policy, definition.kind, ['editor-task-instruction']);
-    if ((policy?.operationalScope !== 'ordinary-production' && rule?.editorTaskInstruction === undefined) || expected.systemPrompt !== definition.systemPrompt ||
+    if (rule?.editorTaskInstruction === undefined || expected.systemPrompt !== definition.systemPrompt ||
         expected.promptContractDigest !== definition.promptContractDigest) return null;
     return liveKindAdmission(policy, base, binding);
   }
