@@ -1480,3 +1480,21 @@ it('adds inline revision links to schema 112 and preserves the manuscript (#1428
     expect(written.window.marks.some((mark) => mark.inlineRevision && mark.status === 'open')).toBe(true);
   } finally { store.close(); }
 });
+
+
+it('adds launch snapshots to a revision-114 SampleBook in place (#1455)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const book = await importSample1Book(store, roots.codeRoot, '启动快照迁移');
+  store.markCleanShutdown(); store.close();
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    database.exec('DROP TRIGGER task_launch_snapshots_no_update; DROP TRIGGER task_launch_snapshots_no_delete; DROP TABLE task_launch_snapshots; PRAGMA user_version = 114');
+  } finally { database.close(); }
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(store.inspectDataVersion().schemaRevision).toBe(115);
+    expect(store.getBookOverview(book.bookId).book.title).toBe('启动快照迁移');
+    expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks.length).toBeGreaterThan(0);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});

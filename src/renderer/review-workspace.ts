@@ -194,7 +194,6 @@ import {
   reviewLiveLine,
   reviewManuscriptLine,
   reviewPlanCategoriesLine,
-  reviewPreparationLine,
   reviewQuote,
   reviewReplacementLine,
   reviewReportAppendixLine,
@@ -356,7 +355,6 @@ interface SheetState {
   scope: ReviewScopeKind | null;
   from: string | null;
   to: string | null;
-  job: ServiceJobProjection | null;
   problem: string | null;
   /** Where focus returns when the sheet closes: the control that opened it. */
   readonly openerKey: string | null;
@@ -2389,7 +2387,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       scope: prefill?.scope ?? (projection.scopeOptions[defaults.reviewScope].available && defaults.reviewScope !== 'selection' ? defaults.reviewScope : 'whole'),
       from: prefill?.from ?? defaults.reviewFrom ?? projection.scopeOptions.chapters.chapters[0]?.blockId ?? null,
       to: prefill?.to ?? defaults.reviewTo ?? projection.scopeOptions.chapters.chapters.at(-1)?.blockId ?? null,
-      job: null,
       problem: null,
       openerKey: focusKeyOf(opener),
       prepared: false,
@@ -2800,7 +2797,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
     const prepare = actionButton('prepare', 'quiet', () => void prepareRun(state));
     prepare.classList.add('text-link');
-    const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
     const chooser = createDispatchChooser({ role: 'main-editorial', changed: config => { state.executionConfig = config; delete state.clientCommandId; } });
@@ -2808,7 +2804,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const [settings, preferences] = await Promise.all([api.getModelServiceSettings(), window.ai7.getPreferences()]);
       if (!state.dismissed) chooser.render(settings, preferences.values['model.favourites']);
     })().catch(() => { chooser.unavailable(); });
-    const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare, cancelPreparation);
+    const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, progress, actions);
@@ -2816,7 +2812,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
-      const preparing = state.job !== null;
+      const preparing = state.launchPending === true;
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
       const effective = effectiveCategories(workspace, state);
@@ -2873,8 +2869,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       networkNotice.textContent = networkBlocked ? '联网检索尚未就绪，请到设置中配置后再开始。' : '';
       problem.textContent = blocked ?? state.problem ?? '';
       problem.hidden = state.problem === null && blocked === null;
-      progress.hidden = state.job === null;
-      progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
+      progress.hidden = !preparing;
+      progress.textContent = preparing ? '正在启动审阅…' : '';
       prepare.disabled = preparing || loading || networkBlocked || blocked !== null || effective.length === 0 || state.scope === null;
       for (const control of [prepare, start]) {
         if (blocked !== null) control.setAttribute('aria-describedby', problem.id);
@@ -2883,10 +2879,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       start.disabled = prepare.disabled || state.launchPending === true;
       close.disabled = preparing;
-      cancelPreparation.hidden = !preparing;
-      cancelPreparation.disabled = !preparing;
-      if (state.job !== null) cancelPreparation.dataset['serviceJobId'] = state.job.jobId;
-      else delete cancelPreparation.dataset['serviceJobId'];
+
     }
     sheetUpdate = updateSheet;
     sheetContent(sheet, bar, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== actions), actions, form);
@@ -2910,7 +2903,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
-    if (destroyed || state.job !== null || state.launchPending || projection === null) return;
+    if (destroyed || state.launchPending || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
     const shown = resolved === null ? null : sheet.querySelector<HTMLSelectElement>('[data-review-field="procedure-version"]')?.value ?? null;
@@ -2990,25 +2983,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch (error) {
       state.launchPending = false;
       if (destroyed) return;
-      state.job = null;
       if (state.dismissed) {
         options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
         return;
       }
       announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
       sheetUpdate();
-    }
-  }
-
-  async function cancelJob(state: SheetState, control: HTMLButtonElement): Promise<void> {
-    const jobId = state.job?.jobId;
-    if (jobId === undefined) return;
-    control.disabled = true;
-    try {
-      await api.cancelServiceJob({ jobId });
-    } catch (error) {
-      control.disabled = false;
-      options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
     }
   }
 
@@ -3023,7 +3003,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetState = null;
     if (state) {
       state.dismissed = true;
-      if (state.job) void api.cancelServiceJob({ jobId: state.job.jobId }).catch((error: unknown) => options.setStatus(options.errorMessage(error, '取消准备未完成。'), 'error'));
     }
     sheet.replaceChildren();
     sheetUpdate = () => undefined;

@@ -1,3 +1,4 @@
+import { prepareLegacyReviewPlan } from './legacy-review-plan.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -3444,6 +3445,7 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'memory-governance-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open === true`, 'memory-governance-review-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(prepare.disabled)return false; prepare.click();return true; })()`, 'memory-governance-review-prepare');
+    await prepareLegacyReviewPlan(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'prepared'`, 'memory-governance-review-prepared', 120_000);
     await clickSelector(renderer, '[data-review-action="view-plan"]', 'memory-governance-review-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'memory-governance-review-start-ready');

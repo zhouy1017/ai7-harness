@@ -2717,4 +2717,19 @@ describe('one-step review launch (#1455)', () => {
     });
   });
 
+  it('pins text typed after opening the surface and refuses vanished selected block identities', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const shown = session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      appendToFirstBlock(session, book);
+      const current = session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      expect(current.journalSequence).toBeGreaterThan(shown.journalSequence);
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      expect(launched.manuscript.journalSequence).toBe(current.journalSequence);
+      const second = await importBook(session);
+      expect(() => session.store.launchReviewRun({ bookId: second.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
+        scope: { kind: 'selection', fromChapterBlockId: 'blk_missing', toChapterBlockId: 'blk_missing' } }, launchPolicy)).toThrow();
+      expect(workspace(session, second).run).toBeNull();
+    });
+  });
+
 });

@@ -309,10 +309,6 @@ export function reviewSendConsequence(selected: ReadonlyArray<{ readonly label: 
   return free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`;
 }
 
-export function reviewPreparationLine(progress: { completed: number; total: number; label: string }): string {
-  return progress.total > 0 ? `${progress.label} · ${progress.completed} / ${progress.total}` : progress.label;
-}
-
 // ---- the plan ---------------------------------------------------------------------------------------
 
 /**

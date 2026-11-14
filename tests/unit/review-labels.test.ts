@@ -55,7 +55,6 @@ import {
   reviewManuscriptLine,
   reviewOverviewLine,
   reviewPlanCategoriesLine,
-  reviewPreparationLine,
   reviewReadConsequence,
   reviewReplacementLine,
   reviewReportMustItemLine,
@@ -202,8 +201,6 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }, { label: '情节逻辑与前后一致', modelFree: true }]))
       .toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务；「情节逻辑与前后一致」只读基线分析的线索，不发送。');
     expect(reviewChapterOptionLabel(third)).toBe('第三章（段落 26–43）');
-    expect(reviewPreparationLine({ completed: 1, total: 3, label: '正在冻结「错别字与规范用语」的计划' })).toBe('正在冻结「错别字与规范用语」的计划 · 1 / 3');
-    expect(reviewPreparationLine({ completed: 0, total: 0, label: '排队中' })).toBe('排队中');
   });
 
   it('names a prepared plan in one line beside 查看计划, which opens the rest in the Task Drawer (S72)', () => {

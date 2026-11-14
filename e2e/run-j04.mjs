@@ -1,3 +1,4 @@
+import { prepareLegacyReviewPlan } from './legacy-review-plan.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -3040,6 +3041,7 @@ async function main() {
       'review-governed-preference-exists', governedPreference?.current?.lines);
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
+    await prepareLegacyReviewPlan(renderer, waitFor);
     // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
     // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
     // drawer's bar, so ②B offers 查看计划并开始 beside 返回修改 and no authorization button.
@@ -3447,6 +3449,7 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'factual-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-sheet-open');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
+    await prepareLegacyReviewPlan(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='factual-review'`, 'factual-prepared', 120_000);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(factualPrepared?.state === 'prepared' && UUID_PATTERN.test(factualPrepared.reviewRunId), 'factual-prepared-run');
@@ -3597,6 +3600,7 @@ async function main() {
         if(!remembered.checked||remembered.disabled||from.value!==chosen||to.value!==chosen||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
         const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!prepare||prepare.disabled)return false; prepare.click(); return true;
       })()`, `factual-range-memory-prepare-${pass}`);
+      await prepareLegacyReviewPlan(renderer, waitFor);
       await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, `factual-range-prepared-${pass}`, 120_000);
       const rangePrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
       requireJourney(rangePrepared?.scope.selectedRange.startPosition===1 && rangePrepared.scope.selectedRange.endPosition===15 &&
@@ -4001,6 +4005,7 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'stock-leaf-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'stock-leaf-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
+    await prepareLegacyReviewPlan(renderer, waitFor);
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'stock-leaf-prepared', 120_000);
     const leafPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(leafPrepared.categories.length === 1 && leafPrepared.categories[0].plan.units === SAMPLE1_UNITS &&
