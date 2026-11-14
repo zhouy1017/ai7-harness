@@ -1804,8 +1804,11 @@ async function main() {
     // (a reimport re-identifies rewritten paragraphs), so the checks after the reimport tell a return place kept by the refused
     // jump from none (review P3-A).
     if (await renderer.evaluate(`${CHIP} !== null`)) {
+      const returnBlock = await renderer.evaluate(`${CHIP}.dataset.returnChip`);
       await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
-      await waitFor(renderer, `${CHIP} === null && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
+      // #1479: completion notices share one toast; a background notice can replace 已回到 between polls.
+      // Reimport needs the old return consumed at its target, independently of that transient message.
+      await waitFor(renderer, `${CHIP} === null && ${blockInView(returnBlock)}`, 'selection-task-gone-chip-used', 60_000);
     }
     const composedInputs = resolve(runRoot, 'composed-inputs');
     await mkdir(composedInputs, { recursive: true });

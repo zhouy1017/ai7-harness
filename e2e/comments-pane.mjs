@@ -65,9 +65,9 @@ async function commentsSeedConnectorCases(renderer, check, waitFor) {
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'comments-connector-editor-ready');
   await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]');if(entry.getAttribute('aria-expanded')!=='true')entry.click();document.querySelector('.editor-window [data-block-id="'+__connectorCases.blockId+'"]').scrollIntoView({block:'center',behavior:'instant'}); })()`);
   for(const index of [0,1,2]) {
-    await waitFor(renderer, `document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]')?.hidden===false`, 'comments-connector-case-card');
-    await renderer.evaluate(`document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]').focus({preventScroll:true})`);
-    await waitFor(renderer, `document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]').dataset.selected==='true'`, 'comments-connector-case-selected');
+    // A loading row is focusable before its card has arrived. Select through the same
+    // ready-card and real mouse-input path as the rest of the editor interaction flow.
+    await commentsSelectMark(renderer, check, waitFor, await renderer.evaluate(`__connectorCases.cases[${index}].id`));
     const geometry=`(() => {
       const item=__connectorCases.cases[${index}], words=document.querySelector('.editor-window [data-mark-id="'+item.id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
       const rects=Array.from(words.getClientRects()).filter(r=>r.width>0&&r.height>0), first=rects[0], dot=document.querySelector('.manuscript-comments-leaders circle'), svg=dot?.ownerSVGElement;
