@@ -339,8 +339,11 @@ export * from './protocol/scoped-edit.js';
  * saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes, updateProductionDocumentMeta;
  * mark category/source fields on mark projections (#1429); inline editor revisions with apply/revert card actions (#1428);
  * the one-click `book-review-report` DOCX export target and its report sections (#1430).
+ *
+ * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
+ * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 201 as const;
+export const SERVICE_PROTOCOL_VERSION = 202 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -2346,7 +2349,7 @@ export interface ProposalDraftBatchProjection {
   nextOffset: number | null;
   scopeDigest: string;
   included: ReadonlyArray<string>;
-  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' }>;
+  excluded: ReadonlyArray<{ markId: string; reason: 'conflict' | 'unclassified-stale' | 'unloaded' | 'other-version' | 'atomic-group' | 'applied' | 'guessed-anchor' }>;
   saved: boolean;
   workspace: ProposalWorkspaceProjection;
 }

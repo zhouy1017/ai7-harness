@@ -30,7 +30,7 @@ import {
   type CustomAnalysisContractInput,
   type CustomAnalysisUnitResult,
 } from './custom-analysis-contract.js';
-import { locateQuotation, normalizedQuotation } from './factual-review-contract.js';
+import { locateQuotation, normalizedQuotation, quotationForLocation } from './factual-review-contract.js';
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition } from './kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE, coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from './reducers.js';
 import { carryPositionalResult } from './reused-result.js';
@@ -48,6 +48,7 @@ import { carryPositionalResult } from './reused-result.js';
  *
  * The reducer lists and locates; it never synthesizes across units (the Authority Ceiling). Its counts are the revision's summary.
  */
+// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
 export const CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR = {
   schema: 'ai7.custom-analysis.reducers/1',
   stages: ['unit-validation', 'reference-integrity'],
@@ -142,7 +143,7 @@ export function reduceCustomAnalysis(input: {
         answer: row.answer,
         confidenceNote: row.confidenceNote,
         blockOrdinal: row.blockOrdinal,
-        quote: row.quote,
+        quote: block === undefined ? row.quote : quotationForLocation(block.text, row.quote, location),
         sourceRange: location.state === 'verified' ? { blockId: blockId!, fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme } : null,
         anchorState: location.state === 'verified' ? 'located' : location.state === 'ambiguous' ? 'ambiguous' : 'not-found',
       });

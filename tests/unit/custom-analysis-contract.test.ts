@@ -278,3 +278,7 @@ describe('live admission of a dimension version (#920 rule, slice 7f definition)
     }
   });
 });
+
+it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
+  expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).toBe('0883873a5f83f52eb6d042bc006cd570d99d7c4ec5de4b6195db9060d1ae953d');
+});

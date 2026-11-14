@@ -363,7 +363,7 @@ export function mountSelectControls(root: HTMLElement): () => void {
 export function mountMenuControls(root: HTMLElement): () => void {
   const view = root.ownerDocument?.defaultView;
   if (!view || typeof view.MutationObserver !== 'function') return () => {};
-  const selector = 'details.task-overview-more, details.view-menu, details.editor-save-menu, details.export-menu, details.review-more, details.evaluation-more';
+  const selector = 'details.edit-method-menu, details.derivative-menu, details.task-overview-more, details.view-menu, details.editor-save-menu, details.export-menu, details.review-more, details.evaluation-more';
   const menus = (): HTMLDetailsElement[] => Array.from(root.querySelectorAll<HTMLDetailsElement>(selector));
   const panelOf = (menu: HTMLElement): HTMLElement | null => menu.querySelector('.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body');
   const position = (): void => {

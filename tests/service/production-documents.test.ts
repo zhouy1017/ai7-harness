@@ -152,6 +152,7 @@ function switcherSurface(store: EditorialStore, book: Book, pickerPath?: string)
   /** 新建 / 导入衍生稿件 → 导入文件 → 创建并打开, the 稿件题目 left as offered. */
   const importFile = async (): Promise<void> => {
     await vi.waitFor(() => expect(root.querySelector<HTMLButtonElement>('[data-manuscript-switch="new"]')!.disabled).toBe(false));
+    root.querySelector<HTMLElement>('[data-derivative-menu]')!.click();
     root.querySelector<HTMLButtonElement>('[data-manuscript-switch="new"]')!.click();
     // 稿件题目 is the first field of the form, before the type and the way of making it (Issue #1404).
     expect(root.querySelector('.derivative-create-form [data-document-field]')?.getAttribute('data-document-field')).toBe('title');

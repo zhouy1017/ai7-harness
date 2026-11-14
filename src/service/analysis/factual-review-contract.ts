@@ -78,6 +78,7 @@ export interface FactualUnitAssertion {
   readonly quote: string;
   /** 1-based over the unit's blocks in message order: the overlap blocks first, then the own blocks. */
   readonly blockOrdinal: number;
+  readonly occurrence?: number;
   readonly assertionClass: FactualAssertionClass;
   readonly category: FactualAssertionCategory;
   readonly severity: FactualSeverityTier;
@@ -132,6 +133,7 @@ export function parseFactualAssertion(candidate: unknown, expected: { blockCount
   const basis = reader.text(candidate.basis, MAX_BASIS_GRAPHEMES, 'assertions', index, true);
   if (question === null || basis === null) { reader.drop('assertions', index, 'text-invalid'); return null; }
   return { quote: candidate.quote, blockOrdinal: ordinal as number,
+    ...(Number.isSafeInteger(candidate.occurrence) && (candidate.occurrence as number) > 0 ? { occurrence: candidate.occurrence as number } : {}),
     assertionClass: reader.enum(candidate.assertionClass, FACTUAL_ASSERTION_CLASSES, CLASS_ALIASES, 'judgment', 'assertions', index),
     category: reader.enum(candidate.category, FACTUAL_ASSERTION_CATEGORIES, CATEGORY_ALIASES, '其他', 'assertions', index),
     severity: reader.enum(candidate.severity, FACTUAL_SEVERITY_TIERS, SEVERITY_ALIASES, 'C', 'assertions', index), question, basis };
@@ -259,8 +261,8 @@ export function factualReviewRequestDigest(promptContractDigest: string, unitOrd
  * Presentation-only folding of one grapheme, kick-in 17 rule 7. Exactly two equivalences are applied:
  * every full-width ASCII form (U+FF01–U+FF5E) folds onto its half-width original, and the ideographic
  * space folds onto a space, which the whitespace collapse below then handles. Nothing else moves — no
- * case folding, no NFKC over the wider compatibility ranges, no punctuation substitution — because a
- * changed character is not an exact quotation.
+ * case folding or NFKC over wider compatibility ranges. The separate punctuation pass runs only
+ * after this exact folding fails.
  */
 function foldWidth(segment: string): string {
   let folded = '';
@@ -289,7 +291,7 @@ interface FoldedText {
  * exact graphemes of the source it came from. The map is what lets a match in the folded form be
  * reported as an exact grapheme range of the committed block, which is the only anchor a finding gets.
  */
-function fold(text: string): FoldedText {
+function fold(text: string, punctuation = false): FoldedText {
   const characters: string[] = [];
   const fromGrapheme: number[] = [];
   const toGrapheme: number[] = [];
@@ -324,7 +326,28 @@ function fold(text: string): FoldedText {
       }
     }
   }
-  return { text: characters.join(''), fromGrapheme, toGrapheme };
+  const folded = { text: characters.join(''), fromGrapheme, toGrapheme };
+  if (!punctuation) return folded;
+  let normalized = '';
+  const from: number[] = [];
+  const to: number[] = [];
+  // Explicit punctuation tokens only: no spelling, numeral or word substitutions.
+  const tokens = /……|…|\.{3}|——|--|[—–]|[“”"'‘’「」『』]/gu;
+  let previous = 0;
+  for (const match of folded.text.matchAll(tokens)) {
+    const start = match.index;
+    normalized += folded.text.slice(previous, start);
+    from.push(...fromGrapheme.slice(previous, start));
+    to.push(...toGrapheme.slice(previous, start));
+    normalized += /^[.…]/u.test(match[0]) ? '…' : /^[—–-]/u.test(match[0]) ? '—' : /^[‘’']/u.test(match[0]) ? "'" : '"';
+    from.push(fromGrapheme[start]!);
+    to.push(toGrapheme[start + match[0].length - 1]!);
+    previous = start + match[0].length;
+  }
+  normalized += folded.text.slice(previous);
+  from.push(...fromGrapheme.slice(previous));
+  to.push(...toGrapheme.slice(previous));
+  return { text: normalized, fromGrapheme: from, toGrapheme: to };
 }
 
 /** Where a quotation sits in the block it named, or why it does not sit there exactly once. */
@@ -335,13 +358,22 @@ export type QuotationLocation =
 
 /**
  * Locate one quotation in one committed block under the normalization above and return the exact
- * grapheme range of the block it occupies. Exactly one occurrence verifies; none, or more than one,
- * fails — an ambiguous anchor is no anchor, and the service never rewrites a quotation, shortens it,
- * or picks the first of several to make it match.
+ * grapheme range of the block it occupies. A valid 1-based occurrence selects a match; otherwise
+ * repeated quotations remain ambiguous. Punctuation equivalence is tried only after the original fold fails.
  */
-export function locateQuotation(blockText: string, quote: string): QuotationLocation {
-  const haystack = fold(blockText);
-  const needle = fold(quote).text;
+export function locateQuotation(blockText: string, quote: string, occurrence?: number): QuotationLocation {
+  const exact = locateExactQuotation(blockText, quote, occurrence);
+  return exact.state === 'not-found' ? locateFoldedQuotation(blockText, quote, occurrence, true) : exact;
+}
+
+/** Original width/whitespace matching, used before searching punctuation-equivalent candidates. */
+export function locateExactQuotation(blockText: string, quote: string, occurrence?: number): QuotationLocation {
+  return locateFoldedQuotation(blockText, quote, occurrence, false);
+}
+
+function locateFoldedQuotation(blockText: string, quote: string, occurrence: number | undefined, punctuation: boolean): QuotationLocation {
+  const haystack = fold(blockText, punctuation);
+  const needle = fold(quote, punctuation).text;
   if (needle.length === 0) return { state: 'not-found' };
   const starts: number[] = [];
   // Every start position, overlapping ones included: two occurrences that share characters are still
@@ -350,14 +382,24 @@ export function locateQuotation(blockText: string, quote: string): QuotationLoca
     starts.push(index);
   }
   if (starts.length === 0) return { state: 'not-found' };
-  if (starts.length > 1) return { state: 'ambiguous', occurrences: starts.length };
-  const start = starts[0]!;
+  const selected = Number.isSafeInteger(occurrence) && occurrence! >= 1 && occurrence! <= starts.length ? occurrence! - 1 : undefined;
+  if (starts.length > 1 && selected === undefined) return { state: 'ambiguous', occurrences: starts.length };
+  const start = starts[selected ?? 0]!;
   const fromGrapheme = haystack.fromGrapheme[start]!;
   const toGrapheme = haystack.toGrapheme[start + needle.length - 1]! + 1;
   // A folded substring can start or end inside a grapheme. Never expand that quotation into an
   // anchor over additional characters, even when the substring itself occurs exactly once.
-  if (normalizedQuotation(sliceGraphemes(blockText, fromGrapheme, toGrapheme)) !== needle) return { state: 'not-found' };
+  if (fold(sliceGraphemes(blockText, fromGrapheme, toGrapheme), punctuation).text !== needle) return { state: 'not-found' };
   return { state: 'verified', fromGrapheme, toGrapheme };
+}
+
+/**
+ * Keep previously verified quote text stable: authored replay requests bind those bytes. Newly
+ * located quotations use their exact source slice; legacy width/space alignment follows R2/R3.
+ */
+export function quotationForLocation(blockText: string, quote: string, location: QuotationLocation): string {
+  if (location.state !== 'verified' || locateFoldedQuotation(blockText, quote, undefined, false).state === 'verified') return quote;
+  return sliceGraphemes(blockText, location.fromGrapheme, location.toGrapheme);
 }
 
 /** The comparison key duplicates are merged by: the folded form of the quotation (decision 5). */

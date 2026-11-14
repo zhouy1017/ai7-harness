@@ -1,3 +1,4 @@
+import { REVIEW_UNCHECKED_DISCLOSURE, reviewFindingHasGuessedAnchor } from '../../src/shared/review-basis.js';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { afterEach, expect, it, beforeEach, vi } from 'vitest';
@@ -17,7 +18,7 @@ import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConne
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
-import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
+import { graphemeCount, parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { modelRequestNotSent } from '../../src/service/provider/deepseek-adapter.js';
 import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
@@ -1197,3 +1198,69 @@ it('ends a stalled sent request at the projected deadline as that unit\'s unknow
     .toEqual([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]);
 
 }, 60_000);
+
+it.each([undefined, 2, 99])('accepts a repeated paragraph quotation in one click (#1435 occurrence %s)', async (occurrence) => {
+  const { store: opened, bookId, reviewRunId } = await productionReview(['typos-and-usage'], () => 'valid',
+    (policy) => policy, false, false, { response: async (response, _signal, body) => {
+      const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+      const message = request.messages.findLast((entry) => entry.role === 'user')!.content;
+      const header = parseReviewCategoryUnitMessageHeader(message);
+      if (header?.ordinal !== 1) return response;
+      const target = [...message.matchAll(/^\[([1-9][0-9]*)\] \[blk_[0-9a-f]{24}\] \(paragraph\) (.*)$/gmu)]
+        .find((match) => match[2]!.split('的').length > 2)!;
+      expect(target).toBeDefined();
+      const envelope = await response.json();
+      envelope.choices[0].message.content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: 1,
+        findings: [{ quote: '的', blockOrdinal: Number(target[1]), occurrence, severity: 'should', note: '合成同词建议。', replacement: '之' }] });
+      return new Response(JSON.stringify(envelope), { status: 200 });
+    } });
+  const run = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  expect(run.findings).toHaveLength(1);
+  const finding = run.findings[0]!;
+  const text = opened.baselineAnalysisLedger.readWorkingBlocks(run.manuscript.branchId).find((block) => block.blockId === finding.blockId)!.text;
+  const first = text.indexOf('的');
+  const expectedStart = graphemeCount(text.slice(0, occurrence === 2 ? text.indexOf('的', first + 1) : first));
+  expect(finding).toMatchObject({ quote: '的', replacement: '之', fromGrapheme: expectedStart, toGrapheme: expectedStart + 1 });
+  expect(finding.note.startsWith(REVIEW_UNCHECKED_DISCLOSURE)).toBe(true);
+  expect(reviewFindingHasGuessedAnchor(finding.note)).toBe(occurrence !== 2);
+  const aggregate = opened.inspectBookFindings(bookId).items.find((item) => item.target.kind === 'review' && item.target.findingId === finding.findingId)!;
+  expect(aggregate.suggestion!.batchAllowed).toBe(occurrence === 2);
+  const applied = opened.applyChangeSuggestion({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
+    windowStartBlockId: finding.blockId, markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+  expect(applied.card!.suggestion!.decision).toBeTruthy();
+});
+
+it('leaves a guessed Review Run proposal undecided in bulk, then applies it after individual acceptance', async () => {
+  const { store: opened, bookId, reviewRunId } = await productionReview(['typos-and-usage'], () => 'valid',
+    (policy) => policy, false, false, { response: async (response, _signal, body) => {
+      const message = (JSON.parse(body) as { messages: Array<{ role: string; content: string }> }).messages.findLast((entry) => entry.role === 'user')!.content;
+      if (parseReviewCategoryUnitMessageHeader(message)?.ordinal !== 1) return response;
+      const target = [...message.matchAll(/^\[([1-9][0-9]*)\] \[blk_[0-9a-f]{24}\] \(paragraph\) (.*)$/gmu)].find((match) => match[2]!.split('的').length > 2)!;
+      const envelope = await response.json();
+      envelope.choices[0].message.content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: 1,
+        findings: [undefined, 2].map((occurrence) => ({ quote: '的', blockOrdinal: Number(target[1]), occurrence, severity: 'should', note: '合成同词建议。', replacement: '之' })) });
+      return new Response(JSON.stringify(envelope), { status: 200 });
+    } });
+  const run = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  expect(run.findings).toHaveLength(2);
+  const guessed = run.findings.find((finding) => reviewFindingHasGuessedAnchor(finding.note))!;
+  const pinned = run.findings.find((finding) => !reviewFindingHasGuessedAnchor(finding.note))!;
+  const input = { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, resultId: reviewRunId };
+  const before = opened.baselineAnalysisLedger.readWorkingBlocks(input.branchId).find((block) => block.blockId === guessed.blockId)!.text;
+  const request = { ...input, scope: 'filter' as const, markIds: [], chapterBlockId: null, changeType: null,
+    review: 'unreviewed' as const, disposition: 'accepted' as const, confirmDigest: null };
+  const preview = opened.batchProposalDecisionDraft(request);
+  expect(preview.included).toEqual([pinned.markId]);
+  expect(preview.excluded).toEqual([{ markId: guessed.markId, reason: 'guessed-anchor' }]);
+  expect(preview.workspace.items.find((item) => item.markId === guessed.markId)!.conflict).toBe(false);
+  let workspace = opened.batchProposalDecisionDraft({ ...request, confirmDigest: preview.scopeDigest }).workspace;
+  expect(workspace.items.find((item) => item.markId === guessed.markId)).toMatchObject({ draft: null, disposition: null });
+  expect(workspace.items.find((item) => item.markId === pinned.markId)!.draft).toBe('accepted');
+  workspace = opened.saveProposalDecisionDraft({ ...input, expectedScopeDigest: workspace.scopeDigest, markIds: [guessed.markId!], atomicGroupId: null, disposition: 'accepted' });
+  workspace = opened.recordProposalDecision({ ...input, expectedScopeDigest: workspace.scopeDigest, clientDecisionId: randomUUID() });
+  expect(workspace.decision!.items.every((item) => item.disposition === 'accepted')).toBe(true);
+  const applied = opened.applyChangeSuggestionBatch({ ...input, windowStartBlockId: guessed.blockId, markIds: [guessed.markId!, pinned.markId!], clientEffectId: randomUUID() });
+  expect(applied.application.changeCount).toBe(2);
+  expect(opened.baselineAnalysisLedger.readWorkingBlocks(input.branchId).find((block) => block.blockId === guessed.blockId)!.text)
+    .toBe(before.replace('的', '之').replace('的', '之'));
+});

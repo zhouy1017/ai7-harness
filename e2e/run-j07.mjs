@@ -433,9 +433,9 @@ async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
-/** Press the one enabled button a selector names, refusing one that is missing or disabled. */
+/** Press the enabled button or native disclosure a selector names. */
 async function clickSelector(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLElement) || !button.matches('button, summary') || button.matches(':disabled')) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === ${JSON.stringify(value)}; })()`, name);
@@ -831,6 +831,7 @@ async function openManuscript(renderer, name) {
  */
 async function openDerivativePanel(renderer, { title, typeId, mode }, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]:not(:disabled)') !== null`, `${name}-switcher`, 120_000);
+  await clickSelector(renderer, '[data-derivative-menu]', `${name}-menu`);
   await clickSelector(renderer, '[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="new"]', `${name}-open`);
   await waitFor(renderer, `(() => { const form = document.querySelector('.derivative-create-form'); const first = form?.querySelector('[data-document-field]'); return first?.dataset.documentField === 'title' && document.activeElement === first; })()`, `${name}-title-first`);
   if (title !== undefined) await fill(renderer, '.derivative-create-form [data-document-field="title"]', title, `${name}-title`);
@@ -1810,6 +1811,7 @@ async function main() {
     })()`);
     requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
     // #1427: the compact switcher reaches the separate workspace and returns to the same editor.
+    await clickSelector(renderer, '[data-derivative-menu]', 'derivatives-menu-open');
     await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'derivatives-workspace-open');
     await waitFor(renderer, `document.querySelector('[data-screen="book-derivatives"] .derivatives-item') !== null`, 'derivatives-workspace-ready');
     await assertRenderer(renderer, `(() => {
@@ -1877,14 +1879,43 @@ async function main() {
       throw error;
     }
     at('document-task-target');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await assertRenderer(renderer, DIRECT_EDIT, 'document-toolbar-direct');
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="start-task"]', 'document-task-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
+    await waitFor(renderer, `Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-document.querySelector('#task-drawer').getBoundingClientRect().width)<1`, 'document-toolbar-dock-settled');
+    const widerToolbarViewport = await renderer.evaluate(`Math.round(innerWidth + 620 - document.querySelector('.editor-shell[data-manuscript-kind="derivative"]').getBoundingClientRect().width)`);
+    // Exercise the widest style label without changing the document version fixed for this task.
+    await renderer.evaluate(`(() => { const style=document.querySelector('.editor-toolbar select[aria-label="段落样式"]'); style.value='heading-6'; })()`);
+    for (const width of [1280, widerToolbarViewport]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      let geometry;
+      const geometryDeadline = Date.now() + 5_000;
+      do {
+        geometry = await renderer.evaluate(`(async () => {
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        await Promise.all(document.body.getAnimations().map(animation=>animation.finished.catch(()=>undefined)));
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+        const shell=document.querySelector('.editor-shell[data-manuscript-kind="derivative"]');
+        const toolbar=shell.querySelector('.editor-toolbar'), box=toolbar.getBoundingClientRect();
+        const controls=Array.from(toolbar.querySelector('.editor-edit-actions').children).filter(el=>!el.hidden && !el.classList.contains('ui-select-native') && getComputedStyle(el).display!=='none');
+        const shellWidth=shell.getBoundingClientRect().width;
+        const bounds=controls.map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,scroll:el.scrollWidth,client:el.clientWidth};});
+        return {shellWidth,bounds,checks:{viewport:innerWidth===${width} && innerHeight===800,heading:document.querySelector('.editor-toolbar select[aria-label="段落样式"]').value==='heading-6',drawer:document.body.dataset.taskDrawer==='open',narrow:${width}===1280 ? shellWidth<600 : shellWidth>600 && shellWidth<640,count:controls.length>=7,
+          visible:bounds.every(r=>r.width>0 && r.height>0 && r.left>=Math.max(0,box.left) && r.right<=Math.min(box.right,innerWidth) && r.top>=box.top && r.bottom<=Math.min(box.bottom,innerHeight)),untruncated:bounds.every(r=>r.scroll<=r.client+1)}};
+      })()`);
+        if (Object.values(geometry.checks).every(value=>value===true)) break;
+        await new Promise(resolve=>setTimeout(resolve, 50));
+      } while (Date.now() < geometryDeadline);
+      requireJourney(Object.values(geometry.checks).every(value=>value===true), 'document-toolbar-narrow-shell', geometry);
+    }
     await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
     await clickSelector(renderer, '.task-composer [data-task-composer-action="save-draft"]', 'document-task-save');
     await waitFor(renderer, `document.querySelector('.task-composer')?.dataset.taskComposer==='draft'`, 'document-task-saved');
     const documentTarget = await renderer.evaluate(`(async()=>{const drafts=await window.ai7.inspectTaskIntentDrafts({draftId:null}); const draft=drafts.drafts.find(item=>item.origin==='composer-deliverable'); const document=(await window.ai7.inspectProductionDocuments()).types.find(item=>item.typeId==='news-release').document; return {target:draft?.version.target,pin:draft?.version.deliverable,manuscriptId:document.documentId,branchId:document.branchId,revisionId:document.versions[0].revisionId};})()`);
     requireJourney(documentTarget.target==='deliverable' && documentTarget.pin?.manuscriptId===documentTarget.manuscriptId && documentTarget.pin?.branchId===documentTarget.branchId && documentTarget.pin?.revisionId===documentTarget.revisionId && documentTarget.pin?.version===2 && documentTarget.pin?.stale===false, 'document-task-exact-version', documentTarget);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'document-task-close');
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('document-workflow-complete');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="complete"]`, 'document-workflow-complete');
@@ -3044,7 +3075,7 @@ async function main() {
     await openManuscript(renderer, 'multi-manuscript');
     await waitFor(renderer, `document.querySelectorAll('[data-screen="editor"] .manuscript-switcher-bar [data-manuscript-switch="document"]').length === 2`, 'multi-switcher-listed');
     const multiSwitches = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch]'), (item) => [item.dataset.manuscriptSwitch, item.textContent, item.getAttribute('aria-current')]))`);
-    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '+ 新建 / 导入衍生稿件', null], ['manage', '管理全部衍生稿件 (2)', null]]), 'multi-switcher-words', multiSwitches);
+    requireJourney(multiSwitches === JSON.stringify([['primary', `主稿件（《${WRITING_TITLE}》）`, 'page'], ['document', '[宣传文章] 宣传文章', null], ['document', '[评论文章] 评论文章', null], ['new', '新建 / 导入衍生稿件…', null], ['manage', '管理全部衍生稿件（2）', null]]), 'multi-switcher-words', multiSwitches);
     at('multi-documents-ordinary-blank');
     const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
     // 空白新建 under the 稿件题目 offered for the type: the Book's title and the type, numbered after the one already made.
@@ -3068,7 +3099,7 @@ async function main() {
     await openDerivativePanel(renderer, { typeId: 'promotion-article', mode: 'import' }, 'multi-import');
     await clickSelector(renderer, '.derivative-create-form [data-document-action="create-derivative"]', 'multi-import');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
-    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 3 && document.querySelector('[data-manuscript-switch="manage"]')?.textContent === '管理全部衍生稿件 (4)'`, 'multi-four-listed');
+    await waitFor(renderer, `document.querySelectorAll('.manuscript-switcher-bar [data-manuscript-switch="document"]').length === 3 && document.querySelector('[data-manuscript-switch="manage"]')?.textContent === '管理全部衍生稿件（4）'`, 'multi-four-listed');
     at('multi-documents-ordinary-identities');
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>{const type=page.types.find(type=>type.typeId==='promotion-article');return type.documents.length===3&&new Set(type.documents.map(doc=>doc.documentId)).size===3&&type.document.documentId===type.documents[0].documentId&&type.documents.every(doc=>doc.versions.length===1);})`, 'multi-independent-identities');
     const primaryAfter = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)},historyCursor:null}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
@@ -3128,10 +3159,10 @@ async function main() {
     await waitFor(renderer, `window.__j07Scoped.onlySentenceChanged(${JSON.stringify(SCOPED_EDIT_REPLACEMENT)})`, 'scoped-edit-only-the-sentence', 30_000);
     await assertRenderer(renderer, `(() => { const block=window.__j07Scoped.block(window.__j07Scoped.state.target); const badge=block?.querySelector('.editorial-mark-applied-badge[data-mark-source="ai7"]'); const mark=block?.querySelector('.editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="ai7"]'); if(!badge||!mark)return false; window.__j07Scoped.mark=badge.dataset.appliedMarkId; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return window.__j07Scoped.block(window.__j07Scoped.state.next)?.dataset.aiLocked==='true'; })()`, 'scoped-edit-badge');
     try {
-      await waitFor(renderer, `(() => { const card=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"]'); return card?.className.includes('editorial-mark-card-active') && card.querySelector('[data-mark-source]')?.textContent.includes('AI 局部修改') && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'scoped-edit-card-forward');
+      await waitFor(renderer, `(() => { const card=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"]'); return card?.className.includes('editorial-mark-card-active') && card.querySelector('.editorial-mark-footer')?.textContent.includes('AI 局部修改') && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'scoped-edit-card-forward');
     } catch (error) {
       // Content-free codes only: which part of the card's arrival is missing.
-      const failed = await renderer.evaluate(`(() => { const pane=document.querySelector('#manuscript-comments-pane'); const card=pane?.querySelector('[data-comment-card="'+window.__j07Scoped.mark+'"]'); const source=card?.querySelector('[data-mark-source]')?.textContent ?? ''; const reverse=card?.querySelector('[data-mark-action="reverse-revision"]'); return ['pane-'+(pane?.hidden===false?'open':'closed'), 'cards-'+(pane?.querySelectorAll('[data-comment-card]').length ?? 0), 'card-'+(card?'present':'absent'), 'active-'+String(card?.className.includes('editorial-mark-card-active') ?? false), 'revalidating-'+(card?.dataset.revalidating ?? 'none'), 'source-'+(source.includes('AI 局部修改')?'scoped':source.includes('任务')?'task-other':source.length>0?'other':'empty'), 'reverse-'+(reverse===null||reverse===undefined?'absent':reverse.disabled?'disabled':'enabled'), 'floating-'+(document.querySelector('.editorial-mark-layer [data-mark-card]')?'open':'none')]; })()`).catch(() => ['probe-failed']);
+      const failed = await renderer.evaluate(`(() => { const pane=document.querySelector('#manuscript-comments-pane'); const card=pane?.querySelector('[data-comment-card="'+window.__j07Scoped.mark+'"]'); const source=card?.querySelector('.editorial-mark-footer')?.textContent ?? ''; const reverse=card?.querySelector('[data-mark-action="reverse-revision"]'); return ['pane-'+(pane?.hidden===false?'open':'closed'), 'cards-'+(pane?.querySelectorAll('[data-comment-card]').length ?? 0), 'card-'+(card?'present':'absent'), 'active-'+String(card?.className.includes('editorial-mark-card-active') ?? false), 'revalidating-'+(card?.dataset.revalidating ?? 'none'), 'source-'+(source.includes('AI 局部修改')?'scoped':source.includes('任务')?'task-other':source.length>0?'other':'empty'), 'reverse-'+(reverse===null||reverse===undefined?'absent':reverse.disabled?'disabled':'enabled'), 'floating-'+(document.querySelector('.editorial-mark-layer [data-mark-card]')?'open':'none')]; })()`).catch(() => ['probe-failed']);
       throw journeyCheckFailure('J-07', 'scoped-edit-card-forward', { failed, cause: error });
     }
     await assertRenderer(renderer, `(() => { document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j07Scoped.mark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'scoped-edit-undo');
@@ -3147,6 +3178,7 @@ async function main() {
     at('scoped-ai-edit-derivative');
     // On a derivative document the same entries stand (Issue #1412): 就选中部分让 AI 修改… is offered, and its paragraph is locked
     // and unlocked from the menu and the 🔒 badge.
+    await clickSelector(renderer, '[data-derivative-menu]', 'derivatives-menu-open');
     await clickSelector(renderer, '[data-manuscript-switch="manage"]', 'scoped-derivatives-manage');
     await waitFor(renderer, `document.querySelector('.derivatives-item') !== null`, 'scoped-derivatives-list');
     await fill(renderer, '.derivatives-filters input[type="search"]', WRITING_LIBRARY_TITLE, 'scoped-derivatives-search');

@@ -1406,9 +1406,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(whole.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
         .toEqual(expect.arrayContaining([[10, true], [15, true], [21, true], [56, true], [64, true]]));
       expect(whole.findings).toHaveLength(7);
-      expect(whole.findings.filter((finding) => finding.output === 'annotation')).toHaveLength(2);
+      expect(whole.findings.filter((finding) => finding.output === 'annotation')).toHaveLength(1);
       expect(whole.findings.filter((finding) => finding.note.includes('锚点不唯一'))).toEqual([
-        expect.objectContaining({ output: 'annotation', replacement: null }),
+        expect.objectContaining({ quote: '古怪', output: 'change-suggestion', replacement: '奇怪', note: expect.stringMatching(/^【锚点不唯一】/u) }),
       ]);
       const firstMarks = new Map(chosen.findings.map((finding) => [finding.quote, finding.markId] as const));
       expect(whole.findings.filter((finding) => firstMarks.has(finding.quote)).every((finding) => finding.markId === firstMarks.get(finding.quote))).toBe(true);

@@ -54,6 +54,8 @@ export interface BoundedEditor {
   focus(): void;
   flush(): Promise<void>;
   captureContinuity(): EditorContinuity;
+  /** Adopt the browser caret before decorating a completed click, even before selectionchange reaches the model. */
+  followNativeCaret(): EditorPoint | null;
   captureNavigationContinuity(): EditorContinuity;
   loadWindow(windowProjection: ManuscriptWindowProjection, continuity?: EditorContinuity): boolean;
   loadNavigationWindow(windowProjection: ManuscriptWindowProjection, continuity: EditorContinuity): boolean;
@@ -1166,20 +1168,22 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       compositionend() {
         composing = false;
         view.dom.dataset['composing'] = 'false';
-        const waiting = compositionWaiters;
-        compositionWaiters = [];
-        for (const resolve of waiting) resolve();
         // A composition that ended past the soft limit was never cut short; input pauses now (DUR-008), and again once the
         // input method's last change has reached the document.
         const settleComposition = (): void => {
           if (destroyed) return;
-          if (view.composing) {
+          if (composing || view.composing) {
             window.setTimeout(settleComposition, 20);
             return;
           }
           checkBufferLimit();
           applyEditableState();
           announceState();
+          // An acknowledgement may arrive after compositionend but before ProseMirror clears its flag.
+          // Release those waiters here too; no later compositionend is required to adopt a durable write.
+          const waiting = compositionWaiters;
+          compositionWaiters = [];
+          for (const resolve of waiting) resolve();
         };
         queueMicrotask(settleComposition);
         scheduleAutomaticFlush();
@@ -1227,6 +1231,17 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     focus: () => view.focus(),
     flush,
     captureContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
+    followNativeCaret: () => {
+      const native = view.dom.ownerDocument.getSelection();
+      if (!native?.isCollapsed || !native.anchorNode || !view.dom.contains(native.anchorNode)) return null;
+      let position: number;
+      try { position = view.posAtDOM(native.anchorNode, native.anchorOffset); } catch { return null; }
+      const selection = TextSelection.near(view.state.doc.resolve(position));
+      const point = pointAtPosition(view.state.doc, selection.head);
+      // A decoration update would otherwise redraw the old range before the queued DOM-selection observer runs.
+      if (!view.state.selection.eq(selection)) view.dispatch(view.state.tr.setSelection(selection));
+      return point;
+    },
     captureNavigationContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
     loadWindow: (nextWindow, continuity) => {
       if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
