@@ -1,3 +1,4 @@
+import { READERS_REPORT_NEEDS_FINALIZED } from '../../src/service/readers-reports.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -312,7 +313,7 @@ describe('evaluation on the Go execution path (#429)', () => {
     // A rule that names the report but not the house exemplars it carries admits 初评 alone.
     bindLive(withRuleFor(selected, 'evaluation', { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }));
     expect(store.inspectEvaluation(bookId, null).initial.prepare).toEqual({ allowed: true, mode: 'evaluation-first' });
-    expect(store.inspectEvaluation(bookId, null).readersReport.templates[0]!.prepare.allowed).toBe(true);
+    expect(store.inspectEvaluation(bookId, null).readersReport.templates[0]!.prepare).toEqual({ allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED });
     expect(sent).toBe(0);
   });
 

@@ -418,7 +418,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       expect(store.dialogueSourceDigest(book.bookId, { dialogueId })).toBe(frozenDigest);
       expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null).attempts).toHaveLength(2);
       expect(calls).toHaveLength(1);
-      expect(await ledgerLines()).toHaveLength(0);
+      expect(await ledgerLines()).toHaveLength(1);
     } finally {
       await live.dispose();
     }
