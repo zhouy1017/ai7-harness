@@ -4615,6 +4615,8 @@ export interface GlobalAttentionFactsProjection {
 
 /** One Attention Projection Item (V2-UX-ATTN-007): a pointer to its record, never an authority of its own. */
 export interface GlobalAttentionItemProjection {
+  /** Frozen producing model and sent effort, when this item names a model-backed run. */
+  modelLabel?: string;
   /** Stable across reads: the record's kind and identity. */
   itemId: string;
   group: GlobalAttentionGroupKey;

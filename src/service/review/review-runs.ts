@@ -1,4 +1,5 @@
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
+import { markModelLabels, recordedMarkModel } from '../editorial-mark-source.js';
 import { researchModelChannelLabel } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
@@ -3476,6 +3477,7 @@ export class ReviewRunStore {
         version,
         generatedAt,
         run: {
+          ...this.#modelAttribution(snapshot),
           ordinal: snapshot.ordinal,
           label: `第 ${snapshot.ordinal} 次`,
           createdAt: snapshot.createdAt,
@@ -4733,6 +4735,7 @@ export class ReviewRunStore {
             (['pausing', 'paused', 'resumable', 'awaiting-clarification', 'cancelling'].includes(reading.run.state) || reading.run.progress !== null)))[0];
       return {
         ...(control === undefined ? {} : { control }),
+        ...this.#modelAttribution(view.snapshot),
         bookId: view.snapshot.bookId,
         bookTitle: text(row.book_title),
         reviewRunId: view.snapshot.reviewRunId,
@@ -4882,9 +4885,21 @@ export class ReviewRunStore {
     return row === undefined ? null : this.#versionView(row);
   }
 
+  /** Attribution reads the frozen producing plan, never the current role selection. */
+  #modelAttribution(snapshot: RunSnapshot): { modelLabel?: string } {
+    if (localOnly(snapshot)) return { modelLabel: 'AI7 本地检查' };
+    const labels = [...new Set(snapshot.categories.flatMap(category => {
+      if (category.task === null) return [];
+      const label = markModelLabels(recordedMarkModel(this.#db, category.task.taskIntentId, snapshot.createdAt)).modelLabel;
+      return label ? [label] : [];
+    }))];
+    return labels.length === 0 ? {} : { modelLabel: labels.join('、') };
+  }
+
   #summary(view: RunView): ReviewRunSummaryProjection {
     const reports = this.#db.prepare('SELECT max(version) latest FROM review_reports WHERE review_run_id = ?').get(view.snapshot.reviewRunId) as SqlRow;
     return {
+      ...this.#modelAttribution(view.snapshot),
       reviewRunId: view.snapshot.reviewRunId,
       ordinal: view.snapshot.ordinal,
       label: `第 ${view.snapshot.ordinal} 次`,
@@ -5022,6 +5037,7 @@ export class ReviewRunStore {
     const after = page.findingsAfterOrdinal;
     return {
       projection: {
+        ...this.#modelAttribution(snapshot),
         ...(snapshot.localPlan === undefined ? {} : { localCheck: (() => {
           const last = readLocalStageArtifacts(this.#db, snapshot.reviewRunId).at(-1)?.record;
           const result = last?.result;

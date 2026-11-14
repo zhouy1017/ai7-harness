@@ -34,6 +34,7 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   const line = el('div', 'task-overview-card-line', attentionSentence(progressLine(item))); line.title = line.textContent ?? '';
   const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at, item.state)); time.dateTime = item.at;
   const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
+  if (item.attention.modelLabel) body.append(el('span', 'task-overview-model', item.attention.modelLabel));
   if (item.state === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
   const add = (label: string, action: TaskCardAction): void => { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); }); actions.append(button); };

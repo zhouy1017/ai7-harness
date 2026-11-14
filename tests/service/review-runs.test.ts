@@ -2711,6 +2711,12 @@ describe('one-step review launch (#1455)', () => {
       for (const [book, runId, effort] of [[firstBook, first.reviewRunId, 'high'], [secondBook, second.reviewRunId, 'low']] as const) {
         const run = workspace(session, book, runId).run!;
         expect(run.state).toBe('settled');
+        expect(run.modelLabel).toContain(`@${effort}`);
+        expect(run.report?.record.run.modelLabel).toContain(`@${effort}`);
+        expect(workspace(session, book).runs.find(item => item.reviewRunId === runId)?.modelLabel).toContain(`@${effort}`);
+        const task = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items)
+          .find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === runId);
+        expect(task?.item.modelLabel).toContain(`@${effort}`);
         expect(run.findings.length).toBeGreaterThan(0);
         const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings[0]!.markId!);
         expect(card.source.modelLabel).toContain(`@${effort}`);
