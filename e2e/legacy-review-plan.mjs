@@ -4,7 +4,10 @@ import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 export async function prepareLegacyReviewPlan(renderer, waitFor) {
   const runId = await renderer.evaluate(`(async () => {
     const sheet=document.querySelector('dialog.review-sheet');
-    const categoryIds=Array.from(sheet.querySelectorAll('input[name="review-category"]:checked:not(:disabled)'),input=>input.value);
+    const definition=sheet.querySelector('[data-procedure-definition]')?.dataset.procedureDefinition;
+    // A selected Procedure fixes its membership: its checked controls are intentionally disabled.
+    const categoryIds=Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'),input=>input)
+      .filter(input=>definition||!input.disabled).map(input=>input.value);
     const kind=sheet.querySelector('input[name="review-scope"]:checked').value;
     const scope={kind,fromChapterBlockId:kind==='chapters'?sheet.querySelector('[data-review-chapter="from"]').value:null,
       toChapterBlockId:kind==='chapters'?sheet.querySelector('[data-review-chapter="to"]').value:null};
@@ -14,7 +17,6 @@ export async function prepareLegacyReviewPlan(renderer, waitFor) {
       const captured=await window.ai7.inspectCapturedProcedureRun({procedureId:field.dataset.procedureId,versionId:field.dataset.procedureVersionId});
       input.capturedProcedure={versionId:captured.resolved.versionId,documentSha256:captured.resolved.documentSha256};
     }
-    const definition=sheet.querySelector('[data-procedure-definition]')?.dataset.procedureDefinition;
     if(definition){
       const at=definition.lastIndexOf('@'), id=definition.slice(0,at), version=Number(definition.slice(at+1));
       const library=await window.ai7.procedureLibrary({action:'inspect'});

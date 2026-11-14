@@ -2742,8 +2742,10 @@ describe('one-step review launch (#1455)', () => {
       const before = workspace(session, book);
       const next = session.store.inspectReviewWorkspace(book.bookId, null, undefined, undefined,
         { modelConnectionId: connection.connectionId, modelId: connection.binding.modelId });
-      expect(before.categories.find(category => category.categoryId === FACTUAL)!.networkUnavailable).not.toBe(true);
-      expect(next.categories.find(category => category.categoryId === FACTUAL)!.networkUnavailable).toBe(true);
+      expect(before.categories.find(category => category.categoryId === FACTUAL)!.networkUnavailable).toBe(true);
+      const factual = next.categories.find(category => category.categoryId === FACTUAL)!;
+      expect(factual.networkUnavailable).toBe(false);
+      expect(factual.basis.modelChannelSearchLabel).toContain('DeepSeek');
       expect(next.run).toBeNull(); expect(next.runs).toHaveLength(0);
       expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
     });
