@@ -7,7 +7,9 @@ const commentsConnectorVisible = `(() => {
   const card=document.querySelector('[data-comment-card][data-selected="true"]'), id=card?.dataset.commentCard;
   const line=document.querySelector('[data-comment-leader="'+id+'"]'), svg=line?.ownerSVGElement, dot=svg?.querySelector('circle');
   const words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), pane=document.querySelector('.manuscript-comments-pane');
-  if(!dot||!words||!pane||getComputedStyle(svg).pointerEvents!=='none')return false;
+  if(!line||!dot||!words||!pane||line.parentElement!==dot.parentElement||getComputedStyle(svg).pointerEvents!=='none')return false;
+  const l=line.getBoundingClientRect(), d=dot.getBoundingClientRect();
+  if(l.width<=0||l.height<=0||d.width<=0||d.height<=0)return false;
   const origin=svg.getBoundingClientRect(), x=origin.left+Number(dot.getAttribute('cx')), y=origin.top+Number(dot.getAttribute('cy'));
   const p=pane.getBoundingClientRect(), overlay=getComputedStyle(pane).position==='absolute', z=Number(getComputedStyle(svg).zIndex);
   const exposed=Array.from(words.getClientRects()).some(r=>x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom&&(!overlay||x<p.left||x>=p.right||y<p.top||y>=p.bottom));
@@ -21,34 +23,63 @@ const commentsConnectorVisible = `(() => {
 
 async function commentsConnectorExposure(renderer, check, waitFor) {
   await waitFor(renderer, commentsConnectorVisible, 'comments-connector-visible');
-  if(!await renderer.evaluate(`getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute'`))return;
-  try {
-    // Move only the selected Public SampleBook words to exercise partial/full occlusion.
-    for(const covered of [false,true]) {
-      await renderer.evaluate(`(() => {
-        const id=document.querySelector('[data-comment-card][data-selected="true"]').dataset.commentCard;
-        const words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
-        globalThis.__connectorStyle ??= {sheet:document.styleSheets[0],index:document.styleSheets[0].cssRules.length};
-        if(__connectorStyle.sheet.cssRules.length>__connectorStyle.index)__connectorStyle.sheet.deleteRule(__connectorStyle.index);
-        const r=words.getClientRects()[0];
-        const offset=(${covered} ? p.left+8-r.left : p.left+8-r.right);
-        __connectorStyle.sheet.insertRule('.editor-window [data-mark-id="'+CSS.escape(id)+'"] { position:relative; left:'+offset+'px; }',__connectorStyle.index);
-        window.dispatchEvent(new Event('resize'));
-      })()`);
-      await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))`);
-      if(covered) {
-        try { await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector'); }
-        catch {
-          const geometry=await renderer.evaluate(`(() => { const id=document.querySelector('[data-comment-card][data-selected="true"]').dataset.commentCard, words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect(), w=words.getBoundingClientRect(), dot=document.querySelector('.manuscript-comments-leaders circle'); return {left:w.left,right:w.right,top:w.top,bottom:w.bottom,paneLeft:p.left,paneRight:p.right,paneTop:p.top,paneBottom:p.bottom,offset:parseFloat(getComputedStyle(words).left),rects:Array.from(words.getClientRects()).map(r=>({left:r.left,right:r.right,top:r.top})),cx:dot?.getAttribute('cx'),cy:dot?.getAttribute('cy')}; })()`);
-          check(false,'comments-covered-no-connector',geometry);
-        }
+}
+
+// Seed actual ranges in the admitted sample; use browser line geometry to find
+// occlusion and wrapping without changing the manuscript, words or stylesheet.
+async function commentsSeedConnectorCases(renderer, check, waitFor) {
+  check(await renderer.evaluate(`(async () => {
+    const pane=document.querySelector('.manuscript-comments-pane'), p=pane.getBoundingClientRect();
+    const page=await window.ai7.getManuscriptWindowAt({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,target:{kind:'window-start',blockId:__comments.start}});
+    const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'});
+    for(const block of page.blocks.filter(b=>b.kind==='paragraph')) {
+      const node=document.querySelector('.editor-window [data-block-id="'+block.blockId+'"]');
+      if(!node||node.querySelector('[data-mark-id]')||node.textContent!==block.text)continue;
+      const segments=Array.from(segmenter.segment(block.text));
+      if(segments.length<60||segments.length>500)continue;
+      node.scrollIntoView({block:'center',behavior:'instant'});
+      await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+      const leaves=[];const walk=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let leaf,total=0;
+      while(leaf=walk.nextNode()){leaves.push({node:leaf,start:total});total+=leaf.length;}
+      const boundary=offset=>{const item=leaves.findLast(n=>n.start<=offset);return [item.node,offset-item.start];};
+      const boxes=segments.map((part,index)=>{
+        const range=document.createRange();range.setStart(...boundary(part.index));range.setEnd(...boundary(segments[index+1]?.index??block.text.length));
+        return Array.from(range.getClientRects()).find(r=>r.width>0&&r.height>0);
+      });
+      const covered=r=>r&&r.left>=p.left+1&&r.right<=p.right-1;
+      const wrap=boxes.findIndex((r,i)=>i>=4&&i+1<boxes.length&&r&&boxes[i-1]&&r.top>boxes[i-1].top&&covered(boxes[i-4])&&covered(boxes[i-3])&&covered(boxes[i-2])&&covered(boxes[i-1])&&r.right<p.left&&boxes[i+1]?.right<p.left);
+      const partial=boxes.findIndex((r,i)=>i>0&&r&&boxes[i-1]&&r.top===boxes[i-1].top&&boxes[i-1].left<p.left&&r.right>p.left);
+      if(wrap<0||partial<0)continue;
+      const cases=[{kind:'covered',from:wrap-4,to:wrap-2},{kind:'wrapped',from:wrap-2,to:wrap+2},{kind:'partial',from:partial-1,to:partial+1}];
+      for(const item of cases){
+        const result=await window.ai7.createEditorialMark({manuscriptId:__comments.manuscriptId,branchId:__comments.branchId,windowStartBlockId:__comments.start,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:block.blockId,baseBlockDigest:block.digest,fromGrapheme:item.from,toGrapheme:item.to,selectedText:segments.slice(item.from,item.to).map(s=>s.segment).join(''),kind:'annotation',highlightColor:null,body:'公开连线覆盖检查',proposedText:null,rationale:null});
+        item.id=result.markId;
       }
-      else await waitFor(renderer, commentsConnectorVisible, 'comments-partial-connector-visible');
+      globalThis.__connectorCases={blockId:block.blockId,cases};return true;
     }
-  } finally {
-    await renderer.evaluate(`(() => { __connectorStyle.sheet.deleteRule(__connectorStyle.index); delete globalThis.__connectorStyle; window.dispatchEvent(new Event('resize')); })()`);
+    return false;
+  })()`), 'comments-seed-real-connector-ranges');
+  check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-connector-reload-overview');
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'comments-connector-overview-ready');
+  check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('manuscript'))), 'comments-connector-reload-manuscript');
+  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'comments-connector-editor-ready');
+  await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]');if(entry.getAttribute('aria-expanded')!=='true')entry.click();document.querySelector('.editor-window [data-block-id="'+__connectorCases.blockId+'"]').scrollIntoView({block:'center',behavior:'instant'}); })()`);
+  for(const index of [0,1,2]) {
+    await waitFor(renderer, `document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]')?.hidden===false`, 'comments-connector-case-card');
+    await renderer.evaluate(`document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]').focus({preventScroll:true})`);
+    await waitFor(renderer, `document.querySelector('[data-comment-card="'+__connectorCases.cases[${index}].id+'"]').dataset.selected==='true'`, 'comments-connector-case-selected');
+    const geometry=`(() => {
+      const item=__connectorCases.cases[${index}], words=document.querySelector('.editor-window [data-mark-id="'+item.id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
+      const rects=Array.from(words.getClientRects()).filter(r=>r.width>0&&r.height>0), first=rects[0], dot=document.querySelector('.manuscript-comments-leaders circle'), svg=dot?.ownerSVGElement;
+      if(!first)return false;
+      if(item.kind==='covered')return rects.every(r=>r.left>=p.left&&r.right<=p.right&&r.top>=p.top&&r.bottom<=p.bottom)&&!document.querySelector('[data-comment-leader]')&&!dot;
+      if(item.kind==='partial')return first.left<p.left&&first.right>p.left;
+      const y=svg?.getBoundingClientRect().top+Number(dot?.getAttribute('cy'));
+      return rects.filter(r=>r.top===first.top).every(r=>r.left>=p.left&&r.right<=p.right)&&rects.some(r=>r.top>first.top&&r.left<p.left&&y>=r.top&&y<=r.bottom);
+    })()`;
+    await waitFor(renderer,geometry,'comments-real-connector-case-geometry');
+    if(index!==0)await waitFor(renderer,commentsConnectorVisible,'comments-real-connector-case-visible');
   }
-  await waitFor(renderer, commentsConnectorVisible, 'comments-connector-restored');
 }
 
 export async function commentsOrdinaryMode(renderer, check, waitFor) {
@@ -92,6 +123,7 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
       await commentsGeometryAndScroll(renderer,check,waitFor);
       if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
       else await commentsReplyAndResolve(renderer,check,waitFor);
+      if(form==='overlay')await commentsSeedConnectorCases(renderer,check,waitFor);
       check(true,'comments-'+form+'-complete');
     }
   } finally {

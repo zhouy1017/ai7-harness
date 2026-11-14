@@ -319,13 +319,25 @@ export class EditorialCardCache {
   }
 }
 
-/** Last exposed point on a words fragment's first line, in viewport coordinates. */
+/** Last exposed point on one words fragment, in viewport coordinates. */
 export function editorialCommentStart(words: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'height'>, pane?: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'>): { x: number; y: number } | undefined {
+  if (words.right <= words.left || words.height <= 0) return undefined;
   const y = words.top + Math.min(words.height, 20) / 2;
   if (!pane || y < pane.top || y >= pane.bottom || words.right <= pane.left || words.left >= pane.right) return { x: words.right, y };
   if (words.right > pane.right) return { x: words.right, y };
   // Keep the centre strictly inside the exposed fragment, even for a sliver.
   if (words.left < pane.left) return { x: pane.left - Math.min(1, (pane.left - words.left) / 2), y };
+  return undefined;
+}
+
+/** Keep the first-line endpoint; if covered, continue through later fragments in reading order. */
+export function editorialCommentStartFromFragments(words: readonly Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'height'>[], pane: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'>): { x: number; y: number } | undefined {
+  const top = words[0]?.top;
+  const ordered = [...words.filter(rect => rect.top === top).sort((a, b) => b.right - a.right), ...words.filter(rect => rect.top !== top)];
+  for (const rect of ordered) {
+    const point = editorialCommentStart(rect, pane);
+    if (point) return point;
+  }
   return undefined;
 }
 
@@ -1054,13 +1066,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const target = active.node.getBoundingClientRect();
       if (target.bottom >= base.top && target.top <= base.bottom) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const rects = Array.from(commentAnchor(active.mark)?.getClientRects() ?? []);
+        const rects = Array.from(options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(active.mark.markId)}"]`)).flatMap(node => Array.from(node.getClientRects()));
         const firstLine = rects[0] || active.anchor;
         const pane = options.comments!.host;
         const overlay = getComputedStyle(pane).position === 'absolute';
-        const fragments = overlay ? rects.filter(rect => rect.top === firstLine.top).sort((a, b) => b.right - a.right) : [firstLine];
-        const start = fragments.map(rect => editorialCommentStart({ left: rect.left, right: Math.min(rect.right, viewport.right), top: rect.top, height: rect.height },
-          overlay ? pane.getBoundingClientRect() : undefined)).find(point => point !== undefined);
+        const start = overlay
+          ? editorialCommentStartFromFragments(rects.map(rect => ({ left: rect.left, right: Math.min(rect.right, viewport.right), top: rect.top, height: rect.height })), pane.getBoundingClientRect())
+          : editorialCommentStart({ left: firstLine.left, right: Math.min(firstLine.right, viewport.right), top: firstLine.top, height: firstLine.height });
         if (start) {
           const x = start.x - origin.left;
           const y = start.y - origin.top;

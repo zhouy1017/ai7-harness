@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorialCardCache, mountEditorialMarks, editorialCommentStart, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
+import { EditorialCardCache, mountEditorialMarks, editorialCommentStartFromFragments, editorialCommentStart, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
 import { matchesEditorialMarkFilter } from '../../src/renderer/editorial-mark-filter.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkCardProjection, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -641,4 +641,18 @@ it('clips the connector to exposed words and omits wholly covered words (#1470)'
   expect(editorialCommentStart(words, { ...pane, bottom: 100 })).toEqual({ x: 574, y: 110 });
   expect(editorialCommentStart(words, { ...pane, left: 539, right: 560 })).toEqual({ x: 574, y: 110 });
   expect(editorialCommentStart({ ...words, left: 565.5 }, pane)?.x).toBe(565.75);
+});
+
+
+it('continues into later exposed fragments and ignores zero-width words (#1470)', () => {
+  const pane = { left: 566, right: 900, top: 0, bottom: 681 };
+  const covered = { left: 600, right: 700, top: 100, height: 24 };
+  const exposed = { left: 300, right: 450, top: 128, height: 24 };
+  expect(editorialCommentStartFromFragments([covered, exposed], pane)).toEqual({ x: 450, y: 138 });
+  expect(editorialCommentStartFromFragments([covered, exposed, { ...exposed, top: 156 }], pane)).toEqual({ x: 450, y: 138 });
+  expect(editorialCommentStartFromFragments([covered, { ...covered, top: 128 }], pane)).toBeUndefined();
+  expect(editorialCommentStartFromFragments([], pane)).toBeUndefined();
+  expect(editorialCommentStart({ ...exposed, right: exposed.left }, pane)).toBeUndefined();
+  expect(editorialCommentStart({ ...exposed, height: 0 }, pane)).toBeUndefined();
+  expect(editorialCommentStartFromFragments([{ ...exposed, right: exposed.left }, exposed], pane)).toEqual({ x: 450, y: 138 });
 });
