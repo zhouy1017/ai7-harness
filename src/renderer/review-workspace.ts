@@ -2820,7 +2820,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
-    for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; sheetUpdate(); });
+    for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; estimateNotice.textContent = ''; estimateNotice.hidden = true; });
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
