@@ -98,7 +98,8 @@ import {
 } from '../shared/protocol.js';
 import { modelServiceRowsOutsideBindings } from './model-service-connections.js';
 import { dirname, join } from 'node:path';
-import { statSync, statfsSync } from 'node:fs';
+import { statSync, statfsSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { asNumber, asString, requireStore, type SqlRow } from './store-records.js';
 import { isModelTextAttemptProvenance } from './material-index.js';
@@ -630,7 +631,22 @@ export class WalCheckpointPolicy {
     requireStore(freeBytes >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘剩余空间不足，请释放空间后重试保存。');
     // 30 bursts can append 11.84 GB before checkpointing catches up. Normal backlog is not a write refusal.
     const ceiling = Math.min(this.limits.emergencyBytes, Math.floor(freeBytes / 4));
-    requireStore(this.fileBytes() < ceiling, 'JOURNAL_CHECKPOINT_BUSY', '本机存储空间暂时不足，请稍候重试保存。');
+    const walBytes = this.fileBytes();
+    if (walBytes >= ceiling) this.#recordEmergency(walBytes, ceiling, freeBytes);
+    requireStore(walBytes < ceiling, 'JOURNAL_CHECKPOINT_BUSY', '本机存储空间暂时不足，请稍候重试保存。');
+  }
+
+  #recordEmergency(walBytes: number, ceilingBytes: number, freeBytes: number): void {
+    const record = JSON.stringify({ flag: 'JOURNAL_CHECKPOINT_BUSY', timestamp: Date.now(), walBytes, ceilingBytes, freeBytes });
+    // One bounded numeric observation, not a manuscript or service log; never affects admission or recovery.
+    const target = join(dirname(this.path), 'wal-checkpoint-pressure.json');
+    const staged = `${target}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(staged, record, { flag: 'wx', mode: 0o600 });
+      renameSync(staged, target);
+    } catch { process.stderr.write('AI7_WAL_DIAGNOSTIC_WRITE_FAILED\n'); }
+    finally { try { rmSync(staged, { force: true }); } catch { /* Diagnostics must not mask the original refusal. */ } }
+    process.stderr.write('AI7_WAL_EMERGENCY/' + record + '\n');
   }
 
   maintain(idle: boolean, force = false): { busy: boolean; beforeBytes: number; afterBytes: number } | null {

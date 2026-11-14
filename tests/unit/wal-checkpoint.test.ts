@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
-import { statSync } from 'node:fs';
+import { statSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -59,6 +59,12 @@ describe('store-owned WAL checkpoint policy', () => {
     write('first');
     policy.maintain(false);
     expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_CHECKPOINT_BUSY' }));
+    const diagnostic = JSON.parse(readFileSync(join(root, 'wal-checkpoint-pressure.json'), 'utf8'));
+    expect(Object.keys(diagnostic).sort()).toEqual(['ceilingBytes', 'flag', 'freeBytes', 'timestamp', 'walBytes']);
+    expect(diagnostic.flag).toBe('JOURNAL_CHECKPOINT_BUSY');
+    expect(diagnostic.walBytes).toBeGreaterThanOrEqual(diagnostic.ceilingBytes);
+    expect(diagnostic.ceilingBytes).toBeLessThanOrEqual(diagnostic.freeBytes / 4);
+    expect([diagnostic.timestamp, diagnostic.walBytes, diagnostic.ceilingBytes, diagnostic.freeBytes].every(Number.isFinite)).toBe(true);
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 2 });
     reader.exec('ROLLBACK');
     expect(policy.maintain(true)?.afterBytes).toBe(0);
