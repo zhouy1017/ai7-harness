@@ -1,3 +1,5 @@
+import { createDispatchChooser } from './components/dispatch-chooser.js';
+import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -245,7 +247,7 @@ export interface ReviewWorkspaceSurface {
 
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
-  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
+  'getModelServiceSettings' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
   'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'authorizeReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
@@ -333,6 +335,9 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  executionConfig?: RuntimeExecutionConfig;
+  launchPending?: boolean;
+  clientCommandId?: string;
   dismissed: boolean;
   localOptions: import('../shared/protocol/procedures.js').LocalCheckOptions;
   houseWordListWanted: boolean;
@@ -2798,7 +2803,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    const primaryActions = el('div', 'button-row'); primaryActions.append(start, prepare, cancelPreparation);
+    const chooser = createDispatchChooser({ role: 'main-editorial', changed: config => { state.executionConfig = config; delete state.clientCommandId; } });
+    void (async () => {
+      const [settings, preferences] = await Promise.all([api.getModelServiceSettings(), window.ai7.getPreferences()]);
+      if (!state.dismissed) chooser.render(settings, preferences.values['model.favourites']);
+    })().catch(() => { chooser.unavailable(); });
+    const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare, cancelPreparation);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, progress, actions);
@@ -2871,7 +2881,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         else control.removeAttribute('aria-describedby');
       }
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
-      start.disabled = prepare.disabled;
+      start.disabled = prepare.disabled || state.launchPending === true;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -2900,7 +2910,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
-    if (destroyed || state.job !== null || projection === null) return;
+    if (destroyed || state.job !== null || state.launchPending || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
     const shown = resolved === null ? null : sheet.querySelector<HTMLSelectElement>('[data-review-field="procedure-version"]')?.value ?? null;
@@ -2945,62 +2955,20 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
         ...(state.definition?.composite !== true ? {} : { procedureDefinition: state.definition.pin }),
       };
-      const initial = await api.prepareReviewRun(preparationInput);
-      if (state.dismissed) {
-        await api.cancelServiceJob({ jobId: initial.jobId });
-        options.setStatus('已请求取消审阅准备。', 'success');
+      if (mode === 'preview') {
+        state.problem = '预计调用次数与阅读范围见上方；开始审阅时按当前稿件启动。';
+        sheetUpdate();
+        options.setStatus('已显示审阅估计。', 'success');
         return;
       }
-      state.job = initial;
+      state.launchPending = true;
+      state.clientCommandId ??= crypto.randomUUID();
       sheetUpdate();
-      const completed = await options.awaitServiceJob(initial, (job) => {
-        if (destroyed || sheetState !== state) return;
-        state.job = job;
-        sheetUpdate();
-      });
-      if (destroyed) return;
-      state.job = null;
-      if (state.dismissed) {
-        options.setStatus(completed.state === 'cancelled' ? REVIEW_STATUS_LINES.preparationCancelled : '已关闭审阅配置。', 'success');
-        return;
-      }
-      if (completed.state === 'cancelled') {
-        sheetUpdate();
-        options.setStatus(REVIEW_STATUS_LINES.preparationCancelled, 'success');
-        return;
-      }
-      let result = completed.result;
-      if (completed.kind !== 'review-run-preparation' || result === null || !('scopeOptions' in result) || result.bookId !== bookId || result.run === null) {
-        throw new Error(REVIEW_STATUS_LINES.preparationFailed);
-      }
-      let quickNote: string | null = null;
-      if (mode === 'start') {
-        // 开始审阅 (ADR 0096 §3): the one explicit action records the Run Authorization for the plan exactly as its bar shows
-        // it; a plan that is editable, moved or needs a decision opens first, and a refused start says why there.
-        const decision = oneActionStart(await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId }));
-        if (decision.kind === 'authorize') {
-          try {
-            result = await api.authorizeReviewRun({ reviewRunId: result.run.reviewRunId, planDigests: decision.planDigests });
-            quickNote = REVIEW_STATUS_LINES.started;
-            if (result.run !== null) options.recorded?.(result.run.reviewRunId);
-          } catch (error) {
-            quickNote = options.errorMessage(error, REVIEW_STATUS_LINES.startFailed);
-          }
-        } else {
-          quickNote = REVIEW_STATUS_LINES.startNeedsPlan;
-        }
-      } else if (mode === 'quick') {
-        const plan = await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId });
-        const rule = plan.defaultRule.current;
-        const digest = plan.edit.planEnvelopeDigest;
-        if (rule === null || rule.state !== 'active' || digest === null) {
-          quickNote = plan.defaultRule.reason ?? '这本书没有匹配所选类别的默认执行规则；请先看计划，可以在完整计划里设为快速开始默认。';
-        } else {
-          const started = await api.quickStartReviewRun({ reviewRunId: result.run.reviewRunId, ruleVersionId: rule.ruleVersionId, planEnvelopeDigest: digest });
-          result = started.projection;
-          quickNote = started.outcome === 'started' ? '已按默认执行规则开始审阅。' : started.reasons.join('');
-        }
-      }
+      const result = await api.launchReviewRun({ ...preparationInput, clientCommandId: state.clientCommandId,
+        ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }) });
+      state.launchPending = false;
+      const quickNote = REVIEW_STATUS_LINES.started;
+      if (result.run !== null) options.recorded?.(result.run.reviewRunId);
       if (result.run === null) throw new Error(REVIEW_STATUS_LINES.preparationFailed);
       query.reviewRunId = result.run.reviewRunId;
       query.filters = { ...NO_FILTERS };
@@ -3018,8 +2986,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
       // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
       // it brings focus back to this Run's 查看计划. After 开始审阅 the drawer shows the started Run, its plan one step away.
-      if (mode === 'preview') options.openPlan(result.run.reviewRunId);
+
     } catch (error) {
+      state.launchPending = false;
       if (destroyed) return;
       state.job = null;
       if (state.dismissed) {

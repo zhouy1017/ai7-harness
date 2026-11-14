@@ -98,6 +98,7 @@ export function initializeDatabaseMergeSchema(db: DatabaseSync): void {
 export type MergeTablePolicy = 'seed' | 'owned' | 'dependent' | 'shared' | 'excluded' | 'transient' | 'house' | 'derived';
 
 export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
+  task_launch_snapshots: 'transient',
   books: 'seed',
   earlier_exemplar_books: 'house',
   earlier_exemplar_versions: 'house',

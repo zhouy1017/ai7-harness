@@ -1,3 +1,4 @@
+import { createDispatchChooser } from '../../src/renderer/components/dispatch-chooser.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -678,4 +679,20 @@ it('scans connection-test feedback and the repainted model page when discovery u
       expect(root.textContent?.match(/查看技术详情/gu)).toHaveLength(1);
     } finally { vi.unstubAllGlobals(); }
   } finally { setTechnicalLayerVisible(true); }
+});
+
+
+it('offers ready channels, favourites first, and resets the task choice without saving role defaults (#1455)', () => {
+  const changed = vi.fn();
+  const projection = settings(['opencode-go', 'openai-platform']);
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed });
+  chooser.render(projection, { 'opencode-go': [projection.channels.find(channel => channel.channelId === 'opencode-go')!.models[0]!.modelId] });
+  const root = chooser.element as unknown as MiniElement;
+  expect(root.querySelectorAll('optgroup').map(group => (group as unknown as { label: string }).label)).toEqual(['OpenCode Go', 'OpenAI 官方']);
+  const model = root.querySelector('select[aria-label="本次任务的模型"]')!;
+  const options = root.querySelectorAll('option');
+  expect(options.some(option => option.textContent.includes('★'))).toBe(true);
+  model.dispatchEvent({ type: 'change' });
+  root.querySelector('button')!.click();
+  expect(changed).toHaveBeenLastCalledWith({});
 });

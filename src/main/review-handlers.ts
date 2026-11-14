@@ -73,6 +73,19 @@ export function registerReviewHandlers(context: {
       }),
   );
 
+  ipcMain.handle(IPC_CHANNELS.launchReviewRun, (event, input: Omit<ServiceOperationMap['launchReviewRun']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const generation = owned.routeGeneration;
+        const result = await service.call('launchReviewRun', { ...input, bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, generation);
+        return requireReviewWorkspaceOfRoute(route, result, null);
+      });
+    }));
+
   ipcMain.handle(
     IPC_CHANNELS.prepareReviewRun,
     (event, input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>

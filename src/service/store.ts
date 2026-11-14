@@ -1,3 +1,4 @@
+import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
@@ -3956,6 +3957,24 @@ export class EditorialStore {
     localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
     decisionId?: string, procedureDefinition: import('../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare(this.#reviewRunRequest(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft, seriesId, localCheck, decisionId, procedureDefinition)));
+  }
+
+  #reviewRunRequest(
+    bookId: string,
+    categoryIds: ReadonlyArray<string>,
+    scope: ReviewRunScopeRequest,
+    launchPolicy: LaunchPolicyProjection,
+    // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
+    capturedProcedure: { versionId: string; documentSha256: string } | null = null,
+    materialIds: ReadonlyArray<string> = [],
+    redoOf: string | null = null,
+    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
+    intentDraft: DraftPromotion | null = null,
+    seriesId: string | null = null,
+    localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
+    decisionId?: string, procedureDefinition: import('../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
+  ): Extract<import('./review/review-runs.js').ReviewRunPrepareInput, { phase: 'start' }> {
     const factualDecision = decisionId === undefined ? undefined : this.#verificationCall(() => {
       const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, bookId);
       requireStore(row !== undefined && categoryIds.length === 1 && categoryIds[0] === 'factual-review', 'FACTUAL_DECISION_INVALID', '补充核查需要当前图书的核查决定。');
@@ -3977,12 +3996,45 @@ export class EditorialStore {
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, procedureDefinition, redoOf, seriesId,
+    return { phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, procedureDefinition, redoOf, seriesId,
       ...(factualDecision === undefined ? {} : { factualDecision }),
       ...(localCheck === undefined ? {} : { localCheck }),
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
       ...(intentDraft === null ? {} : { intentDraft }),
-    }));
+    };
+  }
+
+  captureScopedAiEditLaunch(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput & { bookId: string; clientCommandId: string },
+    create: (binding: ConfiguredProviderBinding | null) => { runId: string; manuscript: unknown }): { runId: string; repeated: boolean } {
+    const { clientCommandId, ...request } = input;
+    return launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'scoped-ai-edit', input: request },
+      () => this.#launchChoice('fast-interaction', input.executionConfig ?? {}), choice => create(choice.binding));
+  }
+
+  #launchChoice(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig): import('./task-launch-snapshots.js').LaunchChoice {
+    const binding = this.getConfiguredModelRoleBinding(role, override);
+    requireStore(this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production' || binding !== null,
+      'MODEL_SERVICE_SETUP_REQUIRED', '请先在设置中连接可用模型。');
+    const connection = binding === null ? undefined : this.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference);
+    return { binding, executionConfig: { ...(connection === undefined ? {} : { modelConnectionId: connection.connectionId }),
+      ...(binding === null ? {} : { modelId: binding.model, reasoningEffort: binding.reasoningEffort ?? 'off' }) } };
+  }
+
+  launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection): { projection: ReviewWorkspaceProjection; repeated: boolean } {
+    try {
+      const { clientCommandId, executionConfig = {}, ...request } = input;
+      const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
+        () => input.categoryIds.every(category => category === 'local-text-check') ? { executionConfig: {}, binding: null } : this.#launchChoice('main-editorial', executionConfig), (choice, snapshotId) => {
+          const planned = this.#reviewRunRequest(input.bookId, input.categoryIds, input.scope, launchPolicy,
+            input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
+          const run = this.#reviewRuns.launch(planned, snapshotId, choice.binding);
+          return { runId: run.reviewRunId, manuscript: run.manuscript };
+        });
+      return { projection: this.#reviewRuns.workspace(input.bookId, launched.runId), repeated: launched.repeated };
+    } catch (error) {
+      if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
+      return this.#reviewCall(() => { throw error; });
+    }
   }
 
   advanceReviewRunPreparationWork(workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {

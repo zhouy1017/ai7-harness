@@ -251,6 +251,12 @@ export type FastRoleAnswer =
 const OUTCOME_UNKNOWN_CODES: ReadonlySet<string> = new Set([AI7_FAILURE_CODES.OUTCOME_UNKNOWN, 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN']);
 
 export class FastRoleExecutionOwner {
+  readonly #children = new Set<FastRoleExecutionOwner>();
+  #release: (() => void) | null = null;
+  fork(live: FastRoleLiveRoutes | null): FastRoleExecutionOwner {
+    const child = new FastRoleExecutionOwner({ ...this.#deps, live });
+    this.#children.add(child); child.#release = () => this.#children.delete(child); return child;
+  }
   readonly #deps: FastRoleExecutionDeps;
   #active: PrimaryAgentHarnessHandle | null = null;
   #inFlight = false;
@@ -263,7 +269,7 @@ export class FastRoleExecutionOwner {
 
   /** Whether a request is in flight; a database replacement waits for it as for a dialogue answer. */
   get busy(): boolean {
-    return this.#inFlight;
+    return this.#inFlight || [...this.#children].some(child => child.busy);
   }
 
   /** Why a kind cannot be asked now, for the surfaces to show before anything is selected; `null` when it can. */
@@ -281,6 +287,8 @@ export class FastRoleExecutionOwner {
 
   /** AI7 is closing: the request in flight is interrupted. */
   dispose(): void {
+    for (const child of this.#children) child.dispose();
+    this.#release?.();
     this.#disposed = true;
     this.#requestAbort?.abort();
     if (this.#deps.live === null) this.#active?.interrupt();

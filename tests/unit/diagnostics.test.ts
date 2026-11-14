@@ -58,7 +58,7 @@ describe('pure diagnostics bundle', () => {
       .filter((name) => name.endsWith('.ts'))
       .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
     expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
-    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 114, protocol: SERVICE_PROTOCOL_VERSION');
+    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 115, protocol: SERVICE_PROTOCOL_VERSION');
     expect(facts.buildIdentity!.dataVersion).toBe(DATA_VERSION);
     expect(application).toContain("policySetVersion: 'no-policy-lock'");
     // The sandboxed preload cannot import the main module at runtime, so its literals must match the handler channels.

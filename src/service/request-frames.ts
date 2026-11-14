@@ -1799,10 +1799,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       } catch { throw new ProtocolError(tentativeId); }
       break;
     }
+    case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig'] : [])], tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
+      if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && (!isRecord(input.executionConfig) || Object.keys(input.executionConfig).some(key => !['modelConnectionId', 'modelId', 'reasoningEffort'].includes(key)) || (input.executionConfig.modelConnectionId !== undefined && !isBoundedString(input.executionConfig.modelConnectionId, 128)) || (input.executionConfig.modelId !== undefined && !isBoundedString(input.executionConfig.modelId, 256)) || (input.executionConfig.reasoningEffort !== undefined && !validReasoningEffort(input.executionConfig.reasoningEffort)))))) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
       const composite = input.procedureDefinition != null;
       if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);
@@ -2913,7 +2915,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'startScopedAiEdit': {
-      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], ['clientCommandId', 'executionConfig'], tentativeId);
+      if (input.clientCommandId !== undefined && !validUuid(input.clientCommandId)) throw new ProtocolError(tentativeId);
+      if (input.executionConfig !== undefined && (!isRecord(input.executionConfig) || Object.keys(input.executionConfig).some(key => !['modelConnectionId', 'modelId', 'reasoningEffort'].includes(key)) || (input.executionConfig.modelConnectionId !== undefined && !isBoundedString(input.executionConfig.modelConnectionId, 128)) || (input.executionConfig.modelId !== undefined && !isBoundedString(input.executionConfig.modelId, 256)) || (input.executionConfig.reasoningEffort !== undefined && !validReasoningEffort(input.executionConfig.reasoningEffort)))) throw new ProtocolError(tentativeId);
       const scope = input.scope;
       const validScope = isRecord(scope) && (
         (hasExactKeys(scope, ['mode', 'span']) && scope.mode === 'selected-only' && Array.isArray(scope.span) && scope.span.length >= 1 &&

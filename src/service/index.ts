@@ -1145,6 +1145,11 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };
     case 'saveHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
+    case 'launchReviewRun': {
+      const launched = store.launchReviewRun(request.input, launchPolicy);
+      if (!launched.repeated && launched.projection.run !== null) driveReviewRun(reviewRuns, launched.projection.run.reviewRunId);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress) };
+    }
     case 'prepareReviewRun':
       return {
         id: request.id,
@@ -2365,7 +2370,14 @@ async function run(): Promise<void> {
             () => productionState.fast?.reasoningEffort)
           : null,
     });
-    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store), connectionTesting: () => requestLoop?.probing === true };
+    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store, () => new Date(), binding => {
+      if (production === null || binding === null) return fastRoleOwner;
+      const policy = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', null, binding);
+      const unchanged = (): boolean => openedStore.getModelServiceConnections().some(connection => connection.credentialReference === binding.credentialReference && connection.credentialOperationState === 'ready');
+      return fastRoleOwner.fork(productionFastRoleRoutes(production, () => policy, () => binding.credentialReference, createKeyringSecretResolver(),
+        () => unchanged(), () => openedStore.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference)?.credentialUpdatedAt ?? null,
+        () => binding.reasoningEffort));
+    }), connectionTesting: () => requestLoop?.probing === true };
     // Agent 工作区 (Issue #90, slice 13a): its rounds run on the dialogue's owner and are held in this service's memory only.
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every

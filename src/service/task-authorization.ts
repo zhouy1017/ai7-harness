@@ -1,3 +1,4 @@
+import { initializeTaskLaunchSchema, TASK_LAUNCH_SCHEMA_SQL, TASK_LAUNCH_TRIGGER_SQL } from './task-launch-snapshots.js';
 import { validateRequestAdmissionRecords } from './analysis/request-admissions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -545,7 +546,7 @@ export const SEARCH_BACKEND_FALLBACK_SQL = `CREATE TABLE search_backend_fallback
 ) STRICT`;
 /** Revision 105 (#1282): independent Fast model and cached account model metadata. */
 export const MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION = 105;
-export const LATEST_SCHEMA_VERSION = 114; // #1453: independent role-default reasoning efforts.
+export const LATEST_SCHEMA_VERSION = 115; // #1453: independent role-default reasoning efforts.
 export const FACTUAL_RANGE_SCHEMA_VERSION = 110;
 /** Revision 111 (Issue #1412): the append-only `ai_edit_lock_events` ledger, created before the stamp; no other relation changes. */
 export const AI_EDIT_LOCK_SCHEMA_VERSION = 111;
@@ -3233,6 +3234,8 @@ export function initializeFactualRangeTaskSchema(db: DatabaseSync): void {
 }
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
+  requireExactObjects(db, 'table', TASK_LAUNCH_SCHEMA_SQL, '任务启动快照表');
+  requireExactObjects(db, 'trigger', TASK_LAUNCH_TRIGGER_SQL, '任务启动快照约束');
   requireTask(Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
@@ -3264,8 +3267,9 @@ function initializeCurationSchema(db: DatabaseSync): void {
 }
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+  initializeTaskLaunchSchema(db);
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([113, 112, 111, FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107, 108, 109, FACTUAL_RANGE_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+  if ([114, 113, 112, 111, FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107, 108, 109, FACTUAL_RANGE_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
     initializeFactualRangeTaskSchema(db);
     // Revision 111 only adds the lock ledger, which the store created before this stamp (Issue #1412).
     if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === FACTUAL_RANGE_SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${AI_EDIT_LOCK_SCHEMA_VERSION}`);

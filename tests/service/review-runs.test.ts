@@ -2673,3 +2673,48 @@ describe('house preference review consumption (#911)', () => {
     });
   }, 300_000);
 });
+
+
+describe('one-step review launch (#1455)', () => {
+  it('starts once for a command and refuses changed inputs under that identity', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
+      const first = session.store.launchReviewRun(input, launchPolicy);
+      const repeated = session.store.launchReviewRun(input, launchPolicy);
+      expect(first.repeated).toBe(false);
+      expect(repeated.repeated).toBe(true);
+      expect(repeated.projection.run!.reviewRunId).toBe(first.projection.run!.reviewRunId);
+      expect(() => session.store.launchReviewRun({ ...input, categoryIds: [STYLE] }, launchPolicy)).toThrow();
+      await session.driver.drive(first.projection.run!.reviewRunId);
+      const finished = workspace(session, book, first.projection.run!.reviewRunId).run!;
+      expect(finished.state).toBe('settled');
+      expect(finished.findings.length).toBeGreaterThan(0);
+    });
+  });
+  it('keeps concurrent launch choices and replay independent of later role settings', async () => {
+    await withCapturedReviewBook(async (session, firstBook) => {
+      const secondBook = await importBook(session);
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+      const input = { bookId: firstBook.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        executionConfig: { modelId: defaults.model, reasoningEffort: 'high' } };
+      const first = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      const second = session.store.launchReviewRun({ ...input, bookId: secondBook.bookId, clientCommandId: randomUUID(),
+        executionConfig: { modelId: 'account-future-model', reasoningEffort: 'low' } }, launchPolicy).projection.run!;
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+      expect(session.store.inspectReviewCategory(firstBook.bookId, definition).providerResolutionPlan!.executionRoute).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
+      expect(session.store.inspectReviewCategory(secondBook.bookId, definition).providerResolutionPlan!.executionRoute).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
+      session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+      expect(session.store.launchReviewRun(input, launchPolicy).projection.run!.reviewRunId).toBe(first.reviewRunId);
+      await Promise.all([session.driver.drive(first.reviewRunId), session.driver.drive(second.reviewRunId)]);
+      for (const [book, runId, effort] of [[firstBook, first.reviewRunId, 'high'], [secondBook, second.reviewRunId, 'low']] as const) {
+        const run = workspace(session, book, runId).run!;
+        expect(run.state).toBe('settled');
+        expect(run.findings.length).toBeGreaterThan(0);
+        const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings[0]!.markId!);
+        expect(card.source.modelLabel).toContain(`@${effort}`);
+      }
+    });
+  });
+
+});

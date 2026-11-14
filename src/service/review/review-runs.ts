@@ -1412,6 +1412,44 @@ export class ReviewRunStore {
       requireReview(work !== undefined, 'JOB_NOT_FOUND', '审阅准备不存在或已结束。');
       return this.#advance(work);
     }
+    const work = this.#buildWork(input);
+    if ('done' in work) return work;
+    this.#work.set(work.workId, work);
+    return this.#advance(work);
+  }
+
+  /** Direct launch: plan and runnable categories share one transaction and one execution choice. */
+  launch(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, snapshotId: string,
+    binding: import('../launch-policy.js').ConfiguredProviderBinding | null): { reviewRunId: string; manuscript: unknown } {
+    const work = this.#buildWork(input);
+    let reviewRunId: string;
+    if ('done' in work) {
+      requireReview(work.reviewRunId !== null, 'REVIEW_PLAN_UNAVAILABLE', '审阅未能启动。');
+      reviewRunId = work.reviewRunId;
+    } else {
+      for (const planned of work.planned) {
+        if (planned.plan.kind === 'leads') { work.prepared.push(this.#snapshotCategory(planned, null)); continue; }
+        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined,
+          undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
+        const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
+        const projection = ledger.launchTask({ ...request, reconfirm: false,
+          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, binding);
+        work.prepared.push(this.#snapshotCategory(planned, projection));
+      }
+      reviewRunId = this.#writeRun(work);
+    }
+    const snapshot = this.#runOfBook(input.bookId, reviewRunId);
+    const authorizedAt = new Date().toISOString();
+    const record = canonicalRecord({ schema: AUTHORIZATION_SCHEMA, reviewRunId, authorizedAt, actor: 'editor',
+      interaction: 'authorize-review-run', startWhen: 'now', launchSnapshotId: snapshotId,
+      approvals: snapshot.categories.flatMap<{ categoryId: string; taskIntentId: string | null; planEnvelopeDigest: string }>(category => category.task === null
+        ? snapshot.localPlan === undefined ? [] : [{ categoryId: category.categoryId, taskIntentId: null, planEnvelopeDigest: snapshot.localPlan.digest }]
+        : [{ categoryId: category.categoryId, taskIntentId: category.task.taskIntentId, planEnvelopeDigest: category.task.planEnvelopeDigest }]) });
+    this.#db.prepare('INSERT INTO review_run_authorizations VALUES (?, ?, ?, ?)').run(reviewRunId, authorizedAt, record.json, record.digest);
+    return { reviewRunId, manuscript: snapshot.manuscript };
+  }
+
+  #buildWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>): PreparationWork | ReviewRunPreparationProgress {
     const bookId = input.bookId;
     this.#requireBook(bookId);
     const head = this.#head(bookId);
@@ -1498,8 +1536,7 @@ export class ReviewRunStore {
       index: 0,
       ledgerWorkId: null,
     };
-    this.#work.set(work.workId, work);
-    return this.#advance(work);
+    return work;
   }
 
   /**

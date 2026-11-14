@@ -1,3 +1,4 @@
+import { TASK_LAUNCH_TRIGGER_SQL } from './task-launch-snapshots.js';
 import { IMPORTED_EXEMPLAR_OBJECT_DIRECTORY } from './imported-exemplars.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, open, opendir, readdir, rm } from 'node:fs/promises';
@@ -471,6 +472,17 @@ export async function writeDatabasePackage(
       copyBytes = total * pageSize;
       onProgress?.({ step: 'copying', completedBytes: copied * pageSize, totalBytes: copyBytes });
     });
+    // Launch command identities and credential references belong only to this instance.
+    const exportedCopy = new DatabaseSync(snapshotPath);
+    try {
+      if (exportedCopy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'task_launch_snapshots'").get() !== undefined) {
+        exportedCopy.exec('BEGIN IMMEDIATE');
+        for (const name of Object.keys(TASK_LAUNCH_TRIGGER_SQL)) exportedCopy.exec(`DROP TRIGGER ${name}`);
+        exportedCopy.exec('DELETE FROM task_launch_snapshots');
+        for (const sql of Object.values(TASK_LAUNCH_TRIGGER_SQL)) exportedCopy.exec(sql);
+        exportedCopy.exec('COMMIT');
+      }
+    } finally { exportedCopy.close(); }
     // SQLite hears of the last step before it is taken: the copy is whole now.
     onProgress?.({ step: 'copying', completedBytes: copyBytes, totalBytes: copyBytes });
     const packageFacts: DatabasePackageFacts = { ...facts(), contents: contentsOfCopy(snapshotPath) };

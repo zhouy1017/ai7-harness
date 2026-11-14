@@ -3085,3 +3085,10 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .manuscript-comments-heading button[aria-label="关闭批注栏"] { min-width: 24px; width: 24px; padding: 0; }
 .editorial-mark-card[data-expanded="false"]:has(> .manuscript-comments-refresh) .editorial-mark-compact-preview { display: none; }
 .editorial-mark-card[data-expanded="false"] > .manuscript-comments-refresh { margin: .2rem 0 0; font-size: .8rem; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The dispatch choice stays reachable in the compact start bar. */
+.dispatch-chooser { position: relative; max-width: 100%; min-width: 0; }
+.dispatch-chooser summary { cursor: pointer; overflow-wrap: anywhere; padding: 6px 8px; }
+.dispatch-chooser-panel { position: absolute; z-index: 20; bottom: 100%; left: 0; width: min(320px, 80vw); padding: 12px; background: var(--surface); border: 1px solid currentColor; border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); display: grid; gap: 8px; }
+.dispatch-chooser-panel label { display: grid; gap: 4px; }
+.dispatch-chooser-panel select { max-width: 100%; min-width: 0; }
