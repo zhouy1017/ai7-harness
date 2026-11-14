@@ -3944,7 +3944,13 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-choice-library');
         await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-library-ready');
-        await renderer.evaluate(`document.querySelector('button[data-book-id="${leafBook.bookId}"]').click()`);
+        // The stock unit-child fixture admits first reviews. Each viewport starts a fresh Book, rather than asking that
+        // composition to update the Book the preceding stock review already completed.
+        const choiceBook = await importSample1(renderer, cancellation, true);
+        at('dispatch-model-choice');
+        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-choice-import-return');
+        await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-import-library');
+        await renderer.evaluate(`document.querySelector('button[data-book-id="${choiceBook.bookId}"]').click()`);
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'dispatch-choice-book');
         await openReviewDestination(renderer, 'dispatch-choice-review');
         await reviewAction(renderer, '[data-review-action="new-review"]', 'dispatch-choice-new');
