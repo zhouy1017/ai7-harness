@@ -860,7 +860,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       }
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(run.excludedTotal).toBe(0);
-      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note === `【引文未逐字匹配】${'合成说明'.repeat(50)}`)).toBe(true);
+      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note === `【未联网核查】【引文未逐字匹配】${'合成说明'.repeat(50)}`)).toBe(true);
     });
   }, 300_000);
 

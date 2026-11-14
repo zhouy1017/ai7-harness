@@ -325,14 +325,18 @@ export function pinnedReviewDefinition(definition: AnalysisKindDefinition, diges
   const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;
   const predecessor = (definition as AnalysisKindDefinition & { toolPromptPredecessor?: AnalysisKindDefinition }).toolPromptPredecessor;
   const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
-  const historical = input === undefined ? [] : historicalReviewCategoryDefinitions(input, 2);
-  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract, ...historical]) {
-    if (candidate === undefined) continue;
-    if (candidate.promptContractDigest === digest) return candidate;
-    if (candidate.clarificationBase === undefined) {
-      const clarified = withModelClarification(candidate);
-      if (clarified.promptContractDigest === digest) return clarified;
+  const resolve = (candidates: readonly (AnalysisKindDefinition | undefined)[]): AnalysisKindDefinition | undefined => {
+    for (const candidate of candidates) {
+      if (candidate === undefined) continue;
+      if (candidate.promptContractDigest === digest) return candidate;
+      if (candidate.clarificationBase === undefined) {
+        const clarified = withModelClarification(candidate);
+        if (clarified.promptContractDigest === digest) return clarified;
+      }
     }
-  }
-  return definition;
+    return undefined;
+  };
+  // Most reads already name the current contract; reconstruct historical grammars only for an old pin.
+  return resolve([definition, predecessor, numbered, definition.legacyReviewContract])
+    ?? (input === undefined ? undefined : resolve(historicalReviewCategoryDefinitions(input, 2))) ?? definition;
 }

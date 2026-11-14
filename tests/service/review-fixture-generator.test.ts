@@ -148,6 +148,7 @@ const entries = new Map<string, Labelled>();
 const refreshedRequests = new Map<string, string>();
 const controlRequests = new Set<string>();
 const j16Keys = new Set<string>();
+const j16SharedKeys = new Set<string>();
 let additions = 0;
 
 function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
@@ -163,7 +164,10 @@ function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
   entry = refreshRepeatedFinding(entry);
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
-  if (order.startsWith('j16') && !entries.has(key)) j16Keys.add(key);
+  if (order.startsWith('j16')) {
+    j16SharedKeys.add(key);
+    if (!entries.has(key)) j16Keys.add(key);
+  }
   if (entries.has(key)) return;
   entries.set(key, { entry, group, order });
   fixture.entries.set(key, entry);
@@ -306,17 +310,18 @@ beforeEach(async () => {
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true): Promise<T> {
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
+  const routedFixture = baselineFixture === undefined ? fixture : inheritGeneratedEntries
+    ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
   const store = await EditorialStore.open(scenarioRoots.dataRoot, scenarioRoots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: routedFixture.identity, fixtureSha256: routedFixture.sha256, fixtureLineage: routedFixture.lineage },
   });
-  const routedFixture = baselineFixture === undefined ? fixture : { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) };
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
@@ -558,7 +563,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
   await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace-cross-chapter.json'), `${JSON.stringify({ ...workspace,
     identity: 'sample1-agent-workspace-cross-chapter',
     description: 'Current J-16 authored successor: preserves every Agent workspace/dialogue answer and adds exact plot review, one bounded synthesis and assurance for its synthetically edited first-paragraph selection.',
-    entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
+    entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16SharedKeys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
       ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response }))],
   }, null, 2)}\n`, 'utf8');
 
@@ -593,6 +598,13 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
     await writeFile(path, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
   }
+  // Replay the written workspace alone: shared unit answers must not be supplied by the generator's larger in-memory fixture.
+  const generatedWorkspace = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-agent-workspace-cross-chapter');
+  await withBook(async (context) => {
+    await baseline(context);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J16_EDIT_SUFFIX);
+    expect(await runJ16Selection(context)).toBe(true);
+  }, generatedWorkspace, false);
   const generatedControls = parseModelFixture(JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8')));
   for (const requestDigest of controlRequests) for (const attempt of [1, 2]) {
     expect(generatedControls.entries.some((entry) => entry.unitOrdinal === 1 && entry.requestDigest === requestDigest && entry.attempt === attempt),
