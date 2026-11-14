@@ -392,6 +392,8 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       dialogues.begin(turn);
       await waitFor(() => releaseGap, (value) => value !== undefined, 'held between tool rounds');
       expect(calls).toHaveLength(1);
+      const durableFragments = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]!.fragments;
+      expect(durableFragments.map((entry) => entry.text).join('')).toContain('先核对公开样书。');
       // Reconstruct abrupt process death: close only the store, with no owner settlement or terminal event.
       store.close();
       store = await openStore();
@@ -399,7 +401,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       const interrupted = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
       expect(interrupted.attempts[0]).toMatchObject({ state: 'interrupted', causeCode: 'SERVICE_STOPPED' });
       expect(interrupted.actions).toMatchObject({ continue: true, regenerate: true, convert: false });
-      expect(interrupted.attempts[0]!.fragments.map((entry) => entry.text).join('')).toBe('先核对公开样书。');
+      expect(interrupted.attempts[0]!.fragments).toEqual(durableFragments);
       expect(calls).toHaveLength(1); // Opening and reconciliation never resume the old SDK tool loop.
       const oldSession = readBinding(turn.attemptId)!.harnessSessionId;
       spy.mockRestore();

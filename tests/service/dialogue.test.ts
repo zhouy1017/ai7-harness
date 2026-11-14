@@ -169,7 +169,7 @@ describe('就这段提问… over the real store and harness', () => {
         expect(reopened.inspectDialogue(book.bookId, first.dialogueId, 0, () => null)).toEqual(done);
         const fresh = owner(reopened, null);
         try {
-          const next = reopened.nextDialogueAttempt(book.bookId, { dialogueId: first.dialogueId, attemptId: third.attemptId }, 'continue');
+          const next = reopened.nextDialogueAttempt(book.bookId, { dialogueId: first.dialogueId, attemptId: third.attemptId, question: QUESTION }, 'continue');
           expect(next.message.kept).toContain(FIRST_SENTENCE);
           fresh.begin(next);
           await waitFor(() => reopened.inspectDialogue(book.bookId, first.dialogueId, 0, (id) => fresh.liveText(id)), (value) => value.attempts.at(-1)?.state === 'completed', 'continue after completed restart');

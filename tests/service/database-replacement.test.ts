@@ -331,7 +331,11 @@ describe('导入数据库 over the real store', () => {
     try {
       expect(store.inspectDataVersion()).toMatchObject({ schemaRevision: 114, dataVersion: 1 });
       expect(store.getBookOverview(book.bookId).book.title).toBe('修订113样书');
-      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).toEqual(window);
+      // Cursor authentication is session-local; compare every persisted window field, not its new signature.
+      const { nextCursor: beforeCursor, ...beforeWindow } = window;
+      const { nextCursor: afterCursor, ...afterWindow } = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      expect(beforeCursor).toBeTypeOf('string'); expect(afterCursor).toBeTypeOf('string');
+      expect(afterWindow).toEqual(beforeWindow);
       expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)).toEqual(retained);
       expect(store.getModelServiceConnections()).toEqual(before);
       expect(store.getConfiguredModelRoleBinding('main-editorial')?.reasoningEffort).toBeUndefined();
@@ -368,7 +372,7 @@ describe('导入数据库 over the real store', () => {
         { provider: binding.route, model: binding.model, reasoningEffort: binding.reasoningEffort!,
           system: 'Public synthetic system.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Public synthetic request.' }], source: { kind: 'user' } }] },
         { attribution: {}, promptContractDigest: 'a'.repeat(64), sessionId: 'predecessor-role' });
-      expect(request.body).toBe(canonicalRecord({ model: 'deepseek-v4-pro', reasoning_effort: 'high', thinking: { type: 'enabled' },
+      expect(request.body).toBe(canonicalRecord({ model: 'deepseek-v4-pro', stream: false, reasoning_effort: 'high', thinking: { type: 'enabled' },
         messages: [{ role: 'system', content: 'Public synthetic system.' }, { role: 'user', content: 'Public synthetic request.' }] }).json);
       if (role === 'main') store.selectMainRoleModel('deepseek-open-platform', 'deepseek-v4-pro', 'off');
       else store.selectFastRoleModel('deepseek-open-platform', 'deepseek-v4-pro', 'off');
