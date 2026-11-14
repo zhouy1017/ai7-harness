@@ -1,4 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { newParagraphIdentity } from '../../src/renderer/editor-structure.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import type { JournalEditInput, JournalStructuralEdit } from '../../src/shared/protocol.js';
@@ -8,7 +9,7 @@ const [dataRoot, codeRoot, manuscriptId, branchId] = process.argv.slice(2);
 const store = await EditorialStore.open(dataRoot!, codeRoot!);
 let window = store.getManuscriptWindow(manuscriptId!, branchId!, null);
 const blockId = window.blocks.find(block => block.kind === 'paragraph' && block.text.length > 0)!.blockId;
-const newBlockId = 'blk_' + randomBytes(32).toString('hex');
+const newBlockId = newParagraphIdentity();
 function write(from: number, insertText: string, structure?: JournalStructuralEdit) {
   const block = window.blocks.find(value => value.blockId === blockId)!;
   const input: JournalEditInput = {
