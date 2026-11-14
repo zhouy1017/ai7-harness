@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorialCardCache, mountEditorialMarks, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
+import { EditorialCardCache, mountEditorialMarks, editorialCommentStartFromFragments, editorialCommentStart, stackEditorialComments, pickEditorialComment } from '../../src/renderer/editorial-marks.js';
 import { matchesEditorialMarkFilter } from '../../src/renderer/editorial-mark-filter.js';
 import type { EditorialMarkAnchorProjection, EditorialMarkCardProjection, ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -160,6 +160,7 @@ describe('comments command parity and refresh continuity', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
     Object.assign(miniDocument.body, { getBoundingClientRect: () => ({ top: 0, left: 0, right: 1000, bottom: 700, width: 1000, height: 700 }) });
+    vi.stubGlobal('getComputedStyle', () => ({ position: 'static' }));
     vi.stubGlobal('matchMedia', () => ({ matches: true }));
     vi.stubGlobal('HTMLDetailsElement', MiniElement);
     vi.stubGlobal('HTMLFormElement', MiniElement);
@@ -627,4 +628,31 @@ describe('comments command parity and refresh continuity', () => {
     expect(miniDocument.body.querySelector('[data-comment-leader]') !== null).toBe(true);
   });
 
+});
+
+
+it('clips the connector to exposed words and omits wholly covered words (#1470)', () => {
+  const words = { left: 540, right: 574, top: 100, height: 24 };
+  const pane = { left: 566, right: 900, top: 0, bottom: 681 };
+  expect(editorialCommentStart(words)).toEqual({ x: 574, y: 110 });
+  expect(editorialCommentStart(words, pane)).toEqual({ x: 565, y: 110 });
+  expect(editorialCommentStart({ ...words, left: 566 }, pane)).toBeUndefined();
+  expect(editorialCommentStart(words, { ...pane, left: 574 })).toEqual({ x: 574, y: 110 });
+  expect(editorialCommentStart(words, { ...pane, bottom: 100 })).toEqual({ x: 574, y: 110 });
+  expect(editorialCommentStart(words, { ...pane, left: 539, right: 560 })).toEqual({ x: 574, y: 110 });
+  expect(editorialCommentStart({ ...words, left: 565.5 }, pane)?.x).toBe(565.75);
+});
+
+
+it('continues into later exposed fragments and ignores zero-width words (#1470)', () => {
+  const pane = { left: 566, right: 900, top: 0, bottom: 681 };
+  const covered = { left: 600, right: 700, top: 100, height: 24 };
+  const exposed = { left: 300, right: 450, top: 128, height: 24 };
+  expect(editorialCommentStartFromFragments([covered, exposed], pane)).toEqual({ x: 450, y: 138 });
+  expect(editorialCommentStartFromFragments([covered, exposed, { ...exposed, top: 156 }], pane)).toEqual({ x: 450, y: 138 });
+  expect(editorialCommentStartFromFragments([covered, { ...covered, top: 128 }], pane)).toBeUndefined();
+  expect(editorialCommentStartFromFragments([], pane)).toBeUndefined();
+  expect(editorialCommentStart({ ...exposed, right: exposed.left }, pane)).toBeUndefined();
+  expect(editorialCommentStart({ ...exposed, height: 0 }, pane)).toBeUndefined();
+  expect(editorialCommentStartFromFragments([{ ...exposed, right: exposed.left }, exposed], pane)).toEqual({ x: 450, y: 138 });
 });
