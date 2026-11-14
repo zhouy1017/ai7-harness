@@ -64,16 +64,25 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const sessionId = new Headers(init.headers).get(OPENCODE_GO_SESSION_HEADER);
     const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     let request: AnalysisRequestIdentity | undefined;
+    let frozenModel: string | undefined;
     try {
-      const row = db.prepare(`SELECT canonical_json FROM analysis_run_states
+      const row = db.prepare(`SELECT run_record_id, canonical_json FROM analysis_run_states
         WHERE json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'
         AND json_extract(canonical_json, '$.requestAdmission.data.event.request.sessionId') = ? ORDER BY rowid DESC LIMIT 1`).get(sessionId);
       if (typeof row?.canonical_json === 'string') request = (JSON.parse(row.canonical_json) as {
         requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request;
+      if (row !== undefined) {
+        const plan = db.prepare(`SELECT p.canonical_json FROM analysis_run_records r
+          JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+          JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
+          JOIN analysis_plan_records p ON p.task_intent_id = r.task_intent_id AND p.plan_version = v.ordinal
+          WHERE r.run_record_id = ? AND p.component = 'provider-resolution-plan'`).get(row.run_record_id!);
+        if (typeof plan?.canonical_json === 'string') frozenModel = JSON.parse(plan.canonical_json).executionRoute.model;
+      }
     } finally { db.close(); }
     const body = JSON.parse(String(init.body)) as { model: string; messages: Array<{ role: string; content: string }> };
     const message = body.messages.findLast((entry) => entry.role === 'user')?.content;
-    if (request === undefined || body.model !== binding.model || typeof message !== 'string') return refuse();
+    if (request === undefined || body.model !== frozenModel || typeof message !== 'string') return refuse();
     requests.push(request);
     wireRequests.push(body);
     let response: ModelFixtureResponse | undefined;
@@ -89,7 +98,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const text = substituteAssuranceSamplingBlockPlaceholders(substituteAssuranceSamplingRefPlaceholders(
       substituteCrossUnitBlockPlaceholders(substituteBlockPlaceholders(response.text, ownBlockIdsOf(message)), parseCrossUnitCitedBlocks(message)),
       parseAssuranceSamplingListedRefs(message)), message);
-    return new Response(JSON.stringify({ model: binding.model,
+    return new Response(JSON.stringify({ model: body.model,
       choices: [{ message: { content: text }, finish_reason: 'stop' }],
       usage: { prompt_tokens: response.usage.inputTokens, completion_tokens: response.usage.outputTokens } }), { status: 200 });
   };
