@@ -1355,12 +1355,12 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     opened.push(ci);
     ci.saveModelServiceConnection('L2 官方', null, 'needs-attention');
     const ciPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'development-ci');
-    expect(code(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, ciPolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    expect(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, ciPolicy)).not.toThrow();
     const livePolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
     ci.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: livePolicy, live: {
       ...GO, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
     } });
-    expect(code(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, livePolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    expect(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, livePolicy)).not.toThrow();
   });
 });
 

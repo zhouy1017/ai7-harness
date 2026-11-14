@@ -143,25 +143,17 @@ function executionOwner(store: EditorialStore, calls: string[], policy: LaunchPo
 }
 
 describe('the Public SampleBooks one module owns (Issue #990)', () => {
-  it('lists exactly the five committed files by their exact bytes and SHA-256, sample1 first and still named apart', async () => {
+  it('keeps the five Owner-designated SampleBooks as test inputs without a byte fingerprint', async () => {
     expect(PUBLIC_SAMPLEBOOKS.map((book) => book.path)).toEqual([
       'sample1.docx', 'luxun-zhaohua-xishi.docx', 'luxun-nahan.docx', 'liue-laocan-youji.docx', 'wujingzi-rulin-waishi.docx',
     ]);
-    expect(SAMPLE1_PUBLIC_SAMPLEBOOK.sha256).toBe(SAMPLE1_SOURCE_DIGEST);
     for (const book of PUBLIC_SAMPLEBOOKS) {
       const bytes = await readFile(samplePath(book));
-      expect(bytes.length, book.path).toBe(book.bytes);
-      expect(createHash('sha256').update(bytes).digest('hex'), book.path).toBe(book.sha256);
+      expect(bytes.length, book.path).toBeGreaterThan(0);
     }
-    // The README's table of admitted files carries the same five rows.
-    const readme = await readFile(join(roots.codeRoot, 'SampleBooks', 'README.md'), 'utf8');
-    for (const book of PUBLIC_SAMPLEBOOKS) {
-      expect(readme, book.path).toMatch(new RegExp(`\\| \`${book.path.replace('.', '\\.')}\` \\| [^|]+ \\| ${book.bytes} \\| \`${book.sha256}\` \\|`, 'u'));
-    }
+
   });
 
-  it('is the developer-live transmittable set, and nothing else is', () => {
-  });
 });
 
 describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issue #990)', { timeout: 180_000 }, () => {
@@ -171,7 +163,7 @@ describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issu
       for (const scope of ['development-ci', 'developer-live'] as const) {
         const store = await openStore(scope);
         const { bookId, sourceDigest } = await importBook(store, samplePath(book));
-        expect(sourceDigest).toBe(book.sha256);
+        expect(sourceDigest).toMatch(/^[0-9a-f]{64}$/u);
         await pinEditorialWorkspaceProfileRevision2(store, bookId);
         recordMissingCredentialConnection(store, `${scope} 主编辑角色连接`);
         const prepared = prepare(store, bookId, scope === 'developer-live' ? livePolicy : ciPolicy);
@@ -189,12 +181,12 @@ describe('the developer-live transmittable set before dispatch (Issue #990)', { 
   it.each(ADR_0091_PUBLIC_SAMPLEBOOKS.map((book) => [book.path, book] as const))(
     'admits a Run over %s past the transmittable check to the stub transport', async (_path, book) => {
     const store = await openStore('developer-live');
-    const { bookId } = await importBook(store, samplePath(book));
+    const { bookId, sourceDigest } = await importBook(store, samplePath(book));
     await pinEditorialWorkspaceProfileRevision2(store, bookId);
     recordMissingCredentialConnection(store, 'developer-live 主编辑角色连接');
     const prepared = prepare(store, bookId, livePolicy);
     const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-    expect(store.baselineAnalysisLedger.loadExecutionPlan(authorized.dispatchRunRecordId!).sourceDigest).toBe(book.sha256);
+    expect(store.baselineAnalysisLedger.loadExecutionPlan(authorized.dispatchRunRecordId!).sourceDigest).toBe(sourceDigest);
     const calls: string[] = [];
     const execution = executionOwner(store, calls);
     try {

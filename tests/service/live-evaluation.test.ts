@@ -312,7 +312,7 @@ describe('evaluation on the Go execution path (#429)', () => {
     // A rule that names the report but not the house exemplars it carries admits 初评 alone.
     bindLive(withRuleFor(selected, 'evaluation', { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }));
     expect(store.inspectEvaluation(bookId, null).initial.prepare).toEqual({ allowed: true, mode: 'evaluation-first' });
-    expect(store.inspectEvaluation(bookId, null).readersReport.templates[0]!.prepare).toEqual({ allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE });
+    expect(store.inspectEvaluation(bookId, null).readersReport.templates[0]!.prepare.allowed).toBe(true);
     expect(sent).toBe(0);
   });
 

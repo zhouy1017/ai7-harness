@@ -413,10 +413,11 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       const frozenDigest = store.dialogueSourceDigest(book.bookId, { dialogueId });
       expect(frozenDigest).toBe(composedDigest);
       expect(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))).toBe(SAMPLE1_SOURCE_DIGEST);
-      expect(refusalCode(() => live.requireReady(frozenDigest))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
-      await expect(next(store, live, book.bookId, dialogueId, 'regenerate')).rejects.toMatchObject({ code: 'DIALOGUE_ROUTE_UNAVAILABLE' });
-      expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null).attempts).toHaveLength(1);
-      expect(calls).toHaveLength(0);
+      expect(() => live.requireReady(frozenDigest)).not.toThrow();
+      await next(store, live, book.bookId, dialogueId, 'regenerate');
+      expect(store.dialogueSourceDigest(book.bookId, { dialogueId })).toBe(frozenDigest);
+      expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null).attempts).toHaveLength(2);
+      expect(calls).toHaveLength(1);
       expect(await ledgerLines()).toHaveLength(0);
     } finally {
       await live.dispose();

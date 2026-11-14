@@ -1292,8 +1292,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     );
   });
 
-  it('admits exactly the five Public SampleBooks as transmittable, exact sample1 first (Issue #990)', () => {
-  });
 
   it('offers 开始任务 on a live plan only while the credential its route resolves is present (Issue #420, S74a A3)', async () => {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);

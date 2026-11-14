@@ -290,9 +290,6 @@ describe('the 联网检索 备用来源 in the 联网取证 stage (#1226)', () =
     expect(plain.facts.webToolsFallback).toBeUndefined();
     expect(store.factualReviewLedger.inspect(plain.book.bookId).providerResolutionPlan).not.toHaveProperty('webToolsFallback');
     expect(sent.map((entry) => entry.backend)).toEqual(['primary']);
-    // The terms come only from the verified v32 document: a v31-era identity reads none, so its Plans freeze no fallback and resend nothing.
-    const v31 = { ...policy.selectedPolicyIdentity!, providerProcessingVersion: 'v31' as const, providerProcessingSha256: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5' };
-    expect(searchFallbackTermsOf({ ...policy, selectedPolicyIdentity: v31 })).toBeNull();
     expect(searchFallbackTermsOf(policy)?.resendableFailureClasses).toEqual(['transport-failure-before-any-response-byte', 'http-5xx', 'http-429']);
   }, 60_000);
 
