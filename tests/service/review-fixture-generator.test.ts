@@ -1,4 +1,6 @@
-import { factualReviewKindDefinition } from '../../src/service/analysis/kind-definition.js';
+import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
+import { graphemeCount } from '../../src/service/analysis/canonical.js';
+import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of `sample1-review-cross-chapter-authored`, inheriting the frozen #417 fixture. The findings below are
 // the authored part: each was written after reading one Analysis Unit of exact `sample1` (ADR 0043), and
@@ -12,7 +14,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -27,7 +29,7 @@ import {
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from '../../src/service/analysis/kind-definition.js';
 import { locateQuotation } from '../../src/service/analysis/factual-review-contract.js';
-import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -141,10 +143,22 @@ const byCategory = new Map(DEFINITIONS.map((entry) => [entry.input.categoryId, e
 
 interface Labelled { entry: ModelFixtureEntry; group: number; order: string }
 const entries = new Map<string, Labelled>();
+const refreshedRequests = new Map<string, string>();
 const j16Keys = new Set<string>();
 let additions = 0;
 
+function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
+  if (entry.response.kind !== 'unit-result') return entry;
+  let result;
+  try { result = JSON.parse(entry.response.text); } catch { return entry; }
+  if (result.unitOrdinal !== 3 || !Array.isArray(result.findings) || !result.findings.some((finding: ReviewUnitFinding) => finding.quote === '古怪' && finding.replacement === '奇怪')) return entry;
+  result.findings = result.findings.map((finding: ReviewUnitFinding) => finding.quote === '古怪' && finding.replacement === '奇怪' ? { ...finding, occurrence: 2 } : finding);
+  if (!result.findings.some((finding: ReviewUnitFinding) => finding.quote === '古怪' && finding.occurrence === undefined)) result.findings.push(AUTHORED['typos-and-usage']![3]![2]);
+  return { ...entry, response: { ...entry.response, text: JSON.stringify(result) } };
+}
+
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
+  entry = refreshRepeatedFinding(entry);
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
   if (order.startsWith('j16')) j16Keys.add(key);
   if (entries.has(key)) return;
@@ -172,6 +186,13 @@ function authoredFindings(categoryId: string, unitOrdinal: number, variant: stri
 
 function unitEntry(categoryIndex: number, categoryId: string, definition: AnalysisKindDefinition, unitOrdinal: number, unitDigest: string, variant: string): void {
   const findings = authoredFindings(categoryId, unitOrdinal, variant);
+  const category = DEFINITIONS.find((entry) => entry.input.categoryId === categoryId)!.input;
+  const variants = historicalReviewCategoryDefinitions(category, 2);
+  for (let index = 0; index < 2; index += 1) {
+    refreshedRequests.set(variants[index + 2]!.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
+    refreshedRequests.set(withModelClarification(variants[index + 2]!).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+  }
+
   add({
     unitOrdinal,
     requestDigest: definition.requestDigest(unitOrdinal, unitDigest),
@@ -389,6 +410,15 @@ async function pass(): Promise<boolean> {
     const factual = JSON.parse(await readFile(factualPath, 'utf8'));
     const previousFactual = factualReviewKindDefinition(undefined, false);
     const currentFactual = factualReviewKindDefinition();
+    const verifiedPath = resolve(FIXTURE_PATH, '..', 'sample1-factual-verified.json');
+    const verified = JSON.parse(await readFile(verifiedPath, 'utf8'));
+    const standard = factualReviewLevelDefinition('standard');
+    for (const unit of manifest.units) {
+      const entry = verified.entries.find((entry: ModelFixtureEntry) => entry.unitOrdinal === unit.ordinal);
+      if (entry !== undefined) entry.requestDigest = standard.requestDigest(unit.ordinal, unit.digest);
+    }
+    await writeFile(verifiedPath, `${JSON.stringify(verified, null, 2)}\n`, 'utf8');
+
     for (const unit of manifest.units) {
       const old = factual.entries.find((entry: ModelFixtureEntry) => entry.requestDigest === previousFactual.requestDigest(unit.ordinal, unit.digest));
       if (old !== undefined && !factual.entries.some((entry: ModelFixtureEntry) => entry.requestDigest === currentFactual.requestDigest(unit.ordinal, unit.digest))) {
@@ -509,6 +539,85 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
       ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response }))],
   }, null, 2)}\n`, 'utf8');
+
+  // Refresh every authored successor/control request that shares a generated unit. Captured recordings stay untouched.
+  for (const name of await readdir(resolve(FIXTURE_PATH, '..'))) {
+    if (!name.endsWith('.json')) continue;
+    const path = resolve(FIXTURE_PATH, '..', name);
+    const body = JSON.parse(await readFile(path, 'utf8'));
+    if (body.provenance !== 'authored' || !Array.isArray(body.entries)) continue;
+    let changed = false;
+    const deduplicated = new Map<string, unknown>();
+    for (const original of body.entries) {
+      const entry = refreshRepeatedFinding(original);
+      if (entry !== original) changed = true;
+      const next = refreshedRequests.get(entry.requestDigest);
+      if (next !== undefined && next !== entry.requestDigest) { entry.requestDigest = next; changed = true; }
+      deduplicated.set(`${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`, entry);
+    }
+    if (changed) await writeFile(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
+  }
   // eslint-disable-next-line no-console
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
+}, 600_000);
+
+
+it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the overlap fixture derived requests', async () => {
+  const path = resolve(FIXTURE_PATH, '..', 'review-overlap-authored.json');
+  const body = JSON.parse(await readFile(path, 'utf8'));
+  const loaded = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'review-overlap-authored');
+  const entries = new Map(loaded.entries);
+  const localFixture = { ...loaded, entries };
+  const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE, 1);
+  const add = (unitOrdinal: number, requestDigest: string, content: unknown) => {
+    const key = fixtureEntryKey(unitOrdinal, requestDigest);
+    if (!entries.has(key)) entries.set(key, { unitOrdinal, requestDigest, attempt: null, contentDigest: null,
+      response: { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 100, outputTokens: 40 } } });
+  };
+  let closed = false;
+  for (let pass = 0; pass < 3 && !closed; pass += 1) {
+    const scenario = await createServiceTestRoots('ai7-overlap-regenerate-');
+    const store = await EditorialStore.open(scenario.dataRoot, scenario.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: {
+      fixtureIdentity: localFixture.identity, fixtureSha256: localFixture.sha256, fixtureLineage: localFixture.lineage, reviewContractVersion: 1 } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: localFixture, secretResolver: { resolve: async () => null } });
+    try {
+      const book = await importSample1Book(store, scenario.codeRoot, '合成引文夹具');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      recordMissingCredentialConnection(store, '合成引文夹具');
+      const paragraphs = ['甲'.repeat(1200), '开头👩‍💻Ａ　Ｂ结尾'];
+      for (const [index, block] of store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).entries()) {
+        const replace = (fromGrapheme: number, toGrapheme: number, insertText: string) => {
+          const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+          const current = window.blocks.find((entry) => entry.blockId === block.blockId)!;
+          store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+            blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: current.digest, expectedJournalSequence: window.journalSequence,
+            fromGrapheme, toGrapheme, insertText });
+        };
+        let remaining = graphemeCount(block.text);
+        while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
+        const words = paragraphs[index] ?? '';
+        for (let offset = 0; offset < words.length; offset += 256) replace(offset, offset, words.slice(offset, offset + 256));
+      }
+      let work = store.createReviewCategoryPreparationWork(book.bookId, definition, { mode: 'review-first', selectedRange: null }, launchPolicy);
+      while (!work.done) work = store.advanceReviewCategoryPreparationWork(definition, work.workId!);
+      const prepared = work.projection!;
+      const authorized = store.authorizeReviewCategory(book.bookId, definition, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      owner.admitAndDispatch(authorized.dispatchRunRecordId!, store.reviewCategoryLedger(definition));
+      await owner.whenIdle();
+      const settled = store.inspectReviewCategory(book.bookId, definition);
+      const revision = settled.resultSetRevision!;
+      const candidates = definition.assurance!.candidates({ components: { findings: revision.findings } } as unknown as AnalysisReductionResult);
+      for (const unit of settled.coverageManifest!.units) {
+        const listed = candidates.filter((candidate) => candidate.unitOrdinal === unit.ordinal);
+        if (listed.length) add(0, assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest, assuranceSampleDigest(listed)), {
+          schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: listed.map((_candidate, index) => ({ ref: `{{ref:${index + 1}}}`, disposition: '成立', reason: '合成引文在授权单元内唯一定位。' })) });
+      }
+      if (revision.assuranceSample.state === 'closed') add(0, runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, settled.taskOutcome!.report!.accountingDigest), {
+        schema: 'ai7.analysis.run-report-reflection-result/1', items: [] });
+      closed = revision.assuranceSample.state === 'closed' && settled.taskOutcome!.report!.ifRedone.state === 'closed';
+      store.markCleanShutdown();
+    } finally { await owner.dispose(); store.close(); await scenario.dispose(); }
+  }
+  expect(closed).toBe(true);
+  await writeFile(path, `${JSON.stringify({ ...body, entries: [...entries.values()].map(({ unitOrdinal, requestDigest, response }) => ({ unitOrdinal, requestDigest, response })) }, null, 2)}\n`, 'utf8');
 }, 600_000);

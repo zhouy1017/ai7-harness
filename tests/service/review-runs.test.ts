@@ -883,7 +883,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       for (const suffix of [J04_EDIT_SUFFIX, '，J-04 计划版本形成后的确认编辑', '，J-04 快速开始前的确认编辑']) appendToBlockAt(session, book, 1, suffix);
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 0 });
-      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
+      expect(settled.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true);
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.unitOrdinal])).toEqual([['contract-retry', 1]]);
       expect(projection.resultSetRevision!.gaps).toEqual([]);
@@ -900,7 +900,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       runId = settled.reviewRunId;
       expect(settled.categories[0]!.state).toBe('settled');
       expect(settled.findings.length).toBeGreaterThan(0);
-      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
+      expect(settled.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true);
       const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       const projection = ledger.inspect(book.bookId);
       expect(projection.run!.adaptations).toHaveLength(1);
@@ -916,7 +916,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(true);
     } finally { await close(session); }
     const reopened = await open('sample1-review-contract-v2-controls');
-    try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true); }
+    try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation')).toBe(true); }
     finally { await close(reopened); }
   }, 300_000);
 
@@ -1346,7 +1346,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const recomputed = revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => revision.coverageManifest!.units[unit.unitOrdinal - 1]!);
       expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
       expect(empty.findings).toEqual([]);
-      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 4 处，未标记。');
+      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 5 处，未标记。');
       expect(selectionExcludedLine(2, ['检索引用未精确取文', '检索引用未精确取文'])).toBe('所读范围内另有 2 条发现未采用，列在排除附录中：检索引用未精确取文');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
