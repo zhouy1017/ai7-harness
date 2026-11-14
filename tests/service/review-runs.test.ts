@@ -327,8 +327,8 @@ class GatedOwner implements ReviewRunExecutionOwner {
     this.#gate = new Promise((resolve) => { this.#release = resolve; });
   }
 
-  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
-    this.#inner.admitAndDispatch(runRecordId, ledger);
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore, options?: { resume?: boolean }): void {
+    this.#inner.admitAndDispatch(runRecordId, ledger, options);
   }
 
   whenPlaceFree(): Promise<void> {
@@ -2809,7 +2809,6 @@ describe('launched review lifecycle regressions (#1455)', () => {
     await withSession('sample1-review-cross-chapter-authored', async second => {
       const cancelled = second.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'cancel' });
       if (cancelled.runRecordId !== null) second.owner.cancelRun(cancelled.runRecordId, cancelled.ledger);
-      await second.driver.continue(reviewRunId);
       expect(workspace(second, book, reviewRunId).run!.categories[1]!.state).toBe('refused');
       const next = second.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy).projection.run!;
       await second.driver.drive(next.reviewRunId);
