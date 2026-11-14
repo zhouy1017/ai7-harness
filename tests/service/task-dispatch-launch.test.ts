@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, driveLaunchedLedgerRun, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import type { RuntimeExecutionConfig } from '../../src/shared/runtime-execution-config.js';
-import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { capturedMapAnswer, capturedOrdinaryExecution, type CapturedOrdinaryAnswer } from '../support/captured-ordinary-transport.js';
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
 import { beginRewriteAsJ11, EVALUATION_REWRITE_FIXTURE_IDENTITY } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
@@ -64,11 +64,19 @@ async function book(kind: Kind) {
   return { ...imported, recordId };
 }
 
-function ordinary(): void {
-  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+function ordinary(answer: CapturedOrdinaryAnswer = () => undefined): void {
+  const search = store.getSearchBackendConnections().find(connection => connection.backendId === 'search-tinyfish') ?? store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
   store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
   store.selectSearchBackend('search-tinyfish');
-  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined);
+  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer);
+}
+
+async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
+  await capture?.owner.dispose(); capture?.assertMatched(); capture = undefined;
+  await setupOwner?.dispose(); setupOwner = undefined;
+  store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  ordinary(answer);
 }
 
 function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false) {
@@ -128,9 +136,45 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
         expect(launched.ledger.currentRunState(launched.runRecordId)).toBe('authorized');
       }
     } finally { db.close(); }
+    await restart();
+    store.reconcileStoppedBaselineAnalysisRuns(); store.reconcileStoppedInitialEvaluationRuns();
+    store.reconcileStoppedWritingRuns(); store.reconcileStoppedReadersReportRuns(); store.reconcileStoppedEvaluationRewriteRuns();
+    store.reconcileStoppedCustomAnalysisRuns();
+    const recovered = firstCommand();
+    expect(recovered).toMatchObject({ repeated: true, runRecordId: first.runRecordId });
+    expect(recovered.ledger.currentRunState(recovered.runRecordId)).toBe('authorized');
+    expect(recovered.ledger.loadExecutionPlan(recovered.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
     const fallback = command(kind, fallbackBook, { modelConnectionId: 'removed-instance-connection', modelId: 'removed-model' }, randomUUID(), true)();
     expect(fallback.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
     expect(fallback.ledger.loadExecutionPlan(fallback.runRecordId).productionBinding).toMatchObject({ model: defaults.model });
     expect(capture!.requests).toHaveLength(0);
   });
+});
+
+it('drives a committed baseline launch after restart once and retains actual request, report and task attribution', async () => {
+  const target = await book('baseline-analysis');
+  ordinary();
+  const clientCommandId = randomUUID();
+  const launch = command('baseline-analysis', target, { modelId: 'account-future-model', reasoningEffort: 'high' }, clientCommandId);
+  const committed = launch();
+  const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
+  store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+  const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-happy');
+  await restart(capturedMapAnswer(fixture.entries));
+  store.reconcileStoppedBaselineAnalysisRuns();
+  const replay = launch();
+  expect(replay).toMatchObject({ repeated: true, runRecordId: committed.runRecordId });
+  driveLaunchedLedgerRun(capture!.owner, replay); driveLaunchedLedgerRun(capture!.owner, replay);
+  await capture!.owner.whenIdle();
+  const report = store.inspectBaselineAnalysis(target.bookId).taskOutcome!.report!;
+  expect(report.modelLabel).toBe('account-future-model@high');
+  expect(capture!.wireRequests.length).toBeGreaterThan(0);
+  expect(capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
+  const sent = capture!.wireRequests.length;
+  driveLaunchedLedgerRun(capture!.owner, launch()); await capture!.owner.whenIdle();
+  expect(capture!.wireRequests).toHaveLength(sent);
+  expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: defaults.model, reasoningEffort: 'off' });
+  const row = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
+    .find(entry => entry.item.modelLabel === report.modelLabel);
+  expect(row).toBeDefined();
 });

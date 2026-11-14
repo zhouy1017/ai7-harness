@@ -4375,7 +4375,7 @@ export class BaselineAnalysisStore {
         // stays recorded, and the Run waits for the editor's 续行 like every Run a restart left, so nothing is sent by itself.
         this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, stopReason: 'shutdown', reconciled: true });
         settled += 1;
-      } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true) {
+      } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true && !this.#launchedRun(runRecordId)) {
         // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its
         // authorization and its admission — never began: blocked with why, it waits for the editor, not for a place.
         this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: RECONCILED_QUEUED_DETAIL, reasons: [RECONCILED_QUEUED_DETAIL], reconciled: true });
@@ -4383,6 +4383,20 @@ export class BaselineAnalysisStore {
       }
     }
     return { settled, cancelling };
+  }
+
+  #launchedRun(runRecordId: string): boolean {
+    return this.#db.prepare(`SELECT 1 FROM analysis_run_records r JOIN analysis_run_authorizations a USING(authorization_id)
+      WHERE r.run_record_id = ? AND json_type(a.canonical_json, '$.launchSnapshotId') = 'text'`).get(runRecordId) !== undefined;
+  }
+
+  /** Only a shutdown reconciliation can turn a repeated launch into a continuation; an editor's pause stays paused. */
+  launchWasInterruptedByRestart(runRecordId: string): boolean {
+    if (!this.#launchedRun(runRecordId)) return false;
+    const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId);
+    if (row === undefined) return false;
+    const state = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
+    return state.reconciled === true && state.stopReason === 'shutdown';
   }
 
   /**

@@ -1,3 +1,4 @@
+import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
 import { controlOverviewTasks } from './task-overview.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
@@ -470,13 +471,13 @@ async function dispatch(
     case 'launchInitialEvaluation':
     case 'launchReadersReport':
     case 'launchEvaluationRewrite': {
-      const { ledger, repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy)
+      const { ledger, repeated: _repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy)
         : request.op === 'launchCustomAnalysis' ? store.launchCustomAnalysis(request.input, launchPolicy)
         : request.op === 'launchWritingTask' ? store.launchWritingTask(request.input, launchPolicy)
         : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy)
         : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy)
         : store.launchEvaluationRewrite(request.input, launchPolicy);
-      if (!repeated || ledger.currentRunState(result.runRecordId) === 'authorized') analysisExecution.admitOrQueue(result.runRecordId, ledger);
+      driveLaunchedLedgerRun(analysisExecution, { ...result, ledger });
       return { id: request.id, ok: true, op: request.op, result };
     }
     case 'prepareBaselineAnalysis':
