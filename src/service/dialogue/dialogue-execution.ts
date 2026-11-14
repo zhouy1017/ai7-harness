@@ -142,7 +142,7 @@ export function productionDialogueRoute(
       const current = admittedDialogueRoute(policy());
       return credentialReference() === reference && current !== null && current.ruleId === route.ruleId &&
         current.profile.route === route.profile.route && current.profile.endpoint === route.profile.endpoint &&
-        current.modelProfile.model === route.modelProfile.model && reasoningEffort() === route.reasoningEffort;
+        current.modelProfile.model === route.modelProfile.model;
     },
     broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
     get route() {

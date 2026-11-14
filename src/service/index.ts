@@ -2357,7 +2357,7 @@ async function run(): Promise<void> {
           ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(),
             (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('fast-interaction');
               return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model &&
-                current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot && current.reasoningEffort === route.reasoningEffort; },
+                  current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
             () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null,
             () => productionState.fast?.reasoningEffort)
           : null,

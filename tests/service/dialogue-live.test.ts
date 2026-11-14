@@ -315,20 +315,20 @@ function retrievalResponse(turn: number, candidateId: string, args: string): Res
 }
 
 describe('the admitted dialogue route, read from the selected policy', () => {
-  it('carries retrieve and exact_fetch through the real /2 SSE adapter and live-once ledger without a socket', async () => {
+  it.each(['developer-live', 'ordinary-production'] as const)('carries retrieve and exact_fetch through /2 SSE in %s, freezing effort across a default change', async (scope) => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '对话检索');
     const selection = selectionOf(store, book);
     const calls: StubCall[] = [];
-    let candidateId = '';
+    let candidateId = '', effort = 'high';
     const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
       calls.push({ url, headers: init.headers, body: init.body });
       const request = JSON.parse(init.body) as { stream: boolean; tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content: string }> };
       expect(request.stream).toBe(true);
       expect(request.tools.map((tool) => tool.function.name)).toEqual(['exact_fetch', 'retrieve']);
-      // The selected v18 dialogue rule admits the local tools, so the digest-pinned /2 contract is the system message.
       expect(request.messages[0]).toEqual({ role: 'system', content: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt });
       const turn = calls.length;
+      if (scope === 'ordinary-production' && turn === 1) effort = 'low';
       if (turn === 2) {
         const result = JSON.parse(request.messages.at(-1)!.content) as Array<{ candidateId: string }>;
         candidateId = result[0]!.candidateId;
@@ -336,9 +336,15 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       const args = JSON.stringify(turn === 1 ? { query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] } : { candidateId });
       return retrievalResponse(turn, candidateId, args);
     }) as unknown as typeof fetch;
+    let route = liveRoute(nativeFetch);
+    if (scope === 'ordinary-production') {
+      const connection = store.saveModelServiceConnection('对话默认强度', null, 'ready', 'opencode-go');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, scope, { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: connection.credentialReference });
+      route = productionDialogueRoute({ scope, nativeFetch }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-effort' }, () => effort);
+    }
     const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
-      live: liveRoute(nativeFetch),
+      live: route,
       retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
     try {
       dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
@@ -349,6 +355,11 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       expect(calls).toHaveLength(3);
       expect(projection.anchors).toHaveLength(1);
       expect(projection.anchors![0]!.candidateId).toBe(candidateId);
+      if (scope === 'ordinary-production') {
+        expect(calls.every((call) => JSON.parse(call.body).reasoning_effort === 'high')).toBe(true);
+        expect(readBinding(turn.attemptId)).toMatchObject({ reasoningEffort: 'high' });
+        return;
+      }
       const lines = await ledgerLines();
       expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(3);
       expect(lines.every((line) => line.requestShape === 'editorial-dialogue-sse')).toBe(true);
