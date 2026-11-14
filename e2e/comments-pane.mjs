@@ -1,6 +1,46 @@
 import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 // All async service operations are evaluated directly and awaited; waitFor receives synchronous DOM predicates only.
+// pointer-events:none removes SVG from hit tests; compare its sibling stacking context
+// with opaque hit-test surfaces without temporarily making the connector interactive.
+const commentsConnectorVisible = `(() => {
+  const card=document.querySelector('[data-comment-card][data-selected="true"]'), id=card?.dataset.commentCard;
+  const line=document.querySelector('[data-comment-leader="'+id+'"]'), svg=line?.ownerSVGElement, dot=svg?.querySelector('circle');
+  const words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), pane=document.querySelector('.manuscript-comments-pane');
+  if(!dot||!words||!pane||getComputedStyle(svg).pointerEvents!=='none')return false;
+  const origin=svg.getBoundingClientRect(), x=origin.left+Number(dot.getAttribute('cx')), y=origin.top+Number(dot.getAttribute('cy'));
+  const p=pane.getBoundingClientRect(), overlay=getComputedStyle(pane).position==='absolute', z=Number(getComputedStyle(svg).zIndex);
+  const exposed=Array.from(words.getClientRects()).some(r=>x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom&&(!overlay||x<p.left||x>=p.right||y<p.top||y>=p.bottom));
+  const visible=document.elementsFromPoint(x,y).every(node=>{
+    if(node===svg||svg.contains(node)||node.contains(svg)||words.contains(node)||node.contains(words))return true;
+    const style=getComputedStyle(node), context=node.closest('.manuscript-comments-pane');
+    return style.backgroundColor==='rgba(0, 0, 0, 0)' || (context&&z>Number(getComputedStyle(context).zIndex));
+  });
+  return exposed&&visible&&(!overlay||z>Number(getComputedStyle(pane).zIndex));
+})()`;
+
+async function commentsConnectorExposure(renderer, check, waitFor) {
+  await waitFor(renderer, commentsConnectorVisible, 'comments-connector-visible');
+  if(!await renderer.evaluate(`getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute'`))return;
+  try {
+    // Move only the selected Public SampleBook words to exercise partial/full occlusion.
+    for(const covered of [false,true]) {
+      await renderer.evaluate(`(() => {
+        const id=document.querySelector('[data-comment-card][data-selected="true"]').dataset.commentCard;
+        const words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
+        words.style.position='relative'; words.style.left='0px'; const r=words.getClientRects()[0];
+        words.style.left=(${covered} ? p.left+8-r.left : p.left+8-r.right)+'px';
+        globalThis.__connectorWords=words; window.dispatchEvent(new Event('resize'));
+      })()`);
+      if(covered)await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector');
+      else await waitFor(renderer, commentsConnectorVisible, 'comments-partial-connector-visible');
+    }
+  } finally {
+    await renderer.evaluate(`(() => { __connectorWords.style.removeProperty('position'); __connectorWords.style.removeProperty('left'); delete globalThis.__connectorWords; window.dispatchEvent(new Event('resize')); })()`);
+  }
+  await waitFor(renderer, commentsConnectorVisible, 'comments-connector-restored');
+}
+
 export async function commentsOrdinaryMode(renderer, check, waitFor) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'comments-startup-landing');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.settings)), 'comments-settings');
@@ -356,6 +396,7 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     })()`);
     check(false, 'comments-overflow-selected-aligned', geometry);
   }
+  await commentsConnectorExposure(renderer, check, waitFor);
   check(await renderer.evaluate(`(() => { for(const id of __comments.ids.slice(2,4)){ const node=document.querySelector('[data-comment-card="'+id+'"]'); node.dispatchEvent(new PointerEvent('pointerenter')); node.dispatchEvent(new PointerEvent('pointerleave')); } return document.querySelector('[data-comment-card="'+__comments.ids[11]+'"]').dataset.selected==='true'; })()`), 'comments-hover-keeps-selection');
   const unmarkedClick = await commentsNativeClick(renderer, await renderer.evaluate(commentsUnmarkedPoint));
   check(unmarkedClick.real, 'comments-real-unmarked-clear', unmarkedClick);

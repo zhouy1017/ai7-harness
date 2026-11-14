@@ -319,6 +319,16 @@ export class EditorialCardCache {
   }
 }
 
+/** Last exposed point on a words fragment's first line, in viewport coordinates. */
+export function editorialCommentStart(words: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'height'>, pane?: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'>): { x: number; y: number } | undefined {
+  const y = words.top + Math.min(words.height, 20) / 2;
+  if (!pane || y < pane.top || y >= pane.bottom || words.right <= pane.left || words.left >= pane.right) return { x: words.right, y };
+  if (words.right > pane.right) return { x: words.right, y };
+  // Keep the centre strictly inside the exposed fragment, even for a sliver.
+  if (words.left < pane.left) return { x: pane.left - Math.min(1, (pane.left - words.left) / 2), y };
+  return undefined;
+}
+
 /** Measured cards stay in anchor order and remain reachable in the pane's own scroll area. */
 export function stackEditorialComments<T extends { desiredTop: number; measuredHeight: number }>(items: readonly T[], selectedIndex = -1, viewport?: { top: number; height: number }): Array<T & { top: number }> {
   let bottom = 8;
@@ -1044,19 +1054,27 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const target = active.node.getBoundingClientRect();
       if (target.bottom >= base.top && target.top <= base.bottom) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const firstLine = commentAnchor(active.mark)?.getClientRects()[0] || active.anchor;
-        const x = Math.min(firstLine.right, viewport.right) - origin.left;
-        const y = firstLine.top + Math.min(firstLine.height, 20) / 2 - origin.top;
-        const endX = target.left - origin.left;
-        const endY = Math.max(base.top, target.top) + 12 - origin.top;
-        line.dataset['commentLeader'] = active.mark.markId;
-        line.dataset['markCategory'] = active.mark.categoryKey;
-        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        dot.dataset['markCategory'] = active.mark.categoryKey;
-        dot.setAttribute('cx', String(x)); dot.setAttribute('cy', String(y)); dot.setAttribute('r', '3');
-        leaders.append(dot);
-        line.setAttribute('d', `M ${x} ${y} L ${endX - 8} ${y} L ${endX - 8} ${endY} L ${endX} ${endY}`);
-        leaders.append(line);
+        const rects = Array.from(commentAnchor(active.mark)?.getClientRects() ?? []);
+        const firstLine = rects[0] || active.anchor;
+        const pane = options.comments!.host;
+        const overlay = getComputedStyle(pane).position === 'absolute';
+        const fragments = overlay ? rects.filter(rect => rect.top === firstLine.top).sort((a, b) => b.right - a.right) : [firstLine];
+        const start = fragments.map(rect => editorialCommentStart({ left: rect.left, right: Math.min(rect.right, viewport.right), top: rect.top, height: rect.height },
+          overlay ? pane.getBoundingClientRect() : undefined)).find(point => point !== undefined);
+        if (start) {
+          const x = start.x - origin.left;
+          const y = start.y - origin.top;
+          const endX = target.left - origin.left;
+          const endY = Math.max(base.top, target.top) + 12 - origin.top;
+          line.dataset['commentLeader'] = active.mark.markId;
+          line.dataset['markCategory'] = active.mark.categoryKey;
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dot.dataset['markCategory'] = active.mark.categoryKey;
+          dot.setAttribute('cx', String(x)); dot.setAttribute('cy', String(y)); dot.setAttribute('r', '3');
+          leaders.append(dot);
+          line.setAttribute('d', `M ${x} ${y} L ${endX - 8} ${y} L ${endX - 8} ${endY} L ${endX} ${endY}`);
+          leaders.append(line);
+        }
       }
     }
     commentsCanvas.dataset['loading'] = String(commentsReading > 0);
