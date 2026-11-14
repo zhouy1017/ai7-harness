@@ -257,6 +257,9 @@ it.each([
 
 it('tells the reviewer how to select a repeated quotation', () => {
   const contract = reviewCategoryContract(reviewCategoryContractInput(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories[0]!));
+  expect(contract.systemPrompt).toContain('引文应尽量短，只覆盖有问题的文字。');
+  expect(contract.systemPrompt).toContain('优先选用在该内容块中只出现一次的引文；无法做到时');
+  expect(contract.systemPrompt).not.toContain('并且在该内容块中只出现一次。');
   expect(contract.systemPrompt).toContain('必须给出 occurrence');
   expect(contract.systemPrompt).toContain('1 表示第一处');
 });

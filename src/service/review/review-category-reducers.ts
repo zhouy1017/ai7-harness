@@ -266,8 +266,9 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       entry.legacy.replacement === replacement && entry.legacy.fromGrapheme === coordinates.fromGrapheme && entry.legacy.toGrapheme === coordinates.toGrapheme;
     const previousId = findingId(input.exactOccurrences || !legacyUnchanged ? { kind: 'finding', categoryId, ...coordinates, replacement }
       : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalizedQuotation(entry.legacy!.quote), replacement });
-    // Whole-block annotations have no matched quote: retain their separate opinions even in occurrence-based reduction.
-    const id = entry.wholeBlockFallback && findings.some((finding) => finding.findingId === previousId)
+    // A fallback and a whole-block quotation can share coordinates in either order.
+    // Keep the first (base) identity and distinguish every later opinion by its quotation.
+    const id = findings.some((finding) => finding.findingId === previousId)
       ? findingId({ kind: 'finding', categoryId, ...coordinates, quote: normalized, replacement }) : previousId;
     findings.push({
       findingId: id,

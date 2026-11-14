@@ -293,7 +293,7 @@ function systemPromptOf(category: ReviewCategoryContractInput): string {
     ...(category.riskPointsOnly
       ? ['本类别只标出需人工复核的风险点：note 只说明为何需要人工复核，不得给出合规、抄袭、政策或法律结论。']
       : []),
-    '每条发现必须给出稿件中的逐字引文：原样复制，不加省略号、不合并、不改标点、不超过 80 字素，并指明该引文所在内容块的序号。引文应尽量短，只覆盖有问题的文字，并且在该内容块中只出现一次。',
+    '每条发现必须给出稿件中的逐字引文：原样复制，不加省略号、不合并、不改标点、不超过 80 字素，并指明该引文所在内容块的序号。引文应尽量短，只覆盖有问题的文字。',
     '优先选用在该内容块中只出现一次的引文；无法做到时，必须给出 occurrence 整数，表示第几次出现（从 1 开始，1 表示第一处）；只出现一次时可省略。',
     '内容块序号从 1 开始，按用户消息中列出的顺序计数：先是重叠上下文的内容块，然后是本单元的内容块。',
     '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
@@ -348,6 +348,7 @@ export function reviewCategoryContract(input: ReviewCategoryContractInput, versi
   };
   if (!occurrencePrompt) (contract as { systemPrompt: string }).systemPrompt = contract.systemPrompt
     .split('\n').filter((line) => !line.startsWith('优先选用在该内容块中只出现一次的引文')).join('\n')
+    .replace('引文应尽量短，只覆盖有问题的文字。', '引文应尽量短，只覆盖有问题的文字，并且在该内容块中只出现一次。')
     .replace('另可包含 clauseId、occurrence。', '另可包含 clauseId。');
   const selected = version === 1 || toolNames.length === 0 ? contract : { ...contract, schema: 'ai7.editorial-review.prompt-contract/3' as const,
     systemPrompt: contract.systemPrompt.replace('不改写稿件、不调用任何工具、不引用外部资料、不下事实结论。',

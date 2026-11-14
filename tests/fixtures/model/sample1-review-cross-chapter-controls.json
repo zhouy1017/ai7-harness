@@ -33,19 +33,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "0c2c27dea5e832462426a829ee5416effe1b1a845fab75093bd6b7dd23b43463",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "0d5f99033fa1f0266b7bb06594c1162f5c9127152421260fa4670a971cdfb7fb",
+      "requestDigest": "0f4591f95fe7cc4404310d776a5a89b263769691c484170e0e996883ae40667b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -57,13 +45,13 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "123e5e77c04d603aee3a7aed09f764849cb33fd0ece8eed4cadff634067a1790",
+      "requestDigest": "11bfcde4dd330b5d35330b491bb60abe5e87109d09390beaf4a6cd70e2aeda37",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
+          "inputTokens": 800,
+          "outputTokens": 80
         }
       }
     },
@@ -81,18 +69,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "1e0f9db9696097344c4e3825de9f3bcda1726cc3af54e1ad01b2754dd23f140e",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "21d4a0bac03ae7fd99f381187d4faa5634ee09c17970136dc1a164d55c7e415c",
       "response": {
         "kind": "unit-result",
@@ -100,30 +76,6 @@
         "usage": {
           "inputTokens": 1810,
           "outputTokens": 100
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "23d53502a3077c2eccd66b4e9a184831e130bf5a34b11b1b4931adb589953a0f",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
-        "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "26a62db47dd4d3fdde8df17ad7aa9be84a1bfced08049b439cfd398784c4d43b",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
-        "usage": {
-          "inputTokens": 1690,
-          "outputTokens": 220
         }
       }
     },
@@ -153,25 +105,13 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "29ec197683ac9559eb57914cabc21d80da76f10131798657197fddc6c92442fe",
+      "requestDigest": "2b9f2b97117b33e5a170fb76d5d782b052a07f30599fa3239e172ce6432cc43d",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
         "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "2b0952d2df9aa33be0e09b03945edae5db96de3c528a49cea067c99f547cacfd",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
+          "inputTokens": 900,
+          "outputTokens": 210
         }
       }
     },
@@ -213,18 +153,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "36c866431362b5e7789f8a21e38e895a757e8bdd6a51db6cd9a6d0a4c5a1f0b9",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "3a1b1162847a81fb8eb7cf154f4c937fd043db31ea82e02c9274252b400bd3fd",
       "response": {
         "kind": "unit-result",
@@ -232,30 +160,6 @@
         "usage": {
           "inputTokens": 900,
           "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "3ac8f541a3112ed84423d21cdc691ce92c773fb8f2b2efa6ab2af1b8082b1eb2",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "3b13e9430ccc950c821c4504115b98e982ba48e12e7032a4ef18c10b826fb848",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
-        "usage": {
-          "inputTokens": 1810,
-          "outputTokens": 160
         }
       }
     },
@@ -285,10 +189,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "4083e80df88465ea5cbcfca0c3b6789695d43e2b3f60efd138b387d1efc44c19",
+      "requestDigest": "449177fb2f4c368fe4c21cc879d59b6aafb4298fec8220407dd91a1bbafc054d",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
@@ -333,6 +237,18 @@
     },
     {
       "unitOrdinal": 0,
+      "requestDigest": "4851ab712a761e97914bd0f466ffa58a23df80bebdbd61f99bed55928611ae82",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
+        "usage": {
+          "inputTokens": 800,
+          "outputTokens": 80
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
       "requestDigest": "4901b39d058e1d271252c776e20272b7f57c9a83a54ea167dacb04cfe9af750e",
       "response": {
         "kind": "unit-result",
@@ -357,18 +273,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "4a2da550f2645d6e1442b7ca1f194430ff7a3188bba4dd6b237284239574e5c1",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "4af6736fd410202e9d1dcd734404ca3262597bb24b62fc6cb9e601f484d1bd93",
       "response": {
         "kind": "unit-result",
@@ -376,18 +280,6 @@
         "usage": {
           "inputTokens": 1750,
           "outputTokens": 100
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "5206d5ded42cbc47e18ef50d6f107a95e970ddd9887273cb216ef7c354ffb292",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
         }
       }
     },
@@ -429,43 +321,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "5d75d7e8b1bfefef42d65efe382e6b19958dafccffc10c3f69ed686044fb74fa",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "5fa13bd28a27774a4331cef9adc4cbb2daebf108188f4f4f553e1b6e7fb18255",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "6186851698e031158e72c057ccf8ae7c871b56aa524d51e39d7bf2693410f6a3",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
-        "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "69dafdc25bb218910801e1425b2b269961ca5cfbd3db56cbc4d7fcbb74c400f9",
+      "requestDigest": "60e5ff3f0ba59c1a4e3069af1d32e41b10170dc23bb78d3f356c1d872855b933",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -477,7 +333,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "6ac2c5961d51205a444e903e562525d6893d21444df0be2660f794c9c22d1296",
+      "requestDigest": "6186851698e031158e72c057ccf8ae7c871b56aa524d51e39d7bf2693410f6a3",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
@@ -501,22 +357,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "6de08d21d83928ef8fe045c165439ce04b3871b5a48dde647b8b9718286f9297",
+      "requestDigest": "6bc7c8b1e4b3c882b3fd5d4212fae85108f67b8fed68182cba46182b45543d41",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "6e361ab0ef6cf3ba76ce46e574409709a9408ec914df247d50018aaf87590108",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
@@ -537,10 +381,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "76ea5c55a8ee28af069df22c0549ea1ffe2ce2c27b8441c5cfad0b027a6e7e07",
+      "requestDigest": "70c32a752251e8494997310f38e568a149d221d36bd37e9a7622aa092a118e08",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
@@ -597,10 +441,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "8420db7cd9168d9538e41eef51c631ea913bf919f6654d657c25838dc515542b",
+      "requestDigest": "83cbc893de46112016123abbd6a1cda1008dcdfbeebada341b83e072380d06eb",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
@@ -645,42 +489,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "8dee5fb19d192d7b7308bcd2ac54ee98266dddeda8e01d5df3e571e4126a7821",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "9177604870262993f3d18be9cd68aa9ccca78033c2f6d722feef590fea347244",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "91ea563fb72541f81bfd2ee85ffe2f717fb89232ed31027375da192929c47ab0",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "91ec750c77a09a5b46a01d8acde0e85a95009b0362306cc26c75469eb3d489ee",
       "response": {
         "kind": "unit-result",
@@ -717,30 +525,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "963f3d0fdd6c78a62f1350f5ec420099556ee192e2f92bc2c8e921392623c33b",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "96baef80a6c45863cc0841a9d12404f233d31eadcdb7ea7578dea245521a3d48",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e1\",\"evidenceRefs\":[\"e1\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "96df5c28fe0d8b14031c311b7582234aca876672e59f7d6b65e8f1eadfcc0543",
       "response": {
         "kind": "unit-result",
@@ -760,18 +544,6 @@
         "usage": {
           "inputTokens": 900,
           "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "97eca13cae45179825dcfabec5542bd8fb53ccf3c5fd35ddf0ca8f1f1de9ca21",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
         }
       }
     },
@@ -801,19 +573,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "9d08f2c0f98a764011d5baf07b349f1e71538674ef534da2f80580cdcbcbeeec",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "9ff48b98c887ffb39e2b2c75c74efc704db4b0e1b1376816cfac2564ce8de708",
+      "requestDigest": "a6c6e98ad5c849d7a63b950252dbd12b6d45b8fcc7bfc6a2452d4805c89c9e3b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -825,34 +585,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "a2f4b3a27d34daf622bc34bf1fc9f01903420111cb8042607752e6ade9b32215",
+      "requestDigest": "a9a64bf191533af570828756a4e18e0ddb896c0a1e960ce7a87f55fcc71394b7",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "a30714548c9f0e87a079fa5adb338c342f10f4c10e2e80dfaa807cbbda8250b0",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "a5ecabf6891f1844b8f095fca667e72aba302957e88a6c444d8b297ee86f6aa3",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
@@ -885,43 +621,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "ae37de11bb6832d109a1893611d31b7eacbe07cf7824c2a8f58fa37f6e3e3ab0",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "b509dc9c081bc337c6a088c17e6bcc07ed991e9666a2a5d4a925d3092d042a09",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "b5ed98f0fcd34cecff6245f8064cc07c107015cd8f97ba170238061c024cb025",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
-        "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "ba88bbb6cf8a8e0e0f44f0c25b5d88500ab98371c6189000691ebab1b8665092",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
@@ -957,18 +657,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "bee0cf241cd970bd034dbfa43d1befcc96b72d4d47fc9acbb5be8db7683a1905",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"未能形成发现的条目下一轮可要求模型给出更短、在内容块内唯一的引文，而不是重审整个单元。\",\"basis\":\"账目按排除原因分别记录了未能定位的条数，已定位的发现按严重度分别计数。\"},{\"suggestion\":\"稿件变化后优先只审改动过的单元，未改动的已审单元按血缘复用即可。\",\"basis\":\"账目记录了本次提交、复用与未进入范围的单元数，复用单元不产生模型用量。\"}]}",
-        "usage": {
-          "inputTokens": 900,
-          "outputTokens": 210
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "c2542f242b5a9993c113a2084ed40b9227a724a2abb81f198370d246b83f2a97",
       "response": {
         "kind": "unit-result",
@@ -981,18 +669,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "c41351f4be6ac6fa27216f180630600d767e0f931bf7e3fdc85fa4c144c432e0",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "c520e7b5efc7a871aa8fb5951c65538ba8365c2c593612c772c88d439e4de036",
       "response": {
         "kind": "unit-result",
@@ -1000,6 +676,18 @@
         "usage": {
           "inputTokens": 900,
           "outputTokens": 210
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "c82deca1e1ba4733bdd0f2c8988cac1089946e807205dcc5945939e2493ace3a",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}",
+        "usage": {
+          "inputTokens": 800,
+          "outputTokens": 80
         }
       }
     },
@@ -1041,46 +729,10 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "d487a2de424c7a7080cca0c1a696664322d5fd6ac7c2980d5c89d1a69bde6c9e",
+      "requestDigest": "d8edf23de75348efb4dcf00bacdd28617fab3e360d756946909c924b4132f668",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "d4d644810a8c1e7ffcb0c5cf8f968bc9e1015091baba15ac8f570fcdfe6678bb",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
-        "usage": {
-          "inputTokens": 1690,
-          "outputTokens": 160
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "d5119a802ce37a0163232bd51ffdf85d924f25309cb8be4a6c466e0df0f495d3",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "d94c7d2deff19f4b03dd8b0cad8b34534d65959ffacbc5c43d8e7f8859d066be",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
           "inputTokens": 800,
           "outputTokens": 80
@@ -1113,42 +765,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "df57f3626d4b5583d43b783a68b37aab9b11b8150220307e90730808775a25fc",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "e02c254b100d6a33e7c4225c76a6918646eb290290d742a780c69dd2f66e929d",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
-        "usage": {
-          "inputTokens": 1780,
-          "outputTokens": 160
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "e1fa9f6f78c26076b62c6daf1dcfdcb88c83f73763c97c2ad1e91bef9481a518",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "e2c16d7f80581006b8e7fbf98968bfe38ca0e4776e0f4c42f035b067a9aa1357",
       "response": {
         "kind": "unit-result",
@@ -1168,18 +784,6 @@
         "usage": {
           "inputTokens": 1810,
           "outputTokens": 100
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "e53d1c8c526af7837b10d9368118fbf677331160c667abdc12c6178142e49170",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e3\",\"evidenceRefs\":[\"e3\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
         }
       }
     },
@@ -1221,19 +825,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "f9ee2837cad4f5bd47267c83879ca1cbdbb9de52dc4a063dd5a3501507046c4f",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\",\"e5\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 800,
-          "outputTokens": 80
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
-      "requestDigest": "fd783e98aa69e248ec56dee7eb8673fb6721723ec585bb58ea8c9fea57bf92b0",
+      "requestDigest": "fa6fe2ce73244cc2619ae8705de0fcc0a92838003e28c186f53b88d141f21b33",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[{\"anchorRef\":\"e2\",\"evidenceRefs\":[\"e2\"],\"severity\":\"note\",\"note\":\"章序使用大写数字，请统一标题层级与呈现。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -1257,7 +849,19 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "0464587ef310994a9d4fa15d88435df4f11a2cf9272c74d7bd05806308e76af3",
+      "requestDigest": "04e7e5bf17f2103d336656829b0f89884a760c4cffdb60129532369d0a613504",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "1282b25f1d606ce6c3d4c119c4ae11aa3b9cfa7c7a43eba6c78915d172dca9f4",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"丛书名与序次的著录格式需与版权页、封面保持一致。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"壹\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"章节序号单独成段但未设为标题样式，与全书的标题层级体例不一致。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -1269,7 +873,31 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "3f5eca6dd33c8acdad2be9d6d01f837ca60e4b5ff086a8be6495ccbbf6ca1ecf",
+      "requestDigest": "1b7cc41f06e1780dffa628c130491bbf75c55808c89a68b02ee6158dfdcf07cf",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "25db66cde2ef7eb6cd6909e37a86bce800597ba1f84839ee7a2ccedcf018d36d",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "3f235ba3f9bc4d0d4b5f60c0d0af14d97af6573c2cf25972abd1cc8cd78066a0",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
@@ -1293,55 +921,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "60518c25b59431073ca35bf5613fd37df634d26aa7f87dcb7b4d532cae4cf888",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "66c6cdb7c0afb17f7d372f8c0226d821bc09253ea6177c937723d1bcbdc54600",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"丛书名与序次的著录格式需与版权页、封面保持一致。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"壹\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"章节序号单独成段但未设为标题样式，与全书的标题层级体例不一致。\",\"clauseId\":\"style-and-format/1\"}]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 200
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "77589587238ee2a51b4e8a5d9b13f3ef621fff63c8239b7d28587d99ee663469",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "78ce6348386771b1847b542754b72262f124bc97ad2008e206c529171a149d5c",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 130
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "796f7f628b1c3ca24f93a295c4f359b44cf5f4bed8d803b4b9548dd3906bfec4",
+      "requestDigest": "44d0b91b202a4ecff48571f045d78c5c0bed94c41ef40b72d02daff63e11f281",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
@@ -1353,7 +933,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "796f7f628b1c3ca24f93a295c4f359b44cf5f4bed8d803b4b9548dd3906bfec4",
+      "requestDigest": "44d0b91b202a4ecff48571f045d78c5c0bed94c41ef40b72d02daff63e11f281",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":",
@@ -1366,7 +946,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "796f7f628b1c3ca24f93a295c4f359b44cf5f4bed8d803b4b9548dd3906bfec4",
+      "requestDigest": "44d0b91b202a4ecff48571f045d78c5c0bed94c41ef40b72d02daff63e11f281",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
@@ -1379,7 +959,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "8986ef02469129ea92fb8406309dbdf1d9ccab65f1d6eec5170751c01a844280",
+      "requestDigest": "6431cccc121693191a49865b374f8a5e48a8647723e7a6688c08c47a6cce28bb",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
@@ -1391,7 +971,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "8986ef02469129ea92fb8406309dbdf1d9ccab65f1d6eec5170751c01a844280",
+      "requestDigest": "6431cccc121693191a49865b374f8a5e48a8647723e7a6688c08c47a6cce28bb",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":",
@@ -1404,7 +984,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "8986ef02469129ea92fb8406309dbdf1d9ccab65f1d6eec5170751c01a844280",
+      "requestDigest": "6431cccc121693191a49865b374f8a5e48a8647723e7a6688c08c47a6cce28bb",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
@@ -1417,31 +997,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "89b24abb8c3d11b05c76fb9adf97631d57a9a0aa7b82ea912cc84a4090fe2c9f",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 130
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "95b1c3af0d7cfd0048289411f84bdab584af216e315e44640369473d53419616",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "99b9e92814f41d855d34d571bbbebd0e33533f8870c0a46d3cc2e176d5ad5b1a",
+      "requestDigest": "67183dc08a5914a2c3ad7a7714f2db1eaacb3651fc76ee8a8e35b97427604a11",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"丛书名与序次的著录格式需与版权页、封面保持一致。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"壹\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"章节序号单独成段但未设为标题样式，与全书的标题层级体例不一致。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -1453,7 +1009,95 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "9af0fabbbcf88ce9bd85dab1df5ee8093885c89339c261399c8066ca5f8ff481",
+      "requestDigest": "6b10f064ce8b3f006572be35711eb1200b366382e9828add984d69e98b2f23ea",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "6b10f064ce8b3f006572be35711eb1200b366382e9828add984d69e98b2f23ea",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      },
+      "attempt": 1
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "6b10f064ce8b3f006572be35711eb1200b366382e9828add984d69e98b2f23ea",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      },
+      "attempt": 2
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "6c0139fbbd15c404d9a3f4ab839759122162d854c038e60d88e70b5d3542bfd2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "6c0139fbbd15c404d9a3f4ab839759122162d854c038e60d88e70b5d3542bfd2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      },
+      "attempt": 1
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "6c0139fbbd15c404d9a3f4ab839759122162d854c038e60d88e70b5d3542bfd2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      },
+      "attempt": 2
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "7259f02a62bd8b2d556bec156ca9a10c0b8c66e8b0badeb5ff95339fe52a23ab",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"丛书名与序次的著录格式需与版权页、封面保持一致。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"壹\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"章节序号单独成段但未设为标题样式，与全书的标题层级体例不一致。\",\"clauseId\":\"style-and-format/1\"}]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "7f125421cae6f21578395f8f844f84ad10474d3b149750555b77ee9ccb616e28",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
@@ -1465,13 +1109,13 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "afc316416ef073f7f4b9be96a7daa639f624769b7fbe2f53a5eb0e865b588b96",
+      "requestDigest": "86f990ac3b2b74344203b8b791c32f75d8166ad76fe0f98ca7041116c9955fc5",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
         "usage": {
           "inputTokens": 1430,
-          "outputTokens": 130
+          "outputTokens": 60
         }
       }
     },
@@ -1489,44 +1133,6 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "ba7e7a6b694855921656e3e49154aeb9cca257b9ac0d6c87d6bb7526dc8139f1",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 200
-        }
-      }
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "ba7e7a6b694855921656e3e49154aeb9cca257b9ac0d6c87d6bb7526dc8139f1",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 200
-        }
-      },
-      "attempt": 1
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "ba7e7a6b694855921656e3e49154aeb9cca257b9ac0d6c87d6bb7526dc8139f1",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 200
-        }
-      },
-      "attempt": 2
-    },
-    {
-      "unitOrdinal": 1,
       "requestDigest": "cd98f5d9a8a12761490bd3a6862b31ec55983943ace07ad2ec6f778e2f428d5c",
       "response": {
         "kind": "unit-result",
@@ -1539,45 +1145,19 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "e6434e14cf685b873b3ba6ee76b440ab9b0660e0676ec1c12dce946a9f77728d",
+      "requestDigest": "d0a22ad3e5b84717938324e6234f634ce401f3a7f55679317dfe7ca8b2f77977",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
           "inputTokens": 1430,
-          "outputTokens": 200
+          "outputTokens": 130
         }
       }
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "e6434e14cf685b873b3ba6ee76b440ab9b0660e0676ec1c12dce946a9f77728d",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 200
-        }
-      },
-      "attempt": 1
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "e6434e14cf685b873b3ba6ee76b440ab9b0660e0676ec1c12dce946a9f77728d",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"合成的无效发现\",\"blockOrdinal\":1,\"severity\":\"invalid\",\"note\":\"合成契约拒绝示例。\",\"replacement\":\"合成改文\"}]}",
-        "usage": {
-          "inputTokens": 1430,
-          "outputTokens": 200
-        }
-      },
-      "attempt": 2
-    },
-    {
-      "unitOrdinal": 1,
-      "requestDigest": "f05815fbc2bfebaff5fdc442ad14ba922ec3b8c5650435d88159240fb6d71e38",
+      "requestDigest": "d276d589d061d647f946978c010eef8e8bd11f71b99225fb2848e5d607e7590d",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"丛书名与序次的著录格式需与版权页、封面保持一致。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"壹\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"章节序号单独成段但未设为标题样式，与全书的标题层级体例不一致。\",\"clauseId\":\"style-and-format/1\"}]}",
@@ -1588,20 +1168,20 @@
       }
     },
     {
-      "unitOrdinal": 2,
-      "requestDigest": "0a92ea3e5603e78cda7c39158c4353956e96278e04928aef5a03ca32da9f838c",
+      "unitOrdinal": 1,
+      "requestDigest": "f80a9363b24fb53a2e123feb6d7758ba7d8177e7c9380baf014cd256022a8028",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九九○年代\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九八〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"系列名称首次出现；请核对后文作品称谓是否保持一致。\",\"clauseId\":\"plot-consistency/1\"}]}",
         "usage": {
-          "inputTokens": 1460,
-          "outputTokens": 200
+          "inputTokens": 1430,
+          "outputTokens": 130
         }
       }
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "1d943494839591b8d49db20c9b8719bd4c4f2a384855b4cf8e3242777bb8cbda",
+      "requestDigest": "0cb03856a32de3c1cffa04b5b336e454ace11c7ce4e20268aad92a38415bb1a1",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"死亡年份与后文来信时间需要对照；先作为未解线索保留。\",\"clauseId\":\"plot-consistency/1\"}]}",
@@ -1613,10 +1193,22 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "8d6ee1fb23840a8680d9510547e1e2bb7d5bee96d52765e697fb798195f44ec8",
+      "requestDigest": "1fecdea0fd74c5835a21037d661d33195bf5d35b44d46e4755b650569c7c9172",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"极端少数之人\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“极端少数之人”搭配生硬，可改为更自然的说法。\",\"replacement\":\"极少数人\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"悄无声息地沉入湖底\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"句末可以更凝练，收束更有余味。\",\"replacement\":\"悄然沉入湖底\",\"clauseId\":\"literary-expression/2\"}]}",
+        "usage": {
+          "inputTokens": 1460,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "28a63b9cd646cb57780a58f0cd8a82d0c96efb4773656d4b5d75deca7b12bdfb",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九九○年代\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九八〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
         "usage": {
           "inputTokens": 1460,
           "outputTokens": 200
@@ -1637,7 +1229,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "c22c2499651e967cfc37d0baf18422e54f3439752ede1a7332cbe118dc0d1cc6",
+      "requestDigest": "cfe105971b03d4225a7f6b52b42fb84807867594318fbb43b5457053e846682c",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"周一下午四点十分\",\"blockOrdinal\":8,\"severity\":\"note\",\"note\":\"时间表述的数字用法（汉字或阿拉伯数字）需在全书范围内统一。\",\"clauseId\":\"style-and-format/2\"}]}",
@@ -1649,31 +1241,7 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "477caefd4f09cdad737a8a2876ba23347018147225451768a1ea8874093f45fb",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"悄无声息地沉入湖底\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"句末可以更凝练，收束更有余味。\",\"replacement\":\"悄然沉入湖底\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"秀色诱人的湖水\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“秀色诱人”略显俗套，可换用更贴合春日湖景的说法。\",\"replacement\":\"波光潋滟的湖水\",\"clauseId\":\"literary-expression/2\"}]}",
-        "usage": {
-          "inputTokens": 1490,
-          "outputTokens": 200
-        }
-      }
-    },
-    {
-      "unitOrdinal": 3,
-      "requestDigest": "5853e7b6dab32d64f2fdebec2c9b077eafa6912bfd18188804bfa8d2b6a9a8ce",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1490,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 3,
-      "requestDigest": "6def7c72d4b82c392ffb1b60cad1d8ff9f969358004573db5a730f2cb74374d1",
+      "requestDigest": "24eb1a09bd0a5e14805bd1fbb10d9b19d0fd2225335acc4b7dfa38c6e36e5817",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"邮证法\",\"blockOrdinal\":18,\"severity\":\"must\",\"note\":\"“邮证法”应为“邮政法”。\",\"replacement\":\"邮政法\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"古怪\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"同一段内“古怪”重复出现，可酌情替换其一。\",\"replacement\":\"奇怪\",\"occurrence\":2},{\"quote\":\"古怪\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"重复词未指定出现次序，供编辑逐条确认。\",\"replacement\":\"奇异\"}]}",
@@ -1685,7 +1253,31 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "919580991fefd297dffd210924bef6b0dc8ee6e1bedd35b515120db7ce00da61",
+      "requestDigest": "3b5fae0d48ce5857551725cbf0cbaa2ca0d732dc7aa3efab0afcbcd31203831d",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"悄无声息地沉入湖底\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"句末可以更凝练，收束更有余味。\",\"replacement\":\"悄然沉入湖底\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"秀色诱人的湖水\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“秀色诱人”略显俗套，可换用更贴合春日湖景的说法。\",\"replacement\":\"波光潋滟的湖水\",\"clauseId\":\"literary-expression/2\"}]}",
+        "usage": {
+          "inputTokens": 1490,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "8f35e38b1952f2edd27ad5b5eebe4b3eb2346f751b1329956e3bda126cfd2d01",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1490,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "b5844eec21d963dafb10b51203ae182cd32811640f2d1a50b750df792d703d98",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"梦中的那一声沉雷\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"梦境与现场的界线尚待后文交代，请复核这条叙事线索。\",\"clauseId\":\"plot-consistency/1\"},{\"quote\":\"他将眼前的景物\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"此处观察与此前梦境的衔接需要后文核对。\",\"clauseId\":\"plot-consistency/1\"}]}",
@@ -1709,7 +1301,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "059b3c40045ad43eb6d75158b69b7d2bfa6672242398e482e6e8286609bb043e",
+      "requestDigest": "0a74a850902d868e7ccce17e7beb619827d041c53a0504a85da743d4f4f58ab9",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"拯之承启！\",\"blockOrdinal\":6,\"severity\":\"note\",\"note\":\"甲骨文释文的呈现方式（是否加引号或改用其他字体）全书需统一。\",\"clauseId\":\"style-and-format/3\"},{\"quote\":\"贰\",\"blockOrdinal\":9,\"severity\":\"should\",\"note\":\"章节序号单独成段但未设为标题样式，与全书的标题层级体例不一致。\",\"clauseId\":\"style-and-format/1\"},{\"quote\":\"上个星期\",\"blockOrdinal\":17,\"severity\":\"note\",\"note\":\"对话中的时间表述需与全书的数字和时间用法保持一致。\",\"clauseId\":\"style-and-format/2\"}]}",
@@ -1721,25 +1313,25 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "30e2b5b8d3442c681aa6e9bac690779fabacbd07b62d1370f191b34dfea8da7f",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"马跃之上第一次谈恋爱\",\"blockOrdinal\":14,\"severity\":\"must\",\"note\":\"“上”字多余，疑为衍文。\",\"replacement\":\"马跃之第一次谈恋爱\",\"clauseId\":\"typos-and-usage/1\"}]}",
-        "usage": {
-          "inputTokens": 1520,
-          "outputTokens": 130
-        }
-      }
-    },
-    {
-      "unitOrdinal": 4,
-      "requestDigest": "4417665b227c36867750b8171e57c6c1187bdd756b27cdd35c1126337a332c68",
+      "requestDigest": "2abd5088b58105a5fdce06f2c504f20a8e82cf0e0bf7afcbdef08c004a6f9b68",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
         "usage": {
           "inputTokens": 1520,
           "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "8313180574aa84c4c55cc27b18fc313697ed66c366a226c600e015a42cd9d9ee",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"马跃之上第一次谈恋爱\",\"blockOrdinal\":14,\"severity\":\"must\",\"note\":\"“上”字多余，疑为衍文。\",\"replacement\":\"马跃之第一次谈恋爱\",\"clauseId\":\"typos-and-usage/1\"}]}",
+        "usage": {
+          "inputTokens": 1520,
+          "outputTokens": 130
         }
       }
     },
@@ -1757,7 +1349,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "edff97a62790e4c38387180ed5aed19a8096b152e8a8d41824a0e2178063024e",
+      "requestDigest": "e088f92afee49af11231eed75d7f0e604d29abc14b3d9dc338c7a03f881e9c8b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
@@ -1769,10 +1361,10 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "5a1226ba689f6ff187b248ab5b4dd1af92682e67ec5deb55be6dd6840753971a",
+      "requestDigest": "2c8f663d690a161bba7de4cd00019461ae7766067cda90e62260ca9a9cb839d9",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"上个星期\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"对话中的时间表述需与全书的数字和时间用法保持一致。\",\"clauseId\":\"style-and-format/2\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"一路上与好好聊聊天\",\"blockOrdinal\":6,\"severity\":\"must\",\"note\":\"介词“与”后缺少宾语，句子成分残缺。\",\"replacement\":\"一路上与曾本之好好聊聊天\",\"clauseId\":\"typos-and-usage/2\"}]}",
         "usage": {
           "inputTokens": 1550,
           "outputTokens": 130
@@ -1781,13 +1373,25 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "8d140cc4f5f4b8c4254199b2c269c44d727d52da6a1c2944ed3ae41462d27b92",
+      "requestDigest": "56b1c2635aee4f6c8835469096e3dbd7674fea3deb3365d9b501621b1cc2ec5f",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"更难的难题\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“更难的难题”用词重复。\",\"replacement\":\"更棘手的难题\",\"clauseId\":\"literary-expression/1\"}]}",
         "usage": {
           "inputTokens": 1550,
           "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "5b74842c90926e0d5480f135750d3bce49d6a7d6a89ff6c14da4551819fc5aa6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1550,
+          "outputTokens": 60
         }
       }
     },
@@ -1805,22 +1409,10 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "be08bcd342e0e1a80b62d550dcaddda80c8d666cf2656e3a028e15ef4a33be77",
+      "requestDigest": "e1395ad02bb1aa5adf4620f5f96bc712d73ca22b12f78318502783d6aae3797d",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1550,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 5,
-      "requestDigest": "c20d5e3f91615c8b70156793eccd605ffb5f3f69e46c879b974581e198957838",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"一路上与好好聊聊天\",\"blockOrdinal\":6,\"severity\":\"must\",\"note\":\"介词“与”后缺少宾语，句子成分残缺。\",\"replacement\":\"一路上与曾本之好好聊聊天\",\"clauseId\":\"typos-and-usage/2\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"上个星期\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"对话中的时间表述需与全书的数字和时间用法保持一致。\",\"clauseId\":\"style-and-format/2\"}]}",
         "usage": {
           "inputTokens": 1550,
           "outputTokens": 130
@@ -1829,31 +1421,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "2ac351c6ebf3f7b5d6bef8661ac5a996aac73f94dac2e239fc20c9fad7069036",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"像风一样流畅\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"比喻可以更具体。\",\"replacement\":\"像风一样轻快\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"有诗意很优雅地戳着\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"两个状语并列缺少连接，节奏不顺。\",\"replacement\":\"既有诗意又很优雅地戳着\",\"clauseId\":\"literary-expression/1\"}]}",
-        "usage": {
-          "inputTokens": 1580,
-          "outputTokens": 200
-        }
-      }
-    },
-    {
-      "unitOrdinal": 6,
-      "requestDigest": "2e707994d0244a41db802a02c44ca89d89cf621bc5ba36eb3e586cd42651693c",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1580,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 6,
-      "requestDigest": "319bb6dba0a034800bb4a8f214182262bbfdff3b73a4130f06e2dac3d40830f5",
+      "requestDigest": "742df15844ff50877a1343d899667011e4d6e392b7fab1944a54587146df0319",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
@@ -1877,12 +1445,60 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "cde61b8cd08d9568f3c354ed9267aabd5f10bcb7b13b0ed4f19b0e702b808d83",
+      "requestDigest": "aa47cdcb84a500096c0b5b50e3c0dc800a7ddafd6aa43de3334ade4be54eee7c",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
         "usage": {
           "inputTokens": 1580,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "bbd70db82b4758609eb6459717cea55a78fab535ffc047fa06554a3a4ddb7395",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1580,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "d774b7b4505016ec65e67d19ea601d0ce4f4ea94314bcea4c7b9d035c9fd5ccb",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"像风一样流畅\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"比喻可以更具体。\",\"replacement\":\"像风一样轻快\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"有诗意很优雅地戳着\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"两个状语并列缺少连接，节奏不顺。\",\"replacement\":\"既有诗意又很优雅地戳着\",\"clauseId\":\"literary-expression/1\"}]}",
+        "usage": {
+          "inputTokens": 1580,
+          "outputTokens": 200
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "0c3ed186b6cf46ed971cb592f966298e000af9ae40ae9f07a01723b4e28c6f85",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"不敢笑,又不能不笑\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"此处应使用全角逗号。\",\"replacement\":\"不敢笑，又不能不笑\"}]}",
+        "usage": {
+          "inputTokens": 1610,
+          "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "152f98e5c06a0ff15d9ab1953ab469ecefd559286f5304abfe9329820b5ac6e3",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1610,
           "outputTokens": 60
         }
       }
@@ -1901,43 +1517,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "6e30afeedcb932e7673177f7b0d86c1efb36abfffc94faa6aade082aa6fe7d73",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1610,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 7,
-      "requestDigest": "7d8f7615965bc549fc8256a24fce1731dc57246a7fad17ccc20cfed7a84d388d",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"不敢笑,又不能不笑\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"此处应使用全角逗号。\",\"replacement\":\"不敢笑，又不能不笑\"}]}",
-        "usage": {
-          "inputTokens": 1610,
-          "outputTokens": 130
-        }
-      }
-    },
-    {
-      "unitOrdinal": 7,
-      "requestDigest": "d233790df97cc612ea9ff728826668ee9fe74f7b01e1d4c496e83fe079bb0ff3",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1610,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 7,
-      "requestDigest": "e98733fdceed3c1949687f27dddf23b644970df9be5d367e29d321c22d86fbf1",
+      "requestDigest": "7b6b24a2e324712909b771a5ddac23b1bee9f8b03b19af3b0e8888c92ba619fb",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"一九七八年出土\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"年份的数字用法需与全书体例统一。\",\"clauseId\":\"style-and-format/2\"},{\"quote\":\"一九六六年\",\"blockOrdinal\":17,\"severity\":\"note\",\"note\":\"年份的数字用法需与全书体例统一。\",\"clauseId\":\"style-and-format/2\"}]}",
@@ -1948,32 +1528,20 @@
       }
     },
     {
-      "unitOrdinal": 8,
-      "requestDigest": "2af7338b95469e8a7978f4528c403b2140bc338c475e989434aa20ffc61791c6",
+      "unitOrdinal": 7,
+      "requestDigest": "82afc676f7177fdff62c79662704f43a962ddd5a14af7b2ca49b123ba93d472e",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
         "usage": {
-          "inputTokens": 1640,
+          "inputTokens": 1610,
           "outputTokens": 60
         }
       }
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "89e85966127022fd9b807f11ae39198dd8440ec2bb24ff1f279e30c26cf25687",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
-        "usage": {
-          "inputTokens": 1640,
-          "outputTokens": 60
-        }
-      }
-    },
-    {
-      "unitOrdinal": 8,
-      "requestDigest": "a5ccb039318562d19df1d040d0ae84250c70bba39f030ded5a286b117bf83f8b",
+      "requestDigest": "1b971eb40dc163ace713f2abf5b2078d3e996c1a59844f00f7cf96ed2ffefa4f",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[{\"quote\":\"原样退出来\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“退出来”可改为更贴切的动词。\",\"replacement\":\"原样抽出来\",\"clauseId\":\"literary-expression/1\"}]}",
@@ -1985,7 +1553,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "b73106bc8eb53c0d7e4b4207bf19e72f914fc6abe382ece33fe0cf1eeab75e88",
+      "requestDigest": "4f9e6cda69c01045a882400c05dd99d84cef04f5a8a8cffef9192f1032af8e83",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
@@ -1997,7 +1565,31 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "e723b5f9c41cdc8a9a1acb8b8ba19c77b25609b97df0d75077aa770847133441",
+      "requestDigest": "5739d6598e7aeb735dfbe88e1685d3cdd6211abedcbe06779aa152a571674f0c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1640,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "a893f82bb2ff2711b56bcbcff24ade8edc432c98e65d9e8d59776fa8a5b8cbd5",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1640,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "b73106bc8eb53c0d7e4b4207bf19e72f914fc6abe382ece33fe0cf1eeab75e88",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",

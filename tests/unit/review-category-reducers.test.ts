@@ -281,9 +281,9 @@ describe('paragraph occurrence retention', () => {
 });
 
 describe('anchoring repair regressions (#1435)', () => {
-  function run(texts: string[], entries: ReviewUnitFinding[], exactOccurrences = false) {
+  function run(texts: string[], entries: ReviewUnitFinding[], exactOccurrences = false, categoryId = 'typos-and-usage') {
     const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
-    return reduceReviewCategory({ categoryId: 'typos-and-usage', exactOccurrences, manifest: { ...manifest,
+    return reduceReviewCategory({ categoryId, exactOccurrences, manifest: { ...manifest,
       units: [{ ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: [] }] },
       blocks: new Map(inputs.map((entry) => [entry.blockId, entry])), outcomes: [{ unitOrdinal: 1, state: 'closed',
         result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: entries } }] });
@@ -315,6 +315,17 @@ describe('anchoring repair regressions (#1435)', () => {
       { quote: '第一条意见', note: '【引文未逐字匹配】第一条理由', replacement: null },
       { quote: '第二条意见', note: '【引文未逐字匹配】第二条理由', replacement: null },
     ]);
+  });
+  it.each([
+    ['style-and-format', '并不存在', '短标题', 'rfd_281bc2664c3639e5fcd71224', 'rfd_9b6bc644135e4905239265e1'],
+    ['style-and-format', '短标题', '并不存在', 'rfd_281bc2664c3639e5fcd71224', 'rfd_972a37c6c867ad52028a4e8a'],
+    ['plot-consistency', '并不存在', '短标题', 'rfd_a1160689b4f94667d8eb44e7', 'rfd_ba5f2b608a26fac9c02eb548'],
+    ['plot-consistency', '短标题', '并不存在', 'rfd_a1160689b4f94667d8eb44e7', 'rfd_64a463ccfe6b96c7cf048c0a'],
+  ])('keeps %s whole-block finding ids unique with %s first', (categoryId, first, second, baseId, laterId) => {
+    const result = run(['短标题'], [first, second].map((quote) => ({ quote, blockOrdinal: 1, severity: 'note', note: `核对${quote}` })), true, categoryId);
+    expect(result.findings.map((finding) => finding.findingId)).toEqual([baseId, laterId]);
+    expect(result.findings.map((finding) => finding.quote)).toEqual([first, second]);
+    expect(new Set(result.findings.map((finding) => finding.findingId)).size).toBe(result.findings.length);
   });
   it.each([undefined, 1])('preserves the base id for a repeated width-folded annotation (%s)', (occurrence) => {
     for (const replacement of [undefined, 'Ａ　Ｂ']) {

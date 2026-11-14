@@ -4,15 +4,15 @@ import { withModelClarification } from '../../src/service/provider/clarification
 import { canonicalJson, graphemeCount } from '../../src/service/analysis/canonical.js';
 import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-// The generator of `sample1-review-cross-chapter-authored`, inheriting the frozen #417 fixture. The findings below are
+// The generator of `sample1-review-cross-chapter-authored`, using the original #417 authored fixture as input. The findings below are
 // the authored part: each was written after reading one Analysis Unit of exact `sample1` (ADR 0043), and
 // each quotation is a verbatim substring of the block it names, except the four that are meant not to
 // anchor. Everything else in the fixture — every request digest, and the answers to the assurance sample
 // and the Run Report reflection those Runs send — depends on the four categories' frozen contracts and
 // on the findings themselves, so it is derived by driving the real path until no Run asks anything new.
 //
-// It never runs in the Local Verification Ladder or in CI. After a clause, a label or the 工序 of one of
-// the four built-in categories changes, regenerate the current fixture with
+// Ordinary service tests derive and compare the current fixture without writing. After a clause, label or 工序
+// changes, explicitly write the provider-free derivation with
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
@@ -149,6 +149,16 @@ const refreshedRequests = new Map<string, string>();
 const controlRequests = new Set<string>();
 const j16Keys = new Set<string>();
 const j16SharedKeys = new Set<string>();
+const activeFixtureEntries = new Set<Map<string, ModelFixtureEntry>>();
+const emittedFiles = new Map<string, string>();
+const regenerating = process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1';
+async function readFixture(path: string, encoding: 'utf8'): Promise<string> {
+  return emittedFiles.get(path) ?? await readFile(path, encoding);
+}
+async function emitFixture(path: string, contents: string, encoding: 'utf8'): Promise<void> {
+  emittedFiles.set(path, contents);
+  if (regenerating) await writeFile(path, contents, encoding);
+}
 let additions = 0;
 
 function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
@@ -171,6 +181,7 @@ function add(entry: ModelFixtureEntry, group: number, order: string): void {
   if (entries.has(key)) return;
   entries.set(key, { entry, group, order });
   fixture.entries.set(key, entry);
+  for (const active of activeFixtureEntries) if (!active.has(key)) active.set(key, entry);
   additions += 1;
 }
 
@@ -202,7 +213,13 @@ function unitEntry(categoryIndex: number, categoryId: string, definition: Analys
     // Authored fixtures also contain the earlier, unshipped #1471 prompt (4f46c0e8).
     // Reconstruct its exact request pin so retry stimuli remain attached after wording repairs.
     const contract = reviewCategoryContract(category, 2, index === 0 ? [] : [...LOCAL_TOOL_DECLARATION_NAMES].sort((left, right) => left.localeCompare(right, 'en')));
-    const previousContract = { ...contract, systemPrompt: contract.systemPrompt
+    const priorContract = { ...contract, systemPrompt: contract.systemPrompt.replace('只覆盖有问题的文字。', '只覆盖有问题的文字，并且在该内容块中只出现一次。') };
+    const priorDigest = reviewCategoryContractDigest(priorContract);
+    const prior = { ...variants[index]!, systemPrompt: priorContract.systemPrompt, promptContractDigest: priorDigest,
+      requestDigest: (ordinal: number, digest: string) => reviewCategoryRequestDigest(priorDigest, categoryId, ordinal, digest) };
+    refreshedRequests.set(prior.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
+    refreshedRequests.set(withModelClarification(prior).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+    const previousContract = { ...contract, systemPrompt: priorContract.systemPrompt
       .replace('只覆盖有问题的文字，并且在该内容块中只出现一次。', '只覆盖有问题的文字，避免无关文字。')
       .replace('优先选用在该内容块中只出现一次的引文；无法做到时，必须给出 occurrence 整数，表示第几次出现', '若引文在该内容块中出现多次，必须给出 occurrence，表示第几次出现') };
     const previousDigest = reviewCategoryContractDigest(previousContract);
@@ -213,12 +230,15 @@ function unitEntry(categoryIndex: number, categoryId: string, definition: Analys
 
   }
 
+  const requestDigest = definition.requestDigest(unitOrdinal, unitDigest);
+  // The predecessor is authored input: retain its answer and usage when only its request wording changed.
+  const previous = [...entries.values()].find(({ entry }) => entry.unitOrdinal === unitOrdinal && refreshedRequests.get(entry.requestDigest) === requestDigest)?.entry;
   add({
     unitOrdinal,
-    requestDigest: definition.requestDigest(unitOrdinal, unitDigest),
+    requestDigest,
     attempt: null,
     contentDigest: null,
-    response: {
+    response: previous?.response ?? {
       kind: 'unit-result',
       text: JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal, findings }),
       usage: { inputTokens: 1400 + unitOrdinal * 30, outputTokens: 60 + findings.length * 70 },
@@ -305,6 +325,7 @@ let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 
 beforeEach(async () => {
+  entries.clear(); refreshedRequests.clear(); controlRequests.clear(); j16Keys.clear(); j16SharedKeys.clear(); fixture.entries.clear(); emittedFiles.clear();
   roots = await createServiceTestRoots('ai7-s69-generate-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
 });
@@ -323,6 +344,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     baselineAnalysisRoute: { fixtureIdentity: routedFixture.identity, fixtureSha256: routedFixture.sha256, fixtureLineage: routedFixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
+  if (inheritGeneratedEntries) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
   try {
     const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -332,6 +354,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     return result;
   } finally {
     await owner.dispose();
+    activeFixtureEntries.delete(routedFixture.entries as Map<string, ModelFixtureEntry>);
     store.close();
     await scenarioRoots.dispose();
   }
@@ -428,17 +451,19 @@ async function pass(): Promise<boolean> {
     const manifest = first.settled.coverageManifest!;
     // Refresh v1 factual unit request keys from the same committed SampleBook manifest, without a call.
     const factualPath = resolve(FIXTURE_PATH, '..', 'sample1-factual-authored.json');
-    const factual = JSON.parse(await readFile(factualPath, 'utf8'));
+    const factual = JSON.parse(await readFixture(factualPath, 'utf8'));
     const previousFactual = factualReviewKindDefinition(undefined, false);
     const currentFactual = factualReviewKindDefinition();
+    const factualRequests = new Set(manifest.units.flatMap((unit) => [previousFactual, currentFactual].map((definition) => definition.requestDigest(unit.ordinal, unit.digest))));
+    factual.entries = factual.entries.filter((entry: ModelFixtureEntry) => entry.unitOrdinal === 0 || factualRequests.has(entry.requestDigest));
     const verifiedPath = resolve(FIXTURE_PATH, '..', 'sample1-factual-verified.json');
-    const verified = JSON.parse(await readFile(verifiedPath, 'utf8'));
+    const verified = JSON.parse(await readFixture(verifiedPath, 'utf8'));
     const standard = factualReviewLevelDefinition('standard');
     for (const unit of manifest.units) {
       const entry = verified.entries.find((entry: ModelFixtureEntry) => entry.unitOrdinal === unit.ordinal);
       if (entry !== undefined) entry.requestDigest = standard.requestDigest(unit.ordinal, unit.digest);
     }
-    await writeFile(verifiedPath, `${JSON.stringify(verified, null, 2)}\n`, 'utf8');
+    await emitFixture(verifiedPath, `${JSON.stringify(verified, null, 2)}\n`, 'utf8');
 
     for (const unit of manifest.units) {
       const old = factual.entries.find((entry: ModelFixtureEntry) => entry.requestDigest === previousFactual.requestDigest(unit.ordinal, unit.digest));
@@ -446,7 +471,7 @@ async function pass(): Promise<boolean> {
         factual.entries.push({ ...old, requestDigest: currentFactual.requestDigest(unit.ordinal, unit.digest) });
       }
     }
-    await writeFile(factualPath, `${JSON.stringify(factual, null, 2)}\n`, 'utf8');
+    await emitFixture(factualPath, `${JSON.stringify(factual, null, 2)}\n`, 'utf8');
 
     for (const [categoryId, units] of Object.entries(AUTHORED)) {
       for (const [unitOrdinal, findings] of Object.entries(units)) {
@@ -517,12 +542,10 @@ async function pass(): Promise<boolean> {
   return allClosed;
 }
 
-it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the authored review fixture', async () => {
+it('generates the authored review fixture without unreachable committed entries', async () => {
   await requireExactSample1(roots.codeRoot);
-  const predecessor = parseModelFixture(JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
+  const predecessor = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
   predecessor.entries.forEach((entry, index) => add(entry, -2, String(index).padStart(5, '0')));
-  const retained = parseModelFixture(JSON.parse(await readFile(FIXTURE_PATH, 'utf8')));
-  retained.entries.forEach((entry, index) => add(entry, -1, String(index).padStart(5, '0')));
   const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), FIXTURE_BASE);
   for (const [key, entry] of base.entries) if (!fixture.entries.has(key)) fixture.entries.set(key, entry);
   let closed = false;
@@ -549,18 +572,18 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     entries: ordered.filter(({ entry, order }) => !j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)) && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
       .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
-  await writeFile(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  await emitFixture(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
   // The predecessor already reaches the loader's depth ceiling. Current controls share its baseline,
   // retaining exactly the old authored retry overrides without another inheritance layer.
-  const controls = JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8'));
+  const controls = JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8'));
   const controlled = new Map(body.entries.map((entry) => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry]));
   for (const entry of controls.entries) controlled.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry);
-  await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-review-cross-chapter-controls.json'), `${JSON.stringify({ ...body,
+  await emitFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-cross-chapter-controls.json'), `${JSON.stringify({ ...body,
     identity: 'sample1-review-cross-chapter-controls', description: 'Current cross-chapter review with the identical authored v2 retry controls; historical fixtures are unchanged.',
     entries: [...controlled.values()] }, null, 2)}\n`, 'utf8');
   // The workspace predecessor is already four layers deep. Keep its exact answers in a sibling successor.
-  const workspace = JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace.json'), 'utf8'));
-  await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace-cross-chapter.json'), `${JSON.stringify({ ...workspace,
+  const workspace = JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace.json'), 'utf8'));
+  await emitFixture(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace-cross-chapter.json'), `${JSON.stringify({ ...workspace,
     identity: 'sample1-agent-workspace-cross-chapter',
     description: 'Current J-16 authored successor: preserves every Agent workspace/dialogue answer and adds exact plot review, one bounded synthesis and assurance for its synthetically edited first-paragraph selection.',
     entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16SharedKeys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
@@ -571,7 +594,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
   for (const name of await readdir(resolve(FIXTURE_PATH, '..'))) {
     if (!name.endsWith('.json')) continue;
     const path = resolve(FIXTURE_PATH, '..', name);
-    const body = JSON.parse(await readFile(path, 'utf8'));
+    const body = JSON.parse(await readFixture(path, 'utf8'));
     if (body.provenance !== 'authored' || !Array.isArray(body.entries)) continue;
     let changed = false;
     const deduplicated = new Map<string, unknown>();
@@ -587,16 +610,19 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
       }
       deduplicated.set(`${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`, entry);
     }
-    if (changed) await writeFile(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
+    if (changed) await emitFixture(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
   }
 
   // Seeded historical responses and newly derived responses use one stable field/entry order.
   for (const name of ['sample1-review-cross-chapter-authored', 'sample1-review-cross-chapter-controls', 'sample1-agent-workspace-cross-chapter']) {
     const path = resolve(FIXTURE_PATH, '..', `${name}.json`);
-    const body = JSON.parse(await readFile(path, 'utf8'));
+    const body = JSON.parse(await readFixture(path, 'utf8'));
     body.entries.sort((left: ModelFixtureEntry, right: ModelFixtureEntry) => left.unitOrdinal - right.unitOrdinal || left.requestDigest.localeCompare(right.requestDigest, 'en') || (left.attempt ?? 0) - (right.attempt ?? 0));
     for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
-    await writeFile(path, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+    await emitFixture(path, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  }
+  if (!regenerating) for (const [path, contents] of emittedFiles) {
+    expect(await readFile(path, 'utf8') === contents, `${path} must equal fresh generator output; regenerate deliberate changes`).toBe(true);
   }
   // Replay the written workspace alone: shared unit answers must not be supplied by the generator's larger in-memory fixture.
   const generatedWorkspace = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-agent-workspace-cross-chapter');
@@ -605,7 +631,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J16_EDIT_SUFFIX);
     expect(await runJ16Selection(context)).toBe(true);
   }, generatedWorkspace, false);
-  const generatedControls = parseModelFixture(JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8')));
+  const generatedControls = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8')));
   for (const requestDigest of controlRequests) for (const attempt of [1, 2]) {
     expect(generatedControls.entries.some((entry) => entry.unitOrdinal === 1 && entry.requestDigest === requestDigest && entry.attempt === attempt),
       'Each generated typos unit-1 request must retain its authored retry stimulus').toBe(true);
@@ -617,7 +643,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
 
 it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the overlap fixture derived requests', async () => {
   const path = resolve(FIXTURE_PATH, '..', 'review-overlap-authored.json');
-  const body = JSON.parse(await readFile(path, 'utf8'));
+  const body = JSON.parse(await readFixture(path, 'utf8'));
   const loaded = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'review-overlap-authored');
   const entries = new Map(loaded.entries);
   const localFixture = { ...loaded, entries };
@@ -672,7 +698,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the ov
     } finally { await owner.dispose(); store.close(); await scenario.dispose(); }
   }
   expect(closed).toBe(true);
-  await writeFile(path, `${JSON.stringify({ ...body, entries: [...entries.values()].map(({ unitOrdinal, requestDigest, response }) => ({ unitOrdinal, requestDigest, response })) }, null, 2)}\n`, 'utf8');
+  await emitFixture(path, `${JSON.stringify({ ...body, entries: [...entries.values()].map(({ unitOrdinal, requestDigest, response }) => ({ unitOrdinal, requestDigest, response })) }, null, 2)}\n`, 'utf8');
 }, 600_000);
 
 it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('regeneration preserves committed fixtures byte for byte', () => {
