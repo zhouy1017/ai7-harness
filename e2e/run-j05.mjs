@@ -538,6 +538,25 @@ async function main() {
       const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});
       return JSON.stringify(routes).includes('当前运行范围未允许');
     })`), 'selected-fast-ci-text-task-refused');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'dispatch-chooser-entry');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-review"]')?.disabled===false`, 'dispatch-chooser-entry-ready');
+    await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>{window.__j05RolesBefore=JSON.stringify(settings.roles)})`);
+    try {
+      for (const viewport of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
+        at(viewport.width === 1280 ? 'dispatch-chooser-wide' : 'dispatch-chooser-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+        await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click();return true; })()`, 'dispatch-chooser-open-sheet');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] .dispatch-chooser select')?.options.length>1`, 'dispatch-chooser-models-ready');
+        await assertRenderer(renderer, `(() => { const chooser=document.querySelector('dialog.review-sheet .dispatch-chooser');chooser.querySelector('summary').click();const panel=chooser.querySelector('.dispatch-chooser-panel'),bounds=panel.getBoundingClientRect();if(!chooser.open||bounds.left<0||bounds.right>innerWidth||bounds.top<0||bounds.bottom>innerHeight)return false;const models=chooser.querySelector('select');models.selectedIndex=models.options.length-1;window.__j05ChoiceLabel=models.selectedOptions[0].textContent.replace(/^★ /u,'');models.dispatchEvent(new Event('change',{bubbles:true}));return true; })()`, 'dispatch-chooser-select-ready-model');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet .dispatch-chooser summary')?.textContent.includes(window.__j05ChoiceLabel) && document.querySelector('dialog.review-sheet [data-review-action="prepare"]')?.disabled===false`, 'dispatch-chooser-choice-retained');
+        await assertRenderer(renderer, `(() => { const chooser=document.querySelector('dialog.review-sheet .dispatch-chooser'),effort=chooser.querySelectorAll('select')[1];if(!effort.closest('label').hidden&&effort.options.length>1){effort.selectedIndex=effort.options.length-1;const level=effort.value;effort.dispatchEvent(new Event('change',{bubbles:true}));if(!chooser.querySelector('summary').textContent.endsWith('@'+level+' ▾'))return false;}chooser.querySelector('button').click();return true; })()`, 'dispatch-chooser-effort-and-reset');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="prepare"]')?.disabled===false`, 'dispatch-chooser-reset-ready');
+        requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles)===window.__j05RolesBefore)`), 'dispatch-chooser-keeps-role-defaults');
+        await assertRenderer(renderer, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click();return true; })()`, 'dispatch-chooser-close-sheet');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'dispatch-chooser-back-to-text');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'dispatch-chooser-back-ready');
     await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
     at('selection-menu-empty');
 

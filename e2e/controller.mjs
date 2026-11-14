@@ -1159,6 +1159,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'local-check-exact-sample1',
     'dispatch-review-wide',
     'dispatch-review-gate',
+    'dispatch-chooser-wide',
+    'dispatch-chooser-gate',
     'completion-browser-close',
     'completion-cleanup',
   ]),
