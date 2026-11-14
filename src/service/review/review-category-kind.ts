@@ -63,15 +63,17 @@ import { withModelClarification } from '../provider/clarification-contract.js';
  * The reducer descriptor is shared by the whole family: how findings are located, merged and excluded
  * does not depend on the category.
  */
-// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
+// Describes occurrence selection and manuscript-slice quotation storage (#1471).
 export const REVIEW_CATEGORY_REDUCER_DESCRIPTOR = {
   schema: 'ai7.editorial-review.reducers/2',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'declared-block-first-message-search-first-ambiguous-match-or-whole-block-annotation',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
-  sourceRangeIntegrity: 'sole-candidate-normalized-grapheme-slice-equals-quotation',
+  sourceRangeIntegrity: 'located-quotation-is-manuscript-grapheme-slice',
+  occurrence: 'optional-one-based-invalid-falls-back-to-ambiguous',
+  punctuation: 'equivalent-punctuation-alignment',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
-  mergeRule: 'same-block-same-normalized-quotation-same-replacement',
+  mergeRule: 'same-block-same-range-same-normalized-quotation-same-replacement',
   exclusionReasons: ['missing-block', 'not-exact-fetched'],
   certaintyPolicy: 'list-and-locate-never-decide',
 } as const;
@@ -122,13 +124,13 @@ const HISTORICAL_REVIEW_TOOL_NAMES = Object.freeze([
 
 /** Reconstruct known prompt bytes only; none of these objects grants tool or transmission authority. */
 export function historicalReviewCategoryDefinitions(input: ReviewCategoryContractInput, version: 1 | 2): readonly AnalysisKindDefinition[] {
-  if (version === 1) return [compileReviewCategory(input, 1, [])];
+  if (version === 1) return [compileReviewCategory(input, 1, []), compileReviewCategory(input, 1, [], false)];
   if (version !== 2) throw new Error('REVIEW_CONTRACT_VERSION_UNSUPPORTED');
-  return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES)];
+  return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES), compileReviewCategory(input, 2, [], false), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES, false)];
 }
 
-function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 2, names: readonly string[]): AnalysisKindDefinition {
-  const contract = reviewCategoryContract(input, version, names);
+function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 2, names: readonly string[], occurrencePrompt = version !== 1): AnalysisKindDefinition {
+  const contract = reviewCategoryContract(input, version, names, occurrencePrompt);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
@@ -171,7 +173,7 @@ function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 
     outOfScope: 'leave-unreviewed',
     systemPrompt: contract.systemPrompt,
     promptContractDigest,
-    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version, names)) }),
+    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version, names, occurrencePrompt)) }),
     unitResultSchema: contract.responseSchema,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,

@@ -132,8 +132,6 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let block = blockId === undefined ? undefined : blocks.get(blockId);
       let location: ReturnType<typeof locateQuotation> = { state: 'not-found' };
       let annotation = false;
-      let wholeParagraphFallback = false;
-      let punctuationMatched = false;
       let legacy: LocatedFinding['legacy'];
       let note = finding.note;
       // Preserve every existing exact recovery before trying punctuation equivalence anywhere.
@@ -157,7 +155,6 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
         if (location.state === 'not-found') continue;
         const wasAmbiguous = location.state === 'ambiguous';
         const guessed = wasAmbiguous || annotation || locate === locateQuotation;
-        punctuationMatched = locate === locateQuotation;
         if (location.state === 'ambiguous' && block !== undefined) location = locate(block.text, finding.quote, 1);
         if (locate === locateExactQuotation && location.state === 'verified' && block !== undefined) {
           const previous = locateExactQuotation(block.text, finding.quote);
@@ -178,13 +175,12 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       if (location.state === 'not-found' && block !== undefined && graphemeCount(block.text) > 0 && !partialGrapheme) {
         location = { state: 'verified', fromGrapheme: 0, toGrapheme: graphemeCount(block.text) };
         annotation = true;
-        wholeParagraphFallback = true;
         legacy = { blockId: blockId!, quote: finding.quote, replacement: null, ...location };
         note = `【引文未逐字匹配】${note}`;
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
-      const retainedFinding = { ...finding, note, ...(!wholeParagraphFallback && (!annotation || punctuationMatched) && location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
+      const retainedFinding = { ...finding, note, ...(location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
       if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,
@@ -254,11 +250,11 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       continue;
     }
     findingsByKey.set(key, findings.length);
-    const legacyUnchanged = entry.legacy !== undefined && entry.legacy.blockId === entry.blockId && entry.legacy.quote === finding.quote &&
+    const legacyUnchanged = entry.legacy !== undefined && entry.legacy.blockId === entry.blockId &&
       entry.legacy.replacement === replacement && entry.legacy.fromGrapheme === coordinates.fromGrapheme && entry.legacy.toGrapheme === coordinates.toGrapheme;
     findings.push({
       findingId: findingId(input.exactOccurrences || !legacyUnchanged ? { kind: 'finding', categoryId, ...coordinates, replacement }
-        : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalized, replacement }),
+        : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalizedQuotation(entry.legacy!.quote), replacement }),
       unitOrdinal: entry.unitOrdinal,
       blockId: entry.blockId,
       sourceRange: { blockId: entry.blockId, fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },

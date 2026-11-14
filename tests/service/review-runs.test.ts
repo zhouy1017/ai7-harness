@@ -950,7 +950,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(settled.findings).toHaveLength(1);
       const finding = settled.findings[0]!;
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
-      expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
+      expect(finding).toMatchObject({ quote: 'Ａ　Ｂ', blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
       const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
       expect(card.pinnedText === 'Ａ　Ｂ').toBe(true);
       const markedWindow = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: finding.blockId });
@@ -1405,10 +1405,21 @@ describe('a Review Run over the real store on exact sample1', () => {
       const whole = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(whole.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
         .toEqual(expect.arrayContaining([[10, true], [15, true], [21, true], [56, true], [64, true]]));
-      expect(whole.findings).toHaveLength(7);
+      expect(whole.findings).toHaveLength(8);
+      const pinnedRepeated = whole.findings.find((finding) => finding.quote === '古怪' && finding.replacement === '奇怪')!;
+      expect(pinnedRepeated.note).not.toContain('锚点不唯一');
+      const repeatedText = workingText(session, book).get(pinnedRepeated.blockId)!;
+      const second = repeatedText.indexOf('古怪', repeatedText.indexOf('古怪') + 2);
+      expect(pinnedRepeated.fromGrapheme).toBe([...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(repeatedText.slice(0, second))].length);
+      for (const finding of whole.findings) {
+        const text = workingText(session, book).get(finding.blockId)!;
+        const slice = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].slice(finding.fromGrapheme, finding.toGrapheme).map((part) => part.segment).join('');
+        expect(finding.quote).toBe(slice);
+      }
+
       expect(whole.findings.filter((finding) => finding.output === 'annotation')).toHaveLength(1);
       expect(whole.findings.filter((finding) => finding.note.includes('锚点不唯一'))).toEqual([
-        expect.objectContaining({ quote: '古怪', output: 'change-suggestion', replacement: '奇怪', note: expect.stringMatching(/^【锚点不唯一】/u) }),
+        expect.objectContaining({ quote: '古怪', output: 'change-suggestion', replacement: '奇异', note: expect.stringMatching(/^【锚点不唯一】/u) }),
       ]);
       const firstMarks = new Map(chosen.findings.map((finding) => [finding.quote, finding.markId] as const));
       expect(whole.findings.filter((finding) => firstMarks.has(finding.quote)).every((finding) => finding.markId === firstMarks.get(finding.quote))).toBe(true);
@@ -1416,7 +1427,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const synced = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
       expect(synced.state).toBe('settled');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 4 });
-      expect(reviewMarkCount(session, book)).toBe(7);
+      expect(reviewMarkCount(session, book)).toBe(8);
     });
   }, 300_000);
 

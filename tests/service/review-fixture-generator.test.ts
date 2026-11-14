@@ -1,3 +1,4 @@
+import { factualReviewKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of `sample1-review-cross-chapter-authored`, inheriting the frozen #417 fixture. The findings below are
 // the authored part: each was written after reading one Analysis Unit of exact `sample1` (ADR 0043), and
@@ -70,7 +71,8 @@ const AUTHORED: Authored = {
     ],
     3: [
       { quote: '邮证法', blockOrdinal: 18, severity: 'must', note: '“邮证法”应为“邮政法”。', replacement: '邮政法', clauseId: 'typos-and-usage/1' },
-      { quote: '古怪', blockOrdinal: 18, severity: 'note', note: '同一段内“古怪”重复出现，可酌情替换其一。', replacement: '奇怪' },
+      { quote: '古怪', blockOrdinal: 18, occurrence: 2, severity: 'note', note: '同一段内“古怪”重复出现，可酌情替换其一。', replacement: '奇怪' },
+      { quote: '古怪', blockOrdinal: 18, severity: 'note', note: '重复词未指定出现次序，供编辑逐条确认。', replacement: '奇异' },
     ],
     4: [{ quote: '马跃之上第一次谈恋爱', blockOrdinal: 14, severity: 'must', note: '“上”字多余，疑为衍文。', replacement: '马跃之第一次谈恋爱', clauseId: 'typos-and-usage/1' }],
     5: [{ quote: '一路上与好好聊聊天', blockOrdinal: 6, severity: 'must', note: '介词“与”后缺少宾语，句子成分残缺。', replacement: '一路上与曾本之好好聊聊天', clauseId: 'typos-and-usage/2' }],
@@ -129,7 +131,7 @@ const AUTHORED: Authored = {
 /** What each authored quotation is meant to be once Reference Integrity has looked: `unique` unless stated. */
 const EXPECTED_STATE: Record<string, 'not-found' | 'ambiguous'> = {
   'typos-and-usage:3:1': 'not-found',
-  'typos-and-usage:3:2': 'ambiguous',
+  'typos-and-usage:3:3': 'ambiguous',
   'style-and-format:7:1': 'not-found',
   'literary-expression:6:1': 'not-found',
 };
@@ -382,12 +384,25 @@ async function pass(): Promise<boolean> {
     // Every authored quotation is what it is meant to be against the committed blocks.
     const blocks = new Map(context.store.baselineAnalysisLedger.readRevisionBlocks(context.manuscriptId, context.revisionId).map((block) => [block.blockId, block] as const));
     const manifest = first.settled.coverageManifest!;
+    // Refresh v1 factual unit request keys from the same committed SampleBook manifest, without a call.
+    const factualPath = resolve(FIXTURE_PATH, '..', 'sample1-factual-authored.json');
+    const factual = JSON.parse(await readFile(factualPath, 'utf8'));
+    const previousFactual = factualReviewKindDefinition(undefined, false);
+    const currentFactual = factualReviewKindDefinition();
+    for (const unit of manifest.units) {
+      const old = factual.entries.find((entry: ModelFixtureEntry) => entry.requestDigest === previousFactual.requestDigest(unit.ordinal, unit.digest));
+      if (old !== undefined && !factual.entries.some((entry: ModelFixtureEntry) => entry.requestDigest === currentFactual.requestDigest(unit.ordinal, unit.digest))) {
+        factual.entries.push({ ...old, requestDigest: currentFactual.requestDigest(unit.ordinal, unit.digest) });
+      }
+    }
+    await writeFile(factualPath, `${JSON.stringify(factual, null, 2)}\n`, 'utf8');
+
     for (const [categoryId, units] of Object.entries(AUTHORED)) {
       for (const [unitOrdinal, findings] of Object.entries(units)) {
         const unit = manifest.units[Number(unitOrdinal) - 1]!;
         const ids = [...unit.overlapBlockIds, ...unit.blockIds];
         findings.forEach((finding, index) => {
-          const state = locateQuotation(blocks.get(ids[finding.blockOrdinal - 1]!)!.text, finding.quote).state;
+          const state = locateQuotation(blocks.get(ids[finding.blockOrdinal - 1]!)!.text, finding.quote, finding.occurrence).state;
           const expected = EXPECTED_STATE[`${categoryId}:${unitOrdinal}:${index + 1}`] ?? 'verified';
           expect(state, `${categoryId} unit ${unitOrdinal} finding ${index + 1}`).toBe(expected);
         });

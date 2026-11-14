@@ -140,7 +140,7 @@ describe('a review category reduction', () => {
     for (const result of results) {
       expect(result.excluded).toEqual([]);
       expect(result.findings).toHaveLength(1);
-      expect(result.findings[0]!.quote).toBe('A B'); // Existing replay requests retain the model's already-verifiable quote.
+      expect(result.findings[0]!.quote).toBe('Ａ　Ｂ'); // Existing replay requests retain the model's already-verifiable quote.
       expect(result.findings[0]!.sourceRange).toEqual({ blockId: paragraphs[1]!.blockId, fromGrapheme: 3, toGrapheme: 6 });
       expect(sliceGraphemes(paragraphs[1]!.text, 3, 6)).toBe('Ａ　Ｂ');
     }
@@ -303,7 +303,7 @@ describe('anchoring repair regressions (#1435)', () => {
   it('keeps unchanged annotation ids byte-identical to base 2f6f14df', () => {
     // Literal results from running the base reducer on these same public synthetic inputs.
     const fallback = run(['今天天气晴朗。'], [{ ...entry, quote: '并不存在', replacement: '替换' }]).findings[0]!;
-    expect(fallback).toMatchObject({ findingId: 'rfd_b75a21bab65708d7870ae8c6', quote: '并不存在', replacement: null });
+    expect(fallback).toMatchObject({ findingId: 'rfd_b75a21bab65708d7870ae8c6', quote: '今天天气晴朗。', replacement: null });
     const repeated = run(['没有', '目标目标'], [{ ...entry, quote: '目标', replacement: '替换' }]).findings[0]!;
     expect(repeated).toMatchObject({ findingId: 'rfd_2512d2f5cd41359ade23aef2', quote: '目标', replacement: null });
   });
@@ -315,4 +315,12 @@ describe('anchoring repair regressions (#1435)', () => {
     const result = run(['他说「明天再来」。'], [{ ...entry, quote: '"明天再来"', replacement: '"次日再来"' }]);
     expect(result.findings[0]).toMatchObject({ quote: '「明天再来」', replacement: '"次日再来"', note: '【锚点不唯一】（标点已与原稿对齐）合成建议。' });
   });
+});
+
+it('stores the manuscript slice without changing a normalized legacy finding id', () => {
+  const run = (quote: string) => reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: new Map([...byId, [blocks[0]!.blockId, { ...blocks[0]!, text: 'Ａ　Ｂ' }]]),
+    outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1,
+      findings: [{ quote, blockOrdinal: 1, severity: 'should', note: '合成建议', replacement: '替换' }] } }] }).findings[0]!;
+  expect(run('A B').quote).toBe('Ａ　Ｂ');
+  expect(run('A B').findingId).toBe(run('Ａ　Ｂ').findingId);
 });

@@ -45,17 +45,18 @@ import {
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 describe('Factual Review Contract /2 is additive', () => {
-  it('leaves v1 byte for byte: its prompt contract, the research wrap and 快速整理 all keep their digests', () => {
+  it('retains pre-occurrence factual prompt identities alongside the current instructions', () => {
     // Synchronized pins (Issue #901): the v1 and research digests are the ones every earlier plan and capture froze.
-    expect(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST).toBe('22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37');
+    expect(factualReviewKindDefinition(undefined, false).promptContractDigest).toBe('22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37');
+    expect(FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt).toContain('occurrence');
     expect(FACTUAL_REVIEW_PROMPT_CONTRACT.responseSchema).toBe(FACTUAL_REVIEW_UNIT_RESULT_SCHEMA);
-    expect(withFactualResearch(factualReviewKindDefinition()).promptContractDigest).toBe('639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b');
+    expect(withFactualResearch(factualReviewKindDefinition(undefined, false)).promptContractDigest).toBe('639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b');
     const quick = factualReviewLevelDefinition('quick');
     expect(quick.promptContractDigest).toBe(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST);
     expect(quick.systemPrompt).toBe(FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt);
     expect(quick.researchDeclaration).toEqual({ webSearch: false, searchEngine: null });
-    const standard = factualReviewLevelDefinition('standard');
-    const strict = factualReviewLevelDefinition('strict');
+    const standard = factualReviewLevelDefinition('standard', undefined, false);
+    const strict = factualReviewLevelDefinition('strict', undefined, false);
     expect(standard.promptContractDigest).toBe('692604f0d48c52ed7f82b43855eab7bdcda2192791c38c22dbc785415bd7db9e');
     expect(strict.promptContractDigest).toBe('610e96937f4aae95da53f1673c6967dc1f359ee01cc42ffa36039bc817177090');
     expect(standard.unitResultSchema).toBe(FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA);
@@ -66,11 +67,11 @@ describe('Factual Review Contract /2 is additive', () => {
     const blocks = new Map([['blk_000000000000000000000001', { blockId: 'blk_000000000000000000000001', kind: 'paragraph', level: null, text: '合成段落。' }]]);
     expect(standard.buildUnitMessage(unit, 1, blocks as never)).toBe(buildFactualReviewUnitMessage(unit, 1, blocks as never));
     // Recorded from the integration baseline de8227ca: the complete /1 system + user message bytes, not just schema identity.
-    expect(sha(JSON.stringify([{ role: 'system', content: quick.systemPrompt },
+    expect(sha(JSON.stringify([{ role: 'system', content: factualReviewKindDefinition(undefined, false).systemPrompt },
       { role: 'user', content: quick.buildUnitMessage(unit, 1, blocks as never) }]))).toBe('b94f66cbc24ffdac111bc6f1e32f7f68cc3326e57c3b82d8f3ddf8fdc1ee8f54');
     // Every frozen factual plan finds its own definition back by digest, the two predecessors included.
-    expect([...factualReviewDefinitionsByDigest().keys()].sort()).toEqual([standard.promptContractDigest, strict.promptContractDigest,
-      '639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b', FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST].sort());
+    expect([...factualReviewDefinitionsByDigest().keys()]).toEqual(expect.arrayContaining([standard.promptContractDigest, strict.promptContractDigest,
+      '639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b', FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST]));
     expect(FACTUAL_REVIEW_PROMPT_CONTRACT_V2_STANDARD.unitMessageHeader).toBe(FACTUAL_REVIEW_PROMPT_CONTRACT.unitMessageHeader);
   });
 

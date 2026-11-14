@@ -55,8 +55,8 @@
       },
       "contractsAgree": null,
       "fixtures": [
-        "1fb1225ccf47378ec88e8f645e76c460a639a36153fad4aa822975d88a216fa4",
-        "b0fad8dff857d6d41bab0a4e9d2e4821ac92686a62e15b3737dcbf25ee6af5cb"
+        "sample1-model-clarification-live-baseline",
+        "sample1-model-clarification-live-ambiguous"
       ]
     },
     "cross-deliverable-sample1": {
@@ -129,7 +129,7 @@
       },
       "contractsAgree": false,
       "fixtures": [
-        "088d7fbe02667dbac382aab68a7f84d1e9cac47396008637c53a14e34d4797e1"
+        "sample1-recorded-v41-review-cross-deliverable-consistency"
       ]
     },
     "initial-evaluation-sample1": {
@@ -182,7 +182,7 @@
       },
       "contractsAgree": true,
       "fixtures": [
-        "daf4ad379cbac8fc513f0faeb514e0592497dee02e94c65affe1bddfe87a2ac3"
+        "sample1-recorded-v41-editorial-evaluation-initial"
       ]
     },
     "material-review-sample1": {
@@ -255,7 +255,7 @@
       },
       "contractsAgree": false,
       "fixtures": [
-        "5059d1153ecc672cce36b6c9796f0cdeecb871015401b46f97fbeb490bdde0a7"
+        "sample1-recorded-v41-material-review"
       ]
     },
     "polish-sample1-attributive": {
@@ -308,7 +308,7 @@
       },
       "contractsAgree": null,
       "fixtures": [
-        "a820f604793614b077f97754aa04a3bf71dd516ca083a81b49b2cac3aee454f9"
+        "sample1-recorded-v41-editorial-polish"
       ]
     },
     "polish-sample1-usage": {
@@ -361,7 +361,7 @@
       },
       "contractsAgree": null,
       "fixtures": [
-        "a820f604793614b077f97754aa04a3bf71dd516ca083a81b49b2cac3aee454f9"
+        "sample1-recorded-v41-editorial-polish"
       ]
     },
     "readers-report-sample1": {
@@ -414,8 +414,8 @@
       },
       "contractsAgree": true,
       "fixtures": [
-        "daf4ad379cbac8fc513f0faeb514e0592497dee02e94c65affe1bddfe87a2ac3",
-        "583de00c3e5297a18191f919c1107751d4d160694bc8aa05bdd79347a88b194a"
+        "sample1-recorded-v41-editorial-evaluation-initial",
+        "sample1-recorded-v41-editorial-readers-report"
       ]
     },
     "review-literary-sample1": {
@@ -483,7 +483,7 @@
       },
       "contractsAgree": true,
       "fixtures": [
-        "de9aa151b509ce9ec3bbfe4522fef968be4c287b10b74d41c3deb0ba40b3266e"
+        "sample1-recorded-v41-editorial-review"
       ]
     },
     "review-style-sample1": {
@@ -553,7 +553,7 @@
       },
       "contractsAgree": true,
       "fixtures": [
-        "de9aa151b509ce9ec3bbfe4522fef968be4c287b10b74d41c3deb0ba40b3266e"
+        "sample1-recorded-v41-editorial-review"
       ]
     },
     "review-style-synthetic-museum": {
@@ -621,13 +621,13 @@
         "unmatched": 0
       },
       "recordedUsage": {
-        "requests": 12,
-        "inputTokens": 8500,
-        "outputTokens": 2750
+        "requests": 18,
+        "inputTokens": 13000,
+        "outputTokens": 4330
       },
       "contractsAgree": null,
       "fixtures": [
-        "03b017c540750fc1f54d434434c0733d9ccef664cd15e8f99fccaa6887c52388"
+        "synthetic-editorial-review-cross-chapter-authored"
       ]
     },
     "review-typos-sample1": {
@@ -703,7 +703,7 @@
       },
       "contractsAgree": true,
       "fixtures": [
-        "de9aa151b509ce9ec3bbfe4522fef968be4c287b10b74d41c3deb0ba40b3266e"
+        "sample1-recorded-v41-editorial-review"
       ]
     },
     "review-typos-synthetic-lighthouse": {
@@ -772,13 +772,13 @@
         "unmatched": 0
       },
       "recordedUsage": {
-        "requests": 12,
-        "inputTokens": 8500,
-        "outputTokens": 2750
+        "requests": 18,
+        "inputTokens": 13000,
+        "outputTokens": 4330
       },
       "contractsAgree": null,
       "fixtures": [
-        "03b017c540750fc1f54d434434c0733d9ccef664cd15e8f99fccaa6887c52388"
+        "synthetic-editorial-review-cross-chapter-authored"
       ]
     },
     "writing-draft-sample1": {
@@ -831,7 +831,7 @@
       },
       "contractsAgree": true,
       "fixtures": [
-        "fac5d50819b4a74db5036997a0307e63b4568ce9ec0fc8515731983f642f6a95"
+        "sample1-recorded-v41-editorial-writing-draft"
       ]
     }
   }

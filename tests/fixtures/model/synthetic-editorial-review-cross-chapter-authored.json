@@ -54,6 +54,78 @@
           "outputTokens": 120
         }
       }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "65b749a8f597384e940ec7e23cff69a415d15ddbd926001fbbb4f40b93b01be5",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"仔细的擦拭\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"状语后的结构助词应为“地”。\",\"replacement\":\"仔细地擦拭\"},{\"quote\":\"渡过了第一个冬天\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"经历一段时间应写作“度过”。\",\"replacement\":\"度过了第一个冬天\"},{\"quote\":\"既使风浪再大\",\"blockOrdinal\":6,\"severity\":\"should\",\"note\":\"让步连词应为“即使”。\",\"replacement\":\"即使风浪再大\"},{\"quote\":\"一部份钱\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"“部份”应作“部分”。\",\"replacement\":\"一部分的钱\"},{\"quote\":\"必竟是第一次\",\"blockOrdinal\":9,\"severity\":\"should\",\"note\":\"“必竟”为错字。\",\"replacement\":\"毕竟是第一次\"},{\"quote\":\"截止今年夏天\",\"blockOrdinal\":10,\"severity\":\"should\",\"note\":\"表示到某时为止应用“截至”。\",\"replacement\":\"截至今年夏天\"},{\"quote\":\"的确给灯塔\",\"blockOrdinal\":4,\"severity\":\"note\",\"note\":\"疑为结构助词误用。\",\"replacement\":\"地确给灯塔\"},{\"quote\":\"更值得记录下来\",\"blockOrdinal\":12,\"severity\":\"note\",\"note\":\"可更简洁。\",\"replacement\":\"更值得记下来\"},{\"quote\":\"灯塔守护人\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"题名用字。\",\"replacement\":\"灯塔守望人\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 510
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "d134ffbd8767b54f2de94607bf19b4b209d1fce94e85e86edf7750a49ab2afa0",
+      "response": {
+        "kind": "unit-result",
+        "usage": {
+          "inputTokens": 700,
+          "outputTokens": 400
+        },
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:6}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:7}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:8}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"},{\"ref\":\"{{ref:9}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明的内容块中逐字出现，内容块支持该发现的提法。\"}]}"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "149887b558dcb660da49499104abbfab66bd8eaf942397d282102999293b1925",
+      "response": {
+        "kind": "unit-result",
+        "usage": {
+          "inputTokens": 600,
+          "outputTokens": 120
+        },
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可维持当前的单元预算。\",\"basis\":\"账目中没有预算造成的缺口。\"}]}"
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "e3fceb85a1b46844b36642a6ed5c33ee1924c5f122086fd3a48125c9b808bcdd",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"三千余件,其中\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"中文行文中误用半角逗号。\"},{\"quote\":\"1985年\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"年份写法与全文汉字数字不一致。\"},{\"quote\":\"「家底」\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"引号与全文“”体例不一致。\"},{\"quote\":\"匆匆走过...\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"省略号应为“……”。\"},{\"quote\":\"全程约3km\",\"blockOrdinal\":9,\"severity\":\"note\",\"note\":\"计量单位写法与中文行文不一致。\"},{\"quote\":\"1∶5000\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"比例尺写法宜统一。\"},{\"quote\":\"前后两进的格局\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"可补充说明格局。\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 410
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "a1316524f8ad7f3b3c3577e38d3d169265d728422ef652dd2a10414827bfb3cf",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}",
+        "usage": {
+          "inputTokens": 800,
+          "outputTokens": 20
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "74fabb842f9df201bb3d627e0d1fdcfb18873609e4cb8b7d1f7d141d9bab39b9",
+      "response": {
+        "kind": "unit-result",
+        "usage": {
+          "inputTokens": 600,
+          "outputTokens": 120
+        },
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可维持当前的单元预算。\",\"basis\":\"账目中没有预算造成的缺口。\"}]}"
+      }
     }
   ]
 }

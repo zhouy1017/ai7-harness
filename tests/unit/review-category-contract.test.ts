@@ -45,7 +45,7 @@ describe('the built-in review categories', () => {
     const { sourceRangeMapping, ...historical } = REVIEW_CATEGORY_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
     const { sourceRangeIntegrity, ...beforeSliceCheck } = REVIEW_CATEGORY_REDUCER_DESCRIPTOR;
-    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(sourceRangeIntegrity).toBe('located-quotation-is-manuscript-grapheme-slice');
     expect(REVIEW_CATEGORY_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(REVIEW_CATEGORY_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(reviewCategoryKindDefinition(TYPOS).reducerDigest).toBe(REVIEW_CATEGORY_REDUCER_DIGEST);
@@ -239,8 +239,10 @@ it.each([undefined, 2, 0, 1.5, '2', 99])('admits optional occurrence without los
     ...(typeof occurrence === 'number' && Number.isInteger(occurrence) && occurrence > 0 ? { occurrence } : {}) });
 });
 
-it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
-  expect(REVIEW_CATEGORY_REDUCER_DIGEST).toBe('a8e818cb4afefbb4e0cff17b634b3a903fb5dc424c9f863e03fc8200c036a8df');
+it('describes occurrence selection and manuscript slices in the reducer identity', () => {
+  expect(REVIEW_CATEGORY_REDUCER_DESCRIPTOR.occurrence).toContain('one-based');
+  expect(REVIEW_CATEGORY_REDUCER_DESCRIPTOR.sourceRangeIntegrity).toContain('manuscript');
+  expect(REVIEW_CATEGORY_REDUCER_DIGEST).toBe(sha256Hex(canonicalJson(REVIEW_CATEGORY_REDUCER_DESCRIPTOR)));
 });
 
 it.each([
@@ -251,4 +253,10 @@ it.each([
   ['合成建议', false], ['【未联网核查】合成建议', false], ['【未联网核查】【未联网核查】合成建议', false],
 ] as const)('classifies the stored review note %s', (note, guessed) => {
   expect(reviewFindingHasGuessedAnchor(note)).toBe(guessed);
+});
+
+it('tells the reviewer how to select a repeated quotation', () => {
+  const contract = reviewCategoryContract(reviewCategoryContractInput(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories[0]!));
+  expect(contract.systemPrompt).toContain('必须给出 occurrence');
+  expect(contract.systemPrompt).toContain('1 表示第一处');
 });

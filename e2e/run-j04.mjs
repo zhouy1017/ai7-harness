@@ -3179,7 +3179,7 @@ async function main() {
     const guessed = pendingSuggestions.filter((finding) => finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】'));
     const batchable = pendingSuggestions.filter((finding) => !finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】') && finding.markStatus === 'open' && finding.anchorState === 'exact');
     const batchExcluded = pendingSuggestions.length - batchable.length;
-    requireJourney(batchable.length > 1 && guessed.some((finding) => finding.quote === '古怪' && finding.replacement === '奇怪'), 'review-batch-candidates', { count: batchable.length, excluded: batchExcluded });
+    requireJourney(batchable.length > 1 && guessed.some((finding) => finding.quote === '古怪' && finding.replacement === '奇异') && batchable.some((finding) => finding.quote === '古怪' && finding.replacement === '奇怪'), 'review-batch-candidates', { count: batchable.length, excluded: batchExcluded });
     // 接受并应用全部 applies in one step (Issue #1410 item 5): the result names the count and offers 撤销本批应用.
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'review-batch-prepare');
     await waitFor(renderer, `(() => { const ids=${JSON.stringify(batchable.map((finding) => finding.findingId))}; return ids.every((id)=>document.querySelector('article.review-finding[data-finding-id="'+id+'"]')?.dataset.status==='handled'); })()`, 'review-batch-handled', 60_000);
