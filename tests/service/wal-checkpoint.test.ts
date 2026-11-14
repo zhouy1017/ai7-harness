@@ -52,8 +52,9 @@ function edit() {
 describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('recovers every acknowledged edit after killing the store process while the edits exist only in WAL', async () => {
     store!.markCleanShutdown(); store!.close(); store = undefined;
-    child = spawn(process.execPath, [helper, roots.dataRoot, roots.codeRoot, book.manuscriptId, book.branchId], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
-    const [message] = await Promise.race([once(child, 'message'), once(child, 'exit').then(([code]) => { throw new Error('WAL child exited before acknowledgement: ' + String(code)); })]);
+    child = spawn(process.execPath, [helper, roots.dataRoot, roots.codeRoot, book.manuscriptId, book.branchId], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    let childError = ''; child.stderr?.on('data', bytes => { childError = (childError + String(bytes)).slice(-6000); });
+    const [message] = await Promise.race([once(child, 'message'), once(child, 'exit').then(([code]) => { throw new Error('WAL child exited before acknowledgement: ' + String(code) + '\n' + childError); })]);
     const ack = message as { sequence: number; workingDigest: string; blockId: string };
     expect(ack.sequence).toBe(3);
     const mainOnly = join(roots.inputRoot, 'main-only.sqlite');
