@@ -2676,6 +2676,29 @@ describe('house preference review consumption (#911)', () => {
 
 
 describe('one-step review launch (#1455)', () => {
+  it('omits an unsent effort from the request, card, report and task row while keeping the role default', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const binding = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+      session.store.selectMainRoleModel('opencode-go', binding.model, 'high');
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+      const label = session.store.getModelServiceModels('opencode-go').find(model => model.modelId === defaults.model)!.modelLabel;
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        executionConfig: { modelId: defaults.model, reasoningEffort: 'off' } }, launchPolicy).projection.run!;
+      await session.driver.drive(launched.reviewRunId);
+      const run = session.store.generateReviewReport(book.bookId, launched.reviewRunId).run!;
+      expect(run.state).toBe('settled');
+      expect(run.modelLabel).toBe(label);
+      expect(run.report!.record.run.modelLabel).toBe(label);
+      expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(session.capture!.wireRequests.every(request => request.reasoning_effort === undefined)).toBe(true);
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings[0]!.markId!);
+      expect(card.source.modelLabel).toBe(label);
+      const task = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items)
+        .find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === launched.reviewRunId);
+      expect(task!.item.modelLabel).toBe(label);
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+    });
+  });
   it('starts once for a command and refuses changed inputs under that identity', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
