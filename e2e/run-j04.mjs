@@ -3179,7 +3179,21 @@ async function main() {
     const guessed = pendingSuggestions.filter((finding) => finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】'));
     const batchable = pendingSuggestions.filter((finding) => !finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】') && finding.markStatus === 'open' && finding.anchorState === 'exact');
     const batchExcluded = pendingSuggestions.length - batchable.length;
-    requireJourney(batchable.length > 1 && guessed.some((finding) => finding.quote === '古怪' && finding.replacement === '奇怪'), 'review-batch-candidates', { count: batchable.length, excluded: batchExcluded });
+    requireJourney(batchable.length > 1 && guessed.some((finding) => finding.quote === '古怪' && finding.replacement === '奇异') && batchable.some((finding) => finding.quote === '古怪' && finding.replacement === '奇怪'), 'review-batch-candidates', { count: batchable.length, excluded: batchExcluded });
+    const pinnedRepeated = batchable.find((finding) => finding.quote === '古怪' && finding.replacement === '奇怪');
+    const guessedRepeated = guessed.find((finding) => finding.quote === '古怪' && finding.replacement === '奇异');
+    const repeatedBlockBefore = await renderer.evaluate(`(async()=>{const page=await window.ai7.getManuscriptWindowAt({manuscriptId:${JSON.stringify(beforeBatch.manuscript.manuscriptId)},branchId:${JSON.stringify(beforeBatch.manuscript.branchId)},target:{kind:'block',blockId:${JSON.stringify(pinnedRepeated.blockId)}}});return page.blocks.find(block=>block.blockId===${JSON.stringify(pinnedRepeated.blockId)}).text;})()`);
+    try {
+      for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+        at(`review-guessed-position-tag-${viewport}`);
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await reviewAction(renderer, `article.review-finding[data-finding-id="${guessedRepeated.findingId}"] [data-review-action="go-to-text"]`, 'review-guessed-go-to-text');
+        await waitFor(renderer, `Array.from(document.querySelectorAll('[data-mark-card="${guessedRepeated.markId}"] .editorial-mark-note-tag')).some(tag=>tag.textContent==='位置待确认')`, 'review-guessed-position-tag');
+        await openReviewDestination(renderer, 'review-guessed-back-to-review');
+        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-guessed-return-settled');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    at('review-batch-apply');
     // 接受并应用全部 applies in one step (Issue #1410 item 5): the result names the count and offers 撤销本批应用.
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'review-batch-prepare');
     await waitFor(renderer, `(() => { const ids=${JSON.stringify(batchable.map((finding) => finding.findingId))}; return ids.every((id)=>document.querySelector('article.review-finding[data-finding-id="'+id+'"]')?.dataset.status==='handled'); })()`, 'review-batch-handled', 60_000);
@@ -3190,6 +3204,11 @@ async function main() {
     'review-batch-one-effect', { before: beforeBatch.manuscript.journalSequence, after: afterBatch?.manuscript?.journalSequence });
     requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation' || finding.note.replace(/^【未联网核查】/u, '').startsWith('【锚点不唯一】')).every((finding) =>
       afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus !== 'applied'), 'review-batch-preserves-annotations');
+
+    at('review-repeated-occurrence-result');
+    const repeatedBlockAfter = await renderer.evaluate(`(async()=>{const page=await window.ai7.getManuscriptWindowAt({manuscriptId:${JSON.stringify(afterBatch.manuscript.manuscriptId)},branchId:${JSON.stringify(afterBatch.manuscript.branchId)},target:{kind:'block',blockId:${JSON.stringify(pinnedRepeated.blockId)}}});return page.blocks.find(block=>block.blockId===${JSON.stringify(pinnedRepeated.blockId)}).text;})()`);
+    const secondRepeated = repeatedBlockBefore.indexOf('古怪', repeatedBlockBefore.indexOf('古怪') + 2);
+    requireJourney(secondRepeated >= 0 && repeatedBlockAfter === repeatedBlockBefore.slice(0, secondRepeated) + '奇怪' + repeatedBlockBefore.slice(secondRepeated + 2), 'review-batch-second-occurrence-only');
 
     at('review-ignore-with-reason');
     // 忽略并说明 needs a reason, recorded as a Quality Signal, and the finding reads 已忽略 (V2-UX-REV-004).

@@ -140,7 +140,7 @@ describe('a review category reduction', () => {
     for (const result of results) {
       expect(result.excluded).toEqual([]);
       expect(result.findings).toHaveLength(1);
-      expect(result.findings[0]!.quote).toBe('A B'); // Existing replay requests retain the model's already-verifiable quote.
+      expect(result.findings[0]!.quote).toBe('Ａ　Ｂ'); // Existing replay requests retain the model's already-verifiable quote.
       expect(result.findings[0]!.sourceRange).toEqual({ blockId: paragraphs[1]!.blockId, fromGrapheme: 3, toGrapheme: 6 });
       expect(sliceGraphemes(paragraphs[1]!.text, 3, 6)).toBe('Ａ　Ｂ');
     }
@@ -281,9 +281,9 @@ describe('paragraph occurrence retention', () => {
 });
 
 describe('anchoring repair regressions (#1435)', () => {
-  function run(texts: string[], entries: ReviewUnitFinding[]) {
+  function run(texts: string[], entries: ReviewUnitFinding[], exactOccurrences = false, categoryId = 'typos-and-usage') {
     const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
-    return reduceReviewCategory({ categoryId: 'typos-and-usage', manifest: { ...manifest,
+    return reduceReviewCategory({ categoryId, exactOccurrences, manifest: { ...manifest,
       units: [{ ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: [] }] },
       blocks: new Map(inputs.map((entry) => [entry.blockId, entry])), outcomes: [{ unitOrdinal: 1, state: 'closed',
         result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: entries } }] });
@@ -307,6 +307,33 @@ describe('anchoring repair regressions (#1435)', () => {
     const repeated = run(['没有', '目标目标'], [{ ...entry, quote: '目标', replacement: '替换' }]).findings[0]!;
     expect(repeated).toMatchObject({ findingId: 'rfd_2512d2f5cd41359ade23aef2', quote: '目标', replacement: null });
   });
+  it.each([false, true])('retains both unmatched annotations and their original quotations (occurrence reduction %s)', (exactOccurrences) => {
+    const result = run(['今天天气晴朗。'], [{ ...entry, quote: '第一条意见', note: '第一条理由' }, { ...entry, quote: '第二条意见', note: '第二条理由' }], exactOccurrences);
+    expect(new Set(result.findings.map((finding) => finding.findingId)).size).toBe(2);
+    if (!exactOccurrences) expect(result.findings.map((finding) => finding.findingId)).toEqual(['rfd_3423bd96273c1743d1d3cd44', 'rfd_94ce1533af38cd50d9d6b87f']);
+    expect(result.findings.map(({ quote, note, replacement }) => ({ quote, note, replacement }))).toEqual([
+      { quote: '第一条意见', note: '【引文未逐字匹配】第一条理由', replacement: null },
+      { quote: '第二条意见', note: '【引文未逐字匹配】第二条理由', replacement: null },
+    ]);
+  });
+  it.each([
+    ['style-and-format', '并不存在', '短标题', 'rfd_281bc2664c3639e5fcd71224', 'rfd_9b6bc644135e4905239265e1'],
+    ['style-and-format', '短标题', '并不存在', 'rfd_281bc2664c3639e5fcd71224', 'rfd_972a37c6c867ad52028a4e8a'],
+    ['plot-consistency', '并不存在', '短标题', 'rfd_a1160689b4f94667d8eb44e7', 'rfd_ba5f2b608a26fac9c02eb548'],
+    ['plot-consistency', '短标题', '并不存在', 'rfd_a1160689b4f94667d8eb44e7', 'rfd_64a463ccfe6b96c7cf048c0a'],
+  ])('keeps %s whole-block finding ids unique with %s first', (categoryId, first, second, baseId, laterId) => {
+    const result = run(['短标题'], [first, second].map((quote) => ({ quote, blockOrdinal: 1, severity: 'note', note: `核对${quote}` })), true, categoryId);
+    expect(result.findings.map((finding) => finding.findingId)).toEqual([baseId, laterId]);
+    expect(result.findings.map((finding) => finding.quote)).toEqual([first, second]);
+    expect(new Set(result.findings.map((finding) => finding.findingId)).size).toBe(result.findings.length);
+  });
+  it.each([undefined, 1])('preserves the base id for a repeated width-folded annotation (%s)', (occurrence) => {
+    for (const replacement of [undefined, 'Ａ　Ｂ']) {
+      const result = run(['Ａ　Ｂ与Ａ　Ｂ。'], [{ quote: 'A B', blockOrdinal: 1, severity: 'note', note: '合成建议', ...(occurrence === undefined ? {} : { occurrence }), ...(replacement === undefined ? {} : { replacement }) }]);
+      expect(result.findings[0]).toMatchObject({ findingId: 'rfd_c4f9ee4cbaf86e57b64918e5', quote: 'Ａ　Ｂ', replacement: null,
+        sourceRange: { fromGrapheme: 0, toGrapheme: 3 } });
+    }
+  });
   it('labels missing or invalid occurrence and punctuation matches for individual acceptance only', () => {
     for (const occurrence of [undefined, 1.5, 99]) {
       const result = run(['我的书放在桌上，他慢慢的走。'], [{ ...entry, quote: '的', replacement: '地', ...(occurrence === undefined ? {} : { occurrence }) }]);
@@ -315,4 +342,13 @@ describe('anchoring repair regressions (#1435)', () => {
     const result = run(['他说「明天再来」。'], [{ ...entry, quote: '"明天再来"', replacement: '"次日再来"' }]);
     expect(result.findings[0]).toMatchObject({ quote: '「明天再来」', replacement: '"次日再来"', note: '【锚点不唯一】（标点已与原稿对齐）合成建议。' });
   });
+});
+
+it('stores the manuscript slice without changing a normalized legacy finding id', () => {
+  const run = (quote: string) => reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: new Map([...byId, [blocks[0]!.blockId, { ...blocks[0]!, text: 'Ａ　Ｂ' }]]),
+    outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1,
+      findings: [{ quote, blockOrdinal: 1, severity: 'should', note: '合成建议', replacement: '替换' }] } }] }).findings[0]!;
+  expect(run('A B').quote).toBe('Ａ　Ｂ');
+  expect(run('A B').findingId).toBe('rfd_b6d82dd5b5d0f37448fcc967');
+  expect(run('Ａ　Ｂ').findingId).toBe('rfd_b6d82dd5b5d0f37448fcc967');
 });
