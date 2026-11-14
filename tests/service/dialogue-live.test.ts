@@ -20,6 +20,8 @@ import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
+import { attemptTurn } from '../../src/service/dialogue/dialogue-history.js';
+import { splitFragments } from '../../src/service/dialogue/fragments.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
@@ -395,9 +397,13 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       const oldSession = readBinding(turn.attemptId)!.harnessSessionId;
       // The next model request can await capacity before the append queue finishes its preceding tool result.
       // A real process death preserves exactly the prefix that reached disk, so freeze that durable checkpoint first.
-      await waitFor(() => readHarnessSessionLog(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), oldSession),
+      const durableLog = await waitFor(() => readHarnessSessionLog(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), oldSession),
         (log) => log?.events.some((event) => event.type === 'tool/result') === true, 'tool result durable before process death');
-      const durableFragments = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]!.fragments;
+      // The unchanged history reader releases the final complete sentence when streaming becomes interrupted.
+      // Compare against that base cut projection of the exact durable log, not its answering projection.
+      const durableFragments = splitFragments(attemptTurn(durableLog!, 0, null).streamed, 'cut');
+      const answering = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]!.fragments;
+      expect(durableFragments.slice(0, answering.length)).toEqual(answering);
       expect(durableFragments.map((entry) => entry.text).join('')).toContain('先核对公开样书。');
       // Reconstruct abrupt process death: close only the store, with no owner settlement or terminal event.
       store.close();
