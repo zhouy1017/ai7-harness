@@ -1139,7 +1139,7 @@ async function dispatch(
           severity: request.input.severity ?? null,
           status: request.input.status ?? null,
           chapterBlockId: request.input.chapterBlockId ?? null,
-        }),
+        }, request.input.executionConfig),
       };
     case 'inspectHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };

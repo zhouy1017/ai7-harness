@@ -2734,4 +2734,19 @@ describe('one-step review launch (#1455)', () => {
     });
   });
 
+  it('reads search availability for the task connection without changing role defaults or preparing a run', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial');
+      const connection = session.store.getModelServiceRouteConnection('deepseek-open-platform')!;
+      session.store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'deepseek-open-platform');
+      const before = workspace(session, book);
+      const next = session.store.inspectReviewWorkspace(book.bookId, null, undefined, undefined,
+        { modelConnectionId: connection.connectionId, modelId: connection.binding.modelId });
+      expect(before.categories.find(category => category.categoryId === FACTUAL)!.networkUnavailable).not.toBe(true);
+      expect(next.categories.find(category => category.categoryId === FACTUAL)!.networkUnavailable).toBe(true);
+      expect(next.run).toBeNull(); expect(next.runs).toHaveLength(0);
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+    });
+  });
+
 });

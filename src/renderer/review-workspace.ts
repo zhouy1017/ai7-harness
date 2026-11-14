@@ -335,6 +335,9 @@ type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string
 
 interface SheetState {
   executionConfig?: RuntimeExecutionConfig;
+  chooser?: ReturnType<typeof createDispatchChooser>;
+  choicePending?: boolean;
+  choiceTicket?: number;
   launchPending?: boolean;
   clientCommandId?: string;
   dismissed: boolean;
@@ -648,7 +651,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let excludedPages = 1;
   let excludedOpen = false;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
-    let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
+    let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
     if (first.bookId !== bookId) {
       if (!destroyed && ticket === generation) clearFactual(true);
       return first;
@@ -2799,10 +2802,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     prepare.classList.add('text-link');
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    const chooser = createDispatchChooser({ role: 'main-editorial', changed: config => { state.executionConfig = config; delete state.clientCommandId; } });
-    void (async () => {
+    const newChooser = state.chooser === undefined;
+    const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
+    if (newChooser) void (async () => {
       const [settings, preferences] = await Promise.all([api.getModelServiceSettings(), window.ai7.getPreferences()]);
-      if (!state.dismissed) chooser.render(settings, preferences.values['model.favourites']);
+      if (!state.dismissed) chooser.render(settings, preferences.values['model.favourites'], state.executionConfig);
     })().catch(() => { chooser.unavailable(); });
     const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
@@ -2812,7 +2816,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
-      const preparing = state.launchPending === true;
+      const preparing = state.launchPending === true || state.choicePending === true;
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
       const effective = effectiveCategories(workspace, state);
@@ -2870,7 +2874,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       problem.textContent = blocked ?? state.problem ?? '';
       problem.hidden = state.problem === null && blocked === null;
       progress.hidden = !preparing;
-      progress.textContent = preparing ? '正在启动审阅…' : '';
+      progress.textContent = state.launchPending ? '正在启动审阅…' : state.choicePending ? '正在更新可用的审阅范围…' : '';
       prepare.disabled = preparing || loading || networkBlocked || blocked !== null || effective.length === 0 || state.scope === null;
       for (const control of [prepare, start]) {
         if (blocked !== null) control.setAttribute('aria-describedby', problem.id);
@@ -2878,7 +2882,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       start.disabled = prepare.disabled || state.launchPending === true;
-      close.disabled = preparing;
+      close.disabled = state.launchPending === true;
 
     }
     sheetUpdate = updateSheet;
@@ -2902,8 +2906,30 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
   }
 
+  async function updateExecutionChoice(state: SheetState, config: RuntimeExecutionConfig): Promise<void> {
+    state.executionConfig = config;
+    delete state.clientCommandId;
+    const ticket = state.choiceTicket = (state.choiceTicket ?? 0) + 1;
+    state.choicePending = true;
+    sheetUpdate();
+    try {
+      const next = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, executionConfig: config });
+      if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
+      const focused = state.chooser?.element.contains(document.activeElement) ? document.activeElement : null;
+      state.choicePending = false;
+      projection = next;
+      renderSheet(next, state);
+      if (focused instanceof HTMLElement) focused.focus();
+    } catch (error) {
+      if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
+      state.choicePending = false;
+      state.problem = options.errorMessage(error, '无法读取本次模型可用的审阅范围。');
+      sheetUpdate();
+    }
+  }
+
   async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
-    if (destroyed || state.launchPending || projection === null) return;
+    if (destroyed || state.launchPending || state.choicePending || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
     const shown = resolved === null ? null : sheet.querySelector<HTMLSelectElement>('[data-review-field="procedure-version"]')?.value ?? null;

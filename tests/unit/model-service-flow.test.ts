@@ -1,3 +1,4 @@
+import { MODEL_SERVICE_CONNECTION_IDS } from '../../src/shared/protocol/model-service.js';
 import { createDispatchChooser } from '../../src/renderer/components/dispatch-chooser.js';
 import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
@@ -16,8 +17,8 @@ beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(true); }
 afterEach(() => restore());
 
 function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelServiceRouteId | null = ready[0] ?? null, fast: ModelServiceRouteId | null = inUse): ModelServiceSettingsProjection {
-  const connection = (route: ModelServiceRouteId) => ({ connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
-  const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, roleLabel: roleId === 'main-editorial' ? '主编辑角色' : '快速交互角色', statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route] });
+  const connection = (route: ModelServiceRouteId) => ({ connectionId: MODEL_SERVICE_CONNECTION_IDS[route], connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
+  const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, roleLabel: roleId === 'main-editorial' ? '主编辑角色' : '快速交互角色', statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route], connection: route === null ? null : connection(route) });
   return {
     channels: modelServiceChannels(),
     roles: [role('fast-interaction', fast), role('main-editorial', inUse ?? 'opencode-go')],
@@ -699,6 +700,9 @@ it('offers ready channels, favourites first, and resets the task choice without 
   effort.value = level; effort.dispatchEvent({ type: 'change' });
   expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: level }));
   expect(root.querySelector('summary')!.textContent).toContain(`@${level}`);
+  const selectedLabel = root.querySelector('summary')!.textContent;
+  chooser.render(projection, {}, changed.mock.lastCall![0]);
+  expect(root.querySelector('summary')!.textContent).toBe(selectedLabel);
   root.querySelector('button')!.click();
   expect(changed).toHaveBeenLastCalledWith({});
 });

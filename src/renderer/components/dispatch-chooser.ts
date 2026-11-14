@@ -1,6 +1,6 @@
 import type { ModelServiceSettingsProjection } from '../../shared/protocol.js';
 import type { ModelFavourites } from '../../shared/preferences.js';
-import type { RuntimeExecutionConfig } from '../../shared/runtime-execution-config.js';
+import { resolveRuntimeExecutionConfig, type RuntimeExecutionConfig } from '../../shared/runtime-execution-config.js';
 import { CONFIGURED_MODEL_REASONING, CONFIGURED_ROUTE_REASONING } from '../../shared/provider-configuration.generated.js';
 import { modelServiceRuntimeBinding } from '../../shared/protocol/model-service.js';
 
@@ -49,7 +49,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
   return {
     element,
     unavailable(): void { summary.textContent = '模型 使用角色默认 ▾'; panel.hidden = true; },
-    render(next: ModelServiceSettingsProjection, favourites: ModelFavourites = {}): void {
+    render(next: ModelServiceSettingsProjection, favourites: ModelFavourites = {}, selection: RuntimeExecutionConfig = {}): void {
       settings = next; choices = []; models.replaceChildren();
       const role = settings.roles.find(role => role.roleId === options.role);
       defaultChoice = { ...(role?.connection === null || role?.connection === undefined ? {} : { modelConnectionId: role.connection.connectionId }),
@@ -69,8 +69,10 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
         }
         if (group.children.length > 0) models.append(group);
       }
-      models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
-      paint(defaultChoice.reasoningEffort);
+      inherited = Object.keys(selection).length === 0;
+      const selected = resolveRuntimeExecutionConfig(defaultChoice, selection);
+      models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === selected.modelConnectionId && choice.config.modelId === selected.modelId);
+      paint(selected.reasoningEffort);
     },
   };
 }

@@ -3097,14 +3097,22 @@ export class BaselineAnalysisStore {
 
   // ---- preparation -----------------------------------------------------------------------------
 
+  forkForLaunch(launch: LaunchBinding): BaselineAnalysisStore {
+    const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
+    ledger.bindLaunch(launch);
+    return ledger;
+  }
+
+  withExecutionChoice(binding: import('../launch-policy.js').ConfiguredProviderBinding | null, policy: LaunchPolicyProjection): BaselineAnalysisStore {
+    const route = allowedProductionBindingOf(binding);
+    return this.forkForLaunch({ ...this.#launch, policy, live: this.#launch.operationalScope === 'ordinary-production' && binding !== null && route !== null
+      ? { ...binding, route: route.route, credentialSlot: route.credentialSlot, scope: 'ordinary-production', runBudgetCeiling: 'unset' } : this.#launch.live });
+  }
+
   /** A fresh task and its run authority are written together; no pending approval is observable. */
   launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string,
-    binding: import('../launch-policy.js').ConfiguredProviderBinding | null): AnalysisProjection {
-    const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
-    const route = allowedProductionBindingOf(binding);
-    ledger.bindLaunch({ ...this.#launch, policy: input.launchPolicy, live: this.#launch.operationalScope === 'ordinary-production' && binding !== null && route !== null
-      ? { ...binding, route: route.route, credentialSlot: route.credentialSlot, scope: 'ordinary-production', runBudgetCeiling: 'unset' } : this.#launch.live });
-    return ledger.#launchTask(input, snapshotId);
+    execution: LaunchBinding): AnalysisProjection {
+    return this.forkForLaunch(execution).#launchTask(input, snapshotId);
   }
 
   #launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string): AnalysisProjection {

@@ -3934,8 +3934,15 @@ export class EditorialStore {
     });
   }
 
-  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page?: ReviewFindingPageRequest): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => this.#reviewRuns.workspace(bookId, reviewRunId, progress, page));
+  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page?: ReviewFindingPageRequest, executionConfig?: RuntimeExecutionConfig): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      if (executionConfig === undefined || Object.keys(executionConfig).length === 0) return this.#reviewRuns.workspace(bookId, reviewRunId, progress, page);
+      const choice = this.#launchChoice('main-editorial', executionConfig);
+      const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
+        ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : this.#baselineAnalysis.launch.policy!;
+      const execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
+      return this.#reviewRuns.workspace(bookId, reviewRunId, progress, page, execution);
+    });
   }
 
   /**

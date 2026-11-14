@@ -82,7 +82,7 @@ import {
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
 } from '../../shared/protocol.js';
-import { RUN_WAITING_IDLE_LABEL, type BaselineAnalysisStore, type ProgressReader } from '../analysis/baseline-analysis-store.js';
+import { RUN_WAITING_IDLE_LABEL, type BaselineAnalysisStore, type LaunchBinding, type ProgressReader } from '../analysis/baseline-analysis-store.js';
 import { UNREAD_WALK_BOUND, type UnreadWalkCut } from '../analysis/unread-changes.js';
 import {
   AnalysisError,
@@ -1421,7 +1421,8 @@ export class ReviewRunStore {
   /** Direct launch: plan and runnable categories share one transaction and one execution choice. */
   launch(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, snapshotId: string,
     binding: import('../launch-policy.js').ConfiguredProviderBinding | null): { reviewRunId: string; manuscript: unknown } {
-    const work = this.#buildWork(input);
+    const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
+    const work = this.#buildWork(input, execution);
     let reviewRunId: string;
     if ('done' in work) {
       requireReview(work.reviewRunId !== null, 'REVIEW_PLAN_UNAVAILABLE', '审阅未能启动。');
@@ -1433,7 +1434,7 @@ export class ReviewRunStore {
           undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
         const projection = ledger.launchTask({ ...request, reconfirm: false,
-          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, binding);
+          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution);
         work.prepared.push(this.#snapshotCategory(planned, projection));
       }
       reviewRunId = this.#writeRun(work);
@@ -1449,7 +1450,7 @@ export class ReviewRunStore {
     return { reviewRunId, manuscript: snapshot.manuscript };
   }
 
-  #buildWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>): PreparationWork | ReviewRunPreparationProgress {
+  #buildWork(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, execution?: LaunchBinding): PreparationWork | ReviewRunPreparationProgress {
     const bookId = input.bookId;
     this.#requireBook(bookId);
     const head = this.#head(bookId);
@@ -1500,9 +1501,9 @@ export class ReviewRunStore {
     const planned = configuration.categories
       .filter((entry) => categoryIds.includes(entry.categoryId))
       .map((entry, position): PlannedCategory => {
-        const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
+        const reading = this.#readCategory(bookId, head, entry, baseline, undefined, execution);
         requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
-        if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
+        if ((execution ?? this.#ledgers.baseline().launch).live !== null && entry.executor !== 'baseline-leads') {
           requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry, input.launchPolicy)}`);
         }
         const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts);
@@ -3635,14 +3636,14 @@ export class ReviewRunStore {
       category.entry.executor === 'review-category-contract' && liveMaterialRule(launch.policy, reviewCategoryKindId(category.categoryId)) === null);
   }
 
-  workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE): ReviewWorkspaceProjection {
+  workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE, execution?: LaunchBinding): ReviewWorkspaceProjection {
     this.#requireBook(bookId);
     requireReview(reviewRunId === null || (typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId)), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
     requireReview(validFindingPage(page), 'REVIEW_PAGE_INVALID', '发现的分页或筛选无效。');
     const head = this.#head(bookId);
     const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
     const house = this.#configuration();
-    const readings = this.#forBook(bookId, house).categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
+    const readings = this.#forBook(bookId, house).categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress, execution));
     const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
     // The 审阅记录 lists the newest Runs only; a Run beyond them is still opened when it is named.
     const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT ?')
@@ -3826,8 +3827,7 @@ export class ReviewRunStore {
     };
   }
 
-  #guidelineRefusal(entry: ReviewCategoryConfigurationEntry): string | null {
-    const launch = this.#ledgers.baseline().launch;
+  #guidelineRefusal(entry: ReviewCategoryConfigurationEntry, launch: LaunchBinding = this.#ledgers.baseline().launch): string | null {
     const admitted = entry.seriesKnowledge === undefined || launch.live === null || launch.policy === undefined ? false
       : liveKindAdmission(launch.policy, this.#ledgers.ledgerOf(entry).definition, launch.live) !== null;
     return houseGuidelineRefusal(entry, launch.live !== null, admitted);
@@ -4355,7 +4355,7 @@ export class ReviewRunStore {
   }
 
   /** What one category can do now: from its own ledger for a Task-backed one, from the baseline for the leads. */
-  #readCategory(bookId: string, head: ManuscriptHead | null, entry: ReviewCategoryConfigurationEntry, baseline: BaselineReading, progress: ProgressReader | undefined): CategoryReading {
+  #readCategory(bookId: string, head: ManuscriptHead | null, entry: ReviewCategoryConfigurationEntry, baseline: BaselineReading, progress: ProgressReader | undefined, execution?: LaunchBinding): CategoryReading {
     const none: ReviewCategoryLedgerFacts = { hasRevision: false, stale: false, syncUnavailableReason: null, baselineRevision: baseline.revision !== null };
     // The house's 书系一致性 is never read unresolved; were it, it could not run.
     if (entry.executor === 'unavailable' || entry.executor === 'series-knowledge') {
@@ -4366,9 +4366,9 @@ export class ReviewRunStore {
     if (entry.executor === 'baseline-leads') {
       return { entry, unavailableReason: baseline.error ?? (baseline.revision === null ? LEADS_ABSENT_REASON : null), facts: none, projection: null };
     }
-    const withheld = this.#guidelineRefusal(entry);
+    const withheld = this.#guidelineRefusal(entry, execution);
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
-    const launch = this.#ledgers.baseline().launch;
+    const launch = execution ?? this.#ledgers.baseline().launch;
     if (launch.live !== null && (launch.policy === undefined || liveReviewRule(launch.policy, entry) === null)) {
       return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
@@ -4376,7 +4376,8 @@ export class ReviewRunStore {
     let modelChannelSearchLabel: string | undefined;
     let researchUnavailableReason: string | null = null;
     try {
-      const ledger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
+      const currentLedger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
+      const ledger = execution === undefined ? currentLedger : currentLedger.forkForLaunch(execution);
       projection = ledger.inspect(bookId, progress);
       if (entry.searchEngine) {
         try {

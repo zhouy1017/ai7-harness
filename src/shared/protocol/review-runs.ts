@@ -967,6 +967,8 @@ export const REVIEW_FINDING_PAGE_KEYS = ['findingsAfterOrdinal', 'categoryId', '
  * process supplies the Book its window is showing.
  */
 export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRequest> {
+  /** Read-only availability for a task choice; it creates no task or snapshot. */
+  executionConfig?: import('../runtime-execution-config.js').RuntimeExecutionConfig;
   bookId: string;
   /** The Review Run to open; `null` opens the latest. */
   reviewRunId: string | null;

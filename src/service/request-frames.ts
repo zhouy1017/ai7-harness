@@ -1,5 +1,5 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
-import { validReasoningEffort } from '../shared/runtime-execution-config.js';
+import { validReasoningEffort, validRuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
@@ -1779,7 +1779,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectReviewWorkspace': {
       // The Run to open, and — each optional, `null` or absent for none — the page cursor and the four
       // filters of the results; a filter is a view and never names more than a Run already holds.
-      const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId'], REVIEW_FINDING_PAGE_KEYS, tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId'], [...REVIEW_FINDING_PAGE_KEYS, 'executionConfig'], tentativeId);
+      if (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !(input.reviewRunId === null || validUuid(input.reviewRunId)) ||
           !optionalOrNull(input, 'findingsAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
           !optionalOrNull(input, 'excludedAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
@@ -1804,7 +1805,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
       const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig'] : [])], tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
-      if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && (!isRecord(input.executionConfig) || Object.keys(input.executionConfig).some(key => !['modelConnectionId', 'modelId', 'reasoningEffort'].includes(key)) || (input.executionConfig.modelConnectionId !== undefined && !isBoundedString(input.executionConfig.modelConnectionId, 128)) || (input.executionConfig.modelId !== undefined && !isBoundedString(input.executionConfig.modelId, 256)) || (input.executionConfig.reasoningEffort !== undefined && !validReasoningEffort(input.executionConfig.reasoningEffort)))))) throw new ProtocolError(tentativeId);
+      if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
       const composite = input.procedureDefinition != null;
       if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);
@@ -2917,7 +2918,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'startScopedAiEdit': {
       const input = requireInputWithOptional(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], ['clientCommandId', 'executionConfig'], tentativeId);
       if (input.clientCommandId !== undefined && !validUuid(input.clientCommandId)) throw new ProtocolError(tentativeId);
-      if (input.executionConfig !== undefined && (!isRecord(input.executionConfig) || Object.keys(input.executionConfig).some(key => !['modelConnectionId', 'modelId', 'reasoningEffort'].includes(key)) || (input.executionConfig.modelConnectionId !== undefined && !isBoundedString(input.executionConfig.modelConnectionId, 128)) || (input.executionConfig.modelId !== undefined && !isBoundedString(input.executionConfig.modelId, 256)) || (input.executionConfig.reasoningEffort !== undefined && !validReasoningEffort(input.executionConfig.reasoningEffort)))) throw new ProtocolError(tentativeId);
+      if (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)) throw new ProtocolError(tentativeId);
       const scope = input.scope;
       const validScope = isRecord(scope) && (
         (hasExactKeys(scope, ['mode', 'span']) && scope.mode === 'selected-only' && Array.isArray(scope.span) && scope.span.length >= 1 &&
