@@ -1,5 +1,4 @@
 import { TASK_LAUNCH_TRIGGER_SQL } from './task-launch-snapshots.js';
-import { configureDatabase } from './store-schema.js';
 import { IMPORTED_EXEMPLAR_OBJECT_DIRECTORY } from './imported-exemplars.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, open, opendir, readdir, rm } from 'node:fs/promises';
@@ -476,6 +475,8 @@ export async function writeDatabasePackage(
     // Launch command identities and credential references belong only to this instance.
     const exportedCopy = new DatabaseSync(snapshotPath);
     try {
+      // Schema definitions import this module; defer their connection owner until initialization is complete.
+      const { configureDatabase } = await import('./store-schema.js');
       configureDatabase(exportedCopy);
       if (exportedCopy.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'task_launch_snapshots'").get() !== undefined) {
         exportedCopy.exec('PRAGMA secure_delete = ON');
