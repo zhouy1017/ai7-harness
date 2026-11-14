@@ -594,9 +594,15 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
 export const WAL_CHECKPOINT_LIMITS = { softBytes: 256 * 1024 * 1024, emergencyBytes: 16 * 1024 * 1024 * 1024 };
 
 /** Connection configuration disables automatic checkpoints; the store runs this only after responses, outside edit commits. */
+export function recordCheckpointSkip(error: unknown, source: string): void {
+  const code = typeof error === 'object' && error !== null && 'errcode' in error ? Number(error.errcode) : 0;
+  process.stderr.write('AI7_CHECKPOINT_SKIPPED/' + JSON.stringify({ source, sqliteCode: Number.isFinite(code) ? code : 0 }) + '\n');
+}
+
 export class WalCheckpointPolicy {
   readonly #pageBytes: number;
   #lastFrames = 0;
+  #reclaim = false;
 
   constructor(
     readonly db: DatabaseSync,
@@ -626,13 +632,14 @@ export class WalCheckpointPolicy {
 
   /** Refuse before BEGIN; the renderer retains and retries the exact command through its existing protection path. */
   admitJournalWrite(): void {
-    const space = statfsSync(dirname(this.path));
-    const freeBytes = space.bavail * space.bsize;
-    requireStore(freeBytes >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘剩余空间不足，请释放空间后重试保存。');
+    let freeBytes = -1;
+    try { const space = statfsSync(dirname(this.path)); freeBytes = space.bavail * space.bsize; }
+    catch { process.stderr.write('AI7_WAL_SPACE_UNAVAILABLE\n'); }
+    requireStore(freeBytes < 0 || freeBytes >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘已满，请腾出空间后再保存。');
     // 30 bursts can append 11.84 GB before checkpointing catches up. Normal backlog is not a write refusal.
-    const ceiling = Math.min(this.limits.emergencyBytes, Math.floor(freeBytes / 4));
+    const ceiling = freeBytes < 0 ? this.limits.emergencyBytes : Math.min(this.limits.emergencyBytes, Math.floor(freeBytes / 4));
     const walBytes = this.fileBytes();
-    if (walBytes >= ceiling) this.#recordEmergency(walBytes, ceiling, freeBytes);
+    if (walBytes >= ceiling) { this.#reclaim = true; this.#recordEmergency(walBytes, ceiling, freeBytes); }
     requireStore(walBytes < ceiling, 'JOURNAL_CHECKPOINT_BUSY', '本机存储空间暂时不足，请稍候重试保存。');
   }
 
@@ -650,27 +657,35 @@ export class WalCheckpointPolicy {
   }
 
   maintain(idle: boolean, force = false): { busy: boolean; beforeBytes: number; afterBytes: number } | null {
-    if (!force && this.frames() * this.#pageBytes < this.limits.softBytes) return null;
-    const beforeBytes = this.fileBytes();
-    const timeout = asNumber((this.db.prepare('PRAGMA busy_timeout').get() as SqlRow).timeout);
-    this.db.exec('PRAGMA busy_timeout = 0');
     try {
-      const result = this.db.prepare(`PRAGMA wal_checkpoint(${idle ? 'TRUNCATE' : 'PASSIVE'})`).get() as SqlRow;
-      return { busy: asNumber(result.busy) !== 0, beforeBytes, afterBytes: this.fileBytes() };
+      if (!force && !idle && !this.#reclaim && !this.needsMaintenance()) return null;
+      const beforeBytes = this.fileBytes();
+      const timeout = asNumber((this.db.prepare('PRAGMA busy_timeout').get() as SqlRow).timeout);
+      this.db.exec('PRAGMA busy_timeout = 0');
+      try {
+        // Backfill without a writer lock first. Only an entirely backfilled, idle WAL may be truncated.
+        const passive = this.db.prepare('PRAGMA wal_checkpoint(PASSIVE)').get() as SqlRow;
+        let busy = asNumber(passive.busy) !== 0 || asNumber(passive.log) > asNumber(passive.checkpointed);
+        if (idle && !busy) {
+          const latest = this.db.prepare('PRAGMA wal_checkpoint(NOOP)').get() as SqlRow;
+          if (asNumber(latest.log) === asNumber(latest.checkpointed)) {
+            const trimmed = this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as SqlRow;
+            busy = asNumber(trimmed.busy) !== 0;
+          }
+        }
+        const afterBytes = this.fileBytes();
+        if (afterBytes === 0) this.#reclaim = false;
+        return { busy, beforeBytes, afterBytes };
+      } finally { this.db.exec(`PRAGMA busy_timeout = ${timeout}`); }
     } catch (error) {
-      // Active statements on this connection may report SQLITE_LOCKED rather than a busy result row.
-      const sqliteCode = typeof error === 'object' && error !== null && 'errcode' in error ? error.errcode : null;
-      if (typeof sqliteCode !== 'number' || ![5, 6].includes(sqliteCode & 0xff)) throw error;
-      return { busy: true, beforeBytes, afterBytes: this.fileBytes() };
-    } finally {
-      this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
+      recordCheckpointSkip(error, 'fallback');
+      return null;
     }
   }
 
   shutdown(): void {
-    const result = this.maintain(true, true)!;
-    // A pinned reader/statement can prevent truncation; FULL commits are already durable in WAL.
-    if (result.busy) this.maintain(false, true);
+    // Busy readers/unfinished statements leave FULL-durable WAL for the next open.
+    this.maintain(true, true);
   }
 }
 

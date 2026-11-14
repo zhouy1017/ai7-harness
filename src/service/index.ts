@@ -1765,9 +1765,15 @@ async function dispatch(
         ),
       };
     case 'shutdown':
-      store.markCleanShutdown();
       return { id: request.id, ok: true, op: request.op, result: { state: 'stopping' } };
   }
+}
+
+/** The clean lifetime marker is durable before potentially slow checkpoint/close work starts. */
+async function prepareCleanShutdown(store: EditorialStore, stopOwners: () => Promise<void>): Promise<void> {
+  await stopOwners();
+  store.markCleanShutdown(false);
+  await store.stopCheckpointWorker(true);
 }
 
 /** The Book-less dialogue's route (Issue #1083), refused before anything is recorded unless the selected policy admits one. */
@@ -2509,7 +2515,7 @@ async function run(): Promise<void> {
         if (serving.store.replacementWaiting()) throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
       },
       dispatch: async (request) => {
-        if (request.op === 'shutdown') { await stopOwners(); await serving.store.stopCheckpointWorker(true); }
+        if (request.op === 'shutdown') await prepareCleanShutdown(serving.store, stopOwners);
         let response: ServiceResponse;
         try {
           response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,

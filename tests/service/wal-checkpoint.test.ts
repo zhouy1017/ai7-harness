@@ -9,9 +9,9 @@ import { setImmediate as tick } from 'node:timers/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { configureDatabase, WalCheckpointPolicy } from '../../src/service/store-schema.js';
+import { configureDatabase, WAL_CHECKPOINT_LIMITS } from '../../src/service/store-schema.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -29,6 +29,7 @@ beforeAll(async () => {
   if (boundary < 0) throw new Error('SERVICE_STARTUP_BOUNDARY_NOT_FOUND');
   // Exercise the actual dispatcher and failure mapper without booting the service as a side effect of import.
   await build({ stdin: { resolveDir: join(codeRoot, 'src/service'), sourcefile: 'index.ts', loader: 'ts', contents: entry.slice(0, boundary) + `
+export { prepareCleanShutdown };
 export async function journalResponse(store, request, errorClass) {
   StoreErrorClass = errorClass;
   try { return { response: await dispatch(store, undefined, undefined, undefined, undefined, undefined, undefined, undefined, request, undefined, undefined, undefined, undefined), sqliteCode: 0 }; }
@@ -91,10 +92,11 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('acknowledges a journal request with no error response when it meets a real TRUNCATE writer lock', async () => {
     store!.markCleanShutdown(); store!.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.flushJournalEdit(edit());
     const reader = new DatabaseSync(database(), { readOnly: true });
+    // Pin the current tail: PASSIVE can backfill everything, but TRUNCATE must still wait for this reader.
     reader.exec('PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=0; BEGIN');
     reader.prepare('SELECT * FROM branch_working_state').all();
-    store.flushJournalEdit(edit());
     const pending = edit();
     const adapter = await import(pathToFileURL(serviceAdapter).href);
     const probe = new DatabaseSync(database()); configureDatabase(probe); probe.exec('PRAGMA busy_timeout=0');
@@ -113,7 +115,7 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
           parentPort.postMessage({ready:true});
           parentPort.on('message', request => {
             if (request.mode === 'close') { db.close(); parentPort.postMessage({id:request.id,ok:true,busy:false,beforeBytes:0,afterBytes:bytes()}); parentPort.close(); return; }
-            const beforeBytes = bytes(); parentPort.postMessage({checkpointStarted:true});
+            const beforeBytes = bytes(); if(request.mode==='TRUNCATE') parentPort.postMessage({checkpointStarted:true});
             const row = db.prepare('PRAGMA wal_checkpoint('+request.mode+')').get();
             if (request.close) db.close();
             parentPort.postMessage({id:request.id,ok:true,busy:Number(row.busy)!==0,beforeBytes,afterBytes:bytes(),logFrames:Number(row.log),checkpointedFrames:Number(row.checkpointed)});
@@ -156,21 +158,78 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
     expect(store!.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence).toBe(ack.sequence);
   });
 
-  it('resumes an exact journal command after hard-pressure maintenance without dropping or duplicating it', () => {
-    const writer = new DatabaseSync(database()), reader = new DatabaseSync(database(), { readOnly: true });
-    configureDatabase(writer);
-    const policy = new WalCheckpointPolicy(writer, database(), { softBytes: 1, emergencyBytes: 1 });
+  it('reclaims below-soft emergency WAL after worker failure and admits the store exact retry once', async () => {
+    store!.checkpointAfterResponse(true);
+    expect(await store!.startCheckpointWorker(() => { throw new Error('worker unavailable'); })).toBe(false);
+    store!.flushJournalEdit(edit());
+    expect(statSync(database() + '-wal').size).toBeLessThan(WAL_CHECKPOINT_LIMITS.softBytes);
+    const pending = edit(), ceiling = WAL_CHECKPOINT_LIMITS.emergencyBytes;
     try {
-      policy.shutdown(); reader.exec('BEGIN'); reader.prepare('SELECT * FROM branch_working_state').all();
-      store!.flushJournalEdit(edit());
-      const pending = edit();
-      const attempt = () => { policy.admitJournalWrite(); return store!.flushJournalEdit(pending); };
-      policy.maintain(false);
-      expect(attempt).toThrowError(expect.objectContaining({ code: 'JOURNAL_CHECKPOINT_BUSY' }));
-      reader.exec('ROLLBACK'); policy.maintain(true);
-      const ack = attempt(); policy.maintain(true);
-      expect(attempt().sequence).toBe(ack.sequence);
+      WAL_CHECKPOINT_LIMITS.emergencyBytes = 1;
+      expect(() => store!.flushJournalEdit(pending)).toThrowError(expect.objectContaining({ code: 'JOURNAL_CHECKPOINT_BUSY' }));
+      store!.checkpointAfterResponse(true);
+      const ack = store!.flushJournalEdit(pending); store!.checkpointAfterResponse(true);
+      expect(store!.flushJournalEdit(pending).sequence).toBe(ack.sequence);
       expect(ack.sequence).toBe(pending.expectedJournalSequence + 1);
-    } finally { reader.close(); writer.close(); }
+    } finally { WAL_CHECKPOINT_LIMITS.emergencyBytes = ceiling; await store!.stopCheckpointWorker(false); }
+  });
+
+  it('acknowledges a non-journal annotation while idle PASSIVE backfills a large WAL', async () => {
+    const writer = new DatabaseSync(database()); configureDatabase(writer);
+    // Isolated zero padding creates WAL pressure without adding manuscript content or changing any product row.
+    writer.exec('CREATE TABLE checkpoint_test_padding(bytes BLOB); INSERT INTO checkpoint_test_padding VALUES (zeroblob(33554432))');
+    const modes: string[] = [];
+    let started!: () => void;
+    const checkpointStarted = new Promise<void>(resolve => { started = resolve; });
+    try {
+      expect(await store!.startCheckpointWorker(databasePath => {
+        const worker = new Worker(`const {parentPort}=require('node:worker_threads');
+          parentPort.on('message', request => { if(request.mode==='PASSIVE') parentPort.postMessage({checkpointStarted:true}); });
+          import(${JSON.stringify(pathToFileURL(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs')).href)});`,
+        { eval: true, workerData: { databasePath } });
+        worker.on('message', packet => { if (packet.checkpointStarted) started(); });
+        const send = worker.postMessage.bind(worker);
+        vi.spyOn(worker, 'postMessage').mockImplementation(request => { modes.push(request.mode); send(request); });
+        return worker;
+      })).toBe(true);
+      await checkpointStarted;
+      expect(modes[0]).toBe('PASSIVE');
+      const window = store!.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = window.blocks.find(value => value.kind === 'paragraph' && value.text.length > 0)!;
+      const card = store!.createEditorialMark({ ...book, windowStartBlockId: window.blocks[0]!.blockId,
+        clientMarkId: randomUUID(), baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence,
+        blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1,
+        selectedText: Array.from(block.text)[0]!, kind: 'annotation', highlightColor: null, body: '核对用语。', proposedText: null, rationale: null }).card!;
+      expect(card.kind).toBe('annotation');
+      expect(store!.getEditorialMarkCard(book.manuscriptId, book.branchId, card.markId).body).toBe('核对用语。');
+      expect(store!.flushJournalEdit(edit()).sequence).toBe(1);
+    } finally { await store!.stopCheckpointWorker(false); writer.exec('DROP TABLE checkpoint_test_padding'); writer.close(); }
+  });
+
+  it('marks a normal quit clean before a checkpoint exceeds the shutdown bound', async () => {
+    const adapter = await import(pathToFileURL(serviceAdapter).href);
+    store!.flushJournalEdit(edit());
+    let worker!: Worker;
+    expect(await store!.startCheckpointWorker(databasePath => {
+      worker = new Worker(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), { workerData: { databasePath } }); return worker;
+    })).toBe(true);
+    const events: string[] = [];
+    const mark = store!.markCleanShutdown.bind(store!);
+    vi.spyOn(store!, 'markCleanShutdown').mockImplementation(checkpoint => { events.push('clean'); mark(checkpoint); });
+    const send = worker.postMessage.bind(worker);
+    vi.spyOn(worker, 'postMessage').mockImplementation(request => {
+      if (request.mode === 'PASSIVE') { events.push('checkpoint'); return; }
+      send(request);
+    });
+    vi.useFakeTimers();
+    try {
+      const stopped = adapter.prepareCleanShutdown(store!, async () => { events.push('owners-stopped'); });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(events).toEqual(['owners-stopped', 'clean', 'checkpoint']);
+      await vi.advanceTimersByTimeAsync(5_000); await stopped;
+    } finally { vi.useRealTimers(); await worker.terminate(); }
+    store!.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect((await store.getStartup()).state).not.toBe('manuscript-recovery');
+    expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence).toBe(1);
   });
 });

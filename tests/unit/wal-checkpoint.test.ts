@@ -6,10 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureDatabase, WalCheckpointPolicy, WAL_CHECKPOINT_LIMITS } from '../../src/service/store-schema.js';
 
-const lowDisk = vi.hoisted(() => ({ enabled: false }));
+const lowDisk = vi.hoisted(() => ({ enabled: false, unavailable: false }));
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return { ...actual, statfsSync: (path: import('node:fs').PathLike) => {
+    if (lowDisk.unavailable) throw Object.assign(new Error('space unavailable'), { errno: -5 });
     const result = actual.statfsSync(path); return lowDisk.enabled ? { ...result, bavail: 0 } : result;
   } };
 });
@@ -18,6 +19,7 @@ let root: string, path: string, db: DatabaseSync, reader: DatabaseSync | undefin
 let policy: WalCheckpointPolicy;
 beforeEach(async () => {
   lowDisk.enabled = false;
+  lowDisk.unavailable = false;
   root = await mkdtemp(join(tmpdir(), 'ai7-checkpoint-'));
   path = join(root, 'store.sqlite');
   db = new DatabaseSync(path); configureDatabase(db);
@@ -34,6 +36,27 @@ const write = (id: string): void => {
 };
 
 describe('store-owned WAL checkpoint policy', () => {
+  it('reclaims idle physical WAL below the soft threshold after emergency admission refuses an edit', () => {
+    policy = new WalCheckpointPolicy(db, path, { softBytes: 256 * 1024 * 1024, emergencyBytes: 64 * 1024 });
+    write('first');
+    expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_CHECKPOINT_BUSY' }));
+    expect(policy.maintain(true)?.afterBytes).toBe(0);
+    expect(() => write('pending')).not.toThrow();
+  });
+
+  it('uses the configured emergency ceiling when free-space inspection is unavailable', () => {
+    lowDisk.unavailable = true;
+    expect(() => write('pending')).not.toThrow();
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 2 });
+  });
+
+  it('skips maintenance bookkeeping while an authority statement is un-reset', () => {
+    write('first');
+    const rows = db.prepare('SELECT * FROM edits').iterate(); rows.next();
+    try { expect(() => policy.maintain(true)).not.toThrow(); }
+    finally { rows.return?.(); }
+    expect(policy.maintain(true)?.afterBytes).toBe(0);
+  });
   it('keeps FULL durability and disables automatic checkpoint on every configured connection', () => {
     reader = new DatabaseSync(path); configureDatabase(reader);
     for (const connection of [db, reader]) {
@@ -88,7 +111,7 @@ describe('store-owned WAL checkpoint policy', () => {
 
   it('refuses before beginning a write when disk headroom is exhausted, and resumes after space returns', () => {
     lowDisk.enabled = true;
-    expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_DISK_FULL' }));
+    expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_DISK_FULL', message: '磁盘已满，请腾出空间后再保存。' }));
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 1 });
     lowDisk.enabled = false; write('pending');
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 2 });

@@ -39,6 +39,32 @@ function write(id: string): void {
 }
 
 describe('store-owned checkpoint worker', () => {
+  it('reclaims below-soft emergency WAL after worker failure so the next edit succeeds', async () => {
+    policy.limits.softBytes = 256 * 1024 * 1024;
+    write('first');
+    policy.limits.emergencyBytes = 64 * 1024;
+    await worker.terminate();
+    expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_CHECKPOINT_BUSY' }));
+    expect(maintenance.maintain(true)?.afterBytes).toBe(0);
+    write('pending');
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
+  });
+  it('keeps fallback idle reclamation alive after the worker dies', async () => {
+    policy.limits.softBytes = 256 * 1024 * 1024;
+    write('first'); policy.limits.emergencyBytes = 64 * 1024;
+    await worker.terminate();
+    vi.useFakeTimers();
+    try {
+      expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_CHECKPOINT_BUSY' }));
+      maintenance.maintain(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(policy.fileBytes()).toBe(0);
+      write('pending');
+      expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
+      await maintenance.stop(false);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('coalesces requests with at most one checkpoint in flight', async () => {
     expect(readyMessage).toMatchObject({ ready: true, wal: true, synchronous: 2, autoCheckpoint: 0 });
     const send = worker.postMessage.bind(worker);
@@ -71,14 +97,15 @@ describe('store-owned checkpoint worker', () => {
 
   it('keeps the worker and one deferred request through busy/partial checkpoints, then drains after the reader releases', async () => {
     reader = new DatabaseSync(path, { readOnly: true }); reader.exec('BEGIN'); reader.prepare('SELECT * FROM edits').all();
-    const busy = new Promise<void>(resolve => { worker.on('message', packet => { if (packet.busy) resolve(); }); });
+    const busy = new Promise<void>(resolve => { worker.on('message', packet => { if (packet.busy || packet.logFrames > packet.checkpointedFrames) resolve(); }); });
     write('first'); maintenance.maintain(false); await maintenance.settled();
     expect(maintenance.available).toBe(true);
-    await busy; // A real pinned-reader TRUNCATE returns busy without retiring the thread.
+    await busy; // PASSIVE reports the reader-pinned remainder without retiring the thread.
     expect(maintenance.available).toBe(true);
     expect(maintenance.maintain(false)).toBeNull();
+    const drained = new Promise<void>(resolve => { worker.on('message', packet => { if ('id' in packet && packet.afterBytes === 0) resolve(); }); });
     reader.exec('ROLLBACK'); write('second');
-    await maintenance.stop(true);
+    await drained; // The live worker's own spaced retry, not shutdown, must finish this maintenance.
     expect(policy.fileBytes()).toBe(0);
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
   });
@@ -114,35 +141,61 @@ describe('store-owned checkpoint worker', () => {
     expect(policy.fileBytes()).toBe(0);
   });
 
-  it('bounds a checkpoint wait below the service watchdog without retiring the worker', async () => {
+  it('bounds a missing worker response and settles without a synthetic cleanup response', async () => {
     vi.useFakeTimers();
+    const diagnostic = vi.spyOn(process.stderr, 'write');
     let heldId = 0;
     const send = worker.postMessage.bind(worker);
     const held = vi.spyOn(worker, 'postMessage').mockImplementation(request => {
-      if (request.mode === 'TRUNCATE') { heldId = request.id; return; }
+      if (request.mode === 'PASSIVE') { heldId = request.id; return; }
       send(request);
     });
     try {
-      write('first'); await vi.advanceTimersByTimeAsync(1_000);
+      write('first'); maintenance.maintain(false);
       expect(heldId).toBeGreaterThan(0);
-      const waiting = maintenance.waitForJournalWrite();
-      const refused = expect(waiting).rejects.toMatchObject({ code: 'JOURNAL_CHECKPOINT_WAIT_TIMEOUT' });
-      await vi.advanceTimersByTimeAsync(20_000); await refused;
-      expect(maintenance.available).toBe(true);
-    } finally {
-      vi.useRealTimers();
-      const stopped = maintenance.stop(false);
-      worker.emit('message', { id: heldId, ok: true, busy: false, beforeBytes: policy.fileBytes(), afterBytes: 0 });
-      held.mockRestore(); await stopped;
-    }
+      const settled = maintenance.settled();
+      await vi.advanceTimersByTimeAsync(60_000); await settled;
+      expect(maintenance.available).toBe(false);
+      expect(diagnostic.mock.calls.some(([line]) => String(line).includes('"reason":"flight-timeout","mode":"PASSIVE"'))).toBe(true);
+      await maintenance.stop(false);
+    } finally { vi.useRealTimers(); held.mockRestore(); diagnostic.mockRestore(); await worker.terminate(); }
   });
 
-  it('finishes clean shutdown through the fallback if the worker dies while shutdown starts', async () => {
+  it('does not run synchronous fallback while a healthy thread is still starting', async () => {
+    await maintenance.stop(false);
+    db.prepare('INSERT INTO edits VALUES (?, ?)').run('recovered', 'x'.repeat(80 * 1024));
+    const fallback = vi.spyOn(policy, 'maintain');
+    maintenance = new WalCheckpointMaintenance(policy, path, () => {
+      worker = new Worker(`const {parentPort}=require('node:worker_threads'); parentPort.on('message', packet=>{
+        if(packet==='release-ready') parentPort.postMessage({ready:true});
+        else { parentPort.postMessage({id:packet.id,ok:true,busy:false,beforeBytes:0,afterBytes:0,logFrames:0,checkpointedFrames:0}); if(packet.close) parentPort.close(); }
+      });`, { eval: true }); return worker;
+    });
+    expect(maintenance.maintain(true)).toBeNull();
+    expect(fallback).not.toHaveBeenCalled();
+    worker.postMessage('release-ready'); expect(await maintenance.ready).toBe(true);
+    fallback.mockRestore();
+  });
+
+  it('skips response and idle ticks rather than throwing for an un-reset authority statement', async () => {
+    write('first');
+    const rows = db.prepare('SELECT * FROM edits').iterate(); rows.next();
+    vi.useFakeTimers();
+    try {
+      expect(() => maintenance.maintain(false)).not.toThrow();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(maintenance.available).toBe(true);
+    } finally { rows.return?.(); vi.useRealTimers(); }
+  });
+
+  it('retains acknowledged WAL if the worker dies while bounded shutdown starts', async () => {
     write('acknowledged');
     const terminated = worker.terminate();
     const stopped = maintenance.stop(true);
     await terminated; await stopped;
-    expect(policy.fileBytes()).toBe(0);
+    const reopened = new DatabaseSync(path, { readOnly: true });
+    try { expect(reopened.prepare('SELECT id FROM edits WHERE id = ?').get('acknowledged')).toMatchObject({ id: 'acknowledged' }); }
+    finally { reopened.close(); }
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 2 });
   });
 
