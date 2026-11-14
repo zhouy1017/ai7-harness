@@ -5,14 +5,14 @@ export async function prepareLegacyReviewPlan(renderer, waitFor) {
   const runId = await renderer.evaluate(`(async () => {
     const sheet=document.querySelector('dialog.review-sheet');
     const definition=sheet.querySelector('[data-procedure-definition]')?.dataset.procedureDefinition;
+    const field=sheet.querySelector('.review-sheet-procedure');
     // A selected Procedure fixes its membership: its checked controls are intentionally disabled.
     const categoryIds=Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'),input=>input)
-      .filter(input=>definition||!input.disabled).map(input=>input.value);
+      .filter(input=>definition||field?.dataset.procedureVersionId||!input.disabled).map(input=>input.value);
     const kind=sheet.querySelector('input[name="review-scope"]:checked').value;
     const scope={kind,fromChapterBlockId:kind==='chapters'?sheet.querySelector('[data-review-chapter="from"]').value:null,
       toChapterBlockId:kind==='chapters'?sheet.querySelector('[data-review-chapter="to"]').value:null};
     const input={categoryIds,scope};
-    const field=sheet.querySelector('.review-sheet-procedure');
     if(field?.dataset.procedureVersionId){
       const captured=await window.ai7.inspectCapturedProcedureRun({procedureId:field.dataset.procedureId,versionId:field.dataset.procedureVersionId});
       input.capturedProcedure={versionId:captured.resolved.versionId,documentSha256:captured.resolved.documentSha256};
