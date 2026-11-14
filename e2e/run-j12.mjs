@@ -1337,11 +1337,11 @@ async function main() {
     // Synchronized delta with Issue #405: move the editor off the manuscript's start, so that what the
     // restart below returns to is a position this editor chose rather than the place every manuscript
     // opens at. The 40-block synthetic manuscript is longer than one window, so paging forward has
-    // somewhere to go, and the moved-to window is what is remembered. `已到达` is written after the
-    // position is durable, so reading it is enough to know the product may be closed; the overview is
-    // then asked what it would enter at, because that is what the restart below has to match.
+    // somewhere to go, and the moved-to window is what is remembered. Issue #1481: hosted
+    // diagnosis observed a cursor load and persisted position 9 while the arrival announcement was
+    // absent from the status line. Wait for the durable position the restart actually consumes.
     await click(primary, '向后浏览', 'page-away-from-start');
-    await waitFor(primary, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'paged-away-from-start');
+    await waitFor(primary, `window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}).then((overview)=>Number.isSafeInteger(overview.manuscriptAnchor?.entry?.blockPosition) && overview.manuscriptAnchor.entry.blockPosition>1)`, 'paged-away-from-start');
     const pagedAwayPosition = await primary.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}).then((overview)=>overview.manuscriptAnchor?.entry?.blockPosition??null,()=>null)`);
     requireJourney(Number.isSafeInteger(pagedAwayPosition) && pagedAwayPosition > 1, 'paged-away-position-remembered-off-the-start');
 
