@@ -3943,6 +3943,10 @@ async function main() {
     const dispatchDefaults = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        // The admitted native file picker is one-use per product lifetime; renew that existing picker owner for each import.
+        await closeOwnedBrowser();
+        await launchForCleanup();
+        await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-restart-ready');
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-choice-library');
         await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-library-ready');
