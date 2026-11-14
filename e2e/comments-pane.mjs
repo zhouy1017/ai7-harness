@@ -34,7 +34,14 @@ async function commentsConnectorExposure(renderer, check, waitFor) {
         __connectorStyle.textContent='.editor-window [data-mark-id="'+CSS.escape(id)+'"] { position:relative; left:'+offset+'px; }';
         window.dispatchEvent(new Event('resize'));
       })()`);
-      if(covered)await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector');
+      await renderer.evaluate(`new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))`);
+      if(covered) {
+        try { await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector'); }
+        catch {
+          const geometry=await renderer.evaluate(`(() => { const id=document.querySelector('[data-comment-card][data-selected="true"]').dataset.commentCard, words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect(), w=words.getBoundingClientRect(), dot=document.querySelector('.manuscript-comments-leaders circle'); return {left:w.left,right:w.right,top:w.top,bottom:w.bottom,paneLeft:p.left,paneRight:p.right,paneTop:p.top,paneBottom:p.bottom,offset:parseFloat(getComputedStyle(words).left),rects:Array.from(words.getClientRects()).map(r=>({left:r.left,right:r.right,top:r.top})),cx:dot?.getAttribute('cx'),cy:dot?.getAttribute('cy')}; })()`);
+          check(false,'comments-covered-no-connector',geometry);
+        }
+      }
       else await waitFor(renderer, commentsConnectorVisible, 'comments-partial-connector-visible');
     }
   } finally {
