@@ -115,7 +115,7 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
           // Malformed calls are rejected individually at normalization.
           return { id: call.id, type: call.type, function: { name: call.name, arguments: call.arguments } };
         });
-        yield { kind: 'complete', response: { model, choices: [{ message: { content: toolCalls.length > 0 && content === '' ? null : content,
+        yield { kind: 'complete', response: { model, choices: [{ message: { content,
           ...(reasoningContent === null || !preserveReasoning && toolCalls.length === 0 ? {} : { reasoning_content: reasoningContent }),
           ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }) }, finish_reason: finish }], usage } };
         return;
