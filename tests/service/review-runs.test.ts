@@ -2709,7 +2709,7 @@ describe('one-step review launch (#1455)', () => {
       expect(session.store.launchReviewRun(input, launchPolicy).projection.run!.reviewRunId).toBe(first.reviewRunId);
       await Promise.all([session.driver.drive(first.reviewRunId), session.driver.drive(second.reviewRunId)]);
       for (const [book, runId, effort] of [[firstBook, first.reviewRunId, 'high'], [secondBook, second.reviewRunId, 'low']] as const) {
-        const run = workspace(session, book, runId).run!;
+        const run = session.store.generateReviewReport(book.bookId, runId).run!;
         expect(run.state).toBe('settled');
         expect(run.modelLabel).toContain(`@${effort}`);
         expect(run.report?.record.run.modelLabel).toContain(`@${effort}`);
