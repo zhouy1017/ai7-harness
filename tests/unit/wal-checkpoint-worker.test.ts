@@ -163,9 +163,10 @@ describe('store-owned checkpoint worker', () => {
     await maintenance.stop(false);
     const signal = new Int32Array(new SharedArrayBuffer(8));
     maintenance = new WalCheckpointMaintenance(policy, path, databasePath => {
-      worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads'); const signal=new Int32Array(workerData.signal);
+      worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads'); const signal=new Int32Array(workerData.signal), modes=new Map();
+        parentPort.on('message', request=>modes.set(request.id,request.mode));
         const post=parentPort.postMessage.bind(parentPort); parentPort.postMessage=packet=>{
-          post(packet); if(packet.id) { Atomics.store(signal,0,1); Atomics.notify(signal,0); }
+          post(packet); if(modes.get(packet.id)==='TRUNCATE') { Atomics.store(signal,0,1); Atomics.notify(signal,0); }
         }; import(${JSON.stringify(new URL('file:///' + script.replaceAll('\\', '/')).href)});`,
       { eval: true, workerData: { databasePath, signal: signal.buffer } }); return worker;
     });
