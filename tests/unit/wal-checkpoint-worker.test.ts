@@ -69,15 +69,29 @@ describe('store-owned checkpoint worker', () => {
     expect(maintenance.maintain(true)?.afterBytes).toBe(0);
   });
 
-  it('uses the fallback after a busy checkpoint, then resumes after the reader releases its snapshot', async () => {
+  it('keeps the worker and one deferred request through busy/partial checkpoints, then drains after the reader releases', async () => {
     reader = new DatabaseSync(path, { readOnly: true }); reader.exec('BEGIN'); reader.prepare('SELECT * FROM edits').all();
-    const stopped = once(worker, 'exit');
+    const busy = new Promise<void>(resolve => { worker.on('message', packet => { if (packet.busy) resolve(); }); });
     write('first'); maintenance.maintain(false); await maintenance.settled();
-    expect(maintenance.available).toBe(true); // A partial PASSIVE checkpoint is normal while a reader pins its snapshot.
-    await stopped; // The later write-idle TRUNCATE returns busy without waiting for that reader.
+    expect(maintenance.available).toBe(true);
+    await busy; // A real pinned-reader TRUNCATE returns busy without retiring the thread.
+    expect(maintenance.available).toBe(true);
+    expect(maintenance.maintain(false)).toBeNull();
+    reader.exec('ROLLBACK'); write('second');
+    await maintenance.stop(true);
+    expect(policy.fileBytes()).toBe(0);
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
+  });
+
+  it('records the mode and reason for a real checkpoint error and uses the fallback', async () => {
+    const diagnostic = vi.spyOn(process.stderr, 'write');
+    const send = worker.postMessage.bind(worker);
+    vi.spyOn(worker, 'postMessage').mockImplementation(request => send({ ...request, mode: 'invalid' }));
+    write('first'); maintenance.maintain(false); await maintenance.settled();
     expect(maintenance.available).toBe(false);
-    reader.exec('ROLLBACK'); expect(maintenance.maintain(true)?.afterBytes).toBe(0);
-    write('second'); expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
+    expect(diagnostic.mock.calls.some(([line]) => String(line).includes('"reason":"checkpoint-error","mode":"PASSIVE"'))).toBe(true);
+    expect(maintenance.maintain(true)?.afterBytes).toBe(0);
+    diagnostic.mockRestore();
   });
 
   it('awaits the last checkpoint, truncates and closes before the main connection closes', async () => {

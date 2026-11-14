@@ -24,9 +24,11 @@ parentPort.on('message', (request: { id: number; mode: 'PASSIVE' | 'TRUNCATE' | 
     const busy = Number(result['busy']) !== 0;
     if (request.close) db.close();
     parentPort!.postMessage({ id: request.id, ok: true, busy, beforeBytes, afterBytes: bytes(), logFrames: Number(result['log']), checkpointedFrames: Number(result['checkpointed']) });
-  } catch {
+  } catch (error) {
+    const sqliteCode = typeof error === 'object' && error !== null && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode : 0;
+    const busy = [5, 6].includes(sqliteCode & 0xff);
     if (request.close) { try { db.close(); } catch {} }
-    parentPort!.postMessage({ id: request.id, ok: false, busy: true, beforeBytes, afterBytes: bytes() });
+    parentPort!.postMessage({ id: request.id, ok: busy, busy, sqliteCode, beforeBytes, afterBytes: bytes() });
   }
   if (request.close) parentPort!.close();
 });

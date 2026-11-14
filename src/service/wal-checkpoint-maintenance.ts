@@ -4,7 +4,9 @@ import { requireStore } from './store-records.js';
 
 const WRITE_IDLE_MS = 1_000;
 type Mode = 'PASSIVE' | 'TRUNCATE' | 'close';
-type Result = { id: number; ok: boolean; busy: boolean; beforeBytes: number; afterBytes: number };
+type Result = { id: number; ok: boolean; busy: boolean; beforeBytes: number; afterBytes: number; logFrames?: number; checkpointedFrames?: number; sqliteCode?: number };
+type FailureReason = 'start-error' | 'thread-error' | 'thread-exit' | 'checkpoint-error' | 'send-error';
+const sqliteCodeOf = (error: unknown): number => typeof error === 'object' && error !== null && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode : 0;
 export type CheckpointWorkerFactory = (path: string) => Worker;
 
 /** One store-owned checkpoint connection; all data transactions remain on the existing writer connections. */
@@ -18,6 +20,8 @@ export class WalCheckpointMaintenance {
   #nextId = 0;
   #lastWrite = Date.now();
   #lastFrames = 0;
+  #retryAt = 0;
+  #lastCheckpointBusy = false;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #flight: { id: number; mode: Mode; done: Promise<void>; resolve: () => void } | undefined;
   #termination: Promise<number> | undefined;
@@ -41,20 +45,27 @@ export class WalCheckpointMaintenance {
         const flight = this.#flight;
         if (!flight || flight.id !== packet.id) return;
         this.#flight = undefined; flight.resolve();
-        if (!packet.ok || packet.busy) { this.#fail(); return; }
-        this.#pump(); this.#scheduleIdle();
+        this.#lastCheckpointBusy = packet.busy;
+        if (!packet.ok) { this.#fail('checkpoint-error', flight.mode, packet.sqliteCode ?? 0); return; }
+        if (!this.#stopping && (packet.busy || (packet.logFrames ?? 0) > (packet.checkpointedFrames ?? 0))) {
+          // Contention/partial progress is normal. Keep one deferred request on this live worker.
+          this.#pending = true; this.#truncatePending = false; this.#retryAt = Date.now() + WRITE_IDLE_MS;
+          this.#scheduleIdle(); return;
+        }
+        this.#retryAt = 0; this.#pump(); this.#scheduleIdle();
       });
-      this.#worker.on('error', () => this.#fail());
-      this.#worker.on('exit', () => {
-        if (this.#flight || !this.#stopping) this.#fail();
+      this.#worker.on('error', error => this.#fail('thread-error', this.#flight?.mode ?? (this.#available ? 'none' : 'startup'), sqliteCodeOf(error)));
+      this.#worker.on('exit', code => {
+        if (this.#flight || !this.#stopping) this.#fail('thread-exit', this.#flight?.mode ?? 'none', 0, code);
         this.#available = false; this.#resolveReady(false);
       });
-    } catch { this.#fail(); }
+    } catch (error) { this.#fail('start-error', 'startup', sqliteCodeOf(error)); }
   }
 
   get available(): boolean { return this.#available && !this.#failed && !this.#stopping; }
 
-  #fail(): void {
+  #fail(reason: FailureReason, mode: Mode | 'startup' | 'none', sqliteCode = 0, exitCode = 0): void {
+    if (!this.#failed) process.stderr.write('AI7_CHECKPOINT_WORKER_FAILED/' + JSON.stringify({ reason, mode, sqliteCode, exitCode }) + '\n');
     this.#failed = true; this.#available = false; this.#pending = false;
     this.#resolveReady(false); this.#clearIdle();
     this.#flight?.resolve(); this.#flight = undefined;
@@ -94,12 +105,13 @@ export class WalCheckpointMaintenance {
       this.#timer = undefined; this.#observeWrites();
       if (Date.now() - this.#lastWrite < WRITE_IDLE_MS) { this.#scheduleIdle(); return; }
       this.#pending = true; this.#truncatePending = true; this.#pump();
-    }, Math.max(1, WRITE_IDLE_MS - (Date.now() - this.#lastWrite)));
+    }, Math.max(1, this.#retryAt - Date.now(), WRITE_IDLE_MS - (Date.now() - this.#lastWrite)));
     this.#timer.unref();
   }
 
   #pump(): void {
     if (!this.available || this.#flight || !this.#pending) return;
+    if (Date.now() < this.#retryAt) { this.#scheduleIdle(); return; }
     this.#observeWrites();
     const truncate = this.#truncatePending && Date.now() - this.#lastWrite >= WRITE_IDLE_MS;
     this.#pending = false; this.#truncatePending = false;
@@ -113,7 +125,7 @@ export class WalCheckpointMaintenance {
     const done = new Promise<void>(yes => { resolve = yes; });
     this.#flight = { id, mode, done, resolve };
     try { this.#worker!.postMessage({ id, mode, close }); }
-    catch { this.#fail(); }
+    catch (error) { this.#fail('send-error', mode, sqliteCodeOf(error)); }
     return done;
   }
 
@@ -136,7 +148,7 @@ export class WalCheckpointMaintenance {
     await this.#send(clean ? 'TRUNCATE' : 'close', true);
     this.#termination ??= this.#worker!.terminate();
     await this.#termination;
-    if (clean && this.#failed) this.policy.shutdown();
+    if (clean && (this.#failed || this.#lastCheckpointBusy)) this.policy.shutdown();
   }
 
   abort(): void { this.#stopping = true; this.#clearIdle(); this.#termination ??= this.#worker?.terminate(); void this.#termination?.catch(() => undefined); }
