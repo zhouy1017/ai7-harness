@@ -32,7 +32,13 @@ async function commentsConnectorExposure(renderer, check, waitFor) {
         words.style.left=(${covered} ? p.left+8-r.left : p.left+8-r.right)+'px';
         globalThis.__connectorWords=words; window.dispatchEvent(new Event('resize'));
       })()`);
-      if(covered)await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector');
+      if(covered) {
+        try { await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector'); }
+        catch {
+          const geometry=await renderer.evaluate(`(() => { const p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect(), w=__connectorWords.getBoundingClientRect(), dot=document.querySelector('.manuscript-comments-leaders circle'); return {connected:__connectorWords.isConnected,left:w.left,right:w.right,top:w.top,bottom:w.bottom,paneLeft:p.left,paneRight:p.right,paneTop:p.top,paneBottom:p.bottom,offset:parseFloat(__connectorWords.style.left),cx:dot?.getAttribute('cx'),cy:dot?.getAttribute('cy')}; })()`);
+          check(false,'comments-covered-no-connector',geometry);
+        }
+      }
       else await waitFor(renderer, commentsConnectorVisible, 'comments-partial-connector-visible');
     }
   } finally {
