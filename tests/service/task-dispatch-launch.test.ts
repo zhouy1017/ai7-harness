@@ -167,11 +167,15 @@ it('drives a committed baseline launch after restart once and retains actual req
   store.selectMainRoleModel('opencode-go', defaults.model, 'off');
   const changedDefaults = store.getConfiguredModelRoleBinding('main-editorial');
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-happy');
+  const reflectionFixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-transient-retry');
+  const reflection = Array.from(reflectionFixture.entries.values()).find(entry =>
+    entry.response?.kind === 'unit-result' && entry.response.text.includes('ai7.analysis.run-report-reflection-result/1'))?.response;
+  expect(reflection).toBeDefined();
   await restart((request, message) => {
     // The ordinary clarification wrapper has its own physical digest; reuse the existing baseline response schedule
     // under the frozen unit identity, as the real-store composite transport tests do.
     const unit = parseUnitMessageHeader(message);
-    return request.stage === 'units' && unit !== null
+    return request.stage === 'run-report-reflection' ? reflection : request.stage === 'units' && unit !== null
       ? resolveFixtureEntry(fixture.entries, unit.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.unitDigest), request.attemptIndex)?.response
       : capturedMapAnswer(fixture.entries)(request, message);
   });
