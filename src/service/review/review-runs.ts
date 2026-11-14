@@ -3456,6 +3456,7 @@ export class ReviewRunStore {
     requireReview(bookWide || !view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
     const views = bookWide ? (this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[])
       .map((row) => this.#runView(this.#snapshotOf(row))).filter((candidate) => candidate.authorization !== null) : [view];
+    const models = [...new Set(views.flatMap(candidate => this.#modelAttribution(candidate.snapshot).modelLabel ?? []))];
     // Views run newest first: a mark several Runs found is one finding as its latest Run states it, and a category is the
     // latest Run's, in that Run's order; a single Run's report reads exactly its own.
     const newestOf = <T>(values: ReadonlyArray<T>, key: (value: T) => string): T[] =>
@@ -3477,7 +3478,7 @@ export class ReviewRunStore {
         version,
         generatedAt,
         run: {
-          ...this.#modelAttribution(snapshot),
+          ...(models.length === 0 ? {} : { modelLabel: models.join('、') }),
           ordinal: snapshot.ordinal,
           label: `第 ${snapshot.ordinal} 次`,
           createdAt: snapshot.createdAt,

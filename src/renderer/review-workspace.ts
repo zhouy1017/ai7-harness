@@ -1851,7 +1851,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function renderReport(run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
-    if (run.modelLabel) section.append(el('p', 'review-report-model', run.modelLabel));
+    const modelLabel = run.report?.record.run.modelLabel ?? run.modelLabel;
+    if (modelLabel) section.append(el('p', 'review-report-model', modelLabel));
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
     section.append(el('h5', undefined, `${REVIEW_REPORT_HEADING} · 旧版保留`));
     // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).
