@@ -3378,15 +3378,12 @@ export class EditorialStore {
     return this.#checkpoint.maintain(idle);
   }
 
-  checkpointForShutdown(): void {
-    this.#checkpoint.shutdown();
-  }
-
   markCleanShutdown(): void {
     this.#assertAvailable();
     requireStore(!this.#cleanShutdownMarked, 'LIFETIME_STATE_CHANGED', '本地服务生命周期无法重复结束。');
     this.#boundedCall(() => this.#boundedAuthority.markServiceLifetimeClean(this.#lifetimeId, new Date().toISOString()));
     this.#cleanShutdownMarked = true;
+    this.#checkpoint.shutdown();
   }
 
   async inspectEditorialWorkspaceProfile(bookId: string): Promise<EditorialWorkspaceProfileProjection> {

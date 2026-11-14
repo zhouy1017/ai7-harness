@@ -51,7 +51,7 @@ function edit() {
 
 describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('recovers every acknowledged edit after killing the store process while the edits exist only in WAL', async () => {
-    store!.markCleanShutdown(); store!.checkpointForShutdown(); store!.close(); store = undefined;
+    store!.markCleanShutdown(); store!.close(); store = undefined;
     child = spawn(process.execPath, [helper, roots.dataRoot, roots.codeRoot, book.manuscriptId, book.branchId], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     const [message] = await Promise.race([once(child, 'message'), once(child, 'exit').then(([code]) => { throw new Error('WAL child exited before acknowledgement: ' + String(code)); })]);
     const ack = message as { sequence: number; workingDigest: string; blockId: string };
@@ -72,7 +72,7 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('truncates WAL after clean-shutdown preparation while retaining acknowledged journal state', () => {
     const ack = store!.flushJournalEdit(edit());
     expect(statSync(database() + '-wal').size).toBeGreaterThan(0);
-    store!.markCleanShutdown(); store!.checkpointForShutdown();
+    store!.markCleanShutdown();
     expect(statSync(database() + '-wal').size).toBe(0);
     expect(store!.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence).toBe(ack.sequence);
   });

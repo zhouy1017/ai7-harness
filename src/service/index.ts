@@ -2086,7 +2086,6 @@ async function run(): Promise<void> {
   const requestGovernor = new ModelRequestGovernor();
   let stopping = false;
   let requestLoop: InstanceType<typeof ServiceRequestLoop> | undefined;
-  let cleanShutdown = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
@@ -2112,6 +2111,36 @@ async function run(): Promise<void> {
   let backupTimer: NodeJS.Timeout | undefined;
   let background: BackgroundAnalysisDispatcher | undefined;
   let transportFailure: 'proxy-unreachable' | 'model-service-unreachable' | null = null;
+  let ownersStopped: Promise<void> | undefined;
+  const stopOwners = (): Promise<void> => {
+    ownersStopped ??= (async () => {
+      if (preflightTimer !== undefined) clearInterval(preflightTimer);
+      if (backupTimer !== undefined) clearInterval(backupTimer);
+      const backupsStopped = store?.stopScheduledBackups();
+      // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
+      const exportsStopped = store?.stopDatabaseExports();
+      // The dispatcher starts nothing more: a preparation it has under way stops at its next step.
+      await background?.dispose();
+      await jobs?.dispose();
+      // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
+      await dialogues?.dispose();
+      // A 润色这段 or 重新生成建议 request in flight is interrupted and settles before the store closes (Issue #842).
+      fastRole?.owner.dispose();
+      await fastRole?.requests.settled();
+      // The Review Run loop stops first and starts no further category; the owner then interrupts the
+      // Run in flight, and the loop records what that Run came to before the store closes.
+      const reviewRunsStopped = reviewRuns?.dispose();
+      await analysisExecution?.dispose();
+      await reviewRunsStopped;
+      await harness?.dispose();
+      requestGovernor.close();
+      await requestGovernor.whenIdle();
+      await backupsStopped;
+      await exportsStopped;
+    })();
+    return ownersStopped;
+  };
+
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const buildIdentity = await readBuiltIdentity(codeRoot);
@@ -2477,6 +2506,7 @@ async function run(): Promise<void> {
         if (serving.store.replacementWaiting()) throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
       },
       dispatch: async (request) => {
+        if (request.op === 'shutdown') await stopOwners();
         let response: ServiceResponse;
         try {
           response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
@@ -2504,7 +2534,6 @@ async function run(): Promise<void> {
         return response;
       },
       afterResponse: (request, response) => {
-        if (request.op === 'shutdown' && response.ok) cleanShutdown = true;
         if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
           throw new Error('E2E interruption after acknowledged journal edit.');
         }
@@ -2521,28 +2550,7 @@ async function run(): Promise<void> {
     try {
       // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
       // #434 review).
-      const backupsStopped = store?.stopScheduledBackups();
-      // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
-      const exportsStopped = store?.stopDatabaseExports();
-      // The dispatcher starts nothing more: a preparation it has under way stops at its next step.
-      await background?.dispose();
-      await jobs?.dispose();
-      // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
-      await dialogues?.dispose();
-      // A 润色这段 or 重新生成建议 request in flight is interrupted and settles before the store closes (Issue #842).
-      fastRole?.owner.dispose();
-      await fastRole?.requests.settled();
-      // The Review Run loop stops first and starts no further category; the owner then interrupts the
-      // Run in flight, and the loop records what that Run came to before the store closes.
-      const reviewRunsStopped = reviewRuns?.dispose();
-      await analysisExecution?.dispose();
-      await reviewRunsStopped;
-      await harness?.dispose();
-      requestGovernor.close();
-      await requestGovernor.whenIdle();
-      await backupsStopped;
-      await exportsStopped;
-      if (cleanShutdown) store?.checkpointForShutdown();
+      await stopOwners();
     } finally {
       store?.close();
     }
