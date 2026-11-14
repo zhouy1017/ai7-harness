@@ -2410,3 +2410,13 @@ it('accepts editable derivative categories and workspace metadata, and refuses m
     { op: 'updateProductionDocumentMeta', input: { bookId, documentId, finalized: 'yes' } },
   ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...body })))).toThrow(ProtocolError);
 });
+
+
+it('decodes independent two-role efforts only on the atomic two-role selector (#1453 review)', () => {
+  const input = { route: 'openai-platform', modelId: 'custom-model', reasoningEffort: 'high', fastReasoningEffort: 'low' };
+  const frame = { id: randomUUID(), op: 'selectBothRoleModels', input };
+  expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toMatchObject(frame);
+  for (const op of ['selectMainRoleModel', 'selectFastRoleModel', 'testModelServiceConnection'])
+    expect(() => decodeRequest(new TextEncoder().encode(JSON.stringify({ ...frame, op })))).toThrow(ProtocolError);
+  expect(() => decodeRequest(new TextEncoder().encode(JSON.stringify({ ...frame, input: { ...input, fastReasoningEffort: 'invalid value' } })))).toThrow(ProtocolError);
+});

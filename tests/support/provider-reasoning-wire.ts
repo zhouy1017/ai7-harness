@@ -6,7 +6,7 @@ import { isRecord } from '../../src/service/analysis/canonical.js';
  * DeepSeek: https://api-docs.deepseek.com/guides/thinking_mode/
  * Gemini: https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures
  */
-export function reasoningWireResponse(family: string, turn: number) {
+export function reasoningWireResponse(family: string, turn: number, request: Record<string, unknown> = {}) {
   const calls = turn === 1 ? ['call_1'] : turn === 2 ? ['call_2', 'call_3'] : [];
   const text = turn > 2 ? 'Protocol result.' : '';
   const input = { query: 'protocol' };
@@ -16,7 +16,7 @@ export function reasoningWireResponse(family: string, turn: number) {
     ? [{ role: 'assistant', content: text || null, reasoning_content: reasoning,
       ...(calls.length === 0 ? {} : { tool_calls: calls.map((id) => ({ id, type: 'function', function: { name: 'retrieve', arguments: JSON.stringify(input) } })) }) }]
     : family === 'openai-responses'
-      ? [{ type: 'reasoning', id: `rs_${turn}`, summary: [], encrypted_content: `synthetic-encrypted-${turn}` },
+      ? [{ type: 'reasoning', id: `rs_${turn}`, summary: [], ...(Array.isArray(request.include) && request.include.includes('reasoning.encrypted_content') ? { encrypted_content: `synthetic-encrypted-${turn}` } : {}) },
         ...(text ? [{ type: 'message', role: 'assistant', id: `msg_${turn}`, status: 'completed', phase: 'final_answer', content: [{ type: 'output_text', text, annotations: [] }] }] : []),
         ...calls.map((id) => ({ type: 'function_call', id: `fc_${id}`, call_id: id, name: 'retrieve', arguments: JSON.stringify(input), status: 'completed' }))]
       : family === 'anthropic-messages'

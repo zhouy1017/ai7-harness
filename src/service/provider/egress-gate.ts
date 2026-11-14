@@ -1,3 +1,4 @@
+import { sentReasoningEffort } from '../../shared/runtime-execution-config.js';
 import { SEARCH_BACKENDS } from './search-backends.js';
 import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
@@ -483,6 +484,15 @@ function refuse(reason: EgressRefusalReason, detail: string): EgressDecision {
  * platform tools — contributes its canonical blocks, so two different tool exchanges never share a digest.
  */
 export function payloadDigest(payload: AssembledModelPayload): string {
+  // Never rewrite historical result digests. New controlled/tool transmissions additionally bind every wire-affecting
+  // assembled field, including the adapter-private native items that replace canonical blocks during family encoding.
+  if (sentReasoningEffort(payload.reasoningEffort) !== null || (payload.tools?.length ?? 0) > 0 ||
+      payload.messages.some((message) => message.source.replayState !== undefined)) {
+    return sha256Hex(canonicalJson({ version: 2, provider: payload.provider, model: payload.model, system: payload.system ?? null,
+      reasoningEffort: sentReasoningEffort(payload.reasoningEffort), tools: payload.tools ?? [],
+      messages: payload.messages.map((message) => ({ role: message.role, content: message.content,
+        replayState: message.source.replayState ?? null })) }));
+  }
   const texts = payload.messages.map((message) => `${message.role}\u0000${messageText(message) ?? `\u0001${canonicalJson(message.content)}`}`);
   return sha256Hex([payload.provider, payload.model, payload.system ?? '', ...texts].join('\u0002'));
 }

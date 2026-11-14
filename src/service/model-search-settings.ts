@@ -39,7 +39,7 @@ export interface ModelSearchSettingsHost {
   getModelServiceRouteConnection: (route: ModelServiceRouteId) => ModelServiceConnectionProjection | null;
   getSearchBackendConnections: () => import('../shared/protocol.js').SearchBackendConnectionProjection[];
   modelServiceBinding: (route: ModelServiceRouteId, modelId: string) => import('../shared/protocol.js').ModelServiceBindingProjection;
-  selectRoleModel: (route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string) => void;
+  selectRoleModel: (route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string) => void;
 }
 
 export function getSearchBackendSettings(host: ModelSearchSettingsHost): import('../shared/protocol.js').SearchBackendSettingsProjection {
@@ -251,12 +251,13 @@ export function selectMainRoleModel(host: ModelSearchSettingsHost, route: ModelS
   host.selectRoleModel(route, modelId, 'main', reasoningEffort);
 }
 
-export function selectBothRoleModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-  host.selectRoleModel(route, modelId, 'both', reasoningEffort);
+export function selectBothRoleModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
+  host.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);
 }
 
-export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string): void {
+export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
   requireStore(reasoningEffort === undefined || validReasoningEffort(reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
+  requireStore(fastReasoningEffort === undefined || validReasoningEffort(fastReasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   const connection = host.getModelServiceRouteConnection(route);
   const roles = role === 'both' ? ['main', 'fast'] as const : [role];
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
@@ -268,9 +269,10 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
       host.authority.prepare(`UPDATE model_service_connections SET ${selected} = NULL WHERE ${selected} = 1`).run();
       host.authority.prepare(`UPDATE model_service_connections SET ${selected} = 1, ${model} = ?, updated_at = ? WHERE connection_id = ?`)
         .run(modelId, new Date().toISOString(), connection.connectionId);
-      if (reasoningEffort !== undefined) {
+      const chosenEffort = item === 'fast' && fastReasoningEffort !== undefined ? fastReasoningEffort : reasoningEffort;
+      if (chosenEffort !== undefined) {
         const effort = item === 'main' ? 'reasoning_effort' : 'fast_reasoning_effort';
-        host.authority.prepare(`UPDATE model_service_connections SET ${effort} = ? WHERE connection_id = ?`).run(reasoningEffort === 'off' ? null : reasoningEffort, connection.connectionId);
+        host.authority.prepare(`UPDATE model_service_connections SET ${effort} = ? WHERE connection_id = ?`).run(chosenEffort === 'off' ? null : chosenEffort, connection.connectionId);
       }
     }
   });

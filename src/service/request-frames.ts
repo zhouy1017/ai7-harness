@@ -579,9 +579,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
     case 'testModelServiceConnection': {
-      const input = requireInputWithOptional(value.input, ['route', 'modelId'], ['reasoningEffort'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       if (input.reasoningEffort !== undefined && !validReasoningEffort(input.reasoningEffort)) throw new ProtocolError(tentativeId);
+      if (input.fastReasoningEffort !== undefined && !validReasoningEffort(input.fastReasoningEffort)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'refreshModelServiceModels':

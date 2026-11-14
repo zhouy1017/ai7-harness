@@ -161,6 +161,8 @@ export interface ProviderModelProfile {
    * largest transmission with; nothing reads it yet, and it moves no request byte.
    */
   readonly context: ModelContext;
+  readonly reasoning?: import('../../shared/provider-configuration.generated.js').ConfiguredReasoningDeclaration;
+  readonly pre114ReasoningEffort?: string;
 }
 
 export interface ModelContext {

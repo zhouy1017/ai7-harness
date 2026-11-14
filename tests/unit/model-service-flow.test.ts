@@ -83,7 +83,7 @@ describe('the one model-service flow', () => {
     const { screen, node, poll } = mountSettings(calls);
     try {
       await screen.renderModelServiceSettings();
-      const effort = node.querySelector('input[aria-label="思考强度"]')!;
+      const effort = node.querySelector('input[aria-label="主编辑思考强度"]')!;
       effort.value = 'vendor-future-level'; effort.dispatchEvent({ type: 'input', bubbles: true });
       button(node, 'select-main-role-model').focus();
       const changed = structuredClone(projection);
@@ -91,7 +91,7 @@ describe('the one model-service flow', () => {
       vi.mocked(calls.getModelServiceSettings).mockResolvedValue(changed);
       poll();
       await vi.waitFor(() => expect(calls.getModelServiceSettings).toHaveBeenCalledTimes(2));
-      expect(node.querySelector('input[aria-label="思考强度"]') === effort).toBe(true);
+      expect(node.querySelector('input[aria-label="主编辑思考强度"]') === effort).toBe(true);
       expect(effort.value).toBe('vendor-future-level');
       button(node, 'select-main-role-model').click();
       await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'vendor-future-level' })));
@@ -102,7 +102,7 @@ describe('the one model-service flow', () => {
     setTechnicalLayerVisible(technical);
     const projection = settings(['anthropic-claude']);
     const { node, calls } = flow(projection);
-    const effort = node.querySelector('input[aria-label="思考强度"]')!;
+    const effort = node.querySelector('input[aria-label="主编辑思考强度"]')!;
     expect(effort.value).toBe('');
     effort.value = 'high'; effort.dispatchEvent({ type: 'input' });
     expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
@@ -111,10 +111,50 @@ describe('the one model-service flow', () => {
     const saved = { ...projection, roles: projection.roles.map((role) => ({ ...role,
       binding: role.binding === null ? null : { ...role.binding, reasoningEffort: role.roleId === 'main-editorial' ? 'high' : 'low' } })) };
     const reopened = flow(saved).node;
-    expect(reopened.querySelector('input[aria-label="思考强度"]')!.value).toBe('high');
-    effort.value = 'vendor-future-level'; effort.dispatchEvent({ type: 'input' });
+    expect(reopened.querySelector('input[aria-label="主编辑思考强度"]')!.value).toBe('high');
+    const fastEffort = node.querySelector('input[aria-label="快速交互思考强度"]')!;
+    fastEffort.value = 'vendor-future-level'; fastEffort.dispatchEvent({ type: 'input' });
     button(node, 'select-fast-role-model').click();
     await vi.waitFor(() => expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'vendor-future-level' }));
+  });
+
+  it('reopens and re-saves independent main high / fast low without changing the other role (#1453 review)', async () => {
+    const projection = settings(['anthropic-claude']);
+    const saved = { ...projection, roles: projection.roles.map((role) => ({ ...role,
+      binding: role.binding === null ? null : { ...role.binding, reasoningEffort: role.roleId === 'main-editorial' ? 'high' : 'low' } })) };
+    const { node, calls } = flow(saved);
+    expect(node.querySelector('input[aria-label="主编辑思考强度"]')!.value).toBe('high');
+    expect(node.querySelector('input[aria-label="快速交互思考强度"]')!.value).toBe('low');
+    button(node, 'select-fast-role-model').click();
+    await vi.waitFor(() => expect(calls.selectFastRoleModel).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'low' })));
+    expect(calls.selectMainRoleModel).not.toHaveBeenCalled();
+    const main = node.querySelector('input[aria-label="主编辑思考强度"]')!;
+    main.value = 'medium'; main.dispatchEvent({ type: 'input' });
+    button(node, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'medium', fastReasoningEffort: 'low' })));
+  });
+
+  it('keeps both unsaved efforts through connection-test and refresh action renders (#1453 review)', async () => {
+    const calls = api(completeSettings());
+    const { screen, node } = mountSettings(calls);
+    try {
+      await screen.renderModelServiceSettings();
+      for (const [role, value] of [['主编辑', 'high'], ['快速交互', 'low']]) {
+        const input = node.querySelector(`input[aria-label="${role}思考强度"]`)!;
+        input.value = value!; input.dispatchEvent({ type: 'input', bubbles: true });
+      }
+      button(node, 'test-flow-connection').click();
+      await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: 'high' })));
+      await vi.waitFor(() => expect(node.querySelector('input[aria-label="快速交互思考强度"]')!.value).toBe('low'));
+      expect(node.querySelector('input[aria-label="主编辑思考强度"]')!.value).toBe('high');
+      button(node, 'test-fast-flow-connection').click();
+      await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenLastCalledWith(expect.objectContaining({ reasoningEffort: 'low' })));
+      expect(node.querySelector('input[aria-label="主编辑思考强度"]')!.value).toBe('high');
+      button(node, 'retry-model-list').click();
+      await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalled());
+      await vi.waitFor(() => expect(node.querySelector('input[aria-label="主编辑思考强度"]')!.value).toBe('high'));
+      expect(node.querySelector('input[aria-label="快速交互思考强度"]')!.value).toBe('low');
+    } finally { vi.unstubAllGlobals(); }
   });
 
   // A manual model ID is the developer layer's (#1431 item 97), so only the technical layer offers it.
@@ -135,7 +175,7 @@ describe('the one model-service flow', () => {
     expect(technical ? choices.find((radio) => radio.value === modelId)!.checked : selector!.value).toBe(technical ? true : modelId);
     expect(button(node, 'test-flow-connection').disabled).toBe(false);
     button(node, 'use-model-for-both-roles').click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId, reasoningEffort: 'off' }));
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId, reasoningEffort: 'off', fastReasoningEffort: 'off' }));
   });
 
   it('restores the selected model and filter after channel round trips, refresh and two changed polls', async () => {
@@ -234,7 +274,7 @@ describe('the one model-service flow', () => {
     await vi.waitFor(() => expect(toggleFavourite).toHaveBeenCalledWith('opencode-go', 'model-148'));
     await vi.waitFor(() => expect(node.querySelector('[data-favorite-model="model-148"]')!.getAttribute('aria-pressed')).toBe('true'));
     button(node, 'use-model-for-both-roles').click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: technical ? 'model-42' : 'model-148', reasoningEffort: 'off' }));
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: technical ? 'model-42' : 'model-148', reasoningEffort: 'off', fastReasoningEffort: 'off' }));
   });
   it.each(['deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen'] as const)(
     'keeps ordinary channel %s through credential save, model selection and connection test', async (route) => {
@@ -273,7 +313,7 @@ describe('the one model-service flow', () => {
         expect(model.disabled).toBe(false);
         model.value = model.children.at(-1)!.value; model.dispatchEvent({ type: 'change' });
         button(page, 'use-model-for-both-roles').click();
-        await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route, modelId: model.value, reasoningEffort: 'off' }));
+        await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route, modelId: model.value, reasoningEffort: 'off', fastReasoningEffort: 'off' }));
         await vi.waitFor(() => expect(page.querySelector('select[aria-label="AI7 使用的模型"]')!.value).toBe(model.value));
         button(page, 'test-flow-connection').click();
         await vi.waitFor(() => expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route, modelId: model.value, reasoningEffort: 'off' }));
@@ -493,7 +533,7 @@ describe('the one model-service flow', () => {
     expect([use.disabled, use.textContent]).toEqual([false, USE_FOR_BOTH_ROLES_LABEL]);
     use.click();
     await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
-    expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash', reasoningEffort: 'off' });
+    expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash', reasoningEffort: 'off', fastReasoningEffort: 'off' });
   });
 
   it('offers every Claude model without a connection test and saves both bindings atomically', async () => {
@@ -503,7 +543,7 @@ describe('the one model-service flow', () => {
     expect(modelServiceChoices(projection).filter((choice) => choice.route === 'anthropic-claude')).toHaveLength(4);
     expect(button(node, 'use-model-for-both-roles').disabled).toBe(false);
     button(node, 'use-model-for-both-roles').click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'off' }));
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-opus-5', reasoningEffort: 'off', fastReasoningEffort: 'off' }));
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
 
@@ -593,7 +633,7 @@ it('offers one ordinary model view and saves both underlying roles without a tes
   expect(node.querySelector('[data-custom-model-id]')).toBeNull();
   expect(node.textContent).toContain('AI7 使用的模型');
   button(node, 'use-model-for-both-roles').click();
-  await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash', reasoningEffort: 'off' }));
+  await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash', reasoningEffort: 'off', fastReasoningEffort: 'off' }));
   expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
 });
 

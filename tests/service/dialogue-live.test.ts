@@ -366,6 +366,57 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     } finally { await dialogues.dispose(); }
   });
 
+  it('reconstructs a process death in a thinking tool gap as interrupted, then continues in a fresh session (#1453 retention)', async () => {
+    let store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '思考工具间隙重启');
+    const selection = selectionOf(store, book);
+    const calls: StubCall[] = [];
+    const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      const args = JSON.stringify({ query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] });
+      const wire = await retrievalResponse(1, '', args).text();
+      const prefix = `data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: { content: '先核对公开样书。', reasoning_content: 'SYNTHETIC_TOOL_GAP_REASONING' }, finish_reason: null }] })}\n\n`;
+      return new Response(prefix + wire, { headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: liveRoute(nativeFetch),
+      retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
+    const acquire = requestGovernor.acquire.bind(requestGovernor);
+    let acquisitions = 0, releaseGap: (() => void) | undefined;
+    const spy = vi.spyOn(requestGovernor, 'acquire').mockImplementation(async (producer, signal) => {
+      if (++acquisitions === 2) await new Promise<void>((resolve) => { releaseGap = resolve; });
+      return acquire(producer, signal);
+    });
+    const turn = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+    try {
+      dialogues.begin(turn);
+      await waitFor(() => releaseGap, (value) => value !== undefined, 'held between tool rounds');
+      expect(calls).toHaveLength(1);
+      // Reconstruct abrupt process death: close only the store, with no owner settlement or terminal event.
+      store.close();
+      store = await openStore();
+      expect(store.reconcileDialogueAttempts()).toBe(1);
+      const interrupted = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(interrupted.attempts[0]).toMatchObject({ state: 'interrupted', causeCode: 'SERVICE_STOPPED' });
+      expect(interrupted.actions).toMatchObject({ continue: true, regenerate: true, convert: false });
+      expect(interrupted.attempts[0]!.fragments.map((entry) => entry.text).join('')).toBe('先核对公开样书。');
+      expect(calls).toHaveLength(1); // Opening and reconciliation never resume the old SDK tool loop.
+      const oldSession = readBinding(turn.attemptId)!.harnessSessionId;
+      spy.mockRestore();
+      const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-dialogue');
+      const fresh = new DialogueExecutionOwner({ requestGovernor: new ModelRequestGovernor(), records: store, fixture, live: null,
+        sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY) });
+      try {
+        const continued = store.nextDialogueAttempt(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId }, 'continue');
+        expect(continued.message.kept).toContain('先核对公开样书。');
+        fresh.begin(continued);
+        await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => fresh.liveText(id)), (value) => value.attempts.at(-1)!.state === 'completed', 'fresh continuation');
+        expect(readBinding(continued.attemptId)!.harnessSessionId).not.toBe(oldSession);
+        expect(calls).toHaveLength(1);
+      } finally { await fresh.dispose(); }
+    } finally { releaseGap?.(); await dialogues.dispose().catch(() => undefined); }
+  });
+
   it.each(['stop', 'dispose'] as const)('%s in a live tool gap settles as that stop before the next request is sent (#1131 review)', async (action) => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '对话工具间隙停止');

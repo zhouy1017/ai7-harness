@@ -11,7 +11,7 @@ import {
 } from '../shared/protocol.js';
 import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestFeedback, modelConnectionTestLabel } from './model-service-roles.js';
 import type { ModelFavourites } from '../shared/preferences.js';
-import { CONFIGURED_ROUTE_REASONING } from '../shared/provider-configuration.generated.js';
+import { CONFIGURED_ROUTE_REASONING, CONFIGURED_MODEL_REASONING } from '../shared/provider-configuration.generated.js';
 import { modelServiceRuntimeBinding } from '../shared/protocol/model-service.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 
@@ -27,6 +27,8 @@ export interface ModelServiceFlowOptions {
   readonly channel: ModelServiceChannelId | null;
   chooseChannel(channel: ModelServiceChannelId): void;
   readonly modelId?: string;
+  effortDraft?(channel: ModelServiceChannelId, role: 'main' | 'fast'): string | undefined;
+  setEffortDraft?(channel: ModelServiceChannelId, role: 'main' | 'fast', value: string | undefined): void;
   chooseModel?(modelId: string): void;
   readonly favourites?: ModelFavourites;
   toggleFavourite?(channel: ModelServiceChannelId, modelId: string): Promise<ModelFavourites>;
@@ -95,9 +97,10 @@ export function currentModelServiceChoice(projection: ModelServiceSettingsProjec
 }
 
 /** Persist both role bindings atomically, without changing credentials or requiring a connection test. */
-export function useForBothRoles(api: Pick<RendererApi, 'selectBothRoleModels'>, choice: Pick<ModelServiceChoice, 'route' | 'modelId'> & Pick<RuntimeExecutionConfig, 'reasoningEffort'>): Promise<ModelServiceSettingsProjection> {
+export function useForBothRoles(api: Pick<RendererApi, 'selectBothRoleModels'>, choice: Pick<ModelServiceChoice, 'route' | 'modelId'> & Pick<RuntimeExecutionConfig, 'reasoningEffort'> & { fastReasoningEffort?: string }): Promise<ModelServiceSettingsProjection> {
   return api.selectBothRoleModels({ route: choice.route, modelId: choice.modelId,
-    ...(choice.reasoningEffort === undefined ? {} : { reasoningEffort: choice.reasoningEffort }) });
+    ...(choice.reasoningEffort === undefined ? {} : { reasoningEffort: choice.reasoningEffort }),
+    ...(choice.fastReasoningEffort === undefined ? {} : { fastReasoningEffort: choice.fastReasoningEffort }) });
 }
 
 /** The inline credential fields keep their existing route identities. */
@@ -218,6 +221,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const test = el('button', 'secondary', '用公开消息测试连接');
   test.type = 'button';
   test.dataset['action'] = 'test-flow-connection';
+  const testFast = el('button', 'secondary', '测试快速交互连接'); testFast.type = 'button'; testFast.dataset['action'] = 'test-fast-flow-connection';
   const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
   use.type = 'button';
   use.dataset['action'] = 'use-model-for-both-roles';
@@ -226,24 +230,30 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   custom.type = 'text'; custom.maxLength = 128; custom.dataset['customModelId'] = 'true';
   custom.disabled = !ready;
   customLabel.append(custom);
-  const effortLabel = el('label', 'model-service-effort', '思考强度');
-  const effort = el('input'); effort.type = 'text'; effort.maxLength = 40;
-  effort.setAttribute('aria-label', '思考强度'); effort.placeholder = '服务默认'; effort.disabled = !ready;
-  effort.dataset['reasoningEffort'] = 'true';
-  const roleDefault = projection.roles.find((role) => role.roleId === 'main-editorial')?.binding?.reasoningEffort;
-  effort.value = roleDefault === 'off' ? '' : roleDefault ?? '';
   const effortChoices = el('datalist'); effortChoices.id = `model-efforts-${channel.channelId}`;
-  effort.setAttribute('list', effortChoices.id);
-  effortLabel.append(effort, effortChoices, el('span', 'field-note', '留空使用服务默认，也可填写服务支持的其他强度。只影响之后开始的任务。'));
-  const chosenEffort = (): string => effort.value.trim() || 'off';
+  const effortInputs = new Map<'main' | 'fast', HTMLInputElement>();
+  const effortLabels = (['main', 'fast'] as const).map((role) => {
+    const label = role === 'main' ? '主编辑思考强度' : '快速交互思考强度';
+    const wrapper = el('label', 'model-service-effort', label);
+    const input = el('input'); input.type = 'text'; input.maxLength = 40;
+    input.setAttribute('aria-label', label); input.placeholder = '服务默认'; input.disabled = !ready;
+    input.dataset['reasoningEffort'] = role; input.setAttribute('list', effortChoices.id);
+    const roleId = role === 'main' ? 'main-editorial' : 'fast-interaction';
+    const saved = projection.roles.find((entry) => entry.roleId === roleId)?.binding?.reasoningEffort;
+    input.value = options.effortDraft?.(channel.channelId, role) ?? (saved === 'off' ? '' : saved ?? '');
+    effortInputs.set(role, input); wrapper.append(input);
+    return wrapper;
+  });
+  const chosenEffort = (role: 'main' | 'fast' = 'main'): string => effortInputs.get(role)!.value.trim() || 'off';
+  const effortNote = el('p', 'field-note', '留空使用服务默认。建议值来自服务文档；手填其他值由模型服务验证，可能不被接受。只影响之后开始的任务。');
   const roleButtons: HTMLButtonElement[] = [];
   const paint = (): void => {
-    test.disabled = testing || !ready || checked === null;
+    test.disabled = testFast.disabled = testing || !ready || checked === null;
     const sameEffort = projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')
-      .every((role) => (role.binding?.reasoningEffort ?? 'off') === chosenEffort());
+      .every((role) => (role.binding?.reasoningEffort ?? 'off') === chosenEffort(role.roleId === 'main-editorial' ? 'main' : 'fast'));
     use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId && sameEffort);
     const runtime = channel.route === null || checked === null ? undefined : modelServiceRuntimeBinding(channel.route, checked.modelId, 'main');
-    const levels = runtime === undefined ? [] : CONFIGURED_ROUTE_REASONING[runtime.route]?.efforts ?? [];
+    const levels = runtime === undefined ? [] : CONFIGURED_MODEL_REASONING[`${runtime.route}/${runtime.model}`]?.efforts ?? CONFIGURED_ROUTE_REASONING[runtime.route]?.efforts ?? [];
     effortChoices.replaceChildren(...levels.map((level) => { const option = el('option'); option.value = level; return option; }));
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
@@ -256,7 +266,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     feedback.replaceChildren(...(checked === null ? [] : [note, ...modelConnectionTestDisclosure(own)]));
     repaintCatalogue();
   };
-  effort.addEventListener('input', paint);
+  for (const [role, input] of effortInputs) input.addEventListener('input', () => { options.setEffortDraft?.(channel.channelId, role, input.value); paint(); });
   const modelSelect = el('select');
   modelSelect.setAttribute('aria-label', 'AI7 使用的模型');
   modelSelect.disabled = !ready || offered.length === 0;
@@ -355,19 +365,19 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     button.addEventListener('click', () => void (async () => {
       if (checked === null || channel.route === null) return;
       button.disabled = true;
-      try { options.render(await select({ route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort() })); options.setStatus(`${label}已保存。`, 'success'); }
+      try { const next = await select({ route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort(role) }); options.setEffortDraft?.(channel.channelId, role, undefined); options.render(next); options.setStatus(`${label}已保存。`, 'success'); }
       catch (error) { paint(); options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
     })());
     roleButtons.push(button);
   }
-  test.addEventListener('click', () => void (async () => {
+  for (const [role, testButton] of [['main', test], ['fast', testFast]] as const) testButton.addEventListener('click', () => void (async () => {
     if (testing || checked === null || channel.route === null) return;
     const model = checked;
     testing = true;
-    test.disabled = true;
+    test.disabled = testFast.disabled = true;
     options.setStatus('正在测试连接…', 'busy');
     try {
-      const next = await options.api.testModelServiceConnection({ route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort() });
+      const next = await options.api.testModelServiceConnection({ route: channel.route, modelId: model.modelId, reasoningEffort: chosenEffort(role) });
       const result = next.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest;
       const status = modelConnectionTestFeedback(result?.modelId === model.modelId ? result : null, channel.channelLabel, modelLabelWords(model));
       options.render(next);
@@ -380,18 +390,20 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     use.disabled = true;
     options.setStatus(technicalLayerVisible ? '正在保存主编辑与快速交互的模型…' : '正在保存模型…', 'busy');
     try {
-      options.render(await useForBothRoles(options.api, { route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort() }));
+      const next = await useForBothRoles(options.api, { route: channel.route, modelId: checked.modelId, reasoningEffort: chosenEffort(), fastReasoningEffort: chosenEffort('fast') });
+      options.setEffortDraft?.(channel.channelId, 'main', undefined); options.setEffortDraft?.(channel.channelId, 'fast', undefined);
+      options.render(next);
       options.setStatus(`之后开始的任务使用 ${channel.channelLabel} / ${modelLabelWords(checked)}；已在进行的任务不受影响`, 'success');
     } catch (error) { use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   paint();
   if (checked !== null) options.chooseModel?.(checked.modelId);
   const actions = el('div', 'button-row');
-  actions.append(...(technicalLayerVisible ? [test] : []), ...roleButtons, use);
+  actions.append(...(technicalLayerVisible ? [test, testFast] : []), ...roleButtons, use);
   // A manual model ID is the developer layer's (Issue #1431 item 97); ordinary settings choose from the searchable catalogue.
-  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), effortLabel, actions);
+  step.append(filterLabel, group, matchCount, ...(technicalLayerVisible ? [customLabel] : []), ...effortLabels, effortChoices, effortNote, actions);
   const testStep = el('div', 'model-service-flow-test');
-  if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test);
+  if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test, testFast);
   testStep.append(feedback, el('p', 'field-note', technicalLayerVisible ? MODEL_CONNECTION_TEST_NOTE : '只发送一条测试消息，不含图书文字。'));
   step.append(testStep);
   const others = channel.models.filter((model) => !bothEligible(model));

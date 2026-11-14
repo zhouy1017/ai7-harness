@@ -1,3 +1,4 @@
+import { PRE114_MODEL_REASONING_DEFAULTS } from '../shared/provider-configuration.generated.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { asNumber, asString, requireStore, type SqlRow } from './store-records.js';
 export const MODEL_SERVICE_REASONING_SCHEMA_VERSION = 114;
@@ -139,7 +140,7 @@ export const MODEL_SERVICE_CONNECTION_REVISION_105_SQL = MODEL_SERVICE_CONNECTIO
   adapter_revision INTEGER`,
 );
 
-/** Revision 114: independent role defaults; existing rows retain no explicit effort. */
+/** Revision 114: independent role defaults; existing rows retain their predecessor effective effort, otherwise no explicit effort. */
 export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = MODEL_SERVICE_CONNECTION_REVISION_105_SQL.replace(
   '  adapter_revision INTEGER',
   `  reasoning_effort TEXT CHECK(reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 40),
@@ -170,6 +171,13 @@ export function initializeAdmittedChannelsSchema(db: DatabaseSync): void {
     db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, cached_models)
       SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test,
       ${hasIndependentModels ? 'fast_model_id, cached_models' : "model_id, '[]'"} FROM temp.admitted_channels_migration ORDER BY original_rowid`);
+    // Only predecessor profiles that implied an effort receive one; defaults are configuration records, not model IDs in source.
+    const seed = db.prepare('UPDATE model_service_connections SET reasoning_effort = ?, fast_reasoning_effort = ? WHERE connection_id = ?');
+    for (const row of db.prepare('SELECT connection_id, provider_id, model_id, fast_model_id, selected, fast_selected FROM model_service_connections').all() as SqlRow[]) {
+      const key = `${asString(row.provider_id)}/`;
+      seed.run(row.selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + asString(row.model_id)] ?? null : null,
+        row.fast_selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + asString(row.fast_model_id)] ?? null : null, asString(row.connection_id));
+    }
     db.exec('DROP TABLE temp.admitted_channels_migration');
     requireStore(total() === before, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表迁移未保留全部记录。');
     db.exec('COMMIT');

@@ -551,7 +551,7 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     const { reasoning: officialReasoning, ...officialTransport } = DEEPSEEK_ROUTE_PROFILE;
     const { reasoning: goReasoning, ...goTransport } = OPENCODE_GO_ROUTE_PROFILE;
     expect(officialReasoning).toMatchObject({ control: 'deepseek-thinking', efforts: ['low', 'high', 'max'] });
-    expect(goReasoning).toMatchObject({ control: 'openai-chat-completions', efforts: expect.arrayContaining(['low', 'high']) });
+    expect(goReasoning).toBeUndefined(); // A compatible wire is not vendor documentation of effort levels.
     // The route profiles exactly as they were hand-written before Issue #435, plus the two fields it adds.
     expect(officialTransport).toEqual({
       route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', credentialSlot: 'deepseek-api-key',

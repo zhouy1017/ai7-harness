@@ -1,3 +1,4 @@
+import { CONFIGURED_MODEL_REASONING } from '../../shared/provider-configuration.generated.js';
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent, ProviderRouteProfile } from './deepseek-adapter.js';
 import { conversationMessages, strictFunctionTools, systemPromptOf } from './family-payload.js';
@@ -37,6 +38,9 @@ export function googleGenerateContentBody(profile: ProviderRouteProfile, model: 
   if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   const tools = strictFunctionTools(payload, 64);
   const systemInstruction = systemPromptOf(payload);
+  const budget = CONFIGURED_MODEL_REASONING[model.key]?.control === 'google-thinking-budget';
+  const thinkingConfig = effort === null ? null : budget
+    ? { thinkingBudget: /^\d+$/u.test(effort) ? Number(effort) : effort } : { thinkingLevel: effort };
   return canonicalJson({
     contents: toolCalling ? geminiConversation(payload, tools.map((tool) => tool.name)) : conversationMessages(payload).map((message) => ({
       role: message.role === 'assistant' ? 'model' : message.role,
@@ -45,7 +49,7 @@ export function googleGenerateContentBody(profile: ProviderRouteProfile, model: 
     ...(systemInstruction === null ? {} : { systemInstruction: { parts: [{ text: systemInstruction }] } }),
     ...(profile.maxOutputTokens === null && effort === null ? {} : { generationConfig: {
       ...(profile.maxOutputTokens === null ? {} : { maxOutputTokens: profile.maxOutputTokens }),
-      ...(effort === null ? {} : { thinkingConfig: { thinkingLevel: effort } }),
+      ...(effort === null ? {} : { thinkingConfig: thinkingConfig }),
     } }),
     ...(tools.length > 0 ? { tools: [{ functionDeclarations: tools.map(({ name, description, parameters }) =>
       ({ name, description, parametersJsonSchema: parameters })) }] } : {}),
@@ -110,7 +114,7 @@ function geminiConversation(payload: AssembledModelPayload, offeredNames: Readon
 }
 
 /** Exact native part order and thoughtSignature bytes, including the signature on the first parallel call. */
-export function geminiReplayItems(body: unknown, callIds: ReadonlySet<string>): Record<string, unknown>[] | null {
+export function geminiReplayItems(body: unknown, callIds: ReadonlySet<string>, callIdSeed: string): Record<string, unknown>[] | null {
   const candidate = isRecord(body) && Array.isArray(body.candidates) ? body.candidates[0] : null;
   if (!isRecord(candidate) || !isRecord(candidate.content) || !Array.isArray(candidate.content.parts)) return null;
   if (!candidate.content.parts.some((part) => isRecord(part) && (part.thought === true || part.thoughtSignature !== undefined))) return null;
@@ -119,7 +123,7 @@ export function geminiReplayItems(body: unknown, callIds: ReadonlySet<string>): 
     if (!isRecord(part.functionCall)) return true;
     const id = part.functionCall.id;
     ordinal += 1;
-    return typeof id === 'string' ? callIds.has(id) : [...callIds].some((callId) => callId.startsWith(GEMINI_SYNTHETIC_CALL_PREFIX) && callId.endsWith(`-${ordinal}`));
+    return typeof id === 'string' ? callIds.has(id) : callIds.has(`${GEMINI_SYNTHETIC_CALL_PREFIX}${callIdSeed}-${ordinal}`);
   });
 }
 

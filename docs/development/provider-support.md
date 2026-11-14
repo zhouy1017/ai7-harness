@@ -6,7 +6,7 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 ## Three senses of "supported"
 
-Provider documents and the runtime model table supply catalogue defaults and labels. Unknown model IDs inherit their configured route protocol. Role defaults select the effort actually sent, independently of historical per-model capability observations. Suggested effort identifiers are editable suggestions, never model admission lists: another bounded identifier reaches the provider, which decides whether that model accepts it. Unset or off omits the control and uses the service default; it does not promise that provider thinking is disabled. Developer-live retains its exact approved binding.
+Provider documents and the runtime model table supply catalogue defaults and labels. Unknown model IDs inherit their configured route protocol. Role defaults select the effort actually sent, independently of historical per-model capability observations. Only vendor-documented route/model controls advertise suggestions; other routes advertise none and disclose that manual entry is subject to upstream acceptance. Gemini 2.5 budgets are numeric and newer model levels are declared independently. Suggested effort identifiers are editable suggestions, never model admission lists: another bounded identifier reaches the provider, which decides whether that model accepts it. Unset or off omits the control and uses the service default; it does not promise that provider thinking is disabled. Developer-live retains its exact approved binding.
 
 - **Declared** — catalogue metadata and historical evidence for a model. Runtime text, stream and function tools inherit the implemented route protocol; optional model-specific settings remain recorded separately.
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
@@ -53,8 +53,6 @@ All four implemented protocol families support text, streaming and function tool
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
@@ -151,8 +149,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 The model ids are written as the reading printed them; the resold `DeepSeek-V4-Pro` is not declared, because a resold model is the other provider's.
 
@@ -220,6 +216,7 @@ Inert: 0 of 2 (no declared answer channel). Established:
 - `deepseek-v4-pro` · `toolCalling: function` — `vendor-documentation`, DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls, read 2026-09-11
 - every model · `webSearchTool: none` — `vendor-documentation`, DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com), read 2026-09-10
 - every model · context 1,000,000 — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
+- `deepseek-v4-pro` · pre-114 selected-role effective effort high; retained during upgrade only
 - `deepseek-flash` · `requestShape: openai-chat-completions` — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
 - `deepseek-flash` · `answerChannel: message-content-string` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-flash` · `reasoningChannel: message-reasoning-content` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
@@ -257,8 +254,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `google-generate-content` / `minimal`, `low`, `medium`, `high` |
-| Reasoning protocol source | https://ai.google.dev/gemini-api/docs/thinking, read 2026-11-14 |
 
 The endpoint is the models collection: the shape addresses the model in the path and appends `:generateContent`. `generationConfig` is optional, so the route names no cap and sends no such key.
 
@@ -275,6 +270,8 @@ Inert: 0 of 3 (no declared answer channel). Established:
 - every model · `requestShape: google-generate-content` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
 - every model · `answerChannel: candidate-parts-text` — `vendor-documentation`, https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash ; https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview ; https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro ; https://ai.google.dev/api/generate-content, read 2026-10-31
 - every model · context 1,048,576 — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
+- `gemini-3.8-flash`, `gemini-3.1-pro-preview` · reasoning control google-generate-content; suggestions low, medium, high — https://ai.google.dev/gemini-api/docs/generate-content/thinking, read 2026-11-14
+- `gemini-2.5-pro` · reasoning control google-thinking-budget; suggestions 128, 1024, 8192, 32768 — https://ai.google.dev/gemini-api/docs/generate-content/thinking, read 2026-11-14
 
 Readings:
 
@@ -309,8 +306,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
@@ -356,8 +351,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 The search tool is declared per model, for exactly the two the reading names: recommended with `kimi-k3`, and `kimi-k2.6` also searches with thinking on. No page read says `kimi-k2.7-code` searches, so its search tool is absent (ADR 0080 §3: nothing is assumed from a neighbouring row).
 
@@ -405,7 +398,7 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | 8,192 |
-| Reasoning control / suggestions | `openai-responses` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| Reasoning control / suggestions | `openai-responses` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | Reasoning protocol source | https://developers.openai.com/api/docs/guides/reasoning, read 2026-11-14 |
 
 Buffered text only with max_output_tokens 8192. The explicit synthetic connection test narrows this to 512; neither probe nor saved credential proves tools or native streaming.
@@ -457,8 +450,6 @@ Open:
 | DSH attribution headers | not sent — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 The developer-live route of Provider Processing v18 (ADR 0065, ADR 0067), selected by active-policy-set v13; also one of the two routes the editor may choose under ordinary-production v19. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
 
@@ -507,8 +498,6 @@ Inert: 9 of 11 (no declared answer channel). Established:
 | DSH attribution headers | not sent — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | 32,768 |
-| Reasoning control / suggestions | `anthropic-messages` / `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://platform.claude.com/docs/en/build-with-claude/effort, read 2026-11-14 |
 
 The same plan, account and credential slot over the Anthropic-compatible path. The shape requires a per-turn output cap; 32,768 leaves headroom above the largest unit output observed to date (24,225 tokens) and bounds one turn only, the Run Budget Ceiling being the authority over the Run. MiniMax is here on a disagreement: the Go page places it on `/messages`, the Zen table on `chat/completions`; the Go page decides until a live item settles it. Qwen3.8 Flash is absent: the Go page places it here but the Zen table stated no id for it on 2026-09-08.
 
@@ -538,8 +527,6 @@ Inert: 5 of 5 (no declared answer channel). Established:
 | DSH attribution headers | not sent — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-responses` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/docs/guides/reasoning, read 2026-11-14 |
 
 The same plan over the OpenAI-compatible Responses path. `max_output_tokens` is optional on this shape and nothing has established a per-turn bound for these models, so the route names none. Muse Spark 1.3 / 1.2 are absent: the Go page prints `muse-spark-1.3-contributor` / `muse-spark-1.2-contributor`, the Zen table `muse-spark-1.3` / `muse-spark-1.2`, so no id is stated by both. The Zen table's further `/responses` rows are Zen rather than the Go plan.
 
@@ -591,8 +578,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 The Zen page's `chat/completions` rows. A spend limit on this gateway ends the Run, as on the Go plan.
 
@@ -635,8 +620,6 @@ Inert: 18 of 18 (no declared answer channel). Established:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
 | Per-turn output cap | 32,768 |
-| Reasoning control / suggestions | `anthropic-messages` / `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://platform.claude.com/docs/en/build-with-claude/effort, read 2026-11-14 |
 
 The Zen page's `/messages` rows. The shape requires a per-turn output cap; the route declares the same 32,768 as the Go `/messages` route, for the same reason.
 
@@ -680,8 +663,6 @@ Inert: 19 of 19 (no declared answer channel). Established:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-responses` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/docs/guides/reasoning, read 2026-11-14 |
 
 The Zen page's `/responses` rows. `max_output_tokens` is optional on this shape, so the route names none.
 
@@ -755,8 +736,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 Context is the input limit the page states separately from the window.
 
@@ -804,8 +783,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 The adapter sends the Bearer form, which the page lists beside `api-key:`.
 
@@ -853,8 +830,6 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
-| Reasoning control / suggestions | `openai-chat-completions` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
-| Reasoning protocol source | https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create, read 2026-11-14 |
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |

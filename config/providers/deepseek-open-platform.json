@@ -61,6 +61,7 @@
       "models": [
         {
           "modelId": "deepseek-v4-pro",
+          "pre114ReasoningEffort": "high",
           "displayName": "DeepSeek V4 Pro High",
           "capabilities": {
             "reasoningControl": { "value": "deepseek-thinking", "evidence": "production-baseline" },

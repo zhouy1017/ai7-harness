@@ -13561,12 +13561,12 @@ export class EditorialStore {
     return modelSearchSettings.selectMainRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
   }
 
-  selectBothRoleModels(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
-    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
+  selectBothRoleModels(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
+    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId, reasoningEffort, fastReasoningEffort);
   }
 
-  private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string): void {
-    return modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, role, reasoningEffort);
+  private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
+    return modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, role, reasoningEffort, fastReasoningEffort);
   }
 
   private modelServiceBinding(route: ModelServiceRouteId, modelId: string): import('../shared/protocol.js').ModelServiceBindingProjection {

@@ -159,21 +159,7 @@
         { "modelId": "kimi-k2.7-code", "displayName": "Kimi K2.7 Code（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "kimi-k2.6", "displayName": "Kimi K2.6（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "deepseek-v4-flash-vision-exp", "displayName": "DeepSeek V4 Flash Vision Exp（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
-      ],
-      "reasoning": {
-        "control": "openai-chat-completions",
-        "efforts": [
-          "none",
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "source": "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
-        "readOn": "2026-11-14"
-      }
+      ]
     },
     {
       "routeId": "opencode-go-messages",
@@ -198,19 +184,7 @@
         { "modelId": "minimax-m3", "displayName": "MiniMax M3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "minimax-m2.7", "displayName": "MiniMax M2.7（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "minimax-m2.5", "displayName": "MiniMax M2.5（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
-      ],
-      "reasoning": {
-        "control": "anthropic-messages",
-        "efforts": [
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "source": "https://platform.claude.com/docs/en/build-with-claude/effort",
-        "readOn": "2026-11-14"
-      }
+      ]
     },
     {
       "routeId": "opencode-go-responses",
@@ -232,21 +206,7 @@
       "models": [
         { "modelId": "grok-4.6", "displayName": "Grok 4.6（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
         { "modelId": "gpt-5.6-luna", "displayName": "GPT 5.6 Luna（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
-      ],
-      "reasoning": {
-        "control": "openai-responses",
-        "efforts": [
-          "none",
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "xhigh",
-          "max"
-        ],
-        "source": "https://developers.openai.com/api/docs/guides/reasoning",
-        "readOn": "2026-11-14"
-      }
+      ]
     }
   ],
   "openQuestions": [

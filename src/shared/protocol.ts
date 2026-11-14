@@ -2734,6 +2734,11 @@ export interface FastModelSelectionInput extends Pick<RuntimeExecutionConfig, 'r
   modelId: string;
 }
 
+/** Atomic two-role selection carries independent defaults. */
+export interface BothRoleModelSelectionInput extends FastModelSelectionInput {
+  fastReasoningEffort?: RuntimeExecutionConfig['reasoningEffort'];
+}
+
 /**
  * The trusted operational scopes the source checkout can bind from its launch form (ADR 0065, ADR 0046):
  * `development-ci` by default; `developer-live` and `ordinary-production` only through
@@ -6785,7 +6790,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
-  selectBothRoleModels: { input: FastModelSelectionInput; output: void };
+  selectBothRoleModels: { input: BothRoleModelSelectionInput; output: void };
   refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
@@ -7343,7 +7348,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
-  selectBothRoleModels(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectBothRoleModels(input: BothRoleModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;

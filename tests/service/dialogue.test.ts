@@ -165,7 +165,16 @@ describe('就这段提问… over the real store and harness', () => {
       await dialogues.dispose();
       store.close();
       const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try { expect(reopened.inspectDialogue(book.bookId, first.dialogueId, 0, () => null)).toEqual(done); }
+      try {
+        expect(reopened.inspectDialogue(book.bookId, first.dialogueId, 0, () => null)).toEqual(done);
+        const fresh = owner(reopened, null);
+        try {
+          const next = reopened.nextDialogueAttempt(book.bookId, { dialogueId: first.dialogueId, attemptId: third.attemptId }, 'continue');
+          expect(next.message.kept).toContain(FIRST_SENTENCE);
+          fresh.begin(next);
+          await waitFor(() => reopened.inspectDialogue(book.bookId, first.dialogueId, 0, (id) => fresh.liveText(id)), (value) => value.attempts.at(-1)?.state === 'completed', 'continue after completed restart');
+        } finally { await fresh.dispose(); }
+      }
       finally { reopened.close(); }
     } finally { await dialogues.dispose(); try { store.close(); } catch { /* reopened above */ } }
   });

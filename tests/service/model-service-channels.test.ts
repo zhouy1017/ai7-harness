@@ -32,6 +32,8 @@ describe('the model-service channel catalogue', () => {
     expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
     store.selectMainRoleModel('google-gemini', 'gemini-custom');
     expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['google-gemini', 'gemini-custom'], ['anthropic-claude', 'account-haiku']]);
+    store.selectBothRoleModels('anthropic-claude', 'claude-custom', 'high', 'low');
+    expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['high', 'low']);
     store.selectBothRoleModels('anthropic-claude', 'claude-custom', 'vendor-future-level');
     expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['anthropic-claude', 'claude-custom'], ['anthropic-claude', 'claude-custom']]);
     expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['vendor-future-level', 'vendor-future-level']);

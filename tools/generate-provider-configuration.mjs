@@ -574,12 +574,19 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         const contextEvidence = cite(model.context.evidence, `${modelWhere}.context`, modelScope);
         refuse(model.context.tokens === null || contextEvidence.kind === 'vendor-documentation',
           `PROVIDER_CONFIGURATION/context-evidence: ${modelWhere} (a context size names the vendor page that states it)`);
+        if (model.reasoning !== undefined) {
+          refuse(model.reasoning.control === route.requestShape || route.requestShape === 'google-generate-content' && model.reasoning.control === 'google-thinking-budget', `PROVIDER_CONFIGURATION/model-reasoning-family: ${modelWhere}`);
+          refuse(isCalendarDay(model.reasoning.readOn), `PROVIDER_CONFIGURATION/model-reasoning-day: ${modelWhere}`);
+        }
+        refuse(model.pre114ReasoningEffort === undefined || capabilities.reasoningControl === 'deepseek-thinking', `PROVIDER_CONFIGURATION/pre114-reasoning: ${modelWhere}`);
         return {
           key: `${route.routeId}/${model.modelId}`,
           route: route.routeId,
           model: model.modelId,
           displayName: model.displayName,
           capabilities,
+          ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+          ...(model.pre114ReasoningEffort === undefined ? {} : { pre114ReasoningEffort: model.pre114ReasoningEffort }),
           evidence: capabilityEvidence,
           context: { tokens: model.context.tokens, evidence: contextEvidence },
           note: model.note ?? null,
@@ -776,6 +783,10 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
     '',
     '/** Protocol effort controls and suggested levels; custom identifiers are sent to the vendor (#1453). */',
     `export const CONFIGURED_ROUTE_REASONING = ${renderValue(Object.fromEntries(providers.flatMap((provider) => provider.routes.map((route) => [route.profile.route, route.profile.reasoning ?? null]))), 0)} as const;`,
+    '',
+    'export interface ConfiguredReasoningDeclaration { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string }',
+    `export const CONFIGURED_MODEL_REASONING: Readonly<Record<string, ConfiguredReasoningDeclaration>> = ${renderValue(Object.fromEntries(providers.flatMap((provider) => provider.routes.flatMap((route) => route.models.filter((model) => model.reasoning !== undefined).map((model) => [model.key, model.reasoning])))), 0)};`,
+    `export const PRE114_MODEL_REASONING_DEFAULTS: Readonly<Record<string, string>> = ${renderValue(Object.fromEntries(providers.flatMap((provider) => provider.routes.flatMap((route) => route.models.filter((model) => model.pre114ReasoningEffort !== undefined).map((model) => [model.key, model.pre114ReasoningEffort])))), 0)};`,
     '',
     '/** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */',
     `export const CONFIGURED_RUNTIME_MODEL_TABLE = ${renderValue(runtimeModelTable, 0)} as const;`,
@@ -994,7 +1005,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
     '',
     '## Three senses of "supported"',
     '',
-    'Provider documents and the runtime model table supply catalogue defaults and labels. Unknown model IDs inherit their configured route protocol. Role defaults select the effort actually sent, independently of historical per-model capability observations. Suggested effort identifiers are editable suggestions, never model admission lists: another bounded identifier reaches the provider, which decides whether that model accepts it. Unset or off omits the control and uses the service default; it does not promise that provider thinking is disabled. Developer-live retains its exact approved binding.',
+    'Provider documents and the runtime model table supply catalogue defaults and labels. Unknown model IDs inherit their configured route protocol. Role defaults select the effort actually sent, independently of historical per-model capability observations. Only vendor-documented route/model controls advertise suggestions; other routes advertise none and disclose that manual entry is subject to upstream acceptance. Gemini 2.5 budgets are numeric and newer model levels are declared independently. Suggested effort identifiers are editable suggestions, never model admission lists: another bounded identifier reaches the provider, which decides whether that model accepts it. Unset or off omits the control and uses the service default; it does not promise that provider thinking is disabled. Developer-live retains its exact approved binding.',
     '',
     '- **Declared** — catalogue metadata and historical evidence for a model. Runtime text, stream and function tools inherit the implemented route protocol; optional model-specific settings remain recorded separately.',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',
@@ -1055,6 +1066,8 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
           record(model.model, `\`${capability}: ${model.capabilities[capability]}\` — ${describeEvidence(evidence)}`);
         }
         if (model.context.tokens !== null) record(model.model, `context ${grouped(model.context.tokens)} — ${describeEvidence(model.context.evidence)}`);
+        if (model.reasoning !== undefined) record(model.model, `reasoning control ${model.reasoning.control}; suggestions ${model.reasoning.efforts.join(', ')} — ${model.reasoning.source}, read ${model.reasoning.readOn}`);
+        if (model.pre114ReasoningEffort !== undefined) record(model.model, `pre-114 selected-role effective effort ${model.pre114ReasoningEffort}; retained during upgrade only`);
       }
       const every = route.models.length;
       const inert = route.models.filter((model) => model.capabilities.answerChannel === 'none').length;

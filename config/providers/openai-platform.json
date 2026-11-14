@@ -109,8 +109,7 @@
           "low",
           "medium",
           "high",
-          "xhigh",
-          "max"
+          "xhigh"
         ],
         "source": "https://developers.openai.com/api/docs/guides/reasoning",
         "readOn": "2026-11-14"

@@ -30,7 +30,7 @@ export function openaiResponsesBody(profile: ProviderRouteProfile, model: Provid
   return canonicalJson({
     model: model.model,
     ...(effort === null ? {} : { reasoning: { effort } }),
-    ...(profile.route === 'openai-platform' ? { store: false } : {}),
+    ...(profile.route === 'openai-platform' ? { store: false, include: ['reasoning.encrypted_content'] } : {}),
     ...(instructions === null ? {} : { instructions }),
     input: toolCalling ? openaiResponsesConversation(payload) : conversationMessages(payload),
     ...(profile.maxOutputTokens === null ? {} : { max_output_tokens: profile.maxOutputTokens }),

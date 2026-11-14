@@ -1,3 +1,8 @@
+import { DialogueExecutionOwner } from '../../src/service/dialogue/dialogue-execution.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { graphemesOf } from '../../src/shared/mark-anchor.js';
+import { assembleProviderRequest, PROVIDER_ROUTE_PROFILES } from '../../src/service/provider/deepseek-adapter.js';
+import { modelProfileFor } from '../../src/service/provider/model-profile.js';
 import type { PackageVersionRecord } from '../../src/service/book-delivery-packages.js';
 import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
@@ -291,8 +296,23 @@ describe('导入数据库 over the real store', () => {
     finally { store.close(); }
   });
 
-  it('migrates a genuine revision-113 connection table without changing role choices, catalogue or references (#1453)', async () => {
+  it('upgrades a reconstructed revision-113 SampleBook, stored answer and independent role choices in place (#1453)', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const book = await importSample1Book(store, roots.codeRoot, '修订113样书');
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const block = window.blocks.find((entry) => entry.kind === 'paragraph' && graphemesOf(entry.text).length >= 30)!;
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-dialogue');
+    const dialogues = new DialogueExecutionOwner({ requestGovernor: new ModelRequestGovernor(), records: store,
+      fixture, live: null, sessionLogRoot: join(roots.dataRoot, 'harness-sessions') });
+    const turn = store.askAboutSelection(book.bookId, { question: '这段的叙述视角是否一致？', selection: {
+      manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+      baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence, blockId: block.blockId,
+      baseBlockDigest: block.digest, fromGrapheme: 2, toGrapheme: 22, selectedText: graphemesOf(block.text).slice(2, 22).join('') } });
+    dialogues.begin(turn);
+    await vi.waitFor(() => expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)).attempts[0]!.state).toBe('completed'), { timeout: 10_000 });
+    await dialogues.dispose();
+    const retained = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+    expect(retained.attempts[0]!.fragments.length).toBeGreaterThan(0);
     const connection = store.saveModelServiceConnection('Synthetic effort migration', null, 'ready', 'anthropic-claude');
     store.selectMainRoleModel('anthropic-claude', 'account-opus');
     store.selectFastRoleModel('anthropic-claude', 'account-haiku');
@@ -310,13 +330,50 @@ describe('导入数据库 over the real store', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(store.inspectDataVersion()).toMatchObject({ schemaRevision: 114, dataVersion: 1 });
+      expect(store.getBookOverview(book.bookId).book.title).toBe('修订113样书');
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).toEqual(window);
+      expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)).toEqual(retained);
       expect(store.getModelServiceConnections()).toEqual(before);
+      expect(store.getConfiguredModelRoleBinding('main-editorial')?.reasoningEffort).toBeUndefined();
+      expect(store.getConfiguredModelRoleBinding('fast-interaction')?.reasoningEffort).toBeUndefined();
       expect(store.getModelServiceModels('anthropic-claude')).toEqual(catalogue);
       store.selectMainRoleModel('anthropic-claude', 'account-opus', 'high');
       store.selectFastRoleModel('anthropic-claude', 'account-haiku', 'low');
       store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ reasoningEffort: 'high', credentialReference: connection.credentialReference });
       expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ reasoningEffort: 'low', credentialReference: connection.credentialReference });
+    } finally { store.close(); }
+  });
+
+  it.each(['main', 'fast'] as const)('seeds the predecessor DeepSeek effective high for the selected %s role, preserving its wire bytes (#1453 review)', async (role) => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.saveModelServiceConnection('Predecessor thinking role', null, 'ready', 'deepseek-open-platform');
+    if (role === 'main') store.selectMainRoleModel('deepseek-open-platform', 'deepseek-v4-pro');
+    else store.selectFastRoleModel('deepseek-open-platform', 'deepseek-v4-pro');
+    store.markCleanShutdown(); store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec('CREATE TEMP TABLE old_connections AS SELECT rowid AS old_rowid, * FROM model_service_connections');
+      db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_105_SQL);
+      db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, cached_models)
+        SELECT old_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, cached_models FROM old_connections`);
+      db.exec('DROP TABLE old_connections; PRAGMA user_version = 113');
+    } finally { db.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const binding = store.getConfiguredModelRoleBinding(role === 'main' ? 'main-editorial' : 'fast-interaction')!;
+      expect(binding).toMatchObject({ model: 'deepseek-v4-pro', reasoningEffort: 'high' });
+      const profile = modelProfileFor('deepseek-open-platform', binding.model)!;
+      const request = assembleProviderRequest(PROVIDER_ROUTE_PROFILES['deepseek-open-platform'], profile,
+        { provider: binding.route, model: binding.model, reasoningEffort: binding.reasoningEffort!,
+          system: 'Public synthetic system.', messages: [{ role: 'user', content: [{ type: 'text', text: 'Public synthetic request.' }], source: { kind: 'user' } }] },
+        { attribution: {}, promptContractDigest: 'a'.repeat(64), sessionId: 'predecessor-role' });
+      expect(request.body).toBe(canonicalRecord({ model: 'deepseek-v4-pro', reasoning_effort: 'high', thinking: { type: 'enabled' },
+        messages: [{ role: 'system', content: 'Public synthetic system.' }, { role: 'user', content: 'Public synthetic request.' }] }).json);
+      if (role === 'main') store.selectMainRoleModel('deepseek-open-platform', 'deepseek-v4-pro', 'off');
+      else store.selectFastRoleModel('deepseek-open-platform', 'deepseek-v4-pro', 'off');
+      store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getConfiguredModelRoleBinding(role === 'main' ? 'main-editorial' : 'fast-interaction')!.reasoningEffort).toBeUndefined();
     } finally { store.close(); }
   });
 

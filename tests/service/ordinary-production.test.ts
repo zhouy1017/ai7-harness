@@ -1437,7 +1437,10 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       expect(answer).toMatchObject({ kind: 'answered', binding: { model: 'custom-fast-model', reasoningEffort: 'high' } });
       expect(bodies).toHaveLength(1); expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } });
       store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'low');
-      expect(answer).toMatchObject({ binding: { reasoningEffort: 'high' } });
+      const second = await owner.ask('material-translation', 'Public synthetic second reference text.', 'second-effort-proof');
+      expect(second).toMatchObject({ kind: 'answered', binding: { reasoningEffort: 'low' } });
+      expect(bodies).toHaveLength(2); expect(bodies[1]).toMatchObject({ reasoning: { effort: 'low' } });
+      expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } });
     } finally { owner.dispose(); }
   });
 

@@ -1,5 +1,5 @@
 import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
-import { CONFIGURED_ROUTE_REASONING } from '../../shared/provider-configuration.generated.js';
+import { CONFIGURED_ROUTE_REASONING, CONFIGURED_MODEL_REASONING } from '../../shared/provider-configuration.generated.js';
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isRecord, sha256Hex } from '../analysis/canonical.js';
 import { validModelServiceModelId, type DiscoveredModel } from '../../shared/protocol/model-service.js';
@@ -629,10 +629,10 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
 
   resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     // Include the bound custom identifier as wire data; the suggestions are never model/level admission.
-    const efforts = [...new Set([...(CONFIGURED_ROUTE_REASONING[this.#profile.route]?.efforts ?? []),
+    const efforts = [...new Set([...(CONFIGURED_MODEL_REASONING[`${this.#profile.route}/${model}`]?.efforts ?? CONFIGURED_ROUTE_REASONING[this.#profile.route]?.efforts ?? []),
       ...(this.#deps.reasoningEffort === undefined ? [] : [this.#deps.reasoningEffort])])];
     return Promise.resolve({ provider, id: model, name: this.#modelProfile.displayName, inputModalities: ['text'],
-      reasoning: { efforts: efforts.map((id) => ({ id: id as NonNullable<GenerateOptions['reasoningEffort']>, name: id })) } });
+      ...(efforts.length === 0 ? {} : { reasoning: { efforts: efforts.map((id) => ({ id: id as NonNullable<GenerateOptions['reasoningEffort']>, name: id })) } }) });
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -760,7 +760,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         const ids = new Set(parsed.kind === 'tool-calls' ? parsed.calls.map((call) => call.id) : []);
         const items = shape === 'openai-chat-completions' ? chatReplayItems(body, ids)
           : shape === 'openai-responses' ? responsesReplayItems(body, ids)
-            : shape === 'anthropic-messages' ? messagesReplayItems(body, ids) : geminiReplayItems(body, ids);
+            : shape === 'anthropic-messages' ? messagesReplayItems(body, ids) : geminiReplayItems(body, ids, assembly.requestDigest.slice(0, 16));
         if (items !== null) replayState = { family: shape, items };
       }
       if ((outcome.kind === 'failure' || outcome.kind === 'malformed') && streamed.length > 0) {

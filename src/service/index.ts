@@ -215,9 +215,12 @@ async function dispatch(
       store.selectFastRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
-    case 'selectMainRoleModel':
     case 'selectBothRoleModels':
-      store[request.op](request.input.route, request.input.modelId, request.input.reasoningEffort);
+      store.selectBothRoleModels(request.input.route, request.input.modelId, request.input.reasoningEffort, request.input.fastReasoningEffort);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectMainRoleModel':
+      store.selectMainRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'refreshModelServiceModels':
