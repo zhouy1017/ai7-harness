@@ -1,3 +1,4 @@
+import { factualClaimKindDefinition } from '../../src/service/analysis/factual-claim-contract.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import * as liveAdmission from '../../src/service/analysis/live-kind-admission.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -79,6 +80,7 @@ interface Scenario {
   offline?: boolean;
   maxTotalTokens?: number;
   twoAssertions?: boolean;
+  widthClaim?: boolean;
   noAssertions?: boolean;
   invalidUnit?: boolean;
   secondUnit?: 'clarification' | 'unknown';
@@ -176,7 +178,7 @@ async function setup(initial: Scenario): Promise<void> {
       }
       if (declared && header.ordinal === 1 && tools === 0) return answer({ content: null, tool_calls: [{ id: 'call_search', type: 'function', function: { name: 'websearch', arguments: JSON.stringify({ query: 'public background fact for a provider-free verification regression' }) } }] });
       if (declared && header.ordinal === 1 && tools === 1) return answer({ content: null, tool_calls: [{ id: 'call_fetch', type: 'function', function: { name: 'webfetch', arguments: JSON.stringify({ url: MUSEUM }) } }] });
-      const cited = header.ordinal === 1 || scenario.assertionsInEveryUnit ? quoteFrom(unit) : null;
+      const cited = header.ordinal === 1 || scenario.assertionsInEveryUnit ? scenario.widthClaim ? { quote: '1900年', blockOrdinal: 1 } : quoteFrom(unit) : null;
       const v2 = body.messages[0]!.content?.includes('ai7.factual-review.unit-result/2') === true;
       if (scenario.invalidUnit === true) return answer({ content: '{}' });
       const citations = cited === null || scenario.noAssertions === true ? [] : [cited, ...(scenario.twoAssertions === true ? [quoteFrom(unit, 12)].filter((entry) => entry !== null) : [])];
@@ -525,6 +527,44 @@ describe('factual claim occurrence ledger', () => {
     expect(retained.results.find(r=>r.findingId===`fnd_${claim.claimId.slice(0,24)}`)!.limitations)
       .toContain('这条断言尚未开始联网核查；同一阅读范围内其他断言的证据不代表已核查本条。');
   });
+
+  it('resumes a paused 0.7.0 claim Run without changing its frozen width-folded membership', async () => {
+    await setup({ claimStages: true, widthClaim: true, relations: [] });
+    const book = await newBook('旧断言工序续行');
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const first = window.blocks[0]!;
+    store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+      blockId: first.blockId, windowStartBlockId: first.blockId, baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence,
+      fromGrapheme: 0, toGrapheme: [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(first.text)].length, insertText: '１９００年' });
+    let reviewRunId = '';
+    scenario.atClaimAnswer = () => {
+      delete scenario.atClaimAnswer;
+      const paused = store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'pause' });
+      owner.pauseRun(paused.runRecordId!, paused.ledger);
+    };
+    await review(book, undefined, { prepared: (id) => { reviewRunId = id; } });
+    const task = store.inspectReviewWorkspace(book.bookId, reviewRunId).run!.categories[0]!.taskIntentId!;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    const runRecordId = String(db.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id=?').get(task)!.run_record_id);
+    db.close();
+    const ledger = store.executionLedgerForRun(runRecordId);
+
+    expect(factualClaimKindDefinition('standard').promptContractDigest).toBe('4e02f8ac6ef312647bb04b6133df6602643e0885c1f8abc3a26e7ef4d5f7846c');
+    expect(ledger.currentRunState(runRecordId)).toBe('paused');
+    const frozen = ledger.factualVerification.claims(runRecordId)!;
+    expect(frozen.claims[0]!.occurrence.quote).toBe('1900年');
+    const launch = ledger.launch;
+    await owner.dispose();
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
+    owner = reopenExecutionOwner();
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+    try { await driver.continue(reviewRunId); } finally { await driver.dispose(); }
+    const resumed = store.executionLedgerForRun(runRecordId);
+    expect(resumed.currentRunState(runRecordId)).toBe('completed');
+    expect(resumed.factualVerification.claims(runRecordId)).toEqual(frozen);
+  }, 300_000);
 
   it.each(['fresh', 'existing-prefix'] as const)('continues a claim-stage pause with %s evidence without replacing prior captures', async (prefix) => {
     await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });

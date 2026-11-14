@@ -118,7 +118,7 @@ describe('the factual review reduction', () => {
     const { sourceRangeMapping, ...historical } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
     const { sourceRangeIntegrity, ...beforeSliceCheck } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
-    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(sourceRangeIntegrity).toBe('located-quotation-is-manuscript-grapheme-slice');
     expect(FACTUAL_REVIEW_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(FACTUAL_REVIEW_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(factualReviewKindDefinition().reducerDigest).toBe(FACTUAL_REVIEW_REDUCER_DIGEST);
@@ -243,9 +243,7 @@ it('keeps distinct factual occurrences and refuses missing or invalid indexes (#
   for (const occurrence of [0, 1.5, 99]) expect(reduce([closed([assertion({ ...repeated, occurrence })])]).excluded[0]!.reason).toBe('quote-ambiguous');
 });
 
-it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
-  expect(FACTUAL_REVIEW_REDUCER_DIGEST).toBe('89e343da4cfa1ae23655de09e463188612c399002f7bcaff395621cb3de02a52');
-});
+
 
 it('keeps unique factual ids stable with redundant or invalid occurrence values', () => {
   const baseline = reduce([closed([assertion()])]).findings[0]!;

@@ -1,17 +1,22 @@
+import { LOCAL_TOOL_DECLARATION_NAMES } from '../../src/service/provider/local-tools.js';
+import { spawnSync } from 'node:child_process';
+import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
+import { canonicalJson, graphemeCount } from '../../src/service/analysis/canonical.js';
+import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-// The generator of `sample1-review-cross-chapter-authored`, inheriting the frozen #417 fixture. The findings below are
+// The generator of `sample1-review-cross-chapter-authored`, using the original #417 authored fixture as input. The findings below are
 // the authored part: each was written after reading one Analysis Unit of exact `sample1` (ADR 0043), and
 // each quotation is a verbatim substring of the block it names, except the four that are meant not to
 // anchor. Everything else in the fixture — every request digest, and the answers to the assurance sample
 // and the Run Report reflection those Runs send — depends on the four categories' frozen contracts and
 // on the findings themselves, so it is derived by driving the real path until no Run asks anything new.
 //
-// It never runs in the Local Verification Ladder or in CI. After a clause, a label or the 工序 of one of
-// the four built-in categories changes, regenerate the current fixture with
-//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts
+// Ordinary service tests derive and compare the current fixture without writing. After a clause, label or 工序
+// changes, explicitly write the provider-free derivation with
+//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -26,8 +31,8 @@ import {
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from '../../src/service/analysis/kind-definition.js';
 import { locateQuotation } from '../../src/service/analysis/factual-review-contract.js';
-import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
+import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, reviewCategoryContract, reviewCategoryContractDigest, reviewCategoryRequestDigest, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { fixtureEntryKey, loadModelFixture, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -70,7 +75,8 @@ const AUTHORED: Authored = {
     ],
     3: [
       { quote: '邮证法', blockOrdinal: 18, severity: 'must', note: '“邮证法”应为“邮政法”。', replacement: '邮政法', clauseId: 'typos-and-usage/1' },
-      { quote: '古怪', blockOrdinal: 18, severity: 'note', note: '同一段内“古怪”重复出现，可酌情替换其一。', replacement: '奇怪' },
+      { quote: '古怪', blockOrdinal: 18, occurrence: 2, severity: 'note', note: '同一段内“古怪”重复出现，可酌情替换其一。', replacement: '奇怪' },
+      { quote: '古怪', blockOrdinal: 18, severity: 'note', note: '重复词未指定出现次序，供编辑逐条确认。', replacement: '奇异' },
     ],
     4: [{ quote: '马跃之上第一次谈恋爱', blockOrdinal: 14, severity: 'must', note: '“上”字多余，疑为衍文。', replacement: '马跃之第一次谈恋爱', clauseId: 'typos-and-usage/1' }],
     5: [{ quote: '一路上与好好聊聊天', blockOrdinal: 6, severity: 'must', note: '介词“与”后缺少宾语，句子成分残缺。', replacement: '一路上与曾本之好好聊聊天', clauseId: 'typos-and-usage/2' }],
@@ -129,7 +135,7 @@ const AUTHORED: Authored = {
 /** What each authored quotation is meant to be once Reference Integrity has looked: `unique` unless stated. */
 const EXPECTED_STATE: Record<string, 'not-found' | 'ambiguous'> = {
   'typos-and-usage:3:1': 'not-found',
-  'typos-and-usage:3:2': 'ambiguous',
+  'typos-and-usage:3:3': 'ambiguous',
   'style-and-format:7:1': 'not-found',
   'literary-expression:6:1': 'not-found',
 };
@@ -139,15 +145,43 @@ const byCategory = new Map(DEFINITIONS.map((entry) => [entry.input.categoryId, e
 
 interface Labelled { entry: ModelFixtureEntry; group: number; order: string }
 const entries = new Map<string, Labelled>();
+const refreshedRequests = new Map<string, string>();
+const controlRequests = new Set<string>();
 const j16Keys = new Set<string>();
+const j16SharedKeys = new Set<string>();
+const activeFixtureEntries = new Set<Map<string, ModelFixtureEntry>>();
+const emittedFiles = new Map<string, string>();
+const regenerating = process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1';
+async function readFixture(path: string, encoding: 'utf8'): Promise<string> {
+  return emittedFiles.get(path) ?? await readFile(path, encoding);
+}
+async function emitFixture(path: string, contents: string, encoding: 'utf8'): Promise<void> {
+  emittedFiles.set(path, contents);
+  if (regenerating) await writeFile(path, contents, encoding);
+}
 let additions = 0;
 
+function refreshRepeatedFinding(entry: ModelFixtureEntry): ModelFixtureEntry {
+  if (entry.response.kind !== 'unit-result') return entry;
+  let result;
+  try { result = JSON.parse(entry.response.text); } catch { return entry; }
+  if (result.unitOrdinal !== 3 || !Array.isArray(result.findings) || !result.findings.some((finding: ReviewUnitFinding) => finding.quote === '古怪' && finding.replacement === '奇怪')) return entry;
+  result.findings = result.findings.map((finding: ReviewUnitFinding) => finding.quote === '古怪' && finding.replacement === '奇怪' ? { ...finding, occurrence: 2 } : finding);
+  if (!result.findings.some((finding: ReviewUnitFinding) => finding.quote === '古怪' && finding.occurrence === undefined)) result.findings.push(AUTHORED['typos-and-usage']![3]![2]);
+  return { ...entry, response: { ...entry.response, text: JSON.stringify(result) } };
+}
+
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
+  entry = refreshRepeatedFinding(entry);
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
-  if (order.startsWith('j16')) j16Keys.add(key);
+  if (order.startsWith('j16')) {
+    j16SharedKeys.add(key);
+    if (!entries.has(key)) j16Keys.add(key);
+  }
   if (entries.has(key)) return;
   entries.set(key, { entry, group, order });
   fixture.entries.set(key, entry);
+  for (const active of activeFixtureEntries) if (!active.has(key)) active.set(key, entry);
   additions += 1;
 }
 
@@ -170,12 +204,41 @@ function authoredFindings(categoryId: string, unitOrdinal: number, variant: stri
 
 function unitEntry(categoryIndex: number, categoryId: string, definition: AnalysisKindDefinition, unitOrdinal: number, unitDigest: string, variant: string): void {
   const findings = authoredFindings(categoryId, unitOrdinal, variant);
+  if (categoryId === 'typos-and-usage' && unitOrdinal === 1) controlRequests.add(definition.requestDigest(unitOrdinal, unitDigest));
+  const category = DEFINITIONS.find((entry) => entry.input.categoryId === categoryId)!.input;
+  const variants = historicalReviewCategoryDefinitions(category, 2);
+  for (let index = 0; index < 2; index += 1) {
+    refreshedRequests.set(variants[index + 2]!.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
+    refreshedRequests.set(withModelClarification(variants[index + 2]!).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+    // Authored fixtures also contain the earlier, unshipped #1471 prompt (4f46c0e8).
+    // Reconstruct its exact request pin so retry stimuli remain attached after wording repairs.
+    const contract = reviewCategoryContract(category, 2, index === 0 ? [] : [...LOCAL_TOOL_DECLARATION_NAMES].sort((left, right) => left.localeCompare(right, 'en')));
+    const priorContract = { ...contract, systemPrompt: contract.systemPrompt.replace('只覆盖有问题的文字。', '只覆盖有问题的文字，并且在该内容块中只出现一次。') };
+    const priorDigest = reviewCategoryContractDigest(priorContract);
+    const prior = { ...variants[index]!, systemPrompt: priorContract.systemPrompt, promptContractDigest: priorDigest,
+      requestDigest: (ordinal: number, digest: string) => reviewCategoryRequestDigest(priorDigest, categoryId, ordinal, digest) };
+    refreshedRequests.set(prior.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
+    refreshedRequests.set(withModelClarification(prior).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+    const previousContract = { ...contract, systemPrompt: priorContract.systemPrompt
+      .replace('只覆盖有问题的文字，并且在该内容块中只出现一次。', '只覆盖有问题的文字，避免无关文字。')
+      .replace('优先选用在该内容块中只出现一次的引文；无法做到时，必须给出 occurrence 整数，表示第几次出现', '若引文在该内容块中出现多次，必须给出 occurrence，表示第几次出现') };
+    const previousDigest = reviewCategoryContractDigest(previousContract);
+    const previous = { ...variants[index]!, systemPrompt: previousContract.systemPrompt, promptContractDigest: previousDigest,
+      requestDigest: (ordinal: number, digest: string) => reviewCategoryRequestDigest(previousDigest, categoryId, ordinal, digest) };
+    refreshedRequests.set(previous.requestDigest(unitOrdinal, unitDigest), variants[index]!.requestDigest(unitOrdinal, unitDigest));
+    refreshedRequests.set(withModelClarification(previous).requestDigest(unitOrdinal, unitDigest), withModelClarification(variants[index]!).requestDigest(unitOrdinal, unitDigest));
+
+  }
+
+  const requestDigest = definition.requestDigest(unitOrdinal, unitDigest);
+  // The predecessor is authored input: retain its answer and usage when only its request wording changed.
+  const previous = [...entries.values()].find(({ entry }) => entry.unitOrdinal === unitOrdinal && refreshedRequests.get(entry.requestDigest) === requestDigest)?.entry;
   add({
     unitOrdinal,
-    requestDigest: definition.requestDigest(unitOrdinal, unitDigest),
+    requestDigest,
     attempt: null,
     contentDigest: null,
-    response: {
+    response: previous?.response ?? {
       kind: 'unit-result',
       text: JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal, findings }),
       usage: { inputTokens: 1400 + unitOrdinal * 30, outputTokens: 60 + findings.length * 70 },
@@ -262,23 +325,26 @@ let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 
 beforeEach(async () => {
+  entries.clear(); refreshedRequests.clear(); controlRequests.clear(); j16Keys.clear(); j16SharedKeys.clear(); fixture.entries.clear(); emittedFiles.clear();
   roots = await createServiceTestRoots('ai7-s69-generate-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true): Promise<T> {
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
+  const routedFixture = baselineFixture === undefined ? fixture : inheritGeneratedEntries
+    ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
   const store = await EditorialStore.open(scenarioRoots.dataRoot, scenarioRoots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: { fixtureIdentity: routedFixture.identity, fixtureSha256: routedFixture.sha256, fixtureLineage: routedFixture.lineage },
   });
-  const routedFixture = baselineFixture === undefined ? fixture : { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) };
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
+  if (inheritGeneratedEntries) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
   try {
     const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -288,6 +354,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     return result;
   } finally {
     await owner.dispose();
+    activeFixtureEntries.delete(routedFixture.entries as Map<string, ModelFixtureEntry>);
     store.close();
     await scenarioRoots.dispose();
   }
@@ -382,12 +449,36 @@ async function pass(): Promise<boolean> {
     // Every authored quotation is what it is meant to be against the committed blocks.
     const blocks = new Map(context.store.baselineAnalysisLedger.readRevisionBlocks(context.manuscriptId, context.revisionId).map((block) => [block.blockId, block] as const));
     const manifest = first.settled.coverageManifest!;
+    // Refresh v1 factual unit request keys from the same committed SampleBook manifest, without a call.
+    const factualPath = resolve(FIXTURE_PATH, '..', 'sample1-factual-authored.json');
+    const factual = JSON.parse(await readFixture(factualPath, 'utf8'));
+    const previousFactual = factualReviewKindDefinition(undefined, false);
+    const currentFactual = factualReviewKindDefinition();
+    const factualRequests = new Set(manifest.units.flatMap((unit) => [previousFactual, currentFactual].map((definition) => definition.requestDigest(unit.ordinal, unit.digest))));
+    factual.entries = factual.entries.filter((entry: ModelFixtureEntry) => entry.unitOrdinal === 0 || factualRequests.has(entry.requestDigest));
+    const verifiedPath = resolve(FIXTURE_PATH, '..', 'sample1-factual-verified.json');
+    const verified = JSON.parse(await readFixture(verifiedPath, 'utf8'));
+    const standard = factualReviewLevelDefinition('standard');
+    for (const unit of manifest.units) {
+      const entry = verified.entries.find((entry: ModelFixtureEntry) => entry.unitOrdinal === unit.ordinal);
+      if (entry !== undefined) entry.requestDigest = standard.requestDigest(unit.ordinal, unit.digest);
+    }
+    await emitFixture(verifiedPath, `${JSON.stringify(verified, null, 2)}\n`, 'utf8');
+
+    for (const unit of manifest.units) {
+      const old = factual.entries.find((entry: ModelFixtureEntry) => entry.requestDigest === previousFactual.requestDigest(unit.ordinal, unit.digest));
+      if (old !== undefined && !factual.entries.some((entry: ModelFixtureEntry) => entry.requestDigest === currentFactual.requestDigest(unit.ordinal, unit.digest))) {
+        factual.entries.push({ ...old, requestDigest: currentFactual.requestDigest(unit.ordinal, unit.digest) });
+      }
+    }
+    await emitFixture(factualPath, `${JSON.stringify(factual, null, 2)}\n`, 'utf8');
+
     for (const [categoryId, units] of Object.entries(AUTHORED)) {
       for (const [unitOrdinal, findings] of Object.entries(units)) {
         const unit = manifest.units[Number(unitOrdinal) - 1]!;
         const ids = [...unit.overlapBlockIds, ...unit.blockIds];
         findings.forEach((finding, index) => {
-          const state = locateQuotation(blocks.get(ids[finding.blockOrdinal - 1]!)!.text, finding.quote).state;
+          const state = locateQuotation(blocks.get(ids[finding.blockOrdinal - 1]!)!.text, finding.quote, finding.occurrence).state;
           const expected = EXPECTED_STATE[`${categoryId}:${unitOrdinal}:${index + 1}`] ?? 'verified';
           expect(state, `${categoryId} unit ${unitOrdinal} finding ${index + 1}`).toBe(expected);
         });
@@ -421,6 +512,12 @@ async function pass(): Promise<boolean> {
       note((await run(context, categoryId, { mode: 'review-first', selectedRange: null }, 'g-j04-end', 'j')).closed);
     }
   });
+  await withBook(async (context) => {
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, '，J-04 快速开始前的确认编辑');
+    note((await run(context, 'typos-and-usage', { mode: 'review-first', selectedRange: null }, 'g-j04-third', 'j')).closed);
+  });
   // Current category Runs with no baseline, a matching baseline, and selection/chapter scope.
   await withBook(async (context) => {
     note((await run(context, 'plot-consistency', { mode: 'review-first', selectedRange: null }, 'h-no-baseline', 'a')).closed);
@@ -445,12 +542,10 @@ async function pass(): Promise<boolean> {
   return allClosed;
 }
 
-it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the authored review fixture', async () => {
+it('generates the authored review fixture without unreachable committed entries', async () => {
   await requireExactSample1(roots.codeRoot);
-  const predecessor = parseModelFixture(JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
+  const predecessor = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
   predecessor.entries.forEach((entry, index) => add(entry, -2, String(index).padStart(5, '0')));
-  const retained = parseModelFixture(JSON.parse(await readFile(FIXTURE_PATH, 'utf8')));
-  retained.entries.forEach((entry, index) => add(entry, -1, String(index).padStart(5, '0')));
   const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), FIXTURE_BASE);
   for (const [key, entry] of base.entries) if (!fixture.entries.has(key)) fixture.entries.set(key, entry);
   let closed = false;
@@ -474,26 +569,139 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
-    entries: ordered.filter(({ entry, order }) => !order.startsWith('j16') && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
+    entries: ordered.filter(({ entry, order }) => !j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)) && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
       .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
-  await writeFile(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  await emitFixture(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
   // The predecessor already reaches the loader's depth ceiling. Current controls share its baseline,
   // retaining exactly the old authored retry overrides without another inheritance layer.
-  const controls = JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8'));
+  const controls = JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8'));
   const controlled = new Map(body.entries.map((entry) => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry]));
   for (const entry of controls.entries) controlled.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry);
-  await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-review-cross-chapter-controls.json'), `${JSON.stringify({ ...body,
+  await emitFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-cross-chapter-controls.json'), `${JSON.stringify({ ...body,
     identity: 'sample1-review-cross-chapter-controls', description: 'Current cross-chapter review with the identical authored v2 retry controls; historical fixtures are unchanged.',
     entries: [...controlled.values()] }, null, 2)}\n`, 'utf8');
   // The workspace predecessor is already four layers deep. Keep its exact answers in a sibling successor.
-  const workspace = JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace.json'), 'utf8'));
-  await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace-cross-chapter.json'), `${JSON.stringify({ ...workspace,
+  const workspace = JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace.json'), 'utf8'));
+  await emitFixture(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace-cross-chapter.json'), `${JSON.stringify({ ...workspace,
     identity: 'sample1-agent-workspace-cross-chapter',
     description: 'Current J-16 authored successor: preserves every Agent workspace/dialogue answer and adds exact plot review, one bounded synthesis and assurance for its synthetically edited first-paragraph selection.',
-    entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
+    entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16SharedKeys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
       ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response }))],
   }, null, 2)}\n`, 'utf8');
+
+  // Refresh every authored successor/control request that shares a generated unit. Captured recordings stay untouched.
+  for (const name of await readdir(resolve(FIXTURE_PATH, '..'))) {
+    if (!name.endsWith('.json')) continue;
+    const path = resolve(FIXTURE_PATH, '..', name);
+    const body = JSON.parse(await readFixture(path, 'utf8'));
+    if (body.provenance !== 'authored' || !Array.isArray(body.entries)) continue;
+    let changed = false;
+    const deduplicated = new Map<string, unknown>();
+    const originalKeys = new Set(body.entries.map((entry: ModelFixtureEntry) => `${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`));
+    for (const original of body.entries) {
+      let entry = refreshRepeatedFinding(original);
+      if (entry !== original) changed = true;
+      const next = refreshedRequests.get(entry.requestDigest);
+      if (next !== undefined && next !== entry.requestDigest) {
+        changed = true;
+        if (originalKeys.has(`${entry.unitOrdinal}:${next}:${entry.attempt ?? ''}`)) continue;
+        entry = { ...entry, requestDigest: next };
+      }
+      deduplicated.set(`${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`, entry);
+    }
+    if (changed) await emitFixture(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
+  }
+
+  // Seeded historical responses and newly derived responses use one stable field/entry order.
+  for (const name of ['sample1-review-cross-chapter-authored', 'sample1-review-cross-chapter-controls', 'sample1-agent-workspace-cross-chapter']) {
+    const path = resolve(FIXTURE_PATH, '..', `${name}.json`);
+    const body = JSON.parse(await readFixture(path, 'utf8'));
+    body.entries.sort((left: ModelFixtureEntry, right: ModelFixtureEntry) => left.unitOrdinal - right.unitOrdinal || left.requestDigest.localeCompare(right.requestDigest, 'en') || (left.attempt ?? 0) - (right.attempt ?? 0));
+    for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
+    await emitFixture(path, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  }
+  if (!regenerating) for (const [path, contents] of emittedFiles) {
+    expect(await readFile(path, 'utf8') === contents, `${path} must equal fresh generator output; regenerate deliberate changes`).toBe(true);
+  }
+  // Replay the written workspace alone: shared unit answers must not be supplied by the generator's larger in-memory fixture.
+  const generatedWorkspace = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-agent-workspace-cross-chapter');
+  await withBook(async (context) => {
+    await baseline(context);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J16_EDIT_SUFFIX);
+    expect(await runJ16Selection(context)).toBe(true);
+  }, generatedWorkspace, false);
+  const generatedControls = parseModelFixture(JSON.parse(await readFixture(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8')));
+  for (const requestDigest of controlRequests) for (const attempt of [1, 2]) {
+    expect(generatedControls.entries.some((entry) => entry.unitOrdinal === 1 && entry.requestDigest === requestDigest && entry.attempt === attempt),
+      'Each generated typos unit-1 request must retain its authored retry stimulus').toBe(true);
+  }
   // eslint-disable-next-line no-console
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);
+
+
+it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the overlap fixture derived requests', async () => {
+  const path = resolve(FIXTURE_PATH, '..', 'review-overlap-authored.json');
+  const body = JSON.parse(await readFixture(path, 'utf8'));
+  const loaded = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'review-overlap-authored');
+  const entries = new Map(loaded.entries);
+  const localFixture = { ...loaded, entries };
+  const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE, 1);
+  const add = (unitOrdinal: number, requestDigest: string, content: unknown) => {
+    const key = fixtureEntryKey(unitOrdinal, requestDigest);
+    if (!entries.has(key)) entries.set(key, { unitOrdinal, requestDigest, attempt: null, contentDigest: null,
+      response: { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 100, outputTokens: 40 } } });
+  };
+  let closed = false;
+  for (let pass = 0; pass < 3 && !closed; pass += 1) {
+    const scenario = await createServiceTestRoots('ai7-overlap-regenerate-');
+    const store = await EditorialStore.open(scenario.dataRoot, scenario.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: {
+      fixtureIdentity: localFixture.identity, fixtureSha256: localFixture.sha256, fixtureLineage: localFixture.lineage, reviewContractVersion: 1 } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: localFixture, secretResolver: { resolve: async () => null } });
+    try {
+      const book = await importSample1Book(store, scenario.codeRoot, '合成引文夹具');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      recordMissingCredentialConnection(store, '合成引文夹具');
+      const paragraphs = ['甲'.repeat(1200), '开头👩‍💻Ａ　Ｂ结尾'];
+      for (const [index, block] of store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).entries()) {
+        const replace = (fromGrapheme: number, toGrapheme: number, insertText: string) => {
+          const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+          const current = window.blocks.find((entry) => entry.blockId === block.blockId)!;
+          store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+            blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: current.digest, expectedJournalSequence: window.journalSequence,
+            fromGrapheme, toGrapheme, insertText });
+        };
+        let remaining = graphemeCount(block.text);
+        while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
+        const words = paragraphs[index] ?? '';
+        for (let offset = 0; offset < words.length; offset += 256) replace(offset, offset, words.slice(offset, offset + 256));
+      }
+      let work = store.createReviewCategoryPreparationWork(book.bookId, definition, { mode: 'review-first', selectedRange: null }, launchPolicy);
+      while (!work.done) work = store.advanceReviewCategoryPreparationWork(definition, work.workId!);
+      const prepared = work.projection!;
+      const authorized = store.authorizeReviewCategory(book.bookId, definition, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      owner.admitAndDispatch(authorized.dispatchRunRecordId!, store.reviewCategoryLedger(definition));
+      await owner.whenIdle();
+      const settled = store.inspectReviewCategory(book.bookId, definition);
+      const revision = settled.resultSetRevision!;
+      const candidates = definition.assurance!.candidates({ components: { findings: revision.findings } } as unknown as AnalysisReductionResult);
+      for (const unit of settled.coverageManifest!.units) {
+        const listed = candidates.filter((candidate) => candidate.unitOrdinal === unit.ordinal);
+        if (listed.length) add(0, assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest, assuranceSampleDigest(listed)), {
+          schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: listed.map((_candidate, index) => ({ ref: `{{ref:${index + 1}}}`, disposition: '成立', reason: '合成引文在授权单元内唯一定位。' })) });
+      }
+      if (revision.assuranceSample.state === 'closed') add(0, runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, settled.taskOutcome!.report!.accountingDigest), {
+        schema: 'ai7.analysis.run-report-reflection-result/1', items: [] });
+      closed = revision.assuranceSample.state === 'closed' && settled.taskOutcome!.report!.ifRedone.state === 'closed';
+      store.markCleanShutdown();
+    } finally { await owner.dispose(); store.close(); await scenario.dispose(); }
+  }
+  expect(closed).toBe(true);
+  await emitFixture(path, `${JSON.stringify({ ...body, entries: [...entries.values()].map(({ unitOrdinal, requestDigest, response }) => ({ unitOrdinal, requestDigest, response })) }, null, 2)}\n`, 'utf8');
+}, 600_000);
+
+it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('regeneration preserves committed fixtures byte for byte', () => {
+  const result = spawnSync('git', ['diff', '--quiet', '--', 'tests/fixtures/model'], { cwd: roots.codeRoot, windowsHide: true });
+  expect(result.status, 'Regeneration must leave the committed fixtures unchanged; review and commit deliberate updates first.').toBe(0);
+});

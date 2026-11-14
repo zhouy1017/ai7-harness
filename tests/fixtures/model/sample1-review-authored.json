@@ -9,7 +9,7 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "a85cf2de95873579e4bf9dae5a01c311efea7127a60bb18bf1a754fcbd15b655",
+      "requestDigest": "6c0139fbbd15c404d9a3f4ab839759122162d854c038e60d88e70b5d3542bfd2",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
@@ -21,7 +21,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "72de6b1eb776c3c3919285f31e1458914e2a572c0bf9bd07e57fb57fbd7f6168",
+      "requestDigest": "28a63b9cd646cb57780a58f0cd8a82d0c96efb4773656d4b5d75deca7b12bdfb",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九九○年代\",\"blockOrdinal\":1,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"},{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九八〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
@@ -33,10 +33,10 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "ecf28c1555652e131f4b9a140e496dea10d1e63bb06ef48e519e708bafc43527",
+      "requestDigest": "24eb1a09bd0a5e14805bd1fbb10d9b19d0fd2225335acc4b7dfa38c6e36e5817",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"邮证法\",\"blockOrdinal\":18,\"severity\":\"must\",\"note\":\"“邮证法”应为“邮政法”。\",\"replacement\":\"邮政法\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"古怪\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"同一段内“古怪”重复出现，可酌情替换其一。\",\"replacement\":\"奇怪\"}]}",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"邮证法\",\"blockOrdinal\":18,\"severity\":\"must\",\"note\":\"“邮证法”应为“邮政法”。\",\"replacement\":\"邮政法\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"古怪\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"同一段内“古怪”重复出现，可酌情替换其一。\",\"replacement\":\"奇怪\",\"occurrence\":2},{\"quote\":\"古怪\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"重复词未指定出现次序，供编辑逐条确认。\",\"replacement\":\"奇异\"}]}",
         "usage": {
           "inputTokens": 1490,
           "outputTokens": 200
@@ -45,7 +45,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "4ba0700b4c52ad71e2d50743159c99168b75db48c9397d26ccd2ee2c2da3c7ec",
+      "requestDigest": "8313180574aa84c4c55cc27b18fc313697ed66c366a226c600e015a42cd9d9ee",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"马跃之上第一次谈恋爱\",\"blockOrdinal\":14,\"severity\":\"must\",\"note\":\"“上”字多余，疑为衍文。\",\"replacement\":\"马跃之第一次谈恋爱\",\"clauseId\":\"typos-and-usage/1\"}]}",
@@ -57,7 +57,7 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "958e3d573a6fdc6f4a383fd7f5deccb3b44c4a1f1532272e7738df3bbb8345be",
+      "requestDigest": "2c8f663d690a161bba7de4cd00019461ae7766067cda90e62260ca9a9cb839d9",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"一路上与好好聊聊天\",\"blockOrdinal\":6,\"severity\":\"must\",\"note\":\"介词“与”后缺少宾语，句子成分残缺。\",\"replacement\":\"一路上与曾本之好好聊聊天\",\"clauseId\":\"typos-and-usage/2\"}]}",
@@ -69,7 +69,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "03b818baccc048a2b5f742e6dafd76355a423c6111288355ac36c0153c1d6ef0",
+      "requestDigest": "bbd70db82b4758609eb6459717cea55a78fab535ffc047fa06554a3a4ddb7395",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
@@ -81,7 +81,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "8014aec6cfd741f457ccb001ff543a5c2678e19ad0db22a5e11cdf4e270bd42e",
+      "requestDigest": "152f98e5c06a0ff15d9ab1953ab469ecefd559286f5304abfe9329820b5ac6e3",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
@@ -93,7 +93,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "efd3fe7b54f9318e5bb77edb64bb98ada292e5e375f848102ca4d1004890e04d",
+      "requestDigest": "5739d6598e7aeb735dfbe88e1685d3cdd6211abedcbe06779aa152a571674f0c",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
@@ -105,7 +105,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "1bd255fe4858f16bedb1d70fa125448c8b7d4c13ed9038292f0a648027de6c0b",
+      "requestDigest": "44d0b91b202a4ecff48571f045d78c5c0bed94c41ef40b72d02daff63e11f281",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
@@ -117,7 +117,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "d1fd62f6209cfbce107c497b53fb079d6ceaed51625c0bb1cf11383ae3a32917",
+      "requestDigest": "6b10f064ce8b3f006572be35711eb1200b366382e9828add984d69e98b2f23ea",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"},{\"quote\":\"一九九○年代\",\"blockOrdinal\":15,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九九〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
@@ -429,7 +429,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "007ef440ef59dc5f4d30229ee9428fefe626375877104aa9b55d6e8bb9936f3c",
+      "requestDigest": "7f125421cae6f21578395f8f844f84ad10474d3b149750555b77ee9ccb616e28",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
@@ -441,7 +441,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "8fc396c18f13d32d82b7b5575d5da6e0a85cd483db50380a744dc926b36842d2",
+      "requestDigest": "1fecdea0fd74c5835a21037d661d33195bf5d35b44d46e4755b650569c7c9172",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"极端少数之人\",\"blockOrdinal\":2,\"severity\":\"should\",\"note\":\"“极端少数之人”搭配生硬，可改为更自然的说法。\",\"replacement\":\"极少数人\",\"clauseId\":\"literary-expression/1\"},{\"quote\":\"悄无声息地沉入湖底\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"句末可以更凝练，收束更有余味。\",\"replacement\":\"悄然沉入湖底\",\"clauseId\":\"literary-expression/2\"}]}",
@@ -453,7 +453,7 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "292748fc95286db93072a8feb72d847c8728e183a5c4a11ef7ceb6f30ec85dec",
+      "requestDigest": "3b5fae0d48ce5857551725cbf0cbaa2ca0d732dc7aa3efab0afcbcd31203831d",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[{\"quote\":\"悄无声息地沉入湖底\",\"blockOrdinal\":1,\"severity\":\"note\",\"note\":\"句末可以更凝练，收束更有余味。\",\"replacement\":\"悄然沉入湖底\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"秀色诱人的湖水\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“秀色诱人”略显俗套，可换用更贴合春日湖景的说法。\",\"replacement\":\"波光潋滟的湖水\",\"clauseId\":\"literary-expression/2\"}]}",
@@ -465,7 +465,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "9cb1d94aeb77cbf6aab9b608438082b74c53007a69825b2eb292aa743130510e",
+      "requestDigest": "e088f92afee49af11231eed75d7f0e604d29abc14b3d9dc338c7a03f881e9c8b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
@@ -477,7 +477,7 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "15b07ef43c02ed578dcc434e6cbe2f6543e04b16956fd0cae5cf7dd7510a827a",
+      "requestDigest": "56b1c2635aee4f6c8835469096e3dbd7674fea3deb3365d9b501621b1cc2ec5f",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[{\"quote\":\"更难的难题\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"“更难的难题”用词重复。\",\"replacement\":\"更棘手的难题\",\"clauseId\":\"literary-expression/1\"}]}",
@@ -489,7 +489,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "ac8f467b9ea40c4b9d3d09c7ae6e407f2edcc5b244306ac12127bd0e0e798c93",
+      "requestDigest": "d774b7b4505016ec65e67d19ea601d0ce4f4ea94314bcea4c7b9d035c9fd5ccb",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"像风一样流畅\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"比喻可以更具体。\",\"replacement\":\"像风一样轻快\",\"clauseId\":\"literary-expression/2\"},{\"quote\":\"有诗意很优雅地戳着\",\"blockOrdinal\":5,\"severity\":\"should\",\"note\":\"两个状语并列缺少连接，节奏不顺。\",\"replacement\":\"既有诗意又很优雅地戳着\",\"clauseId\":\"literary-expression/1\"}]}",
@@ -501,7 +501,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "a0d3db2435fe63fb86616cdfbb01a995b856517707e53f5b8fd6dcc5621319e7",
+      "requestDigest": "0c3ed186b6cf46ed971cb592f966298e000af9ae40ae9f07a01723b4e28c6f85",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[{\"quote\":\"不敢笑,又不能不笑\",\"blockOrdinal\":18,\"severity\":\"note\",\"note\":\"此处应使用全角逗号。\",\"replacement\":\"不敢笑，又不能不笑\"}]}",
@@ -513,7 +513,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "af689dde7a8130a17258048a54ff19e1c4e368d5e97cde853ee54316d7421b6b",
+      "requestDigest": "1b971eb40dc163ace713f2abf5b2078d3e996c1a59844f00f7cf96ed2ffefa4f",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[{\"quote\":\"原样退出来\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"“退出来”可改为更贴切的动词。\",\"replacement\":\"原样抽出来\",\"clauseId\":\"literary-expression/1\"}]}",
@@ -525,7 +525,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "8674dd7fbf879a92ef150a2eac4f0c6c0c41df9bb24daf9ebbdbda9a08626138",
+      "requestDigest": "86f990ac3b2b74344203b8b791c32f75d8166ad76fe0f98ca7041116c9955fc5",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
@@ -537,7 +537,7 @@
     },
     {
       "unitOrdinal": 1,
-      "requestDigest": "aace118e915c6191067b840be6c8d9b48c5818eab79cd718b4caf36089b64556",
+      "requestDigest": "04e7e5bf17f2103d336656829b0f89884a760c4cffdb60129532369d0a613504",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",

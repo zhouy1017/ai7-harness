@@ -86,7 +86,7 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
     const { sourceRangeMapping, ...historical } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
     const { sourceRangeIntegrity, ...beforeSliceCheck } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
-    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(sourceRangeIntegrity).toBe('located-quotation-is-manuscript-grapheme-slice');
     expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(customAnalysisKindDefinition(version).reducerDigest).toBe(CUSTOM_ANALYSIS_REDUCER_DIGEST);
@@ -258,8 +258,4 @@ describe('live admission of a dimension version (#920 rule, slice 7f definition)
   });
 
 
-});
-
-it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
-  expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).toBe('0883873a5f83f52eb6d042bc006cd570d99d7c4ec5de4b6195db9060d1ae953d');
 });

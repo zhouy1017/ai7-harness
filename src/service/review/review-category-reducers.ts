@@ -78,6 +78,8 @@ interface LocatedFinding {
   readonly blockId: string;
   readonly blockText: string | null;
   readonly location: ReturnType<typeof locateQuotation>;
+  readonly previousQuote: string;
+  readonly wholeBlockFallback: boolean;
   readonly legacy?: { blockId: string; quote: string; replacement: string | null; fromGrapheme: number; toGrapheme: number };
 }
 
@@ -132,7 +134,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let block = blockId === undefined ? undefined : blocks.get(blockId);
       let location: ReturnType<typeof locateQuotation> = { state: 'not-found' };
       let annotation = false;
-      let wholeParagraphFallback = false;
+      let wholeBlockFallback = false;
       let punctuationMatched = false;
       let legacy: LocatedFinding['legacy'];
       let note = finding.note;
@@ -155,9 +157,9 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
           if (occurrences > 1) annotation = true;
         }
         if (location.state === 'not-found') continue;
+        punctuationMatched = locate === locateQuotation;
         const wasAmbiguous = location.state === 'ambiguous';
         const guessed = wasAmbiguous || annotation || locate === locateQuotation;
-        punctuationMatched = locate === locateQuotation;
         if (location.state === 'ambiguous' && block !== undefined) location = locate(block.text, finding.quote, 1);
         if (locate === locateExactQuotation && location.state === 'verified' && block !== undefined) {
           const previous = locateExactQuotation(block.text, finding.quote);
@@ -178,18 +180,24 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       if (location.state === 'not-found' && block !== undefined && graphemeCount(block.text) > 0 && !partialGrapheme) {
         location = { state: 'verified', fromGrapheme: 0, toGrapheme: graphemeCount(block.text) };
         annotation = true;
-        wholeParagraphFallback = true;
+        wholeBlockFallback = true;
         legacy = { blockId: blockId!, quote: finding.quote, replacement: null, ...location };
         note = `【引文未逐字匹配】${note}`;
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
-      const retainedFinding = { ...finding, note, ...(!wholeParagraphFallback && (!annotation || punctuationMatched) && location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
+      // Compare identity against the quote the predecessor reducer stored, before aligning display text.
+      const previousQuote = !wholeBlockFallback && (!annotation || punctuationMatched) && location.state === 'verified' && block !== undefined
+        ? locateExactQuotation(block.text, finding.quote).state === 'verified' ? finding.quote : sliceGraphemes(block.text, location.fromGrapheme, location.toGrapheme)
+        : finding.quote;
+      const retainedFinding = { ...finding, note, ...(!wholeBlockFallback && location.state === 'verified' && block !== undefined ? { quote: quotationForLocation(block.text, finding.quote, location) } : {}) };
       if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,
         findingOrdinal: (outcome.result.acceptedIndexes?.[index] ?? index) + 1,
         finding: retainedFinding,
+        previousQuote,
+        wholeBlockFallback,
         ...(legacy === undefined ? {} : { legacy }),
         blockId: blockId ?? '',
         blockText: block?.text ?? null,
@@ -241,7 +249,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
     const reference = { unitOrdinal: entry.unitOrdinal, blockOrdinal: finding.blockOrdinal, findingOrdinal: entry.findingOrdinal,
       unitDigest: manifest.units[entry.unitOrdinal - 1]!.digest,
       resultDigest: resultDigests.get(entry.unitOrdinal)! };
-    const key = canonicalJson(input.exactOccurrences ? [coordinates, replacement] : [coordinates, normalized, replacement]);
+    const key = canonicalJson(input.exactOccurrences && !entry.wholeBlockFallback ? [coordinates, replacement] : [coordinates, normalized, replacement]);
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {
       merged += 1;
@@ -254,11 +262,16 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       continue;
     }
     findingsByKey.set(key, findings.length);
-    const legacyUnchanged = entry.legacy !== undefined && entry.legacy.blockId === entry.blockId && entry.legacy.quote === finding.quote &&
+    const legacyUnchanged = entry.legacy !== undefined && entry.legacy.blockId === entry.blockId && entry.legacy.quote === entry.previousQuote &&
       entry.legacy.replacement === replacement && entry.legacy.fromGrapheme === coordinates.fromGrapheme && entry.legacy.toGrapheme === coordinates.toGrapheme;
+    const previousId = findingId(input.exactOccurrences || !legacyUnchanged ? { kind: 'finding', categoryId, ...coordinates, replacement }
+      : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalizedQuotation(entry.legacy!.quote), replacement });
+    // A fallback and a whole-block quotation can share coordinates in either order.
+    // Keep the first (base) identity and distinguish every later opinion by its quotation.
+    const id = findings.some((finding) => finding.findingId === previousId)
+      ? findingId({ kind: 'finding', categoryId, ...coordinates, quote: normalized, replacement }) : previousId;
     findings.push({
-      findingId: findingId(input.exactOccurrences || !legacyUnchanged ? { kind: 'finding', categoryId, ...coordinates, replacement }
-        : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalized, replacement }),
+      findingId: id,
       unitOrdinal: entry.unitOrdinal,
       blockId: entry.blockId,
       sourceRange: { blockId: entry.blockId, fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },
