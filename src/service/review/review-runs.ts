@@ -2262,6 +2262,11 @@ export class ReviewRunStore {
   #categoryLedger(category: SnapshotCategory): BaselineAnalysisStore {
     const ledger = this.#categoryDefinitionLedger(category);
     if (category.task === null || this.#ledgers.executionFor === undefined) return ledger;
+    // Only one-step launches inherit the launch choice. Retained prepared work keeps its existing drift checks.
+    const launched = this.#db.prepare(`SELECT 1 FROM review_runs r JOIN review_run_authorizations a USING(review_run_id),
+      json_each(r.canonical_json, '$.categories') c WHERE json_extract(a.canonical_json, '$.launchSnapshotId') IS NOT NULL
+      AND json_extract(c.value, '$.task.taskIntentId') = ? LIMIT 1`).get(category.task.taskIntentId);
+    if (launched === undefined) return ledger;
     const frozen = ledger.frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const provider = frozen.components['provider-resolution-plan'] as Record<string, unknown>;
     const route = provider.executionRoute as Record<string, unknown>;
@@ -4906,9 +4911,18 @@ export class ReviewRunStore {
     return row === undefined ? null : this.#versionView(row);
   }
 
-  /** Attribution reads the frozen producing plan, never the current role selection. */
+  /** Run attribution reads its launch choice, or the legacy frozen plan; never the current role selection. */
   #modelAttribution(snapshot: RunSnapshot): { modelLabel?: string } {
     if (localOnly(snapshot)) return { modelLabel: 'AI7 本地检查' };
+    const launch = this.#db.prepare('SELECT canonical_json, sha256 FROM task_launch_snapshots WHERE run_id = ?').get(snapshot.reviewRunId);
+    if (launch !== undefined) {
+      const choice = recordOf(text(launch.canonical_json), text(launch.sha256));
+      if (isRecord(choice.binding) && typeof choice.binding.route === 'string' && typeof choice.binding.model === 'string') {
+        const label = markModelLabels({ route: choice.binding.route, model: choice.binding.model,
+          ...(typeof choice.binding.reasoningEffort === 'string' ? { reasoningEffort: choice.binding.reasoningEffort } : {}) }).modelLabel;
+        return label ? { modelLabel: label } : {};
+      }
+    }
     const labels = [...new Set(snapshot.categories.flatMap(category => {
       if (category.task === null) return [];
       const label = markModelLabels(recordedMarkModel(this.#db, category.task.taskIntentId, snapshot.createdAt)).modelLabel;

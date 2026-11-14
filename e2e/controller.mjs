@@ -1043,14 +1043,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'quick-start-rules-page',
     'review-relaunch',
     'review-destination',
+    'dispatch-model-choice',
     'review-sheet',
     'review-prepare',
-    // Issue #420 (S74a): the Run's one approval is the drawer bar's 开始任务.
-    'review-bar-ready',
-    // Issue #760 (S74c): offline, the Review Run is approved with 联网后开始任务, waits, and starts once the network is back.
-    'review-offline-bar',
-    'review-start-when-online',
-    'review-online-dispatch',
     'review-authorize',
     // Issue #952: 发现 lists the settled Run's findings, opens one, and drops the one 审阅 disposed.
     'book-findings-center',

@@ -1,4 +1,4 @@
-import { prepareLegacyReviewPlan } from './legacy-review-plan.mjs';
+import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -1220,11 +1220,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'editable-local-options-ready');
     await waitFor(renderer, `document.querySelector('[data-procedure-definition="${localProcedure.procedureId}@1"]') && document.querySelector('dialog.review-sheet input[name="review-category"][value="local-text-check"]')?.checked===true && document.querySelector('dialog.review-sheet [data-review-action="prepare"]')?.disabled===false`, 'editable-local-definition-ready');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); if(sheet.querySelector('[data-local-check-prose]')?.checked!==true)return false; const button=sheet.querySelector('[data-review-action="prepare"]'); if(button.disabled)return false; button.click(); return true; })()`, 'editable-local-prepare');
-    await prepareLegacyReviewPlan(renderer, waitFor);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'editable-local-plan');
+    await launchReviewFromSheet(renderer, waitFor);
     const localRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(p=>p.run)`);
     requireJourney(localRun.preinstalledProcedures.some(p=>p.procedure.procedureId===localProcedure.procedureId&&p.procedure.digest===localProcedure.digest), 'editable-run-exact-pin');
-    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'editable-local-start');
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'editable-local-completed');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editable-capture-knowledge');
     await waitFor(renderer, `document.querySelector('.knowledge-base')`, 'editable-capture-knowledge-ready');

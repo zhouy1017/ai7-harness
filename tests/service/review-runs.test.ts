@@ -122,7 +122,7 @@ interface Book {
   readonly branchId: string;
 }
 
-async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
+async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, reviewVersion?: 1 | 2): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -130,7 +130,7 @@ async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExe
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewVersion ?? reviewFixtureContractVersion(fixture) },
   });
   const executionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner === undefined ? executionOwner : owner(executionOwner));
@@ -2866,13 +2866,16 @@ it('replays a committed launch after restart and drives it once without a second
   });
 });
 
-it('launches model-free baseline leads without a credential (#1455)', async () => {
-  await withBaselineBook(async (session, book) => {
+it('launches historical model-free baseline leads without a credential (#1455)', async () => {
+  // Explicitly reconstruct the retained v1 category owner; current v2 plot review remains model-backed.
+  const session = await open('sample1-review-cross-chapter-authored', undefined, 1);
+  try {
+    const book = await importBook(session); await runBaseline(session, book);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);
     session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', live: null, policy });
     const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [PLOT], scope: WHOLE }, policy);
     expect(launched.projection.run!.categories[0]!.taskIntentId).toBeNull();
     await driveLaunchedReviewRun(session.driver, launched);
     expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
-  });
+  } finally { await close(session); }
 });

@@ -1,4 +1,4 @@
-import { prepareLegacyReviewPlan } from './legacy-review-plan.mjs';
+import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -3041,85 +3041,12 @@ async function main() {
       'review-governed-preference-exists', governedPreference?.current?.lines);
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
-    await prepareLegacyReviewPlan(renderer, waitFor);
-    // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
-    // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
-    // drawer's bar, so ②B offers 查看计划并开始 beside 返回修改 and no authorization button.
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='typos-and-usage,style-and-format,plot-consistency'`, 'review-prepared', 120_000);
+    await launchReviewFromSheet(renderer, waitFor);
     const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    const taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
-    requireJourney(preparedReview?.state === 'prepared' && UUID_PATTERN.test(preparedReview.reviewRunId) &&
-      JSON.stringify(preparedReview.categories.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']) &&
-      JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']), 'review-prepared-run', preparedReview?.categories);
-    await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='review-run' && plans.querySelector('[data-review-action="revise"]')?.textContent==='返回修改' && document.querySelectorAll('[data-review-action="authorize"]').length===0 && !plans.querySelector('.review-authorize-note') && ${AUTHORIZE_LABELED_BUTTONS}===0 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
-    // One model-backed step per category and 汇总; each
-    // model-read category's own frozen plan one step away in 查看技术详情 (S72 D7).
-    const reviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'ready', 'review-drawer');
-    requireJourney(reviewDrawer?.kind === 'review-run' && reviewDrawer.pill === '尚未开始' && reviewDrawer.version === null &&
-      reviewDrawer.chips.position === '全书' && reviewDrawer.steps.length === 4 &&
-      reviewDrawer.steps[0].startsWith('逐章审读：') && reviewDrawer.steps[1].startsWith('逐章审读：') &&
-      reviewDrawer.steps[2].startsWith('逐章审读：') && reviewDrawer.steps[3] === '汇总 → 审阅报告' &&
-      taskBacked.every((category) => reviewDrawer.technical[`category:${category.categoryId}`]?.includes(`计划权限边界 ${category.planEnvelopeDigest}`)) &&
-      JSON.stringify(reviewDrawer.participation) === JSON.stringify(['预计无需中途参与', '结束后：每一类完成后，它的发现立即可以处理：修改建议由你接受并应用，批注由你标记为已处理或忽略并说明']) &&
-      reviewDrawer.actions === 0 && reviewDrawer.footer === '计划说明，不是运行授权', 'review-drawer-plan', reviewDrawer);
-
-    at('review-bar-ready');
-    // Issue #420 (S74a): the Run's one approval is the bar's 开始任务; the categories' deterministic route
-    // needs no credential, so it is offered while the Book's credential stays `missing`.
-    requireJourney(reviewDrawer.bar?.state === 'ready' && reviewDrawer.bar.start === 'ready' &&
-      reviewDrawer.bar.summary === '产出审阅发现与审阅报告，不修改稿件。' &&
-      reviewDrawer.bar.statement === BAR_STATEMENT && reviewDrawer.bar.note === null &&
-      barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
-    'review-bar-ready', reviewDrawer.bar);
-
-    // ---- 联网后开始任务 of a Review Run (Issue #760, plan slice S74c; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002,
-    // AUTH-004, OFF-004 to OFF-010). The device goes offline through J-04's control; the plan read again says so.
-    at('review-offline-bar');
-    cancellation.throwIfRequested();
-    await writeFile(connectivityPath, 'offline');
-    await reviewAction(renderer, 'section.review-plans [data-review-action="view-plan"]', 'review-offline-reopen');
-    const reviewOffline = await drawerShowing(renderer, preparedReview.reviewRunId, 'offline', 'review-offline-drawer');
-    // The same two start actions a baseline offers offline, neither preselected, and no 开始任务 to confuse them with.
-    requireJourney(reviewOffline?.kind === 'review-run' && reviewOffline.pill === '离线' && reviewOffline.bar?.state === 'offline' &&
-      reviewOffline.bar.start === 'offline' && reviewOffline.bar.statement === BAR_STATEMENT &&
-      reviewOffline.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
-      barActions(reviewOffline) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:enabled',
-    'review-offline-bar', reviewOffline?.bar);
-    await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'review-offline-nothing-preselected');
-
-    at('review-start-when-online');
-    cancellation.throwIfRequested();
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start-when-online"]', 'review-start-when-online-click');
-    const reviewWaitingDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
-    requireJourney(reviewWaitingDrawer?.pill === '等待网络' && reviewWaitingDrawer.bar?.state === 'started' && reviewWaitingDrawer.bar.status === '等待网络' &&
-      reviewWaitingDrawer.bar.note === '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
-      barActions(reviewWaitingDrawer) === 'cancel-wait:取消:enabled|run-link:查看审阅:enabled',
-    'review-waiting-bar', reviewWaitingDrawer?.bar);
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='waiting'`, 'review-waiting-card');
-    const waitingReview = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
-    // The one approval is recorded and nothing of the Run began: every category waits, none was authorized on its ledger
-    // or dispatched, 继续审阅 is not offered, and no new 审阅 is prepared over it (OFF-005).
-    requireJourney(waitingReview?.run?.reviewRunId === preparedReview.reviewRunId && waitingReview.run.state === 'waiting' && waitingReview.run.canContinue === false &&
-      waitingReview.run.categories.every((category) => category.state === 'waiting') && waitingReview.newReview?.available === false,
-    'review-waiting-run', { state: waitingReview?.run?.state, categories: waitingReview?.run?.categories?.map((category) => category.state), newReview: waitingReview?.newReview });
-    await assertRenderer(renderer, `!document.querySelector('[data-review-action="continue"]')`, 'review-waiting-no-continue');
-    // 待我处理 holds it under 运行中与已暂停 in what it waits for, as a waiting baseline Run (ATTN-004).
-    const waitingAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    const waitingItem = waitingAttention?.groups?.flatMap((group) => group.items).find((item) => item.itemId === `review:${preparedReview.reviewRunId}`);
-    requireJourney(waitingItem?.group === 'active' && waitingItem.state === 'analysis-waiting-network' && waitingItem.nextStep === 'view-review',
-      'review-waiting-attention', waitingItem);
-
-    at('review-online-dispatch');
-    cancellation.throwIfRequested();
-    // The network returns. The drawer showing the waiting Run asks Reconnect Preflight on its own clock; the approval still
-    // stands and a place is free, so the Run is handed to its drive loop, and ②B beside it follows the Run to its end
-    // (OFF-008).
-    await writeFile(connectivityPath, 'online');
-
+    requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3, 'review-launched-run');
+    // Offline queuing keeps its retained ledger/service coverage; ordinary review has no prepared approval bar.
     at('review-authorize');
-    // Synchronized delta with Issue #420 (S74a A2) and Issue #760 (S74c): the Run's one approval was the bar's
-    // 联网后开始任务; Reconnect Preflight handed it to its drive loop, and it reviews exactly as an approval that started at
-    // once does.
+    // The sheet launched the Run directly; each category starts from its frozen plan at its driver turn.
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-settled', 180_000);
     const reviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const reviewedCategories = reviewed?.run?.categories ?? [];
@@ -3449,35 +3376,8 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'factual-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-sheet-open');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
-    await prepareLegacyReviewPlan(renderer, waitFor);
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='factual-review'`, 'factual-prepared', 120_000);
+    await launchReviewFromSheet(renderer, waitFor);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(factualPrepared?.state === 'prepared' && UUID_PATTERN.test(factualPrepared.reviewRunId), 'factual-prepared-run');
-    await drawerShowing(renderer, factualPrepared.reviewRunId, 'ready', 'factual-drawer');
-    // The selector is part of the full plan: 完整 is the mode J-04 left remembered, and is chosen here if it is not.
-    if ((await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawerMode`)) !== 'full') {
-      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'factual-drawer-full');
-    }
-    await waitFor(renderer, `document.querySelector('#task-drawer fieldset.task-plan-assurance') !== null`, 'factual-selector-shown');
-    // One compact selector: three levels, 标准核查 by default, each with its consequence, none disabled while the policy names no
-    // minimum (EASSURE-001, EASSURE-008); it names no model, provider or quality ladder (EASSURE-013).
-    const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.task-plan-assurance-consequence')?.textContent ?? '' })) }; })()`);
-    requireJourney(selector?.shown === 'standard' && JSON.stringify(selector.options.map((option) => [option.level, option.label, option.checked, option.disabled])) ===
-      JSON.stringify([['quick', '快速整理', false, false], ['standard', '标准核查', true, false], ['strict', '严格核查', false, false]]) &&
-      selector.options.every((option) => option.consequence.length > 0 && !/更正确|模型/u.test(option.consequence)), 'factual-level-selector', selector);
-    const factualPlanBefore = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(factualPrepared.reviewRunId)} })`);
-    // 严格核查 is chosen, made the plan through 更新计划, and then 标准核查 again: two plan edits of the one 事实核查 Task, each a
-    // diff line 证据保证级别 the drawer names; the fixture answers 标准核查, which the Run then freezes.
-    for (const level of ['strict', 'standard']) {
-      await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-plan-edit="assurance:${level}"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, `factual-level-choose-${level}`);
-      await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-assurance-edited') !== null`, `factual-level-pending-${level}`);
-      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', `factual-level-update-${level}`);
-      await waitFor(renderer, `document.querySelector('#task-drawer fieldset.task-plan-assurance')?.dataset.taskPlanAssurance===${JSON.stringify(level)} && document.querySelector('#task-drawer .task-plan-assurance-edited')===null && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `factual-level-updated-${level}`, 60_000);
-      const plan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'review-run', ref: ${JSON.stringify(factualPrepared.reviewRunId)} })`);
-      requireJourney(plan?.edit?.assurance?.level === level && plan.edit.lastEdit?.entries?.some((entry) => entry.field === 'evidenceAssuranceLevel') === true &&
-        plan.edit.planEnvelopeDigest !== factualPlanBefore?.edit?.planEnvelopeDigest, `factual-level-plan-${level}`, plan?.edit);
-    }
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'factual-start');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'factual-settled', 180_000);
     cancellation.throwIfRequested();
 
@@ -3600,14 +3500,11 @@ async function main() {
         if(!remembered.checked||remembered.disabled||from.value!==chosen||to.value!==chosen||document.documentElement.dataset.technicalLayerVisible!=='false')return false;
         const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!prepare||prepare.disabled)return false; prepare.click(); return true;
       })()`, `factual-range-memory-prepare-${pass}`);
-      await prepareLegacyReviewPlan(renderer, waitFor);
-      await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, `factual-range-prepared-${pass}`, 120_000);
+      await launchReviewFromSheet(renderer, waitFor);
       const rangePrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
       requireJourney(rangePrepared?.scope.selectedRange.startPosition===1 && rangePrepared.scope.selectedRange.endPosition===15 &&
         rangePrepared.categories.length===1 && rangePrepared.categories[0].plan.recomputed===1 && rangePrepared.categories[0].plan.unreviewed===7,
         `factual-range-plan-${pass}`);
-      await drawerShowing(renderer, rangePrepared.reviewRunId, 'ready', `factual-range-drawer-${pass}`);
-      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', `factual-range-start-${pass}`);
       await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, `factual-range-settled-${pass}`, 180_000);
       const ranged = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
       requireJourney(ranged?.ordinal===pass+1 && ranged.scope.selectedRange.startPosition===1 && ranged.scope.selectedRange.endPosition===15 &&
@@ -4005,13 +3902,10 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'stock-leaf-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'stock-leaf-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
-    await prepareLegacyReviewPlan(renderer, waitFor);
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'stock-leaf-prepared', 120_000);
+    await launchReviewFromSheet(renderer, waitFor);
     const leafPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(leafPrepared.categories.length === 1 && leafPrepared.categories[0].plan.units === SAMPLE1_UNITS &&
       leafPrepared.categories[0].plan.recomputed === SAMPLE1_UNITS && leafPrepared.influence.length === 0, 'stock-leaf-complete-scope');
-    await drawerShowing(renderer, leafPrepared.reviewRunId, 'ready', 'stock-leaf-drawer');
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'stock-leaf-start');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'stock-leaf-settled', 180_000);
     const leafReviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(leafReviewed.findings.length === 2 && leafReviewed.findings.every((finding) => finding.anchorState === 'exact' && finding.markId !== null) &&
@@ -4025,6 +3919,66 @@ async function main() {
       leafReport.usagePerStage.units.requests === SAMPLE1_UNITS + 1 && leafReport.usagePerStage['assurance-sampling'].requests === 2 &&
       leafReport.usagePerStage['run-report-reflection'].requests === 1 && leafReport.assurance.state === 'closed' && leafReport.ifRedone.state === 'closed' &&
       loopback.observedRequests() === 0, 'stock-leaf-tools-and-parent-stages');
+
+    at('dispatch-model-choice');
+    // The fixture remains local. Chosen binding → actual card attribution is proved by captured ordinary L2 transport.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'dispatch-choice-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'dispatch-choice-settings-ready');
+    await click(renderer, '模型服务', 'dispatch-choice-models');
+    await waitFor(renderer, `document.querySelector('#main-editorial-credential')`, 'dispatch-choice-credential');
+    await renderer.evaluate(`document.querySelector('[data-model-channel="${readyConnection.binding.providerId}"] input').click()`);
+    syntheticSecret = randomBytes(48).toString('base64url');
+    await fill(renderer, '#main-editorial-credential', syntheticSecret, 'dispatch-choice-placeholder');
+    credentialMutationReached = true; credentialRemoved = false;
+    await click(renderer, '保存并获取模型', 'dispatch-choice-enroll');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-choice-ready');
+    const dispatchDefaults = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-choice-library');
+        await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-library-ready');
+        await renderer.evaluate(`document.querySelector('button[data-book-id="${leafBook.bookId}"]').click()`);
+        await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'dispatch-choice-book');
+        await openReviewDestination(renderer, 'dispatch-choice-review');
+        await reviewAction(renderer, '[data-review-action="new-review"]', 'dispatch-choice-new');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('.dispatch-chooser select')?.options.length>1`, 'dispatch-choice-sheet');
+        const chosenLabel = await renderer.evaluate(`(() => {
+          const sheet=document.querySelector('dialog.review-sheet');
+          for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='typos-and-usage')&&!box.disabled)box.click();
+          sheet.querySelector('input[name="review-scope"][value="whole"]').click();
+          const chooser=sheet.querySelector('.dispatch-chooser');chooser.open=true;
+          const models=chooser.querySelector('select[aria-label="本次任务的模型"]');
+          const other=Array.from(models.options).findIndex((option,index)=>index!==models.selectedIndex);
+          if(other<0)return null;
+          models.selectedIndex=other;models.dispatchEvent(new Event('change',{bubbles:true}));
+          const effort=chooser.querySelector('select[aria-label="本次任务的思考强度"]');
+          const value=Array.from(effort.options).find(option=>option.value!=='off')?.value;
+          if(!value)return null;
+          effort.value=value;effort.dispatchEvent(new Event('change',{bubbles:true}));
+          const label=chooser.querySelector('summary').textContent.replace(/^模型 /u,'').replace(/ ▾$/u,'');
+          chooser.open=false;return label;
+        })()`);
+        requireJourney(typeof chosenLabel==='string' && chosenLabel.includes('@'), 'dispatch-choice-model-and-effort');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'dispatch-choice-selected-ready');
+        await assertRenderer(renderer, `(() => {const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'), bounds=button.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth&&bounds.top>=0&&bounds.bottom<=innerHeight;})()`, 'dispatch-choice-start-visible');
+        const before = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        let snapshotsBefore;
+        try { snapshotsBefore=before.prepare('SELECT count(*) n FROM task_launch_snapshots').get().n; } finally { before.close(); }
+        const reviewRunId=await launchReviewFromSheet(renderer, waitFor, { width, height });
+        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'dispatch-choice-settled', 180_000);
+        const after = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          requireJourney(after.prepare('SELECT count(*) n FROM task_launch_snapshots').get().n===snapshotsBefore+1 && after.prepare('SELECT count(*) n FROM task_launch_snapshots WHERE run_id=?').get(reviewRunId).n===1, 'dispatch-choice-one-launch');
+          const frozen=JSON.parse(after.prepare('SELECT canonical_json FROM task_launch_snapshots WHERE run_id=?').get(reviewRunId).canonical_json);
+          requireJourney(frozen.executionConfig.reasoningEffort && frozen.binding.model===frozen.executionConfig.modelId, 'dispatch-choice-frozen');
+        } finally { after.close(); }
+        requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`)===dispatchDefaults, 'dispatch-choice-role-defaults-unchanged');
+        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-choice-tasks');
+        await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenLabel)})`, 'dispatch-choice-frozen-task-row');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }
