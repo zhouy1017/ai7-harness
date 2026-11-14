@@ -224,6 +224,18 @@ describe('comments command parity and refresh continuity', () => {
     chip('all').click(); await paint(); expect(shown()).toEqual(['comment', 'literary']);
     chip('editor').click(); chip('editor').click(); await paint(); expect(chip('all').getAttribute('aria-pressed')).toBe('true');
   });
+  it('selects a keyboard-focused loading row and retains selection when its card arrives', async () => {
+    const ui = mount(); const read = deferred<EditorialMarkCardProjection>();
+    ui.get.mockImplementation(() => read.promise); await paint();
+    const loading = ui.pane.querySelector<HTMLElement>('[data-comment-pending="comment"]')!;
+    expect(loading).not.toBeNull();
+    loading.focus(); (loading as unknown as MiniElement).dispatchEvent({ type: 'focusin' }); await paint();
+    expect(ui.linked).toHaveBeenLastCalledWith('comment');
+    read.resolve(card); await paint();
+    const ready = ui.pane.querySelector('[data-comment-card="comment"]');
+    expect(ready?.getAttribute('data-selected')).toBe('true');
+    expect(document.activeElement).toBe(ready);
+  });
   it('keeps every category badge readable when slow card reads meet the shared 16-request service limit (#1459)', async () => {
     const cards = [card, ...Array.from({length:20},(_,index)=>({...card,markId:`slow-${index}`}))];
     const ui = mount(card,cards.slice(1));
