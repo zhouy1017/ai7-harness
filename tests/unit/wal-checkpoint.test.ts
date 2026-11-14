@@ -3,12 +3,21 @@ import { statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureDatabase, WalCheckpointPolicy, WAL_CHECKPOINT_LIMITS } from '../../src/service/store-schema.js';
+
+const lowDisk = vi.hoisted(() => ({ enabled: false }));
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return { ...actual, statfsSync: (path: import('node:fs').PathLike) => {
+    const result = actual.statfsSync(path); return lowDisk.enabled ? { ...result, bavail: 0 } : result;
+  } };
+});
 
 let root: string, path: string, db: DatabaseSync, reader: DatabaseSync | undefined;
 let policy: WalCheckpointPolicy;
 beforeEach(async () => {
+  lowDisk.enabled = false;
   root = await mkdtemp(join(tmpdir(), 'ai7-checkpoint-'));
   path = join(root, 'store.sqlite');
   db = new DatabaseSync(path); configureDatabase(db);
@@ -56,4 +65,12 @@ describe('store-owned WAL checkpoint policy', () => {
     write('pending'); policy.maintain(true); write('pending');
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
   });
+  it('refuses before beginning a write when disk headroom is exhausted, and resumes after space returns', () => {
+    lowDisk.enabled = true;
+    expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_DISK_FULL' }));
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 1 });
+    lowDisk.enabled = false; write('pending');
+    expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 2 });
+  });
+
 });

@@ -1,4 +1,3 @@
-import { configureDatabase } from './store-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -1276,7 +1275,8 @@ export function mergeIntoStoreFile(
   for (const suffix of STORE_JOURNALS) rmSync(join(packageRoot, 'store', `ai7.sqlite${suffix}`), { force: true });
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   try {
-    configureDatabase(db);
+    // This is a secondary writer to the live WAL; the owning store checkpoints after the merge response.
+    db.exec('PRAGMA wal_autocheckpoint = 0; PRAGMA synchronous = FULL');
     const count = listBooks(db, readMergingBooks(books.path, books));
     const present = Number((db.prepare('SELECT count(*) AS n FROM main.books WHERE book_id IN (SELECT book_id FROM temp.merge_books)').get() as SqlRow).n);
     if (present === count) return 'already';
