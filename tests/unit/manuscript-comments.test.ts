@@ -232,7 +232,9 @@ describe('comments command parity and refresh continuity', () => {
     loading.focus(); (loading as unknown as MiniElement).dispatchEvent({ type: 'focusin' }); await paint();
     expect(ui.linked).toHaveBeenLastCalledWith('comment');
     read.resolve(card); await paint();
-    expect(ui.pane.querySelector('[data-comment-card="comment"]')?.getAttribute('data-selected')).toBe('true');
+    const ready = ui.pane.querySelector('[data-comment-card="comment"]');
+    expect(ready?.getAttribute('data-selected')).toBe('true');
+    expect(document.activeElement).toBe(ready);
   });
   it('keeps every category badge readable when slow card reads meet the shared 16-request service limit (#1459)', async () => {
     const cards = [card, ...Array.from({length:20},(_,index)=>({...card,markId:`slow-${index}`}))];
