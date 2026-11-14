@@ -22,7 +22,7 @@ beforeEach(async () => {
   path = join(root, 'store.sqlite');
   db = new DatabaseSync(path); configureDatabase(db);
   db.exec('CREATE TABLE edits(id TEXT PRIMARY KEY, value TEXT); INSERT INTO edits VALUES (\'initial\', \'original\')');
-  policy = new WalCheckpointPolicy(db, path, { softBytes: 32 * 1024, hardBytes: 64 * 1024 });
+  policy = new WalCheckpointPolicy(db, path, { softBytes: 32 * 1024, emergencyBytes: 64 * 1024 });
   policy.shutdown();
 });
 afterEach(async () => { reader?.close(); reader = undefined; db.close(); await rm(root, { recursive: true, force: true }); });
@@ -41,7 +41,7 @@ describe('store-owned WAL checkpoint policy', () => {
       expect(connection.prepare('PRAGMA synchronous').get()).toMatchObject({ synchronous: 2 });
       expect(connection.prepare('PRAGMA wal_autocheckpoint').get()).toMatchObject({ wal_autocheckpoint: 0 });
     }
-    expect(WAL_CHECKPOINT_LIMITS).toEqual({ softBytes: 256 * 1024 * 1024, hardBytes: 512 * 1024 * 1024 });
+    expect(WAL_CHECKPOINT_LIMITS).toEqual({ softBytes: 256 * 1024 * 1024, emergencyBytes: 16 * 1024 * 1024 * 1024 });
   });
 
   it('leaves acknowledged rows in WAL until maintenance, then truncates on clean shutdown', () => {
@@ -65,6 +65,21 @@ describe('store-owned WAL checkpoint policy', () => {
     write('pending'); policy.maintain(true); write('pending');
     expect(db.prepare('SELECT count(*) AS total FROM edits').get()).toMatchObject({ total: 3 });
   });
+  it('leaves durable WAL for the next open when a local statement prevents clean truncation', () => {
+    write('acknowledged');
+    const rows = db.prepare('SELECT * FROM edits').iterate(); rows.next();
+    try { expect(() => policy.shutdown()).not.toThrow(); expect(policy.fileBytes()).toBeGreaterThan(0); }
+    finally { rows.return?.(); }
+    policy.shutdown(); expect(policy.fileBytes()).toBe(0);
+  });
+
+  it('leaves durable WAL when another connection pins its snapshot at shutdown', () => {
+    reader = new DatabaseSync(path, { readOnly: true }); reader.exec('BEGIN'); reader.prepare('SELECT * FROM edits').all();
+    write('acknowledged');
+    expect(() => policy.shutdown()).not.toThrow(); expect(policy.fileBytes()).toBeGreaterThan(0);
+    reader.exec('ROLLBACK'); policy.shutdown(); expect(policy.fileBytes()).toBe(0);
+  });
+
   it('refuses before beginning a write when disk headroom is exhausted, and resumes after space returns', () => {
     lowDisk.enabled = true;
     expect(() => write('pending')).toThrowError(expect.objectContaining({ code: 'JOURNAL_DISK_FULL' }));

@@ -25,7 +25,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'ai7-checkpoint-worker-')); path = join(root, 'store.sqlite');
   db = new DatabaseSync(path); configureDatabase(db);
   db.exec("CREATE TABLE edits(id TEXT PRIMARY KEY, value TEXT); INSERT INTO edits VALUES ('base','original')");
-  policy = new WalCheckpointPolicy(db, path, { softBytes: 32 * 1024, hardBytes: 256 * 1024 }); policy.shutdown();
+  policy = new WalCheckpointPolicy(db, path, { softBytes: 32 * 1024, emergencyBytes: 256 * 1024 }); policy.shutdown();
   maintenance = new WalCheckpointMaintenance(policy, path, databasePath => {
     worker = new Worker(script, { workerData: { databasePath } });
     worker.once('message', packet => { readyMessage = packet; }); return worker;

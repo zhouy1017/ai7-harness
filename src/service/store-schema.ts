@@ -590,11 +590,12 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
   );
 }
 
-export const WAL_CHECKPOINT_LIMITS = { softBytes: 256 * 1024 * 1024, hardBytes: 512 * 1024 * 1024 };
+export const WAL_CHECKPOINT_LIMITS = { softBytes: 256 * 1024 * 1024, emergencyBytes: 16 * 1024 * 1024 * 1024 };
 
 /** Connection configuration disables automatic checkpoints; the store runs this only after responses, outside edit commits. */
 export class WalCheckpointPolicy {
   readonly #pageBytes: number;
+  #lastFrames = 0;
 
   constructor(
     readonly db: DatabaseSync,
@@ -606,7 +607,10 @@ export class WalCheckpointPolicy {
 
   frames(): number {
     const row = this.db.prepare('PRAGMA wal_checkpoint(NOOP)').get() as SqlRow;
-    return Math.max(0, asNumber(row.log));
+    const frames = asNumber(row.log);
+    // A concurrent checkpoint can return -1 (busy); that is not a WAL reset or a new write.
+    if (frames >= 0) this.#lastFrames = frames;
+    return this.#lastFrames;
   }
 
   fileBytes(): number {
@@ -621,9 +625,12 @@ export class WalCheckpointPolicy {
 
   /** Refuse before BEGIN; the renderer retains and retries the exact command through its existing protection path. */
   admitJournalWrite(): void {
-    requireStore(this.frames() * this.#pageBytes < this.limits.hardBytes, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
     const space = statfsSync(dirname(this.path));
-    requireStore(space.bavail * space.bsize >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘剩余空间不足，请释放空间后重试保存。');
+    const freeBytes = space.bavail * space.bsize;
+    requireStore(freeBytes >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘剩余空间不足，请释放空间后重试保存。');
+    // 30 bursts can append 11.84 GB before checkpointing catches up. Normal backlog is not a write refusal.
+    const ceiling = Math.min(this.limits.emergencyBytes, Math.floor(freeBytes / 4));
+    requireStore(this.fileBytes() < ceiling, 'JOURNAL_CHECKPOINT_BUSY', '本机存储空间暂时不足，请稍候重试保存。');
   }
 
   maintain(idle: boolean, force = false): { busy: boolean; beforeBytes: number; afterBytes: number } | null {
@@ -634,6 +641,11 @@ export class WalCheckpointPolicy {
     try {
       const result = this.db.prepare(`PRAGMA wal_checkpoint(${idle ? 'TRUNCATE' : 'PASSIVE'})`).get() as SqlRow;
       return { busy: asNumber(result.busy) !== 0, beforeBytes, afterBytes: this.fileBytes() };
+    } catch (error) {
+      // Active statements on this connection may report SQLITE_LOCKED rather than a busy result row.
+      const sqliteCode = typeof error === 'object' && error !== null && 'errcode' in error ? error.errcode : null;
+      if (typeof sqliteCode !== 'number' || ![5, 6].includes(sqliteCode & 0xff)) throw error;
+      return { busy: true, beforeBytes, afterBytes: this.fileBytes() };
     } finally {
       this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
     }
@@ -641,7 +653,8 @@ export class WalCheckpointPolicy {
 
   shutdown(): void {
     const result = this.maintain(true, true)!;
-    requireStore(!result.busy && result.afterBytes === 0, 'JOURNAL_CHECKPOINT_BUSY', '本机存储尚未整理完成，不能确认正常关闭。');
+    // A pinned reader/statement can prevent truncation; FULL commits are already durable in WAL.
+    if (result.busy) this.maintain(false, true);
   }
 }
 

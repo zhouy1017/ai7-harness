@@ -85,7 +85,7 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
   it('resumes an exact journal command after hard-pressure maintenance without dropping or duplicating it', () => {
     const writer = new DatabaseSync(database()), reader = new DatabaseSync(database(), { readOnly: true });
     configureDatabase(writer);
-    const policy = new WalCheckpointPolicy(writer, database(), { softBytes: 1, hardBytes: 1 });
+    const policy = new WalCheckpointPolicy(writer, database(), { softBytes: 1, emergencyBytes: 1 });
     try {
       policy.shutdown(); reader.exec('BEGIN'); reader.prepare('SELECT * FROM branch_working_state').all();
       store!.flushJournalEdit(edit());

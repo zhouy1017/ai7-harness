@@ -66,7 +66,8 @@ export class WalCheckpointMaintenance {
 
   #observeWrites(): void {
     const frames = this.policy.frames();
-    if (frames !== this.#lastFrames) { this.#lastFrames = frames; this.#lastWrite = Date.now(); }
+    if (frames !== this.#lastFrames && frames > 0) this.#lastWrite = Date.now();
+    this.#lastFrames = frames;
   }
 
   journalWritten(): void {
@@ -74,7 +75,7 @@ export class WalCheckpointMaintenance {
   }
 
   admitJournalWrite(): void {
-    requireStore(!this.#stopping && this.#flight?.mode !== 'TRUNCATE', 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
+    requireStore(!this.#stopping, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
     this.policy.admitJournalWrite();
   }
 
