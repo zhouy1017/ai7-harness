@@ -220,7 +220,7 @@ import {
 /**
  * ②B 审阅 (Issue #417; editor-surfaces §4, V2-UX-REV-001 to REV-013, MARK-010, FIND-002): the Book-level
  * review destination. One card holds the coverage matrix, the 审阅记录 and 新建审阅, and below them the
- * opened Review Run — its plan before the one approval, then each category's progress, its findings as
+ * opened Review Run — each category's progress, its findings as
  * they become actionable (REV-008), and its versioned Report. 新建审阅 uses the shared non-modal sheet.
  *
  * Everything here reads the service's projection and asks the service again after every action: a
@@ -247,8 +247,8 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
   'getModelServiceSettings' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
-  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'authorizeReviewRun' | 'searchReferableMaterials' |
-  'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
+  'searchReferableMaterials' |
+  'generateReviewReport' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
@@ -362,7 +362,7 @@ interface SheetState {
   /** Where focus returns when the sheet closes: the control that opened it. */
   readonly openerKey: string | null;
   /** The plan is on screen: focus goes to it instead of back to the opener. */
-  prepared: boolean;
+  launched: boolean;
   /** The enabled Captured Procedures 按已保存的工序 offers (Issue #65, S30), each as it applies to this Book (S31b), read when the sheet opens. */
   procedures: ReadonlyArray<CapturedProcedureApplicabilityEntryProjection>;
   /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
@@ -2395,7 +2395,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       to: prefill?.to ?? defaults.reviewTo ?? projection.scopeOptions.chapters.chapters.at(-1)?.blockId ?? null,
       problem: null,
       openerKey: focusKeyOf(opener),
-      prepared: false,
+      launched: false,
       procedures,
       procedure: null,
       requests: new ProcedureChoiceRequests(),
@@ -2403,7 +2403,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     renderSheet(projection, sheetState);
     sheet.show();
-    if (immediate) { await prepareRun(sheetState, 'start'); return; }
+    if (immediate) { await startOrEstimateRun(sheetState, 'start'); return; }
     if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
       await chooseDefinition(sheetState, procedureId);
       return;
@@ -2800,8 +2800,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     problem.setAttribute('role', 'alert');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
-    const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
-    const prepare = actionButton('prepare', 'quiet', () => void prepareRun(state));
+    const start = actionButton('start', 'primary', () => void startOrEstimateRun(state, 'start'));
+    const prepare = actionButton('prepare', 'quiet', () => void startOrEstimateRun(state));
     prepare.classList.add('text-link');
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
@@ -2931,7 +2931,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
   }
 
-  async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
+  async function startOrEstimateRun(state: SheetState, mode: 'preview' | 'start' = 'preview'): Promise<void> {
     if (destroyed || state.launchPending || state.choicePending || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
@@ -2966,7 +2966,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const scope = asked.request;
     void rememberActionDefaults({ reviewCategories: categoryIds, reviewScope: scope.kind,
       reviewFrom: state.from, reviewTo: state.to }).catch(() => options.setStatus('未能记住本次审阅设置。', 'error'));
-    options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
       const preparationInput: Parameters<ReviewApi['prepareReviewRun']>[0] = {
         ...(categoryIds.includes('local-text-check') ? { localCheck: { ...state.localOptions, numeralsConfirmed: state.localOptions.numerals !== 'off' && state.localOptions.numeralsConfirmed } } : {}),
@@ -2983,15 +2982,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         options.setStatus('已显示审阅估计。', 'success');
         return;
       }
+      options.setStatus(REVIEW_STATUS_LINES.launching, 'busy');
       state.launchPending = true;
       state.clientCommandId ??= crypto.randomUUID();
       sheetUpdate();
       const result = await api.launchReviewRun({ ...preparationInput, clientCommandId: state.clientCommandId,
         ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }) });
       state.launchPending = false;
-      const quickNote = REVIEW_STATUS_LINES.started;
       if (result.run !== null) options.recorded?.(result.run.reviewRunId);
-      if (result.run === null) throw new Error(REVIEW_STATUS_LINES.preparationFailed);
+      if (result.run === null) throw new Error(REVIEW_STATUS_LINES.launchFailed);
       query.reviewRunId = result.run.reviewRunId;
       query.filters = { ...NO_FILTERS };
       query.pages = 1;
@@ -2999,24 +2998,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       ui.convert = null;
       ui.batch = null;
       ui.capabilityFindingId = null;
-      state.prepared = true;
+      state.launched = true;
       if (sheet.open) sheet.close();
       generation += 1;
       clearFactual(true);
       stableKey = '';
       if (host.isConnected) show(result);
-      options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
-      // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
-      // it brings focus back to this Run's 查看计划. After 开始审阅 the drawer shows the started Run, its plan one step away.
+      options.setStatus(REVIEW_STATUS_LINES.started, 'success');
 
     } catch (error) {
       state.launchPending = false;
       if (destroyed) return;
       if (state.dismissed) {
-        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
+        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.launchFailed), 'error');
         return;
       }
-      announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
+      announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.launchFailed), options.setStatus);
       sheetUpdate();
     }
   }
@@ -3039,7 +3036,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // A choice still loading as the sheet closes would leave 「正在读取…」 on the status bar (Issue #705 item 2).
     const closing = procedureSheetCloseStatus(state.requests);
     if (closing !== null) options.setStatus(closing);
-    if (state.prepared) return;
+    if (state.launched) return;
     const opener = card === undefined ? undefined : Array.from(card.querySelectorAll<HTMLElement>('button'))
       .find((candidate) => focusKeyOf(candidate) === state.openerKey && !(candidate as HTMLButtonElement).disabled);
     (opener ?? card?.querySelector<HTMLElement>('[data-review-action="new-review"]:not(:disabled)'))?.focus();
