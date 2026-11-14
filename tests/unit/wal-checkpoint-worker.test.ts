@@ -177,6 +177,20 @@ describe('store-owned checkpoint worker', () => {
     fallback.mockRestore();
   });
 
+  it('finishes shutdown after the close acknowledgement even if thread termination never settles', async () => {
+    const termination = vi.spyOn(worker, 'terminate').mockImplementation(() => new Promise<number>(() => undefined));
+    let stopped = false;
+    vi.useFakeTimers();
+    try {
+      const stopping = maintenance.stop(false).then(() => { stopped = true; });
+      // close() is real SQLite; wait for that acknowledgement before advancing the cleanup bound.
+      await once(worker, 'message');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(stopped).toBe(true);
+      await stopping;
+    } finally { vi.useRealTimers(); termination.mockRestore(); await worker.terminate(); }
+  });
+
   it('skips response and idle ticks rather than throwing for an un-reset authority statement', async () => {
     write('first');
     const rows = db.prepare('SELECT * FROM edits').iterate(); rows.next();

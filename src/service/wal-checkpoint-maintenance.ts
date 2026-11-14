@@ -178,8 +178,8 @@ export class WalCheckpointMaintenance {
       }
       if (this.#available && !this.#failed) await this.#send('close', true);
       // A thread stuck in native I/O may not terminate promptly. Detach it; never await that unbounded native work.
-      const terminated = this.#terminate();
-      if (!this.#failed) await terminated;
+      // A healthy close acknowledgement already proves the database connection closed.
+      this.#terminate();
     } finally { clearTimeout(deadline); }
   }
   abort(): void {
