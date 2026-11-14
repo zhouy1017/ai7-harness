@@ -290,28 +290,16 @@ describe('cross-deliverable participants and revision lineage', () => {
     expect(snapshot.categories[0].entry.deliverables.participants[0].revisionId).toBe(pin.revisionId);
   });
 
-  it('requires an exact live kind, deliverable category and explicit deliverable permission; v11 refuses', async () => {
+  it('keeps the task contract and finalized deliverable eligibility after policy retirement', async () => {
     const doc = await create();
     await finalize(doc.documentId);
     const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry()));
     const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-    const legacy = JSON.parse(await readFile(join(roots.codeRoot, 'docs/policies/provider-processing-policy.v11.json'), 'utf8')) as {
-      decision: { providerAllowRules: Array<{ ruleId: string; allowedTaskKinds: string[]; allowedOutboundDataCategories: string[] }> };
-    };
-    const v11: LaunchPolicyProjection = { ...selected, providerProcessing: { ...selected.providerProcessing, version: 'v11',
-      // The enrolled background rule is new in v14 and the 来源译文 rule in v18: v11 has no counterpart to emulate.
-      admittedRules: selected.providerProcessing.admittedRules!.filter((rule) => !rule.backgroundOrigin && legacy.decision.providerAllowRules.some((candidate) => candidate.ruleId === rule.ruleId)).map((rule) => {
-        const previous = legacy.decision.providerAllowRules.find((candidate) => candidate.ruleId === rule.ruleId)!;
-        return { ...rule, taskKinds: previous.allowedTaskKinds, outboundDataCategories: rule.outboundDataCategories.filter((category) => previous.allowedOutboundDataCategories.includes(category)),
-          editorialDeliverablesAllowed: false, materialReferencesAllowed: false };
-      }) } };
-    expect(liveKindAdmission(v11, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
     const allowed = selected;
     expect(liveKindAdmission(allowed, definition, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();
-    for (const denial of ['kind', 'category', 'permission']) {
+    for (const denial of ['kind', 'permission']) {
       const denied = { ...allowed, providerProcessing: { ...allowed.providerProcessing, admittedRules: allowed.providerProcessing.admittedRules!.map((rule) => ({ ...rule,
         taskKinds: denial === 'kind' ? rule.taskKinds.filter((kind) => kind !== definition.kind) : rule.taskKinds,
-        outboundDataCategories: denial === 'category' ? rule.outboundDataCategories.filter((category) => String(category) !== 'editorial-deliverable-excerpt') : rule.outboundDataCategories,
         ...(denial === 'permission' ? { editorialDeliverablesAllowed: false } : {}),
       })) } };
       expect(liveKindAdmission(denied, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();

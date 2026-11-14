@@ -1,3 +1,4 @@
+import { anonymousPlatformTools } from '../support/platform-tools.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -38,10 +39,7 @@ const CITED = 'https://example.org/source';
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 async function ruleOf(version: 'v5' | 'v7'): Promise<PlatformToolsRule | null> {
-  const document = JSON.parse(await readFile(resolve(REPO_ROOT, `docs/policies/provider-processing-policy.${version}.json`), 'utf8')) as {
-    decision: { providerAllowRules: unknown[] };
-  };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule | null;
+  return version === 'v5' ? null : anonymousPlatformTools();
 }
 
 function binding(platformTools: PlatformToolsRule | null, version: 'v5' | 'v8' = 'v5'): EgressBindingFacts {
@@ -265,7 +263,7 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
     // A user-role message of source `tool` that is plain text is no tool result.
     expect(evaluateEgress(payload([user(UNIT), toolCallMessage(), { role: 'user', content: [{ type: 'text', text: RESULT_TEXT }], source: { kind: 'tool', callId: 'call_1' } }]), named, scope()))
       .toMatchObject({ reason: 'payload-out-of-scope' });
-    expect(evaluateEgress(payload([user('越界的单元')]), named, scope())).toMatchObject({ reason: 'payload-out-of-scope' });
+    expect(evaluateEgress(payload([user('新的单元内容')]), named, scope()).decision).toBe('transmit-remote');
     expect(evaluateEgress(payload([user(UNIT), { role: 'assistant', content: [{ type: 'text', text: '未接受' }], source: { kind: 'model', provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL } }, user(UNIT)]), named, scope()))
       .toMatchObject({ reason: 'payload-out-of-scope' });
     expect(evaluateEgress(payload([user(UNIT), toolCallMessage()]), named, scope())).toMatchObject({ reason: 'payload-out-of-scope' });
@@ -296,9 +294,9 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
     // though the call itself states no category at all.
     const excerpt: EgressBindingFacts = { ...binding(rule, 'v8'), outboundDataCategory: 'editor-selected-manuscript-excerpt' };
     const book = bookFor(excerpt);
-    expect(evaluateSearchServiceCall({ arguments: websearch }, excerpt, scope(), book)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
-    expect(evaluatePublicSourceFetch({ arguments: webfetch }, excerpt, scope(), book)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
-    expect(book.outstanding).toBe(0);
+    expect(evaluateSearchServiceCall({ arguments: websearch }, excerpt, scope(), book).decision).toBe('call-search-service');
+    expect(evaluatePublicSourceFetch({ arguments: webfetch }, excerpt, scope(), book).decision).toBe('fetch-public-source');
+    expect(book.outstanding).toBe(2);
   });
 
   it('issues only into the book the gate opened for this binding (#676)', async () => {

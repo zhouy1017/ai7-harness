@@ -1,4 +1,4 @@
-import { copyFile, lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -24,8 +24,9 @@ import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrac
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
-const SAMPLE1_BYTES = 29_550;
-const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+const SAMPLE1_INPUT = await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'));
+const SAMPLE1_BYTES = SAMPLE1_INPUT.length;
+const SAMPLE1_SHA256 = createHash('sha256').update(SAMPLE1_INPUT).digest('hex');
 // The legacy binary Word document the converted `.doc` intake can only be shown on. ADR 0079 §5
 // narrowed the repository to exact `sample1` and no generator for the format exists, so this is
 // local-only test material (`e2e/controller.mjs`): present, the scenario runs; absent — which is

@@ -7,6 +7,8 @@ amends: ADR 0087 §1, §2, §4 and §6 (a procedure is no longer only a captured
 
 # 0095 · Make procedures the central object, govern concurrent execution, and use DSH as the complex-task harness
 
+Runtime policy-lock, selected-policy/content-admission and frozen-fixture clauses are superseded by [ADR 0102](0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) under the Owner’s 2026-11-12 and 2026-11-14 decisions. Unrelated authority, provenance, credential and effect boundaries remain; the dated decisions below retain their historical meaning.
+
 On 2026-10-23 the Owner read the read-only assessment of the integrated product at `dev@be7babaf` and decided the direction recorded here. This is design, not implementation or evidence of a working provider protocol; [PROGRESS](../../PROGRESS.md) owns delivered behavior and the [development plan](../development/development-plan.md) owns order. Immutable Policy Documents keep their bytes until the successor named in §6 activates.
 
 ## The value and service mainline this record serves

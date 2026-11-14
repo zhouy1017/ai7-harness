@@ -8,6 +8,8 @@ amends: `SampleBooks/README.md` (the allowlist), `.gitignore` (the `SampleBooks/
 
 # 0091 · Admit four public-domain works as Public SampleBooks
 
+Partly superseded by [ADR 0102](./0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md): only the source-set prerequisite for local development-ci analysis; repository exact-byte admission and developer-live source checks stay.
+
 Accepted by the Owner on 2026-10-19 in the wave-15 Commander session. The Commander recorded the Owner's answers in Issue #989, quoted in Context; that decision is this record's acceptance.
 
 ## Context

@@ -1,9 +1,10 @@
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
+import { build } from 'esbuild';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
@@ -34,8 +35,9 @@ const REPORT_EXPORT_FILE = '审阅报告.md';
 const BOOK_REPORT_EXPORT_FILE = '书稿_审阅报告.docx';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
-const SAMPLE1_BYTES = 29_550;
-const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+const SAMPLE1_INPUT = await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'));
+const SAMPLE1_BYTES = SAMPLE1_INPUT.length;
+const SAMPLE1_SHA256 = createHash('sha256').update(SAMPLE1_INPUT).digest('hex');
 const SAMPLE1_BLOCKS = 97;
 const SAMPLE1_UNITS = 8;
 const SAMPLE1_UNIT_RANGES = [[1, 15], [16, 25], [26, 43], [44, 59], [60, 68], [69, 75], [76, 92], [93, 97]];
@@ -761,7 +763,7 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v26', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'no-policy-lock', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -857,7 +859,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v26', liveTransmissions: 0 }) &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'no-policy-lock', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -1091,7 +1093,7 @@ async function main() {
     runRoot = await runRootAcquisition;
     cancellation.throwIfRequested();
     dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
-    const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    let shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
     // The bound fixture identity is a launch control; the Issue #48 stages relaunch with the transient-retry variant.
@@ -1827,6 +1829,46 @@ async function main() {
     at('restart-immutable');
     await closeOwnedBrowser();
     cancellation.throwIfRequested();
+    // Reconstruct the accepted reader-93 encoding on an isolated copy, using the migration suite's
+    // predecessor writer. This is historical fixture construction, not damage to a product record.
+    at('historical-policy-fixture');
+    const currentDataRoot = dataRoot;
+    const currentShellRoot = shellRoot;
+    const historicalDataRoot = resolve(runRoot, 'historical-policy-reader');
+    await cp(currentDataRoot, historicalDataRoot, { recursive: true, filter: (source) => source !== currentShellRoot });
+    const historicalHelper = resolve(runRoot, 'historical-policy-fixture.mjs');
+    await build({ entryPoints: [resolve(ROOT, 'tests/support/analysis-ledger-revisions.ts')], bundle: true,
+      platform: 'node', format: 'esm', outfile: historicalHelper, logLevel: 'silent' });
+    const { constructPre94PolicyEncoding } = await import(pathToFileURL(historicalHelper).href);
+    const historicalDatabase = new DatabaseSync(resolve(historicalDataRoot, 'store', 'ai7.sqlite'));
+    try { constructPre94PolicyEncoding(historicalDatabase); } finally { historicalDatabase.close(); }
+    dataRoot = historicalDataRoot;
+    try {
+      shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+      at('historical-policy-startup');
+      await launchForCleanup();
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'historical-policy-ready');
+      try {
+        for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+          at(`historical-policy-result-${viewport}`);
+          await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+          if (viewport === 'gate') {
+            await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'historical-policy-return-library');
+            await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'historical-policy-library');
+          }
+          await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false;button.click();return true; })()`, `historical-policy-open-${viewport}`);
+          await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, `historical-policy-manuscript-${viewport}`);
+          await openAnalysisDestination(renderer, `historical-policy-analysis-${viewport}`);
+          await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, `historical-policy-visible-${viewport}`);
+          const historical = await readBaseline(renderer);
+          requireJourney(historical.resultSetRevision.revisionId === revision.revisionId &&
+            sameRecord(historical.resultSetRevision.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v19', liveTransmissions: 0 }) &&
+            sameValue(historical.resultSetRevision.units, revision.units) && loopback.observedRequests() === 0, `historical-policy-read-${viewport}`);
+        }
+      } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+      await closeOwnedBrowser();
+    } finally { dataRoot = currentDataRoot; shellRoot = currentShellRoot; }
+    at('restart-immutable');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-open-book');
@@ -2956,7 +2998,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-search-sheet');
     // #1371: the ordinary configuration entry and selected-set identity remain visible under CI's provider-free policy.
     // The real v34 Main-channel freeze for all three official routes is covered by search-backend-freeze service composition.
-    requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v26' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
+    requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='no-policy-lock' && settings.launchPolicy.providerProcessing.version==='v1')`), 'review-search-selected-set');
     await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelector('input[name="review-category"][value="factual-review"]')?.disabled===false`, 'review-search-ordinary-category-available');
 
     await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');

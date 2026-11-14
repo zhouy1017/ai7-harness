@@ -10,8 +10,8 @@
 
 - [Learning Eligibility Policy](./docs/policies/learning-eligibility-policy.md) — current design baseline for material-selection authority, bounded automation, revision evidence, and rollback.
 - [Factual Verification Policy](./docs/policies/factual-verification-policy.md) — current design baseline for factual-evidence authority, provenance, independent verification statuses, and conflict handling.
-- [Provider Processing and active policy selection](./docs/policies/README.md) — the policy index owns the target-qualified scope map, exact JSON/schema/projection paths and selected digests. Historical version numbers are not current launch pins.
-- [External Export Policy](./docs/policies/README.md) — selected separately from Provider Processing and from Public Release Permission; an eligible export still requires its exact preparation, approval and outcome receipt.
+- [Provider Processing and active policy selection](./docs/policies/README.md) — the policy index identifies historical JSON/schema/projection records; ADR 0102 retires runtime policy selection and fingerprints.
+- [External Export Policy](./docs/policies/README.md) — separate from Model Provider processing and Public Release Permission; an eligible export still requires its exact preparation, approval and outcome receipt.
 
 Trusted build/launch authority binds one operational scope. A policy's internal lifecycle status, ordinary setting, installed artifact or configured Provider does not select a scope or grant processing, Apply, export or publication authority. The context definitions own domain meaning; [PROGRESS](./PROGRESS.md) records implemented selectors and capabilities.
 

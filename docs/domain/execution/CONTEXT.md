@@ -353,23 +353,23 @@ _中文_: 安全凭据库
 _Avoid_: Credential Broker, ordinary configuration, project data
 
 **Outbound Data Category**:
-A policy-defined classification of the exact content permitted to leave the local AI7 authority for Model Provider processing.
+A classification describing content sent for Model Provider processing. It does not grant or refuse processing authority.
 _中文_: 外发数据类别
 _Avoid_: Run Source Scope, Public Release Permission, credential
 
 **Provider Processing Policy**:
-A Policy Document deciding which Outbound Data Categories and scopes may be sent to which configured Model Providers.
+A historical Policy Document recording former Model Provider content and scope admission. Runtime processing no longer selects or verifies it under ADR 0102.
 _中文_: 模型服务数据处理策略
 _Avoid_: External Export Policy, Public Release Permission
 
-_Target-qualified accepted route_: [`active-policy-set.v7.json`](../../policies/active-policy-set.v7.json) binds exactly one trusted operational scope per launch: development/CI to immutable Provider Processing [`v1`](../../policies/provider-processing-policy.v1.json), fixture recording to immutable [`v2`](../../policies/provider-processing-policy.v2.json), ordinary production to its [`v6`](../../policies/provider-processing-policy.v6.json) successor of v3, and the developer-live scope of [ADR 0065](../../adr/0065-admit-a-developer-live-provider-processing-scope.md) to the baseline-only [`v9`](../../policies/provider-processing-policy.v9.json), the successor under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) of [`v5`](../../policies/provider-processing-policy.v5.json), itself the successor of v4 under [ADR 0079](../../adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §2. Their schemas and human projections remain beside each immutable JSON record. The closed scope map is repository-current/canonical only at an exact integrated `dev` commit where every same-tree pin matches scope, identity, version, path, and SHA-256; elsewhere it is `accepted-but-unintegrated`. Scope is bound only by trusted build/launch authority, with no ordinary setting, environment, Provider, artifact/Plugin, or cross-scope fallback selector. The selection contract claims no executable selector or Provider path.
+[ADR 0102](../../adr/0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) retires document and fingerprint admission. Trusted launch scope still controls the provider-free transport boundary.
 
 **External Export Policy**:
 A Policy Document governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination, including a user-chosen local filesystem destination. It is evaluated for each export Effect and is never a Delivery Package field, standing overwrite grant, Public Release Permission, or outcome proof.
 _中文_: 对外导出策略
 _Avoid_: Provider Processing Policy, Delivery Package authority, Effect Approval, Effect Receipt, Public Release Permission
 
-_Target-qualified accepted route_: [`external-export-policy.v2.json`](../../policies/external-export-policy.v2.json), with its [policy-specific schema](../../policies/external-export-policy.v2.schema.json), [human projection](../../policies/external-export-policy.v2.md), and its exact [active-set v7 pin](../../policies/active-policy-set.v7.json), unchanged since its selection under [ADR 0079](../../adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §3; the immutable [v1](../../policies/external-export-policy.v1.json) remains predecessor history. Its internal `lifecycleStatus: "active"` is repository-current/canonical only at an exact integrated `dev` commit where that same-tree pin matches identity, version, path, and SHA-256; elsewhere it is `accepted-but-unintegrated`.
+[ADR 0102 clause 4](../../adr/0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) removes the historical document fingerprint from model launch while preserving export eligibility, preparation, approval and receipts.
 
 <a id="local-export-preparation"></a>
 **Local Export Preparation**:

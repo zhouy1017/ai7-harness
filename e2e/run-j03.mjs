@@ -9,8 +9,9 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
-const SAMPLE1_BYTES = 29_550;
-const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+const SAMPLE1_INPUT = await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'));
+const SAMPLE1_BYTES = SAMPLE1_INPUT.length;
+const SAMPLE1_SHA256 = createHash('sha256').update(SAMPLE1_INPUT).digest('hex');
 const SIDECAR_REVISION_2_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
 const TASK_GOAL = '分析当前书稿的结构与叙事连贯性，列出供编辑复核的重点。';
@@ -1252,7 +1253,7 @@ async function main() {
       blockedBoundary?.planEnvelopeDigest === authorized.planEnvelope.digest && blockedBoundary?.authorizationId === authorized.authorization.authorizationId &&
       blockedBoundary?.runRecordId === authorized.runRecord.runRecordId && blockedBoundary?.runAuthority === 'record-only-no-dispatch' &&
       blockedBoundary?.launchPolicy?.integrityState === 'verified' && blockedBoundary?.launchPolicy?.operationalScope === 'development-ci' &&
-      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v26' &&
+      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'no-policy-lock' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v1' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
       blockedBoundary?.launchPolicy?.providerProcessing?.liveTransmissionAllowed === false &&
