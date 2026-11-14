@@ -28,21 +28,17 @@ async function commentsConnectorExposure(renderer, check, waitFor) {
       await renderer.evaluate(`(() => {
         const id=document.querySelector('[data-comment-card][data-selected="true"]').dataset.commentCard;
         const words=document.querySelector('.editor-window [data-mark-id="'+id+'"]'), p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect();
-        words.style.position='relative'; words.style.left='0px'; const r=words.getClientRects()[0];
-        words.style.left=(${covered} ? p.left+8-r.left : p.left+8-r.right)+'px';
-        globalThis.__connectorWords=words; window.dispatchEvent(new Event('resize'));
+        globalThis.__connectorStyle ??= document.head.appendChild(document.createElement('style'));
+        __connectorStyle.textContent=''; const r=words.getClientRects()[0];
+        const offset=(${covered} ? p.left+8-r.left : p.left+8-r.right);
+        __connectorStyle.textContent='.editor-window [data-mark-id="'+CSS.escape(id)+'"] { position:relative; left:'+offset+'px; }';
+        window.dispatchEvent(new Event('resize'));
       })()`);
-      if(covered) {
-        try { await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector'); }
-        catch {
-          const geometry=await renderer.evaluate(`(() => { const p=document.querySelector('.manuscript-comments-pane').getBoundingClientRect(), w=__connectorWords.getBoundingClientRect(), dot=document.querySelector('.manuscript-comments-leaders circle'); return {connected:__connectorWords.isConnected,left:w.left,right:w.right,top:w.top,bottom:w.bottom,paneLeft:p.left,paneRight:p.right,paneTop:p.top,paneBottom:p.bottom,offset:parseFloat(__connectorWords.style.left),cx:dot?.getAttribute('cx'),cy:dot?.getAttribute('cy')}; })()`);
-          check(false,'comments-covered-no-connector',geometry);
-        }
-      }
+      if(covered)await waitFor(renderer, `!document.querySelector('[data-comment-leader]') && !document.querySelector('.manuscript-comments-leaders circle')`, 'comments-covered-no-connector');
       else await waitFor(renderer, commentsConnectorVisible, 'comments-partial-connector-visible');
     }
   } finally {
-    await renderer.evaluate(`(() => { __connectorWords.style.removeProperty('position'); __connectorWords.style.removeProperty('left'); delete globalThis.__connectorWords; window.dispatchEvent(new Event('resize')); })()`);
+    await renderer.evaluate(`(() => { __connectorStyle.remove(); delete globalThis.__connectorStyle; window.dispatchEvent(new Event('resize')); })()`);
   }
   await waitFor(renderer, commentsConnectorVisible, 'comments-connector-restored');
 }
