@@ -811,6 +811,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const sequence = pressSequence;
     setTimeout(() => { if (pressSequence === sequence) releaseCommentPress(); }, 100);
   };
+  function focusComment(mark: EditorialMarkAnchorProjection): void {
+    if (pressedComment !== undefined) return;
+    const rect = commentAnchor(mark)?.getBoundingClientRect();
+    const viewport = options.scroll.getBoundingClientRect();
+    if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
+    activateComment(mark.markId);
+  }
   function layoutComments(): void {
     if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
@@ -887,6 +894,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           pending.tabIndex = 0; pending.dataset['commentPending'] = pending.dataset['commentCard'] = mark.markId;
           pending.dataset['expanded'] = String(mark.markId === activeComment);
           pending.addEventListener('pointerdown', (event) => { if (event.button === 0) { pressSequence++; pressedComment = mark.markId; } });
+          pending.addEventListener('focusin', () => focusComment(mark));
           pending.addEventListener('click', () => activateComment(mark.markId));
           commentsCanvas.append(pending);
         }
@@ -904,7 +912,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         items.push({ mark, anchor: rect, node: pending, desiredTop: rect.top - base.top + commentsFrameScroll, measuredHeight: pending.getBoundingClientRect().height });
         continue;
       }
-      commentsCanvas.querySelector(`[data-comment-pending="${CSS.escape(mark.markId)}"]`)?.remove();
+      const pending = commentsCanvas.querySelector<HTMLElement>(`[data-comment-pending="${CSS.escape(mark.markId)}"]`);
+      const restoreFocus = pending?.contains(document.activeElement) === true;
+      pending?.remove();
       const readState = freshCard ? 'ready' : cardCache.failed(mark.markId) ? 'failed' : 'pending';
       const stale = readState !== 'ready';
       present.add(mark.markId);
@@ -919,13 +929,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         node.addEventListener('pointerdown', (event) => { if (event.button === 0) { pressSequence++; pressedComment = mark.markId; } });
         node.addEventListener('pointerenter', () => hoverComment(mark.markId));
         node.addEventListener('pointerleave', () => hoverComment(undefined));
-        node.addEventListener('focusin', () => {
-          if (pressedComment !== undefined) return;
-          const rect = commentAnchor(mark)?.getBoundingClientRect();
-          const currentViewport = options.scroll.getBoundingClientRect();
-          if (rect && (rect.bottom < currentViewport.top || rect.top > currentViewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
-          activateComment(mark.markId);
-        });
+        node.addEventListener('focusin', () => focusComment(mark));
         node.addEventListener('click', (event) => {
           activateComment(mark.markId);
           const anchor = commentAnchor(mark);
@@ -1002,6 +1006,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       entry.node.dataset['expanded'] = String(expanded);
       entry.node.dataset['revalidating'] = String(stale);
       entry.node.setAttribute('aria-busy', String(readState === 'pending'));
+      if (restoreFocus) entry.node.focus({ preventScroll: true });
       const replySend = replyForm?.querySelector<HTMLButtonElement>('[data-mark-action="send-reply"]');
       if (replySend) replySend.disabled = stale || replyForm?.dataset['sending'] === 'true';
       entry.node.hidden = false;
