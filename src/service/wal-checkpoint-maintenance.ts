@@ -1,8 +1,10 @@
 import { Worker } from 'node:worker_threads';
 import type { WalCheckpointPolicy } from './store-schema.js';
-import { requireStore } from './store-records.js';
+import { requireStore, StoreError } from './store-records.js';
 
 const WRITE_IDLE_MS = 1_000;
+// Leave 10s for the journal transaction/acknowledgement inside the unchanged 30s service watchdog.
+const JOURNAL_CHECKPOINT_WAIT_MS = 20_000;
 type Mode = 'PASSIVE' | 'TRUNCATE' | 'close';
 type Result = { id: number; ok: boolean; busy: boolean; beforeBytes: number; afterBytes: number; logFrames?: number; checkpointedFrames?: number; sqliteCode?: number };
 type FailureReason = 'start-error' | 'thread-error' | 'thread-exit' | 'checkpoint-error' | 'send-error';
@@ -22,6 +24,7 @@ export class WalCheckpointMaintenance {
   #lastFrames = 0;
   #retryAt = 0;
   #lastCheckpointBusy = false;
+  #waitingWriters = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #flight: { id: number; mode: Mode; done: Promise<void>; resolve: () => void } | undefined;
   #termination: Promise<number> | undefined;
@@ -85,6 +88,29 @@ export class WalCheckpointMaintenance {
     this.#lastFrames = this.policy.frames(); this.#lastWrite = Date.now(); this.#scheduleIdle();
   }
 
+  /** A new write yields to the current idle TRUNCATE, instead of reaching SQLite's shorter busy timeout. */
+  async waitForJournalWrite(): Promise<void> {
+    const checkpoint = this.#flight;
+    if (checkpoint?.mode !== 'TRUNCATE') return;
+    this.#waitingWriters++;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        checkpoint.done,
+        new Promise<void>((_resolve, reject) => {
+          timeout = setTimeout(() => {
+            process.stderr.write('AI7_JOURNAL_CHECKPOINT_WAIT_TIMEOUT/' + JSON.stringify({ waitMs: JOURNAL_CHECKPOINT_WAIT_MS, mode: 'TRUNCATE' }) + '\n');
+            reject(new StoreError('JOURNAL_CHECKPOINT_WAIT_TIMEOUT', '本机存储仍在整理，请稍候重试保存。'));
+          }, JOURNAL_CHECKPOINT_WAIT_MS);
+          timeout.unref();
+        }),
+      ]);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+      this.#waitingWriters--;
+    }
+  }
+
   admitJournalWrite(): void {
     requireStore(!this.#stopping, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
     this.policy.admitJournalWrite();
@@ -113,7 +139,7 @@ export class WalCheckpointMaintenance {
     if (!this.available || this.#flight || !this.#pending) return;
     if (Date.now() < this.#retryAt) { this.#scheduleIdle(); return; }
     this.#observeWrites();
-    const truncate = this.#truncatePending && Date.now() - this.#lastWrite >= WRITE_IDLE_MS;
+    const truncate = this.#truncatePending && this.#waitingWriters === 0 && Date.now() - this.#lastWrite >= WRITE_IDLE_MS;
     this.#pending = false; this.#truncatePending = false;
     if (!truncate && !this.policy.needsMaintenance()) return;
     this.#send(truncate ? 'TRUNCATE' : 'PASSIVE');

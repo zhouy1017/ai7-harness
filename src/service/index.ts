@@ -175,6 +175,8 @@ async function dispatch(
   probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
   refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<import('../shared/protocol.js').ModelDiscoveryResult> = async () => ({ status: 'failure', code: 'MODEL_DISCOVERY_UNAVAILABLE', reason: '模型列表暂不可用' }),
 ): Promise<ServiceSuccessResponse> {
+  // Wait before even the ordinary preflight reads can meet an idle checkpoint's lock.
+  if (request.op === 'flushJournalEdit') await store.waitForJournalCheckpoint();
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
   // is lost with the data the replacement replaces — only reads, a search, and 取消替换 are taken.

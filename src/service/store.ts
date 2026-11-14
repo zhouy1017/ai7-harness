@@ -13323,6 +13323,8 @@ export class EditorialStore {
     return this.#boundedCall(() => this.#bounded.readManuscriptEntryPosition(manuscriptId, branchId));
   }
 
+  async waitForJournalCheckpoint(): Promise<void> { await this.#checkpointWorker?.waitForJournalWrite(); }
+
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
     this.#assertAvailable();
     if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite();

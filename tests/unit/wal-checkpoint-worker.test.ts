@@ -114,6 +114,29 @@ describe('store-owned checkpoint worker', () => {
     expect(policy.fileBytes()).toBe(0);
   });
 
+  it('bounds a checkpoint wait below the service watchdog without retiring the worker', async () => {
+    vi.useFakeTimers();
+    let heldId = 0;
+    const send = worker.postMessage.bind(worker);
+    const held = vi.spyOn(worker, 'postMessage').mockImplementation(request => {
+      if (request.mode === 'TRUNCATE') { heldId = request.id; return; }
+      send(request);
+    });
+    try {
+      write('first'); await vi.advanceTimersByTimeAsync(1_000);
+      expect(heldId).toBeGreaterThan(0);
+      const waiting = maintenance.waitForJournalWrite();
+      const refused = expect(waiting).rejects.toMatchObject({ code: 'JOURNAL_CHECKPOINT_WAIT_TIMEOUT' });
+      await vi.advanceTimersByTimeAsync(20_000); await refused;
+      expect(maintenance.available).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      const stopped = maintenance.stop(false);
+      worker.emit('message', { id: heldId, ok: true, busy: false, beforeBytes: policy.fileBytes(), afterBytes: 0 });
+      held.mockRestore(); await stopped;
+    }
+  });
+
   it('finishes clean shutdown through the fallback if the worker dies while shutdown starts', async () => {
     write('acknowledged');
     const terminated = worker.terminate();

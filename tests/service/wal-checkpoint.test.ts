@@ -1,19 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, rm, readFile } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import { setImmediate as tick } from 'node:timers/promises';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { EditorialStore } from '../../src/service/store.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { configureDatabase, WalCheckpointPolicy } from '../../src/service/store-schema.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
+const serviceAdapter = join(codeRoot, '.cache', 'service', `wal-service-adapter-${process.pid}.mjs`);
 const helper = join(codeRoot, '.cache', 'service', `wal-crash-child-${process.pid}.mjs`);
 let roots: ServiceTestRoots, store: EditorialStore | undefined, child: ChildProcess | undefined;
 let pinned: DatabaseSync | undefined;
@@ -21,11 +24,22 @@ let book: { manuscriptId: string; branchId: string };
 const database = () => join(roots.dataRoot, 'store', 'ai7.sqlite');
 beforeAll(async () => {
   await mkdir(join(codeRoot, '.cache', 'service'), { recursive: true });
+  const entry = await readFile(join(codeRoot, 'src/service/index.ts'), 'utf8');
+  const boundary = entry.lastIndexOf('\nawait run().catch(');
+  if (boundary < 0) throw new Error('SERVICE_STARTUP_BOUNDARY_NOT_FOUND');
+  // Exercise the actual dispatcher and failure mapper without booting the service as a side effect of import.
+  await build({ stdin: { resolveDir: join(codeRoot, 'src/service'), sourcefile: 'index.ts', loader: 'ts', contents: entry.slice(0, boundary) + `
+export async function journalResponse(store, request, errorClass) {
+  StoreErrorClass = errorClass;
+  try { return { response: await dispatch(store, undefined, undefined, undefined, undefined, undefined, undefined, undefined, request, undefined, undefined, undefined, undefined), sqliteCode: 0 }; }
+  catch (error) { return { response: failureResponse(request.id, error, errorClass), sqliteCode: typeof error === 'object' && error !== null && typeof error.errcode === 'number' ? error.errcode : 0 }; }
+}
+` }, outfile: serviceAdapter, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24.18', logLevel: 'silent' });
   await build({ entryPoints: [join(codeRoot, 'src/service/wal-checkpoint-worker.ts')], outfile: join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24.18', logLevel: 'silent' });
   await build({ entryPoints: [join(codeRoot, 'tests/support/wal-crash-child.ts')], outfile: helper,
     bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24.18', logLevel: 'silent' });
 });
-afterAll(async () => { await rm(helper, { force: true }); await rm(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), { force: true }); });
+afterAll(async () => { await rm(helper, { force: true }); await rm(serviceAdapter, { force: true }); await rm(join(codeRoot, '.cache', 'service', 'wal-checkpoint-worker.mjs'), { force: true }); });
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-wal-recovery-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -73,6 +87,66 @@ describe('durable edit acknowledgement with store-owned checkpoints', () => {
     expect(recovered.workingDigest).toBe(ack.workingDigest);
     expect(recovered.blocks.find(block => block.blockId === ack.blockId)?.text.startsWith('甲')).toBe(true);
   });
+
+  it('acknowledges a journal request with no error response when it meets a real TRUNCATE writer lock', async () => {
+    store!.markCleanShutdown(); store!.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const reader = new DatabaseSync(database(), { readOnly: true });
+    reader.exec('PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=0; BEGIN');
+    reader.prepare('SELECT * FROM branch_working_state').all();
+    store.flushJournalEdit(edit());
+    const pending = edit();
+    const adapter = await import(pathToFileURL(serviceAdapter).href);
+    const probe = new DatabaseSync(database()); configureDatabase(probe); probe.exec('PRAGMA busy_timeout=0');
+    let started!: () => void;
+    const checkpointStarted = new Promise<void>(resolve => { started = resolve; });
+    try {
+      expect(await store.startCheckpointWorker(databasePath => {
+        const worker = new Worker(`
+          const { parentPort, workerData } = require('node:worker_threads');
+          const { DatabaseSync } = require('node:sqlite');
+          const { statSync } = require('node:fs');
+          const db = new DatabaseSync(workerData.databasePath);
+          // Test only: a pinned reader holds a real TRUNCATE lock beyond the writer's unchanged 5s busy wait.
+          db.exec('PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=0; PRAGMA busy_timeout=20000');
+          const bytes = () => { try { return statSync(workerData.databasePath+'-wal').size; } catch { return 0; } };
+          parentPort.postMessage({ready:true});
+          parentPort.on('message', request => {
+            if (request.mode === 'close') { db.close(); parentPort.postMessage({id:request.id,ok:true,busy:false,beforeBytes:0,afterBytes:bytes()}); parentPort.close(); return; }
+            const beforeBytes = bytes(); parentPort.postMessage({checkpointStarted:true});
+            const row = db.prepare('PRAGMA wal_checkpoint('+request.mode+')').get();
+            if (request.close) db.close();
+            parentPort.postMessage({id:request.id,ok:true,busy:Number(row.busy)!==0,beforeBytes,afterBytes:bytes(),logFrames:Number(row.log),checkpointedFrames:Number(row.checkpointed)});
+            if(request.close)parentPort.close();
+          });
+        `, { eval: true, workerData: { databasePath } });
+        worker.on('message', packet => { if (packet.checkpointStarted) started(); }); return worker;
+      })).toBe(true);
+      await checkpointStarted;
+      // Confirm SQLite itself holds the writer lock; no fixed sleep or scheduler-timing assumption.
+      const until = Date.now() + 10_000;
+      while (true) {
+        try { probe.exec('BEGIN IMMEDIATE; ROLLBACK'); }
+        catch (error) { if (typeof error === 'object' && error !== null && 'errcode' in error && Number(error.errcode) % 256 === 5) break; throw error; }
+        if (Date.now() >= until) throw new Error('TRUNCATE_WRITER_LOCK_NOT_ACQUIRED');
+        await tick();
+      }
+      const began = Date.now();
+      const reply = adapter.journalResponse(store, { id: randomUUID(), op: 'flushJournalEdit', input: pending }, StoreError);
+      // An async wait lets the reader release here; the old synchronous write instead times out first.
+      reader.exec('ROLLBACK');
+      const result = await reply;
+      if (!result.response.ok) console.error('DIAG_WAL_LOCK/' + JSON.stringify({ sqliteCode: result.sqliteCode, response: result.response.ok ? 'ACKNOWLEDGED' : result.response.error.code, elapsedMs: Date.now() - began }));
+      expect(result.response.ok).toBe(true);
+      expect(result.response.result.sequence).toBe(pending.expectedJournalSequence + 1);
+      const duplicate = await adapter.journalResponse(store, { id: randomUUID(), op: 'flushJournalEdit', input: pending }, StoreError);
+      expect(duplicate.response.ok).toBe(true);
+      expect(duplicate.response.result.sequence).toBe(result.response.result.sequence);
+    } finally {
+      if (reader.isTransaction) reader.exec('ROLLBACK');
+      reader.close(); probe.close(); await store.stopCheckpointWorker(false);
+    }
+  }, 30_000);
 
   it('truncates WAL after clean-shutdown preparation while retaining acknowledged journal state', () => {
     const ack = store!.flushJournalEdit(edit());
