@@ -1,3 +1,4 @@
+import { configureDatabase } from './store-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -1275,6 +1276,7 @@ export function mergeIntoStoreFile(
   for (const suffix of STORE_JOURNALS) rmSync(join(packageRoot, 'store', `ai7.sqlite${suffix}`), { force: true });
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   try {
+    configureDatabase(db);
     const count = listBooks(db, readMergingBooks(books.path, books));
     const present = Number((db.prepare('SELECT count(*) AS n FROM main.books WHERE book_id IN (SELECT book_id FROM temp.merge_books)').get() as SqlRow).n);
     if (present === count) return 'already';

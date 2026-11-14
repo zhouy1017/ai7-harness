@@ -97,7 +97,8 @@ import {
   type ModelServiceRouteId,
 } from '../shared/protocol.js';
 import { modelServiceRowsOutsideBindings } from './model-service-connections.js';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { statSync, statfsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { asNumber, asString, requireStore, type SqlRow } from './store-records.js';
 import { isModelTextAttemptProvenance } from './material-index.js';
@@ -575,6 +576,7 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
     PRAGMA recursive_triggers = ON;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = FULL;
+    PRAGMA wal_autocheckpoint = 0;
     PRAGMA busy_timeout = 5000;
     PRAGMA trusted_schema = OFF;
     PRAGMA secure_delete = ON;
@@ -586,6 +588,59 @@ export function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE'
     'SCHEMA_INVALID',
     'SQLite 递归触发器未启用，无法保护不可变记录。',
   );
+}
+
+export const WAL_CHECKPOINT_LIMITS = { softBytes: 256 * 1024 * 1024, hardBytes: 512 * 1024 * 1024 };
+
+/** Connection configuration disables automatic checkpoints; the store runs this only after responses, outside edit commits. */
+export class WalCheckpointPolicy {
+  readonly #pageBytes: number;
+
+  constructor(
+    readonly db: DatabaseSync,
+    readonly path: string,
+    readonly limits = WAL_CHECKPOINT_LIMITS,
+  ) {
+    this.#pageBytes = asNumber((db.prepare('PRAGMA page_size').get() as SqlRow).page_size) + 24;
+  }
+
+  #logBytes(): number {
+    const row = this.db.prepare('PRAGMA wal_checkpoint(NOOP)').get() as SqlRow;
+    return Math.max(0, asNumber(row.log)) * this.#pageBytes;
+  }
+
+  #fileBytes(): number {
+    try { return statSync(`${this.path}-wal`).size; }
+    catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return 0;
+      throw error;
+    }
+  }
+
+  /** Refuse before BEGIN; the renderer retains and retries the exact command through its existing protection path. */
+  admitJournalWrite(): void {
+    requireStore(this.#logBytes() < this.limits.hardBytes, 'JOURNAL_CHECKPOINT_BUSY', '本机存储正在整理，请稍候重试保存。');
+    const space = statfsSync(dirname(this.path));
+    requireStore(space.bavail * space.bsize >= 64 * 1024 * 1024, 'JOURNAL_DISK_FULL', '磁盘剩余空间不足，请释放空间后重试保存。');
+  }
+
+  maintain(idle: boolean, force = false): { busy: boolean; beforeBytes: number; afterBytes: number } | null {
+    if (!force && this.#logBytes() < this.limits.softBytes) return null;
+    const beforeBytes = this.#fileBytes();
+    const timeout = asNumber((this.db.prepare('PRAGMA busy_timeout').get() as SqlRow).timeout);
+    this.db.exec('PRAGMA busy_timeout = 0');
+    try {
+      const result = this.db.prepare(`PRAGMA wal_checkpoint(${idle ? 'TRUNCATE' : 'PASSIVE'})`).get() as SqlRow;
+      return { busy: asNumber(result.busy) !== 0, beforeBytes, afterBytes: this.#fileBytes() };
+    } finally {
+      this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
+    }
+  }
+
+  shutdown(): void {
+    const result = this.maintain(true, true)!;
+    requireStore(!result.busy && result.afterBytes === 0, 'JOURNAL_CHECKPOINT_BUSY', '本机存储尚未整理完成，不能确认正常关闭。');
+  }
 }
 
 const ABANDONMENT_CLEANUP_SCHEMA = `

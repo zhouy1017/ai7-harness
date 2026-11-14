@@ -2086,6 +2086,7 @@ async function run(): Promise<void> {
   const requestGovernor = new ModelRequestGovernor();
   let stopping = false;
   let requestLoop: InstanceType<typeof ServiceRequestLoop> | undefined;
+  let cleanShutdown = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
@@ -2503,9 +2504,11 @@ async function run(): Promise<void> {
         return response;
       },
       afterResponse: (request, response) => {
+        if (request.op === 'shutdown' && response.ok) cleanShutdown = true;
         if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
           throw new Error('E2E interruption after acknowledged journal edit.');
         }
+        if (request.op !== 'shutdown') serving.store.checkpointAfterResponse(process.stdin.readableLength === 0);
       },
     });
     await requestLoop.run();
@@ -2539,6 +2542,7 @@ async function run(): Promise<void> {
       await requestGovernor.whenIdle();
       await backupsStopped;
       await exportsStopped;
+      if (cleanShutdown) store?.checkpointForShutdown();
     } finally {
       store?.close();
     }

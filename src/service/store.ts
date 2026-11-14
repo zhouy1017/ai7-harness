@@ -1205,6 +1205,7 @@ import {
 } from './store-operation-support.js';
 import {
   configureDatabase,
+  WalCheckpointPolicy,
   initializeManuscriptIntakeSchema,
   initializeManuscriptReimportSchema,
   initializeModelServiceSchema,
@@ -2776,6 +2777,7 @@ export class EditorialStore {
   readonly #control: StoreControl;
   #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
   #recoveryObjectLifecycleTail: Promise<void> = Promise.resolve();
+  readonly #checkpoint: WalCheckpointPolicy;
   #cleanShutdownMarked = false;
   #poisoned = false;
   readonly #reimportPreparationWork = new Map<string, ReimportPreparationWork>();
@@ -2804,6 +2806,7 @@ export class EditorialStore {
     this.#dataRoot = dataRoot;
     this.#objectsRoot = objectsRoot;
     this.#authority = authority;
+    this.#checkpoint = new WalCheckpointPolicy(authority, join(dataRoot, 'store', 'ai7.sqlite'));
     this.#journal = journal;
     this.#ingest = ingest;
     this.#boundedAuthority = boundedAuthority;
@@ -3368,6 +3371,15 @@ export class EditorialStore {
       closeDatabaseQuietly(authority);
       throw error;
     }
+  }
+
+  /** Called only after the service response frame has been written. */
+  checkpointAfterResponse(idle: boolean): ReturnType<WalCheckpointPolicy['maintain']> {
+    return this.#checkpoint.maintain(idle);
+  }
+
+  checkpointForShutdown(): void {
+    this.#checkpoint.shutdown();
   }
 
   markCleanShutdown(): void {
@@ -13304,6 +13316,8 @@ export class EditorialStore {
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
+    this.#assertAvailable();
+    this.#checkpoint.admitJournalWrite();
     return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
       new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
   }
