@@ -1429,7 +1429,7 @@ export class ReviewRunStore {
   launch(input: Extract<ReviewRunPrepareInput, { phase: 'start' }>, snapshotId: string,
     binding: import('../launch-policy.js').ConfiguredProviderBinding | null): { reviewRunId: string; manuscript: unknown } {
     const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
-    this.#ledgers.baseline().checkpointAtLaunch(input.bookId);
+    if (this.requiresModel(input.bookId, input.categoryIds)) this.#ledgers.baseline().forkForLaunch(execution).checkpointAtLaunch(input.bookId);
     const work = this.#buildWork(input, execution);
     let reviewRunId: string;
     if ('done' in work) {
@@ -2788,7 +2788,7 @@ export class ReviewRunStore {
     if (this.#stopForWithdrawnInfluence(snapshot, category)) return null;
     const ledger = this.#categoryLedger(category);
     // House guideline text never reaches a live model before the Owner admits it, whenever the Run was prepared.
-    const withheld = this.#guidelineRefusal(category.entry);
+    const withheld = this.#guidelineRefusal(category.entry, ledger.launch);
     if (withheld !== null) {
       this.#recordEvent(reviewRunId, categoryId, 'refused', withheld, { extra: { code: HOUSE_GUIDELINE_NOT_TRANSMITTABLE } });
       return null;

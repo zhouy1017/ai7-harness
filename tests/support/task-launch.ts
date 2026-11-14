@@ -1,4 +1,3 @@
-import { recordMissingCredentialConnection } from './sample1-baseline.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +6,6 @@ import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-
 
 /** Populate the instance table through the real launch owner, using the test's admitted SampleBook. */
 export function launchLocalForSnapshot(store: EditorialStore, codeRoot: string, bookId: string): string {
-  if (store.getModelServiceConnections().length === 0) recordMissingCredentialConnection(store, '本地启动测试的缺失凭据元数据');
   const clientCommandId = randomUUID();
   store.launchReviewRun({ bookId, clientCommandId, categoryIds: ['local-text-check'],
     scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null },
