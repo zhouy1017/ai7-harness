@@ -3131,7 +3131,7 @@ async function main() {
     'review-run-settled', { state: reviewed?.run?.state, categories: reviewedCategories.map((category) => [category.categoryId, category.state, category.findingsCount, category.excludedCount]) });
     // H3: the retry still closes the unit; unknown severity and an unmatched quotation become a disclosed annotation.
     requireJourney(reviewed.run.excluded.length === 0 &&
-      reviewed.run.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation' && entry.replacement === null && entry.note.includes('引文未逐字匹配')) &&
+      reviewed.run.findings.some((entry) => entry.note.startsWith('【引文未逐字匹配】') && entry.output === 'annotation' && entry.replacement === null && entry.note.includes('引文未逐字匹配')) &&
       reviewed.run.findings.some((entry) => entry.categoryId === 'typos-and-usage' && entry.blockPosition !== null && entry.blockPosition <= SAMPLE1_UNIT_RANGES[0][1]),
     'review-v2-rejected-sibling');
     await assertRenderer(renderer, `document.querySelector('details.review-excluded')===null && document.querySelectorAll('article.review-finding').length>0`, 'review-v2-visible-excluded');
