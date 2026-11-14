@@ -79,8 +79,9 @@ export class WalCheckpointMaintenance {
 
   get available(): boolean { return this.#available && !this.#failed && !this.#stopping; }
   #terminate(): Promise<number> | undefined {
-    this.#worker?.unref();
     this.#termination ??= this.#worker?.terminate();
+    // Node's terminate() calls ref(); detach only after requesting termination.
+    this.#worker?.unref();
     void this.#termination?.catch(() => undefined);
     return this.#termination;
   }

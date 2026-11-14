@@ -177,8 +177,12 @@ describe('store-owned checkpoint worker', () => {
     fallback.mockRestore();
   });
 
-  it('finishes shutdown after the close acknowledgement even if thread termination never settles', async () => {
-    const termination = vi.spyOn(worker, 'terminate').mockImplementation(() => new Promise<number>(() => undefined));
+  it('finishes shutdown unreferenced after close acknowledgement even if thread termination never settles', async () => {
+    let referenced = true;
+    const ref = vi.spyOn(worker, 'ref').mockImplementation(() => { referenced = true; });
+    const unref = vi.spyOn(worker, 'unref').mockImplementation(() => { referenced = false; });
+    // Node terminate() calls ref() itself before requesting native thread termination.
+    const termination = vi.spyOn(worker, 'terminate').mockImplementation(() => { worker.ref(); return new Promise<number>(() => undefined); });
     let stopped = false;
     vi.useFakeTimers();
     try {
@@ -187,8 +191,9 @@ describe('store-owned checkpoint worker', () => {
       await once(worker, 'message');
       await vi.advanceTimersByTimeAsync(5_000);
       expect(stopped).toBe(true);
+      expect(referenced).toBe(false);
       await stopping;
-    } finally { vi.useRealTimers(); termination.mockRestore(); await worker.terminate(); }
+    } finally { vi.useRealTimers(); termination.mockRestore(); ref.mockRestore(); unref.mockRestore(); await worker.terminate(); }
   });
 
   it('skips response and idle ticks rather than throwing for an un-reset authority statement', async () => {
