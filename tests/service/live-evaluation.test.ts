@@ -1,3 +1,4 @@
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { READERS_REPORT_NEEDS_FINALIZED } from '../../src/service/readers-reports.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
@@ -22,7 +23,7 @@ import { AUTHORED_REWRITE_WORDS, beginRewriteAsJ11 } from '../support/evaluation
 import { evaluationRewriteContract, evaluationRewriteContractDigest } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { evaluationRewriteContractInput, type RewritableEvaluation } from '../../src/service/evaluation-rewrites.js';
 import { ruleFor, withRuleFor, withoutRuleFor, withSeriesKnowledgeFor } from '../support/policy-rules.js';
-import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.js';
+import { makeJ13Series, J13_SERIES_TITLE, J13_EDITOR_WORDS } from '../support/series-consistency.js';
 import { AUTHORED_SECTIONS, finalizeAsJ11 } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1, SAMPLE1_UNITS } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -243,6 +244,47 @@ async function contractCase(kind: 'initial' | 'readers' | 'rewrite') {
 }
 
 describe('evaluation on the Go execution path (#429)', () => {
+
+  it.each(['Series', 'procedure instruction'])('prepares and completes ordinary-production 初评 with %s in unit and synthesis requests (#1453)', async (context) => {
+    const seriesId = context === 'Series' ? makeJ13Series(store, bookId) : null;
+    const instruction = '保留叙述中的短句。';
+    if (seriesId === null) {
+      const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'evaluation')!;
+      const basedOn = { procedureId: original.procedureId, version: original.version, digest: original.digest };
+      const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId, basedOn,
+        title: original.document.title, editorInstruction: instruction, stages: original.document.stages } })
+        .procedures.find((entry) => entry.procedureId === original.procedureId)!;
+      store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
+    }
+    activeFamily = 'evaluation-initial';
+    const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor,
+      (_request, message) => ({ kind: 'unit-result', ...answerOf(message) }),
+      { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
+    owners.push(capture.owner);
+    let progress = store.createInitialEvaluationPreparationWork(bookId, capture.policy, [], null, seriesId);
+    while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+    const prepared = progress.projection!;
+    if (seriesId !== null) expect(prepared.runSourceScope!.seriesScopes![0]!.title).toBe(J13_SERIES_TITLE);
+    const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    expect(capture.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger)).toBe('admitted');
+    await capture.owner.whenIdle();
+    const completed = store.inspectInitialEvaluation(bookId);
+    expect(completed.run!.state).toBe('completed');
+    expect(completed.resultSetRevision!.evaluation.synthesis.state).toBe('closed');
+    const evaluationRequests = capture.wireRequests.filter((body) => body.messages.some((message) =>
+      message.role === 'user' && /^(评估单元|评估综合) /u.test(message.content)));
+    expect(evaluationRequests).toHaveLength(SAMPLE1_UNITS + 1);
+    for (const body of evaluationRequests) {
+      const system = body.messages.find((message) => message.role === 'system')!.content;
+      if (seriesId !== null) {
+        expect(system).toContain(J13_SERIES_TITLE);
+        expect(system).toContain(J13_EDITOR_WORDS);
+        expect(system).toContain('仅作背景，只读');
+      } else expect(system).toContain(instruction);
+    }
+    capture.assertMatched();
+  });
+
   it.each([1, SAMPLE1_UNITS])('stops the Series evaluation after %s admitted unit reads, before the next unit or synthesis can transmit', async (units) => {
     const seriesId = makeJ13Series(store, bookId);
     const policy = withSeriesKnowledgeFor(selected, 'evaluation');

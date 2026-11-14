@@ -57,6 +57,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   store.factualReviewLedger.bindLaunch(launch);
   const unmatched: string[] = [];
   const requests: AnalysisRequestIdentity[] = [];
+  const wireRequests: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
   const nativeFetch: typeof fetch = async (url, init) => {
     const refuse = (reason = 'unmatched-request'): never => { unmatched.push(reason); throw new Error('CAPTURED_ORDINARY_UNMATCHED_REQUEST'); };
     if (String(url) !== allowed.endpoint || init === undefined) return refuse();
@@ -74,6 +75,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const message = body.messages.findLast((entry) => entry.role === 'user')?.content;
     if (request === undefined || body.model !== binding.model || typeof message !== 'string') return refuse();
     requests.push(request);
+    wireRequests.push(body);
     let response: ModelFixtureResponse | undefined;
     try { response = answer(request, message); } catch (error) { unmatched.push('invalid-response-schedule'); throw error; }
     if (response === undefined) return refuse(`${request.stage}:${request.unitOrdinal ?? 'none'}:response-missing`);
@@ -95,6 +97,6 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     currentLaunchPolicy: () => policy, productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', frozen),
     fixture: null, production: { scope: 'ordinary-production', nativeFetch },
     secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...controls });
-  return { owner, policy, launch, nativeFetch, requests, assertMatched: () => strictEqual(unmatched.length, 0,
+  return { owner, policy, launch, nativeFetch, requests, wireRequests, assertMatched: () => strictEqual(unmatched.length, 0,
     `CAPTURED_ORDINARY_UNMATCHED_REQUEST ${unmatched.join(', ')}`) };
 }

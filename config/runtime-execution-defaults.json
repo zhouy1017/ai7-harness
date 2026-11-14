@@ -226,7 +226,8 @@
         "unpublished-metadata",
         "unpublished-excerpts",
         "unpublished-full-content",
-        "house-review-preference-excerpt"
+        "house-review-preference-excerpt",
+        "series-knowledge-excerpt"
       ],
       "crossUnitSynthesisAllowed": true,
       "materialReferencesAllowed": true,
@@ -239,7 +240,8 @@
       "platformTools": 0,
       "localTools": 0,
       "sourceTranslationAllowed": false,
-      "plusOneCrossUnitSynthesisTurn": true
+      "plusOneCrossUnitSynthesisTurn": true,
+      "seriesKnowledgeAllowed": true
     },
     {
       "ruleId": "ordinary-production-editorial-polish",

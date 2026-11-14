@@ -444,4 +444,34 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       await rm(cacheRoot, { recursive: true, force: true });
     }
   });
+
+  it('refuses a Book that is not exact sample1 under developer-live with the dialogue route refusal, sending nothing', async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), 'ai7-agent-workspace-cache-'));
+    const store = await openStore();
+    try {
+      const path = join(roots.inputRoot, 'composed-agent-workspace.docx');
+      await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30, title: '工作区来源' });
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '工作区来源' }, false);
+      const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId: randomUUID() });
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      let sent = 0;
+      const nativeFetch = (async () => { sent += 1; throw new Error('nothing may be sent'); }) as unknown as typeof fetch;
+      const live = dialogueLiveRoute(
+        { launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch },
+        policy, { resolve: async () => 'placeholder-development-key' },
+      );
+      expect(live.route).not.toBeNull();
+      const workspace = new AgentWorkspace(store, new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live }));
+      const selection = paragraphHolding(store, book, '');
+      const before = rowCounts();
+      const refused = await refusal(() => workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION }));
+      expect(refused.code).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
+      expect(refused.message).toMatch(/公开样书范围/u);
+      expect(changedTables(before, rowCounts())).toEqual({});
+      expect(sent).toBe(0);
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true });
+    }
+  });
 });
