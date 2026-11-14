@@ -39,7 +39,7 @@ const LOOP: AssembledModelPayload['messages'] = [
 ];
 
 function payload(provider: string, model: string, overrides: Partial<AssembledModelPayload> = {}): AssembledModelPayload {
-  return { provider, model, system: SYSTEM, messages: [LOOP[0]!], ...overrides };
+  return { provider, model, ...(provider === DEEPSEEK_ROUTE ? { reasoningEffort: 'high' } : {}), system: SYSTEM, messages: [LOOP[0]!], ...overrides };
 }
 
 const TOOL_CALL_RESPONSE = {

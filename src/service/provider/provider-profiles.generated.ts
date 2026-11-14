@@ -214,6 +214,12 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
     dshAttribution: false,
     sessionHeader: false,
     maxOutputTokens: 32768,
+    reasoning: {
+      control: 'anthropic-messages',
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      source: 'https://platform.claude.com/docs/en/build-with-claude/effort',
+      readOn: '2026-11-14',
+    },
     credentialHeaderEvidence: EVIDENCE_2,
     displayName: 'Claude 官方 · Messages',
   },
@@ -240,6 +246,12 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
     dshAttribution: true,
     sessionHeader: false,
     maxOutputTokens: null,
+    reasoning: {
+      control: 'deepseek-thinking',
+      efforts: ['low', 'high', 'max'],
+      source: 'https://api-docs.deepseek.com/guides/thinking_mode/',
+      readOn: '2026-11-14',
+    },
     credentialHeaderEvidence: EVIDENCE_4,
     displayName: 'DeepSeek 开放平台（官方）',
   },
@@ -292,6 +304,12 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
     dshAttribution: false,
     sessionHeader: false,
     maxOutputTokens: 8192,
+    reasoning: {
+      control: 'openai-responses',
+      efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+      source: 'https://developers.openai.com/api/docs/guides/reasoning',
+      readOn: '2026-11-14',
+    },
     credentialHeaderEvidence: EVIDENCE_8,
     displayName: 'OpenAI 官方 · Responses',
   },
@@ -701,6 +719,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'function',
       webSearchTool: 'none',
     },
+    pre114ReasoningEffort: 'high',
     evidence: {
       requestShape: EVIDENCE_4,
       reasoningControl: EVIDENCE_4,
@@ -755,6 +774,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'none',
       webSearchTool: 'none',
     },
+    reasoning: {
+      control: 'google-generate-content',
+      efforts: ['low', 'medium', 'high'],
+      source: 'https://ai.google.dev/gemini-api/docs/generate-content/thinking',
+      readOn: '2026-11-14',
+    },
     evidence: {
       requestShape: EVIDENCE_23,
       reasoningControl: EVIDENCE_14,
@@ -782,6 +807,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       toolCalling: 'none',
       webSearchTool: 'none',
     },
+    reasoning: {
+      control: 'google-generate-content',
+      efforts: ['low', 'medium', 'high'],
+      source: 'https://ai.google.dev/gemini-api/docs/generate-content/thinking',
+      readOn: '2026-11-14',
+    },
     evidence: {
       requestShape: EVIDENCE_23,
       reasoningControl: EVIDENCE_14,
@@ -808,6 +839,12 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       usageAttribution: 'unknown',
       toolCalling: 'none',
       webSearchTool: 'none',
+    },
+    reasoning: {
+      control: 'google-thinking-budget',
+      efforts: ['128', '1024', '8192', '32768'],
+      source: 'https://ai.google.dev/gemini-api/docs/generate-content/thinking',
+      readOn: '2026-11-14',
     },
     evidence: {
       requestShape: EVIDENCE_23,
@@ -3630,8 +3667,8 @@ export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, Family
     accountLimit: 'supported',
     rateLimit: 'supported',
     structuredOutput: 'unsupported',
-    reasoningControl: 'unsupported',
-    reasoningContinuation: 'unsupported',
+    reasoningControl: 'supported',
+    reasoningContinuation: 'supported',
     providerTools: 'unsupported',
   },
   'openai-responses': {
@@ -3643,8 +3680,8 @@ export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, Family
     accountLimit: 'supported',
     rateLimit: 'supported',
     structuredOutput: 'unsupported',
-    reasoningControl: 'unsupported',
-    reasoningContinuation: 'unsupported',
+    reasoningControl: 'supported',
+    reasoningContinuation: 'supported',
     providerTools: 'unsupported',
   },
   'google-generate-content': {
@@ -3656,8 +3693,8 @@ export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, Family
     accountLimit: 'supported',
     rateLimit: 'supported',
     structuredOutput: 'unsupported',
-    reasoningControl: 'unsupported',
-    reasoningContinuation: 'unsupported',
+    reasoningControl: 'supported',
+    reasoningContinuation: 'supported',
     providerTools: 'unsupported',
   },
 };

@@ -20,7 +20,9 @@ import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
-import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
+import { attemptTurn } from '../../src/service/dialogue/dialogue-history.js';
+import { splitFragments } from '../../src/service/dialogue/fragments.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
@@ -315,20 +317,20 @@ function retrievalResponse(turn: number, candidateId: string, args: string): Res
 }
 
 describe('the admitted dialogue route, read from the selected policy', () => {
-  it('carries retrieve and exact_fetch through the real /2 SSE adapter and live-once ledger without a socket', async () => {
+  it.each(['developer-live', 'ordinary-production'] as const)('carries retrieve and exact_fetch through /2 SSE in %s, freezing effort across a default change', async (scope) => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '对话检索');
     const selection = selectionOf(store, book);
     const calls: StubCall[] = [];
-    let candidateId = '';
+    let candidateId = '', effort = 'high';
     const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
       calls.push({ url, headers: init.headers, body: init.body });
       const request = JSON.parse(init.body) as { stream: boolean; tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content: string }> };
       expect(request.stream).toBe(true);
       expect(request.tools.map((tool) => tool.function.name)).toEqual(['exact_fetch', 'retrieve']);
-      // The selected v18 dialogue rule admits the local tools, so the digest-pinned /2 contract is the system message.
       expect(request.messages[0]).toEqual({ role: 'system', content: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt });
       const turn = calls.length;
+      if (scope === 'ordinary-production' && turn === 1) effort = 'low';
       if (turn === 2) {
         const result = JSON.parse(request.messages.at(-1)!.content) as Array<{ candidateId: string }>;
         candidateId = result[0]!.candidateId;
@@ -336,9 +338,15 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       const args = JSON.stringify(turn === 1 ? { query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] } : { candidateId });
       return retrievalResponse(turn, candidateId, args);
     }) as unknown as typeof fetch;
+    let route = liveRoute(nativeFetch);
+    if (scope === 'ordinary-production') {
+      const connection = store.saveModelServiceConnection('对话默认强度', null, 'ready', 'opencode-go');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, scope, { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: connection.credentialReference });
+      route = productionDialogueRoute({ scope, nativeFetch }, () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-effort' }, () => effort);
+    }
     const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
-      live: liveRoute(nativeFetch),
+      live: route,
       retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
     try {
       dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
@@ -349,10 +357,76 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       expect(calls).toHaveLength(3);
       expect(projection.anchors).toHaveLength(1);
       expect(projection.anchors![0]!.candidateId).toBe(candidateId);
+      if (scope === 'ordinary-production') {
+        expect(calls.every((call) => JSON.parse(call.body).reasoning_effort === 'high')).toBe(true);
+        expect(readBinding(turn.attemptId)).toMatchObject({ reasoningEffort: 'high' });
+        return;
+      }
       const lines = await ledgerLines();
       expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(3);
       expect(lines.every((line) => line.requestShape === 'editorial-dialogue-sse')).toBe(true);
     } finally { await dialogues.dispose(); }
+  });
+
+  it('reconstructs a process death in a thinking tool gap as interrupted, then continues in a fresh session (#1453 retention)', async () => {
+    let store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '思考工具间隙重启');
+    const selection = selectionOf(store, book);
+    const calls: StubCall[] = [];
+    const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      const args = JSON.stringify({ query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] });
+      const wire = await retrievalResponse(1, '', args).text();
+      const prefix = `data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: { content: '先核对公开样书。', reasoning_content: 'SYNTHETIC_TOOL_GAP_REASONING' }, finish_reason: null }] })}\n\n`;
+      return new Response(prefix + wire, { headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: liveRoute(nativeFetch),
+      retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
+    const acquire = requestGovernor.acquire.bind(requestGovernor);
+    let acquisitions = 0, releaseGap: (() => void) | undefined;
+    const spy = vi.spyOn(requestGovernor, 'acquire').mockImplementation(async (producer, signal) => {
+      if (++acquisitions === 2) await new Promise<void>((resolve) => { releaseGap = resolve; });
+      return acquire(producer, signal);
+    });
+    const turn = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+    try {
+      dialogues.begin(turn);
+      await waitFor(() => releaseGap, (value) => value !== undefined, 'held between tool rounds');
+      expect(calls).toHaveLength(1);
+      const oldSession = readBinding(turn.attemptId)!.harnessSessionId;
+      // The next model request can await capacity before the append queue finishes its preceding tool result.
+      // A real process death preserves exactly the prefix that reached disk, so freeze that durable checkpoint first.
+      const durableLog = await waitFor(() => readHarnessSessionLog(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), oldSession),
+        (log) => log?.events.some((event) => event.type === 'tool/result') === true, 'tool result durable before process death');
+      // The unchanged history reader releases the final complete sentence when streaming becomes interrupted.
+      // Compare against that base cut projection of the exact durable log, not its answering projection.
+      const durableFragments = splitFragments(attemptTurn(durableLog!, 0, null).streamed, 'cut');
+      const answering = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]!.fragments;
+      expect(durableFragments.slice(0, answering.length)).toEqual(answering);
+      expect(durableFragments.map((entry) => entry.text).join('')).toContain('先核对公开样书。');
+      // Reconstruct abrupt process death: close only the store, with no owner settlement or terminal event.
+      store.close();
+      store = await openStore();
+      expect(store.reconcileDialogueAttempts()).toBe(1);
+      const interrupted = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(interrupted.attempts[0]).toMatchObject({ state: 'interrupted', causeCode: 'SERVICE_STOPPED' });
+      expect(interrupted.actions).toMatchObject({ continue: true, regenerate: true, convert: false });
+      expect(interrupted.attempts[0]!.fragments).toEqual(durableFragments);
+      expect(calls).toHaveLength(1); // Opening and reconciliation never resume the old SDK tool loop.
+      spy.mockRestore();
+      const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-dialogue');
+      const fresh = new DialogueExecutionOwner({ requestGovernor: new ModelRequestGovernor(), records: store, fixture, live: null,
+        sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY) });
+      try {
+        const continued = store.nextDialogueAttempt(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId }, 'continue');
+        expect(continued.message.kept).toContain('先核对公开样书。');
+        fresh.begin(continued);
+        await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => fresh.liveText(id)), (value) => value.attempts.at(-1)!.state === 'completed', 'fresh continuation');
+        expect(readBinding(continued.attemptId)!.harnessSessionId).not.toBe(oldSession);
+        expect(calls).toHaveLength(1);
+      } finally { await fresh.dispose(); }
+    } finally { releaseGap?.(); await dialogues.dispose().catch(() => undefined); }
   });
 
   it.each(['stop', 'dispose'] as const)('%s in a live tool gap settles as that stop before the next request is sent (#1131 review)', async (action) => {
@@ -503,13 +577,15 @@ describe('就这段提问… on the live route (provider-free)', () => {
         text: scope.kind === 'book' ? '本书保留合成短句。' : '全社统一合成标点。', effect: 'guide' });
     const calls: StubCall[] = [];
     const dialogues = liveOwner(store, productionDialogueRoute({ scope: 'ordinary-production', nativeFetch: stubTransport(calls, () => ANSWER) },
-      () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-dialogue-memory' }));
+      () => policy, () => connection.credentialReference, { resolve: async () => 'synthetic-dialogue-memory' }, () => 'high'));
     try {
       const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION }, new Date(), workspace ? 'agent-workspace' : undefined);
       if (workspace) dialogues.beginWorkspaceTurn({ ...turn, settled: () => {} }); else dialogues.begin(turn);
       const result = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), settled, 'memory turn settled');
       expect(result.attempts[0]!.state).toBe('completed');
       expect(calls).toHaveLength(1);
+      expect(JSON.parse(calls[0]!.body).reasoning_effort).toBe('high');
+      expect(readBinding(turn.attemptId)).toMatchObject({ reasoningEffort: 'high' });
       const prompt = JSON.parse(calls[0]!.body).messages[0].content as string;
       expect(prompt).toContain('本书保留合成短句。'); expect(prompt).toContain('全社统一合成标点。');
       expect(prompt.indexOf('本书保留合成短句。')).toBeLessThan(prompt.indexOf('全社统一合成标点。'));

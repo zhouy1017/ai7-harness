@@ -27,11 +27,11 @@ describe('pure diagnostics bundle', () => {
       crashes: [{ instant: '2026-10-17T00:00:00.000Z', kind: 'uncaughtException', reason: manuscript,
         stack: `Error: ${manuscript}\n${manuscript}\n    at ${manuscript} (D:/data-root/books/private/book.ts:12:3)\n    at C:\\Users\\Synthetic\\development.key.txt:7:4\n    at https://example.invalid/frame.js?token=synthetic-query:9:2` }],
       fixtureTree: { 'books/manuscript.txt': manuscript, 'development.key.txt': 'synthetic-secret',
-        'database.sqlite': 'synthetic-database', 'provider-cache/entry': manuscript, 'export-staging/book.docx': manuscript },
+        'database.sqlite': 'synthetic-database', 'harness-sessions/synthetic.jsonl': 'SYNTHETIC_RAW_REASONING_DO_NOT_EXPORT', 'provider-cache/entry': manuscript, 'export-staging/book.docx': manuscript },
     });
     expect(Object.keys(files).sort()).toEqual(['README.txt', 'crashes/01-uncaughtException.json', 'summary.json']);
     const output = JSON.stringify(files);
-    for (const excluded of [manuscript, 'data-root', 'C:\\Users', 'Synthetic', 'development.key.txt', 'synthetic-query', 'example.invalid', 'synthetic-secret', 'synthetic-database']) {
+    for (const excluded of [manuscript, 'data-root', 'C:\\Users', 'Synthetic', 'development.key.txt', 'synthetic-query', 'example.invalid', 'synthetic-secret', 'synthetic-database', 'SYNTHETIC_RAW_REASONING_DO_NOT_EXPORT', 'harness-sessions']) {
       expect(output).not.toContain(excluded);
     }
     expect(output).toContain('<redacted-path>');
@@ -58,7 +58,7 @@ describe('pure diagnostics bundle', () => {
       .filter((name) => name.endsWith('.ts'))
       .flatMap((name) => [...source(`src/service/${name.replaceAll('\\', '/')}`).matchAll(/_SCHEMA_VERSION = (\d+);/gu)].map((match) => Number(match[1])));
     expect(application.match(/schemaRevision: (\d+), protocol: SERVICE_PROTOCOL_VERSION/u)?.[1]).toBe(String(Math.max(...schemaVersions)));
-    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 113, protocol: SERVICE_PROTOCOL_VERSION');
+    expect(application).toContain('dataVersion: buildIdentity.dataVersion, schemaRevision: 114, protocol: SERVICE_PROTOCOL_VERSION');
     expect(facts.buildIdentity!.dataVersion).toBe(DATA_VERSION);
     expect(application).toContain("policySetVersion: 'no-policy-lock'");
     // The sandboxed preload cannot import the main module at runtime, so its literals must match the handler channels.

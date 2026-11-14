@@ -434,7 +434,7 @@ describe('baseline and custom analysis on the same launch', () => {
 describe('schema revision 82', () => {
   it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
     // Synchronized with #89: imported-Skill update ledgers follow revision 82 without rebuilding its relations.
-    expect(LATEST_SCHEMA_VERSION).toBe(113);
+    expect(LATEST_SCHEMA_VERSION).toBe(114);
     let bookId = '';
     await withBook(async (book) => {
       bookId = book.bookId;

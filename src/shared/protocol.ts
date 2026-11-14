@@ -1,3 +1,5 @@
+import type { RuntimeExecutionConfig } from './runtime-execution-config.js';
+export type { RuntimeExecutionConfig } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
@@ -2727,9 +2729,14 @@ export interface ModelTextAttemptProvenance {
   readonly failureCode: string | null;
 }
 
-export interface FastModelSelectionInput {
+export interface FastModelSelectionInput extends Pick<RuntimeExecutionConfig, 'reasoningEffort'> {
   route: ModelServiceRouteId;
   modelId: string;
+}
+
+/** Atomic two-role selection carries independent defaults. */
+export interface BothRoleModelSelectionInput extends FastModelSelectionInput {
+  fastReasoningEffort?: RuntimeExecutionConfig['reasoningEffort'];
 }
 
 /**
@@ -6783,7 +6790,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
-  selectBothRoleModels: { input: FastModelSelectionInput; output: void };
+  selectBothRoleModels: { input: BothRoleModelSelectionInput; output: void };
   refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
@@ -7341,7 +7348,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
-  selectBothRoleModels(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectBothRoleModels(input: BothRoleModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;

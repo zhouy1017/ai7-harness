@@ -1,12 +1,9 @@
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent } from './deepseek-adapter.js';
 import { conversationMessages, functionToolOf, systemPromptOf } from './family-payload.js';
-import { effectiveModelReasoningEffort, type ProviderModelProfile } from './model-profile.js';
-import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
+import { effectiveModelReasoningEffort, modelReasoningControl, type ProviderModelProfile } from './model-profile.js';
+import { assistantToolCalls, familyReplayItems, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { sseFrames, streamFailure } from './stream-frames.js';
-
-/** The reasoning effort the production route's `deepseek-thinking` control sends. */
-export { DEEPSEEK_REASONING_EFFORT } from './model-profile.js';
 
 /**
  * The OpenAI Chat Completions family (Issue #1180 moved it beside the adapter, byte for byte): the body adapter revision
@@ -30,13 +27,13 @@ export function chatCompletionsBody(model: ProviderModelProfile, payload: Assemb
   const system = systemPromptOf(payload);
   const conversation = toolCalling ? chatCompletionsConversation(payload) : conversationMessages(payload);
   const messages = system === null ? conversation : [{ role: 'system', content: system }, ...conversation];
-  const reasoningEffort = effectiveModelReasoningEffort(model);
+  const reasoningEffort = effectiveModelReasoningEffort(model, payload.reasoningEffort);
   return canonicalJson({
     model: model.model,
     messages,
     stream: false,
     ...(reasoningEffort !== null
-      ? { thinking: { type: 'enabled' }, reasoning_effort: reasoningEffort }
+      ? { ...(modelReasoningControl(model) === 'deepseek-thinking' ? { thinking: { type: 'enabled' } } : {}), reasoning_effort: reasoningEffort }
       : {}),
     // One field, and nothing else moves: a profile that declares `json-object` sends the body it
     // would have sent anyway plus this key, so the constraint can be added to or withdrawn from a
@@ -60,6 +57,8 @@ export function chatCompletionsStreamBody(body: string): string {
 function chatCompletionsConversation(payload: AssembledModelPayload): Array<Record<string, unknown>> {
   const messages: Array<Record<string, unknown>> = [];
   for (const message of payload.messages) {
+    const replay = familyReplayItems(message, 'openai-chat-completions');
+    if (replay !== null) { messages.push(...replay); continue; }
     const calls = assistantToolCalls(message);
     if (calls !== null) {
       messages.push({
@@ -83,12 +82,26 @@ function chatCompletionsConversation(payload: AssembledModelPayload): Array<Reco
   return messages;
 }
 
+/** DeepSeek requires reasoning_content on every retained assistant turn when tools are offered. */
+export function chatReplayItems(body: unknown, callIds: ReadonlySet<string>): Record<string, unknown>[] | null {
+  const choice = isRecord(body) && Array.isArray(body.choices) ? body.choices[0] : null;
+  const message = isRecord(choice) && isRecord(choice.message) ? choice.message : null;
+  if (message === null || typeof message.reasoning_content !== 'string') return null;
+  const text = typeof message.content === 'string' ? message.content : Array.isArray(message.content)
+    ? message.content.filter(isRecord).filter((part) => part.type === 'text' || part.type === 'output_text').map((part) => typeof part.text === 'string' ? part.text : '').join('') : '';
+  const calls = Array.isArray(message.tool_calls) ? message.tool_calls.filter(isRecord).filter((call) => typeof call.id === 'string' && callIds.has(call.id))
+    .map((call) => ({ id: call.id, type: 'function', function: { name: (call.function as Record<string, unknown>).name, arguments: (call.function as Record<string, unknown>).arguments } })) : [];
+  return [{ role: 'assistant', content: calls.length > 0 && text === '' ? null : text, reasoning_content: message.reasoning_content,
+    ...(calls.length === 0 ? {} : { tool_calls: calls }) }];
+}
+
 /**
  * Read the first choice without exposing reasoning. DONE completes the response; redundant frames and model aliases
  * do not change its meaning. EOF without DONE remains outcome-unknown, preserving text at the adapter.
  */
-export async function* dialogueSseEvents(response: DeepSeekTransportResponse, model: string): AsyncIterable<DialogueStreamEvent> {
+export async function* dialogueSseEvents(response: DeepSeekTransportResponse, model: string, preserveReasoning = false): AsyncIterable<DialogueStreamEvent> {
   let content = '';
+  let reasoningContent: string | null = null;
   let finish: string | null = null;
   let usage: unknown = null;
   const calls = new Map<number, { id: string; type: string; name: string; arguments: string }>();
@@ -102,7 +115,9 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
           // Malformed calls are rejected individually at normalization.
           return { id: call.id, type: call.type, function: { name: call.name, arguments: call.arguments } };
         });
-        yield { kind: 'complete', response: { model, choices: [{ message: { content, ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }) }, finish_reason: finish }], usage } };
+        yield { kind: 'complete', response: { model, choices: [{ message: { content,
+          ...(reasoningContent === null || !preserveReasoning && toolCalls.length === 0 ? {} : { reasoning_content: reasoningContent }),
+          ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }) }, finish_reason: finish }], usage } };
         return;
       }
       let value: unknown;
@@ -127,6 +142,7 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
         finish = choice.finish_reason;
       }
       if (!isRecord(choice.delta)) continue;
+      if (typeof choice.delta.reasoning_content === 'string') reasoningContent = `${reasoningContent ?? ''}${choice.delta.reasoning_content}`;
       if (choice.delta.tool_calls !== undefined) {
         if (!Array.isArray(choice.delta.tool_calls)) continue;
         for (const delta of choice.delta.tool_calls) {

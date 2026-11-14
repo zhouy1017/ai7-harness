@@ -1,5 +1,7 @@
+import { PRE114_MODEL_REASONING_DEFAULTS } from '../shared/provider-configuration.generated.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { asNumber, asString, requireStore, type SqlRow } from './store-records.js';
+export const MODEL_SERVICE_REASONING_SCHEMA_VERSION = 114;
 
 /**
  * `model_service_connections`, the Model Service routes' connection rows (Issues #712, #811, #1044, #1225): every text the relation
@@ -131,10 +133,18 @@ const MODEL_SERVICE_CHANNEL_BINDINGS = MODEL_SERVICE_ROW_BINDINGS_103.replace(/\
 export const MODEL_SERVICE_CONNECTION_REVISION_104_SQL = MODEL_SERVICE_CONNECTION_REVISION_103_SQL
   .replace(MODEL_SERVICE_ROW_BINDINGS_103, MODEL_SERVICE_CHANNEL_BINDINGS);
 /** model_id retains the Main choice; Fast and the account catalogue have independent storage. */
-export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = MODEL_SERVICE_CONNECTION_REVISION_104_SQL.replace(
+export const MODEL_SERVICE_CONNECTION_REVISION_105_SQL = MODEL_SERVICE_CONNECTION_REVISION_104_SQL.replace(
   '  adapter_revision INTEGER',
   `  fast_model_id TEXT NOT NULL DEFAULT '' CHECK(length(fast_model_id) <= 128),
   cached_models TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(cached_models)),
+  adapter_revision INTEGER`,
+);
+
+/** Revision 114: independent role defaults; existing rows retain their predecessor effective effort, otherwise no explicit effort. */
+export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = MODEL_SERVICE_CONNECTION_REVISION_105_SQL.replace(
+  '  adapter_revision INTEGER',
+  `  reasoning_effort TEXT CHECK(reasoning_effort IS NULL OR length(reasoning_effort) BETWEEN 1 AND 40),
+  fast_reasoning_effort TEXT CHECK(fast_reasoning_effort IS NULL OR length(fast_reasoning_effort) BETWEEN 1 AND 40),
   adapter_revision INTEGER`,
 );
 
@@ -149,7 +159,8 @@ export function initializeAdmittedChannelsSchema(db: DatabaseSync): void {
   const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
   const sql = fold(asString((db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'model_service_connections'").get() as SqlRow).sql));
   if (sql === fold(MODEL_SERVICE_CONNECTION_SCHEMA_SQL)) return;
-  requireStore([MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL].some((text) => sql === fold(text)), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
+  requireStore([MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_105_SQL].some((text) => sql === fold(text)), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
+  const hasIndependentModels = sql === fold(MODEL_SERVICE_CONNECTION_REVISION_105_SQL);
   const total = (): number => asNumber((db.prepare('SELECT count(*) total FROM model_service_connections').get() as SqlRow).total);
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -157,8 +168,16 @@ export function initializeAdmittedChannelsSchema(db: DatabaseSync): void {
     db.exec('CREATE TEMP TABLE admitted_channels_migration AS SELECT rowid AS original_rowid, * FROM model_service_connections');
     db.exec('DROP TABLE model_service_connections');
     db.exec(MODEL_SERVICE_CONNECTION_SCHEMA_SQL);
-    db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id)
-      SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, model_id FROM temp.admitted_channels_migration ORDER BY original_rowid`);
+    db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, cached_models)
+      SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test,
+      ${hasIndependentModels ? 'fast_model_id, cached_models' : "model_id, '[]'"} FROM temp.admitted_channels_migration ORDER BY original_rowid`);
+    // Only predecessor profiles that implied an effort receive one; defaults are configuration records, not model IDs in source.
+    const seed = db.prepare('UPDATE model_service_connections SET reasoning_effort = ?, fast_reasoning_effort = ? WHERE connection_id = ?');
+    for (const row of db.prepare('SELECT connection_id, provider_id, model_id, fast_model_id, selected, fast_selected FROM model_service_connections').all() as SqlRow[]) {
+      const key = `${asString(row.provider_id)}/`;
+      seed.run(row.selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + asString(row.model_id)] ?? null : null,
+        row.fast_selected === 1 ? PRE114_MODEL_REASONING_DEFAULTS[key + (asString(row.fast_model_id) || asString(row.model_id))] ?? null : null, asString(row.connection_id));
+    }
     db.exec('DROP TABLE temp.admitted_channels_migration');
     requireStore(total() === before, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表迁移未保留全部记录。');
     db.exec('COMMIT');
@@ -176,7 +195,7 @@ export function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'model_service_connections'").get() as SqlRow | undefined;
   requireStore(row !== undefined, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表缺失。');
   const sql = folded(asString(row.sql));
-  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL].some((text) => sql === folded(text))) return;
+  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_105_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL].some((text) => sql === folded(text))) return;
   requireStore(sql === folded(MODEL_SERVICE_CONNECTION_REVISION_11_SQL), 'SCHEMA_MIGRATION_FAILED', '模型服务连接表结构不兼容。');
   const total = (): number => asNumber((db.prepare('SELECT count(*) total FROM model_service_connections').get() as SqlRow).total);
   db.exec('BEGIN IMMEDIATE');
@@ -207,7 +226,7 @@ export function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
 export function initializeModelSelectionSchema(db: DatabaseSync): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'model_service_connections'").get() as SqlRow;
   const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
-  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL].some((text) => fold(asString(row.sql)) === fold(text))) return;
+  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_105_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL].some((text) => fold(asString(row.sql)) === fold(text))) return;
   requireStore(fold(asString(row.sql)) === fold(MODEL_SERVICE_CONNECTION_REVISION_72_SQL), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
   db.exec('BEGIN IMMEDIATE');
   try {

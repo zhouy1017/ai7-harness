@@ -69,7 +69,7 @@ async function compose(recorded: RecordedLoop, options: {
   const binding: EgressBindingFacts = {
     bindingDigest: BINDING_DIGEST,
     route: DEEPSEEK_ROUTE,
-    model: DEEPSEEK_MODEL,
+    model: DEEPSEEK_MODEL, reasoningEffort: 'high',
     systemPrompt: SYSTEM,
     outboundDataCategory: 'public-or-synthetic',
     policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v8', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -117,11 +117,12 @@ async function compose(recorded: RecordedLoop, options: {
   const handle = await prepareExecution({
     sessionId,
     route: DEEPSEEK_ROUTE,
-    model: DEEPSEEK_MODEL,
+    model: DEEPSEEK_MODEL, reasoningEffort: 'high',
     systemPrompt: SYSTEM,
     promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
     adapterFactory: (codes) => {
       adapter = new DeepSeekOpenAiCompatibleAdapter({
+        reasoningEffort: 'high',
         // A placeholder secret: the broker hands it to the transport, which only a recorded exchange answers.
         broker: new CredentialBroker({ resolve: async () => 'placeholder-not-a-credential' }),
         slotBinding: { bindingDigest: BINDING_DIGEST, modelRole: 'Main Editorial Role', slot: DEEPSEEK_ROUTE_PROFILE.credentialSlot, credentialReference: randomUUID() },

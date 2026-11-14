@@ -1,4 +1,5 @@
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
+import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
@@ -13575,24 +13576,24 @@ export class EditorialStore {
   }
 
   /** Exact persisted role selection. A missing chosen key never falls back to another channel. */
-  getConfiguredModelRoleBinding(role: 'main-editorial' | 'fast-interaction'): ConfiguredProviderBinding | null {
-    return modelSearchSettings.getConfiguredModelRoleBinding(this.#modelSearchSettingsHost, role);
+  getConfiguredModelRoleBinding(role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
+    return modelSearchSettings.getConfiguredModelRoleBinding(this.#modelSearchSettingsHost, role, override);
   }
 
-  selectFastRoleModel(route: ModelServiceRouteId, modelId: string): void {
-    return modelSearchSettings.selectFastRoleModel(this.#modelSearchSettingsHost, route, modelId);
+  selectFastRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
+    return modelSearchSettings.selectFastRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
   }
 
-  selectMainRoleModel(route: ModelServiceRouteId, modelId: string): void {
-    return modelSearchSettings.selectMainRoleModel(this.#modelSearchSettingsHost, route, modelId);
+  selectMainRoleModel(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
+    return modelSearchSettings.selectMainRoleModel(this.#modelSearchSettingsHost, route, modelId, reasoningEffort);
   }
 
-  selectBothRoleModels(route: ModelServiceRouteId, modelId: string): void {
-    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId);
+  selectBothRoleModels(route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
+    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId, reasoningEffort, fastReasoningEffort);
   }
 
-  private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both'): void {
-    return modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, role);
+  private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
+    return modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, role, reasoningEffort, fastReasoningEffort);
   }
 
   private modelServiceBinding(route: ModelServiceRouteId, modelId: string): import('../shared/protocol.js').ModelServiceBindingProjection {

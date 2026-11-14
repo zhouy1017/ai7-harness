@@ -107,6 +107,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
+  const effortDrafts = new Map<string, string>();
   const modelFilters = new Map<ModelServiceChannelId, string>();
   let favourites: ModelFavourites = {};
   let stopFollow: (() => void) | undefined;
@@ -146,6 +147,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       element('p', 'lede', technicalLayerVisible ? '选择渠道，保存凭据并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
     content.append(modelServiceFlow(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
+      effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
+      setEffortDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortDrafts.delete(key); else effortDrafts.set(key, value); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
       get modelId() { return modelServiceChannel === null ? '' : modelChoices.get(modelServiceChannel) ?? ''; },
       chooseModel: (modelId) => { if (modelServiceChannel !== null) modelChoices.set(modelServiceChannel, modelId); },
@@ -162,7 +165,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const currentRoles = element('section', 'model-service-current-roles');
     currentRoles.setAttribute('aria-label', '当前角色模型');
     for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
-      const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`} · ${role.statusLabel}`);
+      const effort = role.binding?.reasoningEffort;
+      const mark = effort === undefined || effort === 'off' ? ' · 服务默认' : `@${effort}`;
+      const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}${mark}`} · ${role.statusLabel}`);
       line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
       currentRoles.append(line);
     }
@@ -229,7 +234,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     restoreInteraction(content);
     if (searchHadFocus) focusSearchSettings();
     let reading = false, draftEdited = false;
-    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
+    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form, .model-service-effort') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
     content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form')) draftEdited = true; });
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);

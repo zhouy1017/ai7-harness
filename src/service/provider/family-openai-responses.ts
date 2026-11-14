@@ -1,8 +1,8 @@
 import { canonicalJson, isRecord } from '../analysis/canonical.js';
 import type { DeepSeekTransportResponse, DialogueStreamEvent, ProviderRouteProfile } from './deepseek-adapter.js';
 import { conversationMessages, functionToolOf, systemPromptOf } from './family-payload.js';
-import type { ProviderModelProfile } from './model-profile.js';
-import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
+import { effectiveModelReasoningEffort, type ProviderModelProfile } from './model-profile.js';
+import { assistantToolCalls, familyReplayItems, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { sseFrames, streamFailure } from './stream-frames.js';
 
 /**
@@ -16,21 +16,21 @@ import { sseFrames, streamFailure } from './stream-frames.js';
  * The system prompt is the top-level `instructions` and never an input item. `max_output_tokens` is optional here, so
  * the route's declaration decides: a number sends the field, `null` sends nothing, and no cap is invented.
  *
- * This shape has mechanisms of its own for the two capabilities that refuse here — `text.format: { type: 'json_object' }`
- * and `reasoning.effort`. Neither is assembled: a profile declaring either on this shape refuses rather than sending a
- * field on a guess. Opaque reasoning items cannot be replayed through the payload, so a reasoning-bearing call turn
- * refuses (disposition `unsupported` · reasoning continuation).
+ * Selected effort uses `reasoning.effort` (#1453, official reasoning guide read 2026-11-14).
+ * Native output items, including encrypted reasoning and message phase, stay in adapter-private replay state.
+ * Structured output remains unsupported on this family.
  */
 export function openaiResponsesBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload): string {
   if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  const effort = effectiveModelReasoningEffort(model, payload.reasoningEffort);
   const tools = payload.tools ?? [];
   const toolCalling = model.capabilities.toolCalling === 'function';
   if (tools.length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   const instructions = systemPromptOf(payload);
   return canonicalJson({
     model: model.model,
-    ...(profile.route === 'openai-platform' ? { store: false } : {}),
+    ...(effort === null ? {} : { reasoning: { effort } }),
+    ...(profile.route === 'openai-platform' ? { store: false, include: ['reasoning.encrypted_content'] } : {}),
     ...(instructions === null ? {} : { instructions }),
     input: toolCalling ? openaiResponsesConversation(payload) : conversationMessages(payload),
     ...(profile.maxOutputTokens === null ? {} : { max_output_tokens: profile.maxOutputTokens }),
@@ -44,13 +44,15 @@ export function openaiResponsesStreamBody(body: string): string {
   return canonicalJson({ ...JSON.parse(body), stream: true });
 }
 
-/** Text and function items only; opaque Responses reasoning cannot round-trip through this payload. */
+/** Native replay precedes canonical text/function fallback; signed state is never invented from text. */
 function openaiResponsesConversation(payload: AssembledModelPayload): Array<Record<string, unknown>> {
   const items: Array<Record<string, unknown>> = [];
   for (const message of payload.messages) {
+    const replay = familyReplayItems(message, 'openai-responses');
+    if (replay !== null) { items.push(...replay); continue; }
     const calls = assistantToolCalls(message);
     if (calls !== null) {
-      if (message.content.some((block) => block.type === 'reasoning')) throw new Error('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
+      if (message.content.some((block) => block.type === 'reasoning')) throw new Error('PROVIDER_REASONING_REPLAY_ABSENT');
       if (calls.text.length > 0) items.push({ role: 'assistant', content: calls.text });
       for (const call of calls.calls) {
         items.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: call.arguments });
@@ -68,6 +70,14 @@ function openaiResponsesConversation(payload: AssembledModelPayload): Array<Reco
     items.push({ role: message.role, content: text });
   }
   return items;
+}
+
+/** Stateless Responses replays complete output items, including encrypted reasoning and message phase, in native order. */
+export function responsesReplayItems(body: unknown, callIds: ReadonlySet<string>): Record<string, unknown>[] | null {
+  if (!isRecord(body) || !Array.isArray(body.output)) return null;
+  if (!body.output.some((item) => isRecord(item) && (item.type === 'reasoning' || item.phase !== undefined))) return null;
+  return body.output.filter(isRecord).filter((item) => item.type === 'reasoning' || item.type === 'message' && item.role === 'assistant' ||
+    item.type === 'function_call' && typeof item.call_id === 'string' && callIds.has(item.call_id));
 }
 
 /** The HTTP status a Responses error code stands for, so an in-stream failure classifies as the same refusal would. */

@@ -1,3 +1,4 @@
+import { sentReasoningEffort } from '../../shared/runtime-execution-config.js';
 import { SEARCH_BACKENDS } from './search-backends.js';
 import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
@@ -130,6 +131,7 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  readonly reasoningEffort?: string | null;
   readonly factualClaimScope?: { readonly stage: 'claim-extraction' | 'web-verification'; readonly current: () => boolean };
   readonly learningCurationScope?: { readonly messageDigest: string; readonly current: () => boolean };
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
@@ -482,6 +484,15 @@ function refuse(reason: EgressRefusalReason, detail: string): EgressDecision {
  * platform tools — contributes its canonical blocks, so two different tool exchanges never share a digest.
  */
 export function payloadDigest(payload: AssembledModelPayload): string {
+  // Never rewrite historical result digests. New controlled/tool transmissions additionally bind every wire-affecting
+  // assembled field, including the adapter-private native items that replace canonical blocks during family encoding.
+  if (sentReasoningEffort(payload.reasoningEffort) !== null || (payload.tools?.length ?? 0) > 0 ||
+      payload.messages.some((message) => message.source.replayState !== undefined)) {
+    return sha256Hex(canonicalJson({ version: 2, provider: payload.provider, model: payload.model, system: payload.system ?? null,
+      reasoningEffort: sentReasoningEffort(payload.reasoningEffort), tools: payload.tools ?? [],
+      messages: payload.messages.map((message) => ({ role: message.role, content: message.content,
+        replayState: message.source.replayState ?? null })) }));
+  }
   const texts = payload.messages.map((message) => `${message.role}\u0000${messageText(message) ?? `\u0001${canonicalJson(message.content)}`}`);
   return sha256Hex([payload.provider, payload.model, payload.system ?? '', ...texts].join('\u0002'));
 }
@@ -491,10 +502,11 @@ export function payloadDigest(payload: AssembledModelPayload): string {
  * order, each reduced to the fields the model produced. The execution owner records it when the adapter returns the
  * message; the gate admits the message back into history only when the digest is recorded.
  */
-export function assistantToolCallDigest(content: ReadonlyArray<AssembledContentBlock>): string {
-  return sha256Hex(canonicalJson(content.map((block) => block.type === 'tool-call'
+export function assistantToolCallDigest(content: ReadonlyArray<AssembledContentBlock>, replayState?: unknown): string {
+  const blocks = content.map((block) => block.type === 'tool-call'
     ? { type: 'tool-call', id: block.id ?? null, name: block.name ?? null, arguments: block.arguments ?? null }
-    : { type: block.type, text: block.text ?? null })));
+    : { type: block.type, text: block.text ?? null });
+  return sha256Hex(canonicalJson(replayState === undefined ? blocks : { blocks, replayState }));
 }
 
 /**
@@ -524,7 +536,7 @@ function evaluateToolMessage(
   if (toolCalls !== null) {
     if (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
         !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools).some((schema) => schema.name === call.name)) ||
-        !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content)) ?? false)) {
+        !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content, message.source.replayState)) ?? false)) {
       return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用不是本次尝试已接受的输出；未发送任何内容。`);
     }
     // A call id names one call for the whole history: a gateway that reuses ids would let one result answer two calls.
@@ -586,6 +598,9 @@ export function evaluateEgress(
   if (excluded !== null) return refuse('series-retrieval-scope-changed', '书系检索范围已变化；未发送任何内容。');
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');
+  if ((payload.reasoningEffort === 'off' ? null : payload.reasoningEffort ?? null) !==
+      (binding.reasoningEffort === 'off' ? null : binding.reasoningEffort ?? null))
+    return refuse('payload-out-of-scope', '请求思考强度与冻结的执行配置不一致；未发送任何内容。');
   if ((payload.system ?? '') !== binding.systemPrompt)
     return refuse('system-prompt-mismatch', '系统提示与冻结的任务契约不一致；未发送任何内容。');
   const last = payload.messages.at(-1);
@@ -602,6 +617,11 @@ export function evaluateEgress(
   for (const [index, message] of payload.messages.entries()) {
     if (message.role !== 'user' && message.role !== 'assistant')
       return refuse('unknown-message-role', `第 ${index + 1} 条消息角色不在闭合集合内；未发送任何内容。`);
+    if (message.source.replayState !== undefined && (message.role !== 'assistant' || message.source.kind !== 'model' ||
+        message.source.provider !== binding.route || message.source.model !== binding.model ||
+        !scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content, message.source.replayState)))) {
+      return refuse('payload-out-of-scope', '保留的推理续传内容不是本次尝试已接受的输出；未发送任何内容。');
+    }
     const text = messageText(message);
     if (message.role === 'assistant' && text !== null &&
         (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||

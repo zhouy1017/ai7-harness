@@ -214,12 +214,15 @@ async function dispatch(
     case 'probeSearchBackend':
       return { id: request.id, ok: true, op: request.op, result: await probeBackend(request.input) };
     case 'selectFastRoleModel':
-      store.selectFastRoleModel(request.input.route, request.input.modelId);
+      store.selectFastRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectBothRoleModels':
+      store.selectBothRoleModels(request.input.route, request.input.modelId, request.input.reasoningEffort, request.input.fastReasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'selectMainRoleModel':
-    case 'selectBothRoleModels':
-      store[request.op](request.input.route, request.input.modelId);
+      store.selectMainRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'refreshModelServiceModels':
@@ -1987,6 +1990,7 @@ function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null)
     endpoint: allowed.endpoint,
     credentialSlot: allowed.credentialSlot,
     credentialReference: configured.credentialReference,
+    ...(configured.reasoningEffort === undefined ? {} : { reasoningEffort: configured.reasoningEffort }),
     runBudgetCeiling: 'unset',
   };
 }
@@ -2379,7 +2383,7 @@ async function run(): Promise<void> {
         ? dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver())
         // Ordinary production (Issue #811): the route and reference the editor configured, read at each question.
         : production !== null
-          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver())
+          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(), () => productionState.fast?.reasoningEffort)
           : null,
       answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
     });
@@ -2395,8 +2399,9 @@ async function run(): Promise<void> {
           ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(),
             (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('fast-interaction');
               return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model &&
-                current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
-            () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null)
+                  current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
+            () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null,
+            () => productionState.fast?.reasoningEffort)
           : null,
     });
     fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store), connectionTesting: () => requestLoop?.probing === true };
