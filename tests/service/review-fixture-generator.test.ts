@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
-import { graphemeCount } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, graphemeCount } from '../../src/service/analysis/canonical.js';
 import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of `sample1-review-cross-chapter-authored`, inheriting the frozen #417 fixture. The findings below are
@@ -12,7 +12,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //
 // It never runs in the Local Verification Ladder or in CI. After a clause, a label or the 工序 of one of
 // the four built-in categories changes, regenerate the current fixture with
-//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts
+//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
@@ -563,6 +563,15 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
       deduplicated.set(`${entry.unitOrdinal}:${entry.requestDigest}:${entry.attempt ?? ''}`, entry);
     }
     if (changed) await writeFile(path, `${JSON.stringify({ ...body, entries: [...deduplicated.values()] }, null, 2)}\n`, 'utf8');
+  }
+
+  // Seeded historical responses and newly derived responses use one stable field/entry order.
+  for (const name of ['sample1-review-cross-chapter-authored', 'sample1-review-cross-chapter-controls', 'sample1-agent-workspace-cross-chapter']) {
+    const path = resolve(FIXTURE_PATH, '..', `${name}.json`);
+    const body = JSON.parse(await readFile(path, 'utf8'));
+    body.entries.sort((left: ModelFixtureEntry, right: ModelFixtureEntry) => left.unitOrdinal - right.unitOrdinal || left.requestDigest.localeCompare(right.requestDigest, 'en') || (left.attempt ?? 0) - (right.attempt ?? 0));
+    for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
+    await writeFile(path, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
   }
   // eslint-disable-next-line no-console
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);

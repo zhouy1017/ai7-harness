@@ -1,3 +1,4 @@
+import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -338,5 +339,7 @@ it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1' || pr
     entries: [...entries.values()].filter((entry) => !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
       .map((entry) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
+  body.entries.sort((left, right) => left.unitOrdinal - right.unitOrdinal || left.requestDigest.localeCompare(right.requestDigest, 'en'));
+  for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
   await writeFile(join(ROOT, 'tests', 'fixtures', 'model', `${SYNTHETIC_FIXTURE}.json`), `${JSON.stringify(body, null, 2)}\n`, 'utf8');
 }, 600_000);
