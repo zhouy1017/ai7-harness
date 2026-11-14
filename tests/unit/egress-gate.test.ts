@@ -11,7 +11,6 @@ import {
   type EgressBindingFacts,
 } from '../../src/service/provider/egress-gate.js';
 import type { AssembledModelPayload } from '../../src/service/provider/payload.js';
-import { writingMaterialDigest } from '../../src/service/writing-tasks.js';
 
 // The gate must see the complete assembled payload and compare every datum with the binding. These
 // payloads are synthetic: fixed system text, two admitted unit messages, and one accepted output.
@@ -61,6 +60,33 @@ function payload(overrides: Partial<AssembledModelPayload> = {}): AssembledModel
 }
 
 describe('evaluateEgress', () => {
+  it('refuses a route, model or tool registration different from the frozen composition', () => {
+    expect(evaluateEgress(payload({ provider: DEEPSEEK_ROUTE }), binding(), scope())).toMatchObject({ reason: 'route-mismatch' });
+    expect(evaluateEgress(payload({ model: 'other' }), binding(), scope())).toMatchObject({ reason: 'model-mismatch' });
+    expect(evaluateEgress(payload({ tools: [{ name: 'shell' }] }), binding(), scope())).toMatchObject({ reason: 'tools-present' });
+  });
+  it('refuses plain retained output not accepted by this task or attributed to another provider/model', () => {
+    expect(evaluateEgress(payload(), binding(), scope(BINDING_DIGEST, []))).toMatchObject({ reason: 'payload-out-of-scope' });
+    for (const [provider, model] of [[DEEPSEEK_ROUTE, LOCAL_DETERMINISTIC_MODEL], [LOCAL_DETERMINISTIC_ROUTE, 'another-model']])
+      expect(evaluateEgress(payload({ messages: [user(UNIT_1), assistant(OUTPUT_1, provider, model), user(UNIT_2)] }), binding(), scope()))
+        .toMatchObject({ reason: 'payload-out-of-scope' });
+  });
+
+  it('refuses an unset developer-live ceiling before a plain model request', () => {
+    const live: EgressBindingFacts = { ...binding(DEEPSEEK_ROUTE), policy: { operationalScope: 'developer-live',
+      providerProcessingVersion: 'v24', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' } };
+    const request = payload({ provider: live.route, model: live.model, messages: [user(UNIT_1)] });
+    expect(evaluateEgress(request, live, scope())).toMatchObject({ reason: 'run-budget-ceiling-unset' });
+    expect(evaluateEgress(request, live, { ...scope(), ceilingState: () => 'within' }).decision).toBe('transmit-remote');
+  });
+
+  it('refuses a changed frozen system prompt, unknown role, or non-text payload block', () => {
+    expect(evaluateEgress(payload({ system: `${SYSTEM} 附加` }), binding(), scope())).toMatchObject({ reason: 'system-prompt-mismatch' });
+    expect(evaluateEgress(payload({ messages: [{ ...user('x'), role: 'system' }, user(UNIT_1)] }), binding(), scope()))
+      .toMatchObject({ reason: 'unknown-message-role' });
+    expect(evaluateEgress(payload({ messages: [{ ...user('x'), content: [{ type: 'image' }] }] }), binding(), scope()))
+      .toMatchObject({ reason: 'payload-out-of-scope' });
+  });
   it('refuses a Series excerpt excluded during assembly before a synthetic transport can send it, including synthesis', async () => {
     let excluded = false;
     let transmissions = 0;

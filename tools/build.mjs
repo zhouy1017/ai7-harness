@@ -263,7 +263,6 @@ async function main() {
   await mkdir(outputPath('notices'), { recursive: true });
   await mkdir(outputPath('config', 'dsh-profiles', 'manuscript-editorial'), { recursive: true });
   await mkdir(outputPath('config', 'native-artifact-sources', 'editorial-workspace-profile'), { recursive: true });
-  await mkdir(outputPath('docs', 'policies'), { recursive: true });
   await writeFile(outputPath('build-identity.json'), `${JSON.stringify(identity, null, 2)}\n`);
 
   const editorialWorkspaceSourceDirectory = resolve(

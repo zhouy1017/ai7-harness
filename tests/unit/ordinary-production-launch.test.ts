@@ -149,7 +149,6 @@ const OFFICIAL = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[1];
 
 describe('the configured binding the resolver reads (#853 v13, carried by #863 v15, #473 v17, #891 v19, #910 v21 and #920 v23)', () => {
   const CARRIED = [
-    'config/source-checkout-launch-authority.json',
     'docs/policies/active-policy-set.v19.json',
     'docs/policies/active-policy-set.v26.json',
     'docs/policies/active-policy-set.v26.schema.json',

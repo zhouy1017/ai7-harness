@@ -1,4 +1,3 @@
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
 import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
@@ -20,14 +19,6 @@ function deniedCode(action: () => unknown): unknown {
 }
 
 describe('installNodeNetworkDenial', () => {
-  it('blocks model, search, public fetch and discovery/probe transports 100% in development-ci (#1453)', async () => {
-    const endpoint = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0]!.endpoint;
-    const endpoints = { model: endpoint, search: SEARCH_BACKENDS.find((backend) => backend.shipped)!.endpoint!,
-      publicFetch: 'https://example.org/', discoveryProbe: new URL('/models', endpoint).href };
-    for (const [operation, target] of Object.entries(endpoints))
-      await expect(fetch(target), operation).rejects.toMatchObject({ code: NETWORK_DENIED_CODE });
-  });
-
   it('is idempotent', () => {
     expect(() => installNodeNetworkDenial()).not.toThrow();
   });

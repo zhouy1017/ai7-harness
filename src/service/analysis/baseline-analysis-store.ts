@@ -203,6 +203,7 @@ import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
+import { isPublicSampleBookSourceDigest } from '../../shared/public-samplebooks.js';
 import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../shared/public-samplebook-labels.js';
 import type {
   AnalysisAuthorizationOrigin,
@@ -5051,6 +5052,8 @@ export class BaselineAnalysisStore {
       ...(checkpoint !== undefined ? [checkpoint.manuscriptId, checkpoint.branchId] : this.#definition.manuscriptTarget === undefined ? [] : [this.#definition.manuscriptTarget.manuscriptId, this.#definition.manuscriptTarget.branchId])) as SqlRow | undefined;
     requireAnalysis(row !== undefined && typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest),
     'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
+    requireAnalysis(this.#launch.operationalScope !== 'developer-live' || isPublicSampleBookSourceDigest(row.source_digest),
+      'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
     // Ordinary production with no connection yet: 模型服务需设置, naming both routes (Issue #811).
     requireAnalysis(!production || (typeof row.credential_operation_state === 'string' && typeof row.credential_reference === 'string'),
       'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);

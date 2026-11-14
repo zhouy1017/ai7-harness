@@ -1,9 +1,10 @@
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
+import { build } from 'esbuild';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
@@ -1828,6 +1829,42 @@ async function main() {
     at('restart-immutable');
     await closeOwnedBrowser();
     cancellation.throwIfRequested();
+    // Reconstruct the accepted reader-93 encoding on an isolated copy, using the migration suite's
+    // predecessor writer. This is historical fixture construction, not damage to a product record.
+    const currentDataRoot = dataRoot;
+    const historicalDataRoot = resolve(runRoot, 'historical-policy-reader');
+    await cp(currentDataRoot, historicalDataRoot, { recursive: true });
+    const historicalHelper = resolve(runRoot, 'historical-policy-fixture.mjs');
+    await build({ entryPoints: [resolve(ROOT, 'tests/support/analysis-ledger-revisions.ts')], bundle: true,
+      platform: 'node', format: 'esm', outfile: historicalHelper, logLevel: 'silent' });
+    const { constructPre94PolicyEncoding } = await import(pathToFileURL(historicalHelper).href);
+    const historicalDatabase = new DatabaseSync(resolve(historicalDataRoot, 'store', 'ai7.sqlite'));
+    try { constructPre94PolicyEncoding(historicalDatabase); } finally { historicalDatabase.close(); }
+    dataRoot = historicalDataRoot;
+    try {
+      await launchForCleanup();
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'historical-policy-ready');
+      try {
+        for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+          at(`historical-policy-result-${viewport}`);
+          await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+          if (viewport === 'gate') {
+            await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'historical-policy-return-library');
+            await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'historical-policy-library');
+          }
+          await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false;button.click();return true; })()`, `historical-policy-open-${viewport}`);
+          await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, `historical-policy-manuscript-${viewport}`);
+          await openAnalysisDestination(renderer, `historical-policy-analysis-${viewport}`);
+          await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, `historical-policy-visible-${viewport}`);
+          const historical = await readBaseline(renderer);
+          requireJourney(historical.resultSetRevision.revisionId === revision.revisionId &&
+            sameRecord(historical.resultSetRevision.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v19', liveTransmissions: 0 }) &&
+            sameRecord(historical.resultSetRevision.units, revision.units) && loopback.observedRequests() === 0, `historical-policy-read-${viewport}`);
+        }
+      } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+      await closeOwnedBrowser();
+    } finally { dataRoot = currentDataRoot; }
+    at('restart-immutable');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-open-book');

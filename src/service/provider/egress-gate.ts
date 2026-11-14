@@ -586,6 +586,8 @@ export function evaluateEgress(
   if (excluded !== null) return refuse('series-retrieval-scope-changed', '书系检索范围已变化；未发送任何内容。');
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');
+  if ((payload.system ?? '') !== binding.systemPrompt)
+    return refuse('system-prompt-mismatch', '系统提示与冻结的任务契约不一致；未发送任何内容。');
   const last = payload.messages.at(-1);
   if (last?.source.kind === 'tool' && scope.breakerState?.() === 'tripped')
     return refuse('circuit-breaker-tripped', '联网核查未完成：工具往返已达到熔断上限；未发送任何内容。');
@@ -598,6 +600,8 @@ export function evaluateEgress(
     return refuse('tools-present', '工具声明与本次运行注册的工具不一致；未发送任何内容。');
   const calls = { open: new Map<string, PlatformToolName>(), seen: new Set<string>() };
   for (const [index, message] of payload.messages.entries()) {
+    if (message.role !== 'user' && message.role !== 'assistant')
+      return refuse('unknown-message-role', `第 ${index + 1} 条消息角色不在闭合集合内；未发送任何内容。`);
     const text = messageText(message);
     if (message.role === 'assistant' && text !== null &&
         (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
@@ -606,6 +610,8 @@ export function evaluateEgress(
     if (message.source.kind === 'tool' || message.content.some((block) => block.type === 'tool-call' || block.type === 'tool-result')) {
       const refused = evaluateToolMessage(message, index, binding, rule, scope, calls);
       if (refused !== null) return refused;
+    } else if (text === null) {
+      return refuse('payload-out-of-scope', `第 ${index + 1} 条消息含非文本内容块；未发送任何内容。`);
     }
   }
   if (last?.role !== 'user') return refuse('payload-out-of-scope', '请求末尾缺少用户消息或工具结果；未发送任何内容。');

@@ -6,7 +6,7 @@ import { PlatformToolSession, type GlobalAgentScopedToolOwner } from '../provide
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
-import { type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
+import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import type { OrdinaryProductionRouteId } from '../../shared/protocol.js';
 import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
@@ -187,6 +187,10 @@ export function dialogueRouteRefusal(deps: Pick<DialogueExecutionDeps, 'fixture'
   if (deps.live !== null) {
     const production = isOrdinaryProductionRuntime(deps.live.runtime);
     if (deps.live.route === null) return production ? MODEL_SERVICE_SETUP_REQUIRED_REASON : '当前选定的模型处理规则没有准许对话使用实时模型；这次没有发送任何内容。';
+    // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
+    if (!production && sourceDigest !== undefined && (sourceDigest === null || !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(sourceDigest))) {
+      return '这本书不在开发者实时可发送的公开样书范围内；这次没有发送任何内容。';
+    }
     return null;
   }
   if (deps.fixture === null) return '这次启动没有可用的对话模型；没有发送任何内容。';
