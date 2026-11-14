@@ -3950,8 +3950,8 @@ async function main() {
         await closeOwnedBrowser();
         await launchForCleanup();
         await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-restart-ready');
-        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-choice-library');
-        await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'dispatch-choice-library-ready');
+        // Startup already owns this library paint. Navigating to the same destination starts another asynchronous
+        // paint, which can remove the just-clicked import screen while its file has been staged.
         // The stock unit-child fixture admits first reviews. Each viewport starts a fresh Book, rather than asking that
         // composition to update the Book the preceding stock review already completed.
         const choiceBook = await importSample1(renderer, cancellation, true);
