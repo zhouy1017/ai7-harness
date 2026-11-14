@@ -4030,7 +4030,9 @@ export class EditorialStore {
       const { clientCommandId, executionConfig = {}, ...request } = input;
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
         () => input.categoryIds.every(category => category === 'local-text-check') ? { executionConfig: {}, binding: null } : this.#launchChoice('main-editorial', executionConfig), (choice, snapshotId) => {
-          const planned = this.#reviewRunRequest(input.bookId, input.categoryIds, input.scope, launchPolicy,
+          const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
+            ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
+          const planned = this.#reviewRunRequest(input.bookId, input.categoryIds, input.scope, policy,
             input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
           const run = this.#reviewRuns.launch(planned, snapshotId, choice.binding);
           return { runId: run.reviewRunId, manuscript: run.manuscript };

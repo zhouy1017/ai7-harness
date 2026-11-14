@@ -3102,7 +3102,7 @@ export class BaselineAnalysisStore {
     binding: import('../launch-policy.js').ConfiguredProviderBinding | null): AnalysisProjection {
     const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
     const route = allowedProductionBindingOf(binding);
-    ledger.bindLaunch({ ...this.#launch, live: this.#launch.operationalScope === 'ordinary-production' && binding !== null && route !== null
+    ledger.bindLaunch({ ...this.#launch, policy: input.launchPolicy, live: this.#launch.operationalScope === 'ordinary-production' && binding !== null && route !== null
       ? { ...binding, route: route.route, credentialSlot: route.credentialSlot, scope: 'ordinary-production', runBudgetCeiling: 'unset' } : this.#launch.live });
     return ledger.#launchTask(input, snapshotId);
   }
