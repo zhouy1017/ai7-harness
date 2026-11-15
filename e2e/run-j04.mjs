@@ -1753,7 +1753,7 @@ async function main() {
     // accounting digest beside it is over the stable part alone — and the proof that the clocks are
     // out of it is that the reflection closed at all: the fixture entry was keyed by a digest minted
     // from a different Run, on a different host, whose wall times were not these.
-    const { reportDigest, ...reportBody } = report;
+    const { reportDigest, modelLabel: _modelLabel, ...reportBody } = report;
     const reportJson = canonicalJson(reportBody);
     requireJourney(DIGEST_PATTERN.test(reportDigest) && reportDigest === sha256Hex(reportJson) &&
       DIGEST_PATTERN.test(report.accountingDigest) && report.accountingDigest !== reportDigest &&
