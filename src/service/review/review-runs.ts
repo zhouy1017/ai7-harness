@@ -5,7 +5,8 @@ import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from 
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
 import { compositeReviewRun, type CompositeReviewRun } from '../procedures/composite-run.js';
-import { compositeMembers } from '../procedures/composite.js';
+import { procedureContent } from '../procedures/execution.js';
+import { compositeMembers, readProcedurePlanView } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV3, freezeLocalPlanV4, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
@@ -1044,6 +1045,7 @@ export interface ReviewRunPlanFacts {
       readonly planVersion: number;
       readonly plan: ReviewRunCategoryPlanProjection;
       readonly components: Readonly<Record<string, unknown>>;
+      readonly procedureContent?: ReturnType<typeof procedureContent>;
       readonly researchReport?: import('../../shared/protocol.js').RunReportProjection | null;
     };
   }>;
@@ -2113,6 +2115,7 @@ export class ReviewRunStore {
           planVersion: frozen.planVersion,
           plan: category.task.plan,
           components: frozen.components,
+          procedureContent: procedureContent(readProcedurePlanView(this.#db, category.task.planEnvelopeDigest, category.task.kind)?.document),
           researchReport,
         },
         checkpoint: frozen?.checkpoint ?? null,

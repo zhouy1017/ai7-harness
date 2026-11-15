@@ -51,3 +51,9 @@ export function procedureStageBudget(document: ProcedureDefinitionDocument, stag
 export function procedureBasePromptDigest(envelope: Record<string, unknown>): string {
   return String(envelope.basePromptContractDigest ?? editorialMemoryBasePromptDigest(envelope));
 }
+
+/** Content actually appended by procedureInstruction, including composite member views. */
+export function procedureContent(document: ProcedureDefinitionDocument | null | undefined): { editorInstruction: boolean; exemptionRules: boolean } {
+  return { editorInstruction: document !== null && document !== undefined && document.editorInstruction !== '',
+    exemptionRules: document?.stages.some(stage => stage.exemptionRules.length > 0) ?? false };
+}

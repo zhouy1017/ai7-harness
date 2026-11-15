@@ -684,8 +684,8 @@ export interface BaselineAnalysisProjection {
     summary: string;
     /** Append-only sibling pin; the canonical envelope and its legacy digest stay unchanged. */
     procedure?: ProcedureDefinitionPin | null;
-    /** Existing frozen inner contract when the selected procedure adds editor instructions. */
-    basePromptContractDigest?: string;
+    /** Derived from the frozen procedure document; absent on predecessor projections. */
+    procedureContent?: { readonly editorInstruction: boolean; readonly exemptionRules: boolean };
     promptContractDigest: string;
     behaviorCompositionDigest: string;
     /** The plan version this envelope freezes; `null` for an envelope recorded before plan versions existed. */

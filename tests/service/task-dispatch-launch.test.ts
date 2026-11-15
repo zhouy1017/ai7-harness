@@ -74,14 +74,14 @@ async function book(kind: Kind, instruction = false) {
 }
 
 const INSTRUCTION = '保留叙述中的短句。';
-function selectInstruction(kind: Kind, bookId: string): void {
+function selectInstruction(kind: Kind, bookId: string, instruction = INSTRUCTION, exemptions = false): void {
   // Custom dimensions have no registered procedure selection surface.
   if (kind === 'custom-analysis') return;
   const executor = kind === 'initial-evaluation' ? 'evaluation' : kind === 'baseline-analysis' ? 'baseline-manuscript-analysis' : kind;
   const original = store.procedureLibrary({ action: 'inspect' }).procedures.find(entry => entry.executorKind === executor)!;
   const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId,
     basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
-    title: original.document.title, editorInstruction: INSTRUCTION, stages: original.document.stages } }).procedures.find(entry => entry.procedureId === original.procedureId)!;
+    title: original.document.title, editorInstruction: instruction, stages: original.document.stages.map((stage, index) => exemptions && index === 0 ? { ...stage, exemptionRules: ['方言对白不算语病。'] } : stage) } }).procedures.find(entry => entry.procedureId === original.procedureId)!;
   store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
 }
 
@@ -173,8 +173,8 @@ async function lifecycleAnswers(kind: Kind) {
   };
 }
 
-async function launchedLifecycle(kind: Kind) {
-  const target = await book(kind, true), answer = await lifecycleAnswers(kind);
+async function launchedLifecycle(kind: Kind, instruction: boolean) {
+  const target = await book(kind, instruction), answer = await lifecycleAnswers(kind);
   let held!: () => void, release!: () => void, holding = true;
   const reached = new Promise<void>(resolve => { held = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
   let launched!: LaunchedTask;
@@ -357,7 +357,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       expect(preview.steps).toEqual(plan.steps.map(step=>`${step.label}${step.removed?'（本次不做）':''}`));
       expect(preview.scope).toBe(plan.scope.process); expect(preview.reference).toEqual(plan.scope.reference);
       expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`);
-      if (kind !== 'custom-analysis') expect(preview.send).toContain('所选工序中的编辑指令'); expect(preview.usage).toBe(plan.service.usage);
+      if (kind !== 'custom-analysis') expect(preview.send).toContain('所选工序中的编辑任务说明'); expect(preview.usage).toBe(plan.service.usage);
       expect(preview.adaptations).toEqual(plan.boundary.adaptable.map(entry=>`${entry.label}：${entry.removed?'不允许':entry.askFirst?'先问我':'允许'}`));
       if(materialId!==undefined)expect(preview.reference.join('')).toContain('样书背景资料');
       if(kind==='readers-report')expect(preview.send).toContain('定稿的评估记录');
@@ -437,7 +437,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       expect(store.executionLedgerForRun(queued.runRecordId).currentRunState(queued.runRecordId)).toMatch(/^completed/u);
       expectProducedAttribution(kind, queuedBook, queued, 'account-future-model@high');
       expect(capture!.wireRequests.length).toBeGreaterThan(0);
-      if (kind !== 'custom-analysis') expect(capture!.wireRequests.some(request => request.messages.some(message => message.role === 'system' && message.content.includes(INSTRUCTION)))).toBe(true);
+      expect(capture!.wireRequests.some(request => request.messages.some(message => message.role === 'system' && message.content.includes(INSTRUCTION)))).toBe(kind !== 'custom-analysis');
       expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
     } finally { release(); }
   });
@@ -477,12 +477,12 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(store.executionLedgerForRun(first.runRecordId).currentRunState(first.runRecordId)).toBe('cancelled');
     expect(capture!.requests).toHaveLength(0);
   });
-  it.each(['cancel', 'pause', 'restart'] as const)('releases an ordinary-production launched task after %s', async action => {
-    const test = await launchedLifecycle(kind);
+  it.each([false, true].flatMap(instruction => (['cancel', 'pause', 'restart'] as const).map(action => ({ instruction, action }))))('releases an ordinary-production launched task after $action (instruction=$instruction)', async ({ action, instruction }) => {
+    const test = await launchedLifecycle(kind, instruction);
     try {
       await test.reached;
       expect(capture!.wireRequests.length).toBeGreaterThan(0);
-      if (kind !== 'custom-analysis') expect(capture!.wireRequests.some(request => request.messages.some(message => message.role === 'system' && message.content.includes(INSTRUCTION)))).toBe(true);
+      expect(capture!.wireRequests.some(request => request.messages.some(message => message.role === 'system' && message.content.includes(INSTRUCTION)))).toBe(instruction && kind !== 'custom-analysis');
       expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
       if (action === 'restart') {
         const stopping = capture!.owner.dispose(); test.release(); await stopping;
@@ -688,4 +688,21 @@ it('records a development-ci launch without a route and lets the existing admiss
   expect(result.run?.state).toBe('blocked-before-dispatch');
   expect(result.authorization).not.toBeNull();
   expect(result.planRevisions).toHaveLength(0);
+});
+
+it.each([
+  { instruction: INSTRUCTION, exemptions: false, words: '编辑任务说明' },
+  { instruction: '', exemptions: true, words: '豁免规则' },
+  { instruction: INSTRUCTION, exemptions: true, words: '编辑任务说明和豁免规则' },
+])('names $words from frozen procedure content in equal preview and launch plans', async ({ instruction, exemptions, words }) => {
+  const target = await book('initial-evaluation'); ordinary();
+  selectInstruction('initial-evaluation', target.bookId, instruction, exemptions);
+  const launch = launchRequest('initial-evaluation', target, { reasoningEffort: 'high' });
+  const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy);
+  const committed = commitLaunch(target, launch);
+  const plan = store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: committed.taskIntentId });
+  expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`);
+  expect(plan.scope.send).toContain(`所选工序中的${words}`);
+  if (instruction === '') expect(plan.scope.send).not.toContain('编辑任务说明');
+  if (!exemptions) expect(plan.scope.send).not.toContain('豁免规则');
 });

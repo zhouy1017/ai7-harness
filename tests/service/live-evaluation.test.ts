@@ -1,3 +1,6 @@
+import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
+import { withProcedureDefinition } from '../../src/service/procedures/execution.js';
+import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { READERS_REPORT_NEEDS_FINALIZED } from '../../src/service/readers-reports.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -589,4 +592,28 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(revision.gaps.every((gap) => gap.code === (gap.unitOrdinal === 2 ? 'outcome-unknown' : 'not-attempted'))).toBe(true);
     expect(runReportUsageReconciles(result.taskOutcome!.report!, revision.usage)).toBe(true);
   }, 300_000);
+});
+
+describe('developer-live procedure instruction admission', () => {
+  it.each(['evaluation', 'baseline-manuscript-analysis'] as const)('refuses %s instructions at preparation and live admission without sending', async kind => {
+    const original = store.procedureLibrary({ action: 'inspect' }).procedures.find(entry => entry.executorKind === kind)!;
+    const pin = { procedureId: original.procedureId, version: original.version, digest: original.digest };
+    const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId, basedOn: pin,
+      title: original.document.title, editorInstruction: '保留叙述中的短句。', stages: original.document.stages } }).procedures.find(entry => entry.procedureId === original.procedureId)!;
+    const selectedPin = { procedureId: changed.procedureId, version: changed.version, digest: changed.digest };
+    store.procedureLibrary({ action: 'select', bookId, procedure: selectedPin });
+    const base = kind === 'evaluation' ? store.initialEvaluationLedger.definition : store.baselineAnalysisLedger.definition;
+    expect(liveKindAdmission(selected, base, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();
+    const definition = withProcedureDefinition(base, changed.document, selectedPin);
+    expect(liveKindAdmission(selected, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
+    const prepare = () => kind === 'evaluation' ? store.createInitialEvaluationPreparationWork(bookId, selected)
+      : store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, selected);
+    expect(prepare).toThrowError(expect.objectContaining({ code: 'PROCEDURE_INSTRUCTION_NOT_ADMITTED' }));
+    expect(sent).toBe(0);
+    store.procedureLibrary({ action: 'select', bookId, procedure: pin });
+    // Same executor and stages, without editorTaskInstruction content: preparation remains admitted.
+    expect(prepare).not.toThrow();
+    expect(withProcedureDefinition(base, original.document, pin)).toBe(base);
+    expect(sent).toBe(0);
+  });
 });
