@@ -1,3 +1,4 @@
+import { editorialMemoryBasePromptDigest } from '../learning/editorial-memory.js';
 import { procedureStageUsesModel } from '../../shared/protocol/procedures.js';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import type { AnalysisKindDefinition } from '../analysis/kind-definition.js';
@@ -44,4 +45,9 @@ export function procedureStageBudget(document: ProcedureDefinitionDocument, stag
       : stage === 'web-verification' ? ['web-verification'] : [];
   const share = document.stages.filter((entry) => types.includes(entry.stageType) && procedureStageUsesModel(entry, document.stages)).reduce((sum, entry) => sum + entry.budgetShare, 0);
   return share > 0 ? Math.floor(total * share) : null;
+}
+
+/** Profile stores key the inner contract; procedure and memory remain validated by the plan reader. */
+export function procedureBasePromptDigest(envelope: Record<string, unknown>): string {
+  return String(envelope.basePromptContractDigest ?? editorialMemoryBasePromptDigest(envelope));
 }

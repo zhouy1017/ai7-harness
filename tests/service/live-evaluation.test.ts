@@ -277,7 +277,7 @@ describe('evaluation on the Go execution path (#429)', () => {
     capture.assertMatched();
   });
 
-  it('explains that 初评 with a procedure editor instruction is not yet supported, before sending (#1476)', () => {
+  it('prepares, authorizes and completes ordinary 初评 with a procedure instruction (#1476)', async () => {
     const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
     store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
     store.selectSearchBackend('search-tinyfish');
@@ -287,10 +287,18 @@ describe('evaluation on the Go execution path (#429)', () => {
       title: original.document.title, editorInstruction: '保留叙述中的短句。', stages: original.document.stages } })
       .procedures.find((entry) => entry.procedureId === original.procedureId)!;
     store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
-    const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, () => undefined);
+    const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor,
+      (_request, message) => ({ kind: 'unit-result', ...answerOf(message) }));
     owners.push(capture.owner);
-    expect(() => store.createInitialEvaluationPreparationWork(bookId, capture.policy)).toThrow('这项任务暂不支持带编辑指令的工序。');
-    expect(capture.wireRequests).toHaveLength(0);
+    activeFamily = 'evaluation-initial';
+    let progress = store.createInitialEvaluationPreparationWork(bookId, capture.policy);
+    while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+    const prepared = progress.projection!;
+    const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    capture.owner.admitAndDispatch(authorized.dispatchRunRecordId!, authorized.ledger);
+    await capture.owner.whenIdle();
+    expect(store.inspectInitialEvaluation(bookId).run!.state).toBe('completed');
+    expect(capture.wireRequests.some(body => body.messages.some(message => message.role === 'system' && message.content.includes('保留叙述中的短句。')))).toBe(true);
     capture.assertMatched();
   });
 

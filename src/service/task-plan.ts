@@ -1002,7 +1002,7 @@ export function baselineAnalysisPlan(input: {
       reference: update === null || update.predecessor === null
         ? []
         : [`上一份基线分析（第 ${update.predecessor.ordinal} 份，读的是 ${update.predecessor.manuscriptPin.revisionLabel}）`],
-      send: live ? `所读阅读范围的稿件正文（${spans ?? `${recomputed} 个`}）` : '不发送任何内容',
+      send: live ? `所读阅读范围的稿件正文（${spans ?? `${recomputed} 个`}）${procedureInstructionSent(projection.planEnvelope)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     // PLAN-011 (Issue #419): of the analysis's steps only 核对与抽检 can be left out with the result still formed.
@@ -1266,7 +1266,7 @@ export function initialEvaluationPlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${profile.title}（第 ${profile.version} 版）：${items}`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1424,7 +1424,7 @@ export function readersReportPlan(input: {
         `评估记录${basis}（${task.profile.title} 第 ${task.profile.version} 版）：各项得分与评语、主要优点与问题、风险与结论`,
         task.exemplars,
       ],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1709,7 +1709,7 @@ export function writingPlan(input: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: writingReferenceLines(task, exemplarsHere, materials, projection.authorization !== null),
       send: live
-        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope)}`
         : '不发送任何内容',
       notRead: NOT_READ,
     },
@@ -1879,7 +1879,7 @@ export function evaluationRewritePlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${basis}：你的评分（${scored}）、调分原因、现在的评语、优点、问题、总评、风险与结论，以及 AI7 原报告`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -2519,7 +2519,8 @@ export function reviewRunPlan(input: {
   const preferences = facts.housePreferences ?? [];
   const preferenceLines = facts.housePreferences === undefined ? [] : preferences.length === 0 ? [HOUSE_PREFERENCE_CLOSED]
     : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
-  const preferenceSent = preferences.length === 0 ? '' : `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
+  const instructionSent = tasksWithInstruction(facts);
+  const preferenceSent = preferences.length === 0 ? instructionSent : instructionSent + `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
   const tasks = categories.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
@@ -2705,4 +2706,16 @@ export function reviewRunPlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+}
+
+/** The envelope records a base digest only when a procedure adds editor words. */
+function procedureInstructionSent(envelope: unknown): string {
+  return envelope !== null && typeof envelope === 'object' && 'basePromptContractDigest' in envelope
+    ? '，以及所选工序中的编辑指令' : '';
+}
+
+function tasksWithInstruction(facts: ReviewRunPlanFacts): string {
+  return facts.categories.some(category => category.task !== null &&
+    procedureInstructionSent(category.task.components['plan-envelope']) !== '')
+    ? '，以及所选工序中的编辑指令' : '';
 }

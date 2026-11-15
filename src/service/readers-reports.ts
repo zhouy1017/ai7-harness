@@ -1,7 +1,7 @@
 import { readersReportPlan, evaluationMaterialPlan } from './task-plan.js';
 import { launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
-import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
+import { procedureBasePromptDigest } from './procedures/execution.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import {
@@ -418,7 +418,7 @@ export class ReadersReports {
     requireReport(sha256Hex(json) === text(row.sha256), 'READERS_REPORT_RECORD_INVALID', CORRUPT);
     const envelope = JSON.parse(json) as unknown;
     requireReport(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'READERS_REPORT_RECORD_INVALID', CORRUPT);
-    return editorialMemoryBasePromptDigest(envelope);
+    return procedureBasePromptDigest(envelope);
   }
 
   /** The Book's latest 审稿意见 Task by its intent, as the analysis ledger orders them; `null` before the first. */

@@ -3648,7 +3648,7 @@ export class BaselineAnalysisStore {
       : firstEnvelope === undefined ? null : (parseCanonicalJson(asString(firstEnvelope.canonical_json)) as { editorialMemory?: EditorialMemorySnapshot }).editorialMemory ?? null;
     const definition = withEditorialMemoryDefinition(unwrappedDefinition, memory);
     if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
-    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null) {
+    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
         'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '这项任务暂不支持带编辑指令的工序。');
     }
