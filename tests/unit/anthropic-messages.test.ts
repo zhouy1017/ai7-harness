@@ -244,10 +244,10 @@ describe('Messages buffered client functions · synthetic profiles only', () => 
     for (const stop_reason of ['max_tokens', 'end_turn', null]) expect(normalizeModelResponse(functionModel(), { ...toolResponse([{ type: 'text', text: 'partial' }, toolUse()]), stop_reason }, offered)).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
   });
 
-  it('retains readable text without replaying opaque reasoning', () => {
+  it('keeps readable text and calls while native replay owns the opaque thinking bytes', () => {
     for (const opaque of [{ type: 'thinking', thinking: 'opaque' }, { type: 'redacted_thinking', data: 'opaque' }]) {
       const result = normalizeModelResponse(functionModel(), toolResponse([{ type: 'text', text: 'prefix' }, opaque, toolUse()]), offered);
-      expect(result).toMatchObject({ kind: 'answer', text: 'prefix', truncated: true });
+      expect(result).toMatchObject({ kind: 'tool-calls', text: 'prefix', calls: [{ id: 'call_1' }] });
       expect(JSON.stringify(result)).not.toContain('opaque');
     }
   });
@@ -437,13 +437,11 @@ describe('assembleProviderRequest · anthropic-messages', () => {
       .toThrowError(/PROVIDER_MAX_OUTPUT_TOKENS_ABSENT/u);
   });
 
-  it('refuses the capability spellings that belong to the other shape', () => {
+  it('still refuses unimplemented structured-output spellings and unknown shapes', () => {
     // `json-object` and `deepseek-thinking` are chat-completions fields; declaring either on this
     // shape would send the endpoint something no documentation names.
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ structuredOutput: 'json-object' }), payload(), context))
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
-    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ reasoningControl: 'deepseek-thinking' }), payload(), context))
-      .toThrowError(/PROVIDER_REASONING_CONTROL_UNSUPPORTED/u);
     // Every named shape is implemented as of S54c, and a shape none of them names still refuses.
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ requestShape: 'a-shape-nobody-declared' as ProviderModelProfile['capabilities']['requestShape'] }), payload(), context))
       .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);

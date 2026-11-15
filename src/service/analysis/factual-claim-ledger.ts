@@ -2,7 +2,7 @@ import { FACTUAL_FINDING_CLASSES, type CoverageManifestProjection } from '../../
 import { canonicalJson, canonicalRecord, requireAnalysis, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
-  factualReviewMessageBlockIds, locateQuotation, quotationForLocation, type FactualReviewUnitResult, type FactualUnitAssertion,
+  factualReviewMessageBlockIds, locateExactQuotation, locateQuotation, quotationForLocation, type FactualReviewUnitResult, type FactualUnitAssertion,
 } from './factual-review-contract.js';
 
 export const FACTUAL_CLAIM_LEDGER_SCHEMA = 'ai7.factual-claim-ledger/1' as const;
@@ -86,7 +86,7 @@ export function freezeFactualClaimLedger(input: {
       }
       const occurrence: FactualClaimOccurrence = { bookId: input.manifest.manuscript.bookId, revision: input.manifest.manuscript.revisionId,
         block, exactRange: { fromGrapheme: location.fromGrapheme, toGrapheme: location.toGrapheme },
-        quote: quotationForLocation(text!, assertion.quote, location), assertionClass: assertion.assertionClass, question: assertion.question };
+        quote: locateExactQuotation(text!, assertion.quote).state === 'verified' ? assertion.quote : quotationForLocation(text!, assertion.quote, location), assertionClass: assertion.assertionClass, question: assertion.question };
       const claimId = sha256Hex(canonicalJson(occurrence));
       const prior = claims.get(claimId);
       claims.set(claimId, { claimId, occurrence, producers: [...(prior?.producers ?? []), producer] });

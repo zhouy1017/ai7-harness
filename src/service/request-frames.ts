@@ -1,4 +1,7 @@
+import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';
+import { validReasoningEffort, validRuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { canonicalPlanEdits } from './analysis/plan-edits.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
@@ -451,6 +454,37 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
   if (typeof op !== 'string') throw new ProtocolError(tentativeId);
 
   switch (op) {
+    case 'previewTaskLaunch': {
+      const input = value.input;
+      if (!isRecord(input) || Object.keys(input).some(key => key !== 'bookId' && key !== 'launch') || !validUuid(input.bookId) ||
+          !isRecord(input.launch) || Object.keys(input.launch).some(key => key !== 'operation' && key !== 'input') ||
+          !['launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite'].includes(String(input.launch.operation)) ||
+          !isRecord(input.launch.input) || Object.hasOwn(input.launch.input, 'bookId')) throw new ProtocolError(tentativeId);
+      decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: input.launch.operation, input: { ...input.launch.input, bookId: input.bookId } })));
+      break;
+    }
+    case 'launchBaselineAnalysis':
+    case 'launchCustomAnalysis':
+    case 'launchWritingTask':
+    case 'launchInitialEvaluation':
+    case 'launchReadersReport':
+    case 'launchEvaluationRewrite': {
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const { clientCommandId, executionConfig, rememberedChoice, planEdits, startWhen, ...task } = value.input;
+      if (startWhen !== undefined && startWhen !== 'now' && startWhen !== 'idle' && startWhen !== 'when-online') throw new ProtocolError(tentativeId);
+      if (planEdits !== undefined && (!isRecord(planEdits) ||
+          !Object.keys(planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling', 'evidenceAssuranceLevel'].includes(key)) || canonicalPlanEdits({
+            removedSteps: planEdits.removedSteps, disallowedAdaptations: planEdits.disallowedAdaptations, askFirstAdaptations: planEdits.askFirstAdaptations,
+            runBudgetCeiling: planEdits.runBudgetCeiling, evidenceAssuranceLevel: planEdits.evidenceAssuranceLevel,
+          }) === null)) throw new ProtocolError(tentativeId);
+      if (op === 'launchBaselineAnalysis' && Object.hasOwn(task, 'reconfirm')) throw new ProtocolError(tentativeId);
+      if (!validUuid(clientCommandId) || (executionConfig !== undefined && !validRuntimeExecutionConfig(executionConfig)) ||
+          (rememberedChoice !== undefined && typeof rememberedChoice !== 'boolean')) throw new ProtocolError(tentativeId);
+      // The task's existing input validator owns its editorial contract; launch metadata is validated above.
+      decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: op.replace(/^launch/u, 'prepare'),
+        input: op === 'launchBaselineAnalysis' ? { ...task, reconfirm: false } : task })));
+      break;
+    }
     case 'ready':
     case 'getStartup':
     case 'getImportStartup':
@@ -578,8 +612,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectMainRoleModel':
     case 'selectBothRoleModels':
     case 'testModelServiceConnection': {
-      const input = requireInput(value.input, ['route', 'modelId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['route', 'modelId'], value.op === 'selectBothRoleModels' ? ['reasoningEffort', 'fastReasoningEffort'] : ['reasoningEffort'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
+      if (input.reasoningEffort !== undefined && !validReasoningEffort(input.reasoningEffort)) throw new ProtocolError(tentativeId);
+      if (input.fastReasoningEffort !== undefined && !validReasoningEffort(input.fastReasoningEffort)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'refreshModelServiceModels':
@@ -1776,7 +1812,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectReviewWorkspace': {
       // The Run to open, and — each optional, `null` or absent for none — the page cursor and the four
       // filters of the results; a filter is a view and never names more than a Run already holds.
-      const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId'], REVIEW_FINDING_PAGE_KEYS, tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId'], [...REVIEW_FINDING_PAGE_KEYS, 'executionConfig'], tentativeId);
+      if (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !(input.reviewRunId === null || validUuid(input.reviewRunId)) ||
           !optionalOrNull(input, 'findingsAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
           !optionalOrNull(input, 'excludedAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
@@ -1796,10 +1833,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       } catch { throw new ProtocolError(tentativeId); }
       break;
     }
+    case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'rememberedChoice', 'evidenceAssuranceLevel', 'startWhen'] : [])], tentativeId);
+      if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
+      if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);
+      if (value.op === 'launchReviewRun' && ((input.startWhen !== undefined && input.startWhen !== 'now' && input.startWhen !== 'when-online') ||
+          (input.evidenceAssuranceLevel !== undefined && (!EVIDENCE_ASSURANCE_LEVELS.some(level => level === input.evidenceAssuranceLevel) ||
+            !Array.isArray(input.categoryIds) || !input.categoryIds.includes('factual-review'))))) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
       const composite = input.procedureDefinition != null;
       if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);
@@ -2910,7 +2953,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'startScopedAiEdit': {
-      const input = requireInput(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'expectedJournalSequence', 'expectedLocksDigest', 'instruction', 'scope'], ['clientCommandId', 'executionConfig', 'rememberedChoice'], tentativeId);
+      if (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean') throw new ProtocolError(tentativeId);
+      if (input.clientCommandId !== undefined && !validUuid(input.clientCommandId)) throw new ProtocolError(tentativeId);
+      if (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)) throw new ProtocolError(tentativeId);
       const scope = input.scope;
       const validScope = isRecord(scope) && (
         (hasExactKeys(scope, ['mode', 'span']) && scope.mode === 'selected-only' && Array.isArray(scope.span) && scope.span.length >= 1 &&

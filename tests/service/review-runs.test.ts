@@ -33,7 +33,7 @@ import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factua
 import { resolveFixtureEntry, loadModelFixture, reviewFixtureContractVersion, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
-import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
+import { driveLaunchedReviewRun, ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import {
   NEVER_REVIEWED_REASON,
   MAX_SELECTION_BLOCKS,
@@ -122,7 +122,7 @@ interface Book {
   readonly branchId: string;
 }
 
-async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
+async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, reviewVersion?: 1 | 2): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -130,7 +130,7 @@ async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExe
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewVersion ?? reviewFixtureContractVersion(fixture) },
   });
   const executionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner === undefined ? executionOwner : owner(executionOwner));
@@ -327,8 +327,8 @@ class GatedOwner implements ReviewRunExecutionOwner {
     this.#gate = new Promise((resolve) => { this.#release = resolve; });
   }
 
-  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
-    this.#inner.admitAndDispatch(runRecordId, ledger);
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore, options?: { resume?: boolean }): void {
+    this.#inner.admitAndDispatch(runRecordId, ledger, options);
   }
 
   whenPlaceFree(): Promise<void> {
@@ -860,7 +860,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       }
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(run.excludedTotal).toBe(0);
-      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'))).toBe(true);
+      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note === `【未联网核查】【引文未逐字匹配】${'合成说明'.repeat(50)}`)).toBe(true);
     });
   }, 300_000);
 
@@ -950,7 +950,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(settled.findings).toHaveLength(1);
       const finding = settled.findings[0]!;
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
-      expect(finding).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
+      expect(finding).toMatchObject({ quote: 'Ａ　Ｂ', blockId: blocks[1]!.blockId, fromGrapheme: 3, toGrapheme: 6, anchorState: 'exact', status: 'pending' });
       const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
       expect(card.pinnedText === 'Ａ　Ｂ').toBe(true);
       const markedWindow = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: finding.blockId });
@@ -1346,7 +1346,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const recomputed = revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => revision.coverageManifest!.units[unit.unitOrdinal - 1]!);
       expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
       expect(empty.findings).toEqual([]);
-      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 4 处，未标记。');
+      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 5 处，未标记。');
       expect(selectionExcludedLine(2, ['检索引用未精确取文', '检索引用未精确取文'])).toBe('所读范围内另有 2 条发现未采用，列在排除附录中：检索引用未精确取文');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
@@ -1354,7 +1354,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(reviewMarkCount(session, book)).toBe(0);
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], on(twentyOne.blockId, twentyOne.blockId)));
       expect(second.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyOne.blockId, 21, true]]);
-      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所选范围外另有 3 处，未标记。');
+      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所选范围外另有 4 处，未标记。');
       expect(reviewMarkCount(session, book)).toBe(1);
     });
   }, 300_000);
@@ -1405,10 +1405,21 @@ describe('a Review Run over the real store on exact sample1', () => {
       const whole = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(whole.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
         .toEqual(expect.arrayContaining([[10, true], [15, true], [21, true], [56, true], [64, true]]));
-      expect(whole.findings).toHaveLength(7);
+      expect(whole.findings).toHaveLength(8);
+      const pinnedRepeated = whole.findings.find((finding) => finding.quote === '古怪' && finding.replacement === '奇怪')!;
+      expect(pinnedRepeated.note).not.toContain('锚点不唯一');
+      const repeatedText = workingText(session, book).get(pinnedRepeated.blockId)!;
+      const second = repeatedText.indexOf('古怪', repeatedText.indexOf('古怪') + 2);
+      expect(pinnedRepeated.fromGrapheme).toBe([...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(repeatedText.slice(0, second))].length);
+      for (const finding of whole.findings.filter((finding) => !finding.note.startsWith('【引文未逐字匹配】'))) {
+        const text = workingText(session, book).get(finding.blockId)!;
+        const slice = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].slice(finding.fromGrapheme, finding.toGrapheme).map((part) => part.segment).join('');
+        expect(finding.quote).toBe(slice);
+      }
+
       expect(whole.findings.filter((finding) => finding.output === 'annotation')).toHaveLength(1);
       expect(whole.findings.filter((finding) => finding.note.includes('锚点不唯一'))).toEqual([
-        expect.objectContaining({ quote: '古怪', output: 'change-suggestion', replacement: '奇怪', note: expect.stringMatching(/^【锚点不唯一】/u) }),
+        expect.objectContaining({ quote: '古怪', output: 'change-suggestion', replacement: '奇异', note: expect.stringMatching(/^【锚点不唯一】/u) }),
       ]);
       const firstMarks = new Map(chosen.findings.map((finding) => [finding.quote, finding.markId] as const));
       expect(whole.findings.filter((finding) => firstMarks.has(finding.quote)).every((finding) => finding.markId === firstMarks.get(finding.quote))).toBe(true);
@@ -1416,7 +1427,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const synced = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
       expect(synced.state).toBe('settled');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 4 });
-      expect(reviewMarkCount(session, book)).toBe(7);
+      expect(reviewMarkCount(session, book)).toBe(8);
     });
   }, 300_000);
 
@@ -2368,7 +2379,7 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
 
 const SERIES = 'series-consistency';
 /** Selection/procedure business coverage uses one actual ordinary Store; local review/2 and Series/1 remain separate. */
-async function openLayeredSelection(): Promise<Session> {
+async function openLayeredSelection(controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'); // unchanged response bytes, not an admission pin
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -2388,7 +2399,7 @@ async function openLayeredSelection(): Promise<Session> {
           .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
           : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
-  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), ...controls });
   launchPolicy = capture.policy;
   return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture };
 }
@@ -2661,4 +2672,368 @@ describe('house preference review consumption (#911)', () => {
       expect(session.store.rebuildHouseReviewPreference().current!.versionId).toBe(version.versionId);
     });
   }, 300_000);
+});
+
+
+describe('one-step review launch (#1455)', () => {
+  it('omits an unsent effort from the request, card, report and task row while keeping the role default', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const binding = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+      session.store.selectMainRoleModel('opencode-go', binding.model, 'high');
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+      const label = session.store.getModelServiceModels('opencode-go').find(model => model.modelId === defaults.model)!.modelLabel;
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        executionConfig: { modelId: defaults.model, reasoningEffort: 'off' } }, launchPolicy).projection.run!;
+      await session.driver.drive(launched.reviewRunId);
+      const run = session.store.generateReviewReport(book.bookId, launched.reviewRunId).run!;
+      expect(run.state).toBe('settled');
+      expect(run.modelLabel).toBe(label);
+      expect(run.report!.record.run.modelLabel).toBe(label);
+      expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(session.capture!.wireRequests.every(request => request.reasoning_effort === undefined)).toBe(true);
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings[0]!.markId!);
+      expect(card.source.modelLabel).toBe(label);
+      const task = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items)
+        .find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === launched.reviewRunId);
+      expect(task!.item.modelLabel).toBe(label);
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+    });
+  });
+  it('starts once for a command and refuses changed inputs under that identity', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
+      const first = session.store.launchReviewRun(input, launchPolicy);
+      const repeated = session.store.launchReviewRun(input, launchPolicy);
+      expect(first.repeated).toBe(false);
+      expect(repeated.repeated).toBe(true);
+      expect(repeated.projection.run!.reviewRunId).toBe(first.projection.run!.reviewRunId);
+      expect(() => session.store.launchReviewRun({ ...input, categoryIds: [STYLE] }, launchPolicy)).toThrowError(expect.objectContaining({ code: 'TASK_LAUNCH_COMMAND_CHANGED', message: expect.stringContaining('请重新发起') }));
+      await session.driver.drive(first.projection.run!.reviewRunId);
+      const finished = workspace(session, book, first.projection.run!.reviewRunId).run!;
+      expect(finished.state).toBe('settled');
+      expect(finished.findings.length).toBeGreaterThan(0);
+    });
+  });
+  it('keeps concurrent launch choices and replay independent of later role settings', async () => {
+    await withCapturedReviewBook(async (session, firstBook) => {
+      const secondBook = await importSample1Book(session.store, roots.codeRoot, '并行审阅');
+      await pinEditorialWorkspaceProfileRevision2(session.store, secondBook.bookId);
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+      const input = { bookId: firstBook.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        executionConfig: { modelId: defaults.model, reasoningEffort: 'high' } };
+      const first = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      const second = session.store.launchReviewRun({ ...input, bookId: secondBook.bookId, clientCommandId: randomUUID(),
+        executionConfig: { modelId: 'account-future-model', reasoningEffort: 'low' } }, launchPolicy).projection.run!;
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+      expect(session.store.inspectReviewCategory(firstBook.bookId, definition).providerResolutionPlan!.executionRoute).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
+      expect(session.store.inspectReviewCategory(secondBook.bookId, definition).providerResolutionPlan!.executionRoute).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
+      session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+      expect(session.store.launchReviewRun(input, launchPolicy).projection.run!.reviewRunId).toBe(first.reviewRunId);
+      await Promise.all([session.driver.drive(first.reviewRunId), session.driver.drive(second.reviewRunId)]);
+      for (const [book, runId, effort] of [[firstBook, first.reviewRunId, 'high'], [secondBook, second.reviewRunId, 'low']] as const) {
+        const run = session.store.generateReviewReport(book.bookId, runId).run!;
+        expect(run.state).toBe('settled');
+        expect(run.modelLabel).toContain(`@${effort}`);
+        expect(run.report?.record.run.modelLabel).toContain(`@${effort}`);
+        expect(workspace(session, book).runs.find(item => item.reviewRunId === runId)?.modelLabel).toContain(`@${effort}`);
+        const task = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items)
+          .find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === runId);
+        expect(task?.item.modelLabel).toContain(`@${effort}`);
+        expect(run.findings.length).toBeGreaterThan(0);
+        const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings[0]!.markId!);
+        expect(card.source.modelLabel).toContain(`@${effort}`);
+      }
+    });
+  });
+
+  it('pins text typed after opening the surface and refuses vanished selected block identities', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const shown = session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      appendToFirstBlock(session, book);
+      const current = session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      expect(current.journalSequence).toBeGreaterThan(shown.journalSequence);
+      const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!;
+      expect(launched.manuscript.journalSequence).toBe(current.journalSequence);
+      const second = await importSample1Book(session.store, roots.codeRoot, '选区检查');
+      await pinEditorialWorkspaceProfileRevision2(session.store, second.bookId);
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(second.branchId);
+      const first = blocks.find((block, index) => block.kind === 'paragraph' && blocks[index + 1]?.kind === 'paragraph')!;
+      const gone = blocks.find(block => block.position === first.position + 1)!;
+      const window = session.store.getManuscriptWindowAt(second.manuscriptId, second.branchId, { kind: 'block', blockId: first.blockId });
+      session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: second.manuscriptId, branchId: second.branchId,
+        baseRevisionId: window.revisionId, blockId: first.blockId, windowStartBlockId: window.blocks[0]!.blockId,
+        baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: first.graphemes, toGrapheme: first.graphemes,
+        insertText: '', structure: { kind: 'merge', mergedBlockId: gone.blockId, mergedBlockDigest: gone.digest } });
+      expect(session.store.baselineAnalysisLedger.readWorkingBlocks(second.branchId).some(block => block.blockId === gone.blockId)).toBe(false);
+      expect(() => session.store.launchReviewRun({ bookId: second.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS],
+        scope: { kind: 'selection', fromChapterBlockId: gone.blockId, toChapterBlockId: gone.blockId } }, launchPolicy))
+        .toThrowError(expect.objectContaining({ code: 'REVIEW_SCOPE_INVALID', message: expect.stringContaining('重新选择') }));
+      expect(workspace(session, second).run).toBeNull();
+    });
+  });
+
+  it('reads search availability for the task connection without changing role defaults or preparing a run', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial');
+      const connection = session.store.getModelServiceRouteConnection('deepseek-open-platform')!;
+      session.store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'deepseek-open-platform');
+      const before = workspace(session, book);
+      const next = session.store.inspectReviewWorkspace(book.bookId, null, undefined, undefined,
+        { modelConnectionId: connection.connectionId, modelId: connection.binding.modelId });
+      expect(before.categories.find(category => category.categoryId === FACTUAL)!.networkUnavailable).toBe(true);
+      const factual = next.categories.find(category => category.categoryId === FACTUAL)!;
+      expect(factual.networkUnavailable).toBe(false);
+      expect(factual.basis.modelChannelSearchLabel).toContain('DeepSeek');
+      expect(next.run).toBeNull(); expect(next.runs).toHaveLength(0);
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+    });
+  });
+
+});
+
+
+async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-production', wrap?: (owner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
+  if (scope === 'development-ci') return open('sample1-review-cross-chapter-authored', wrap);
+  const session = await openLayeredSelection();
+  return wrap === undefined ? session : { ...session, driver: new ReviewRunDriver(session.store.reviewRunDriveSteps, wrap(session.owner)) };
+}
+
+describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
+  it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
+    let gated: GatedOwner | null = null;
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)));
+    try {
+      const book = await importBook(session);
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE };
+      const run = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      const loop = session.driver.drive(run.reviewRunId);
+      await gated!.reached;
+      const stopped = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId, action });
+      if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
+      else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
+      gated!.release(); await loop;
+      const beforeReplay = eventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
+      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
+      expect(eventTrail(run.reviewRunId)).toEqual(beforeReplay);
+      if (session.capture !== undefined) expect(session.capture.wireRequests).toHaveLength(sent!);
+      expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(STYLE_AND_FORMAT)).run).toBeNull();
+      if (action === 'cancel') {
+        expect(workspace(session, book, run.reviewRunId).run!.categories[1]!.state).toBe('refused');
+        const next = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+        await session.driver.drive(next.reviewRunId);
+        expect(workspace(session, book, next.reviewRunId).run!.state).toBe('settled');
+      } else {
+        await session.driver.continue(run.reviewRunId);
+        expect(workspace(session, book, run.reviewRunId).run!.categories.every(category => category.state === 'settled')).toBe(true);
+      }
+    } finally { (gated as GatedOwner | null)?.release(); await close(session); }
+  });
+
+  it('cancels a launched run after restart and immediately launches an undispatched category again', async () => {
+    let book!: Book, reviewRunId!: string;
+    const first = await openLaunchedLifecycle(scope);
+    try {
+      book = await importBook(first);
+      reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
+      const steps = first.store.reviewRunDriveSteps, handoff = steps.start(reviewRunId, TYPOS)!;
+      handoff.ledger.recordRunState(handoff.runRecordId, 'admitted', { detail: '测试中断前已进入调度。' });
+      handoff.ledger.recordRunState(handoff.runRecordId, 'executing', { detail: '测试中断前正在运行。' });
+      steps.recordDispatch(reviewRunId, TYPOS, handoff.runRecordId);
+    } finally { await close(first); }
+    const second = await openLaunchedLifecycle(scope);
+    try {
+      const cancelled = second.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'cancel' });
+      if (cancelled.runRecordId !== null) second.owner.cancelRun(cancelled.runRecordId, cancelled.ledger);
+      expect(workspace(second, book, reviewRunId).run!.categories[1]!.state).toBe('refused');
+      const next = second.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      await second.driver.drive(next.reviewRunId);
+      expect(workspace(second, book, next.reviewRunId).run!.state).toBe('settled');
+    } finally { await close(second); }
+  });
+});
+
+it('transmits a non-default channel and model with effort and stamps its card, report and task row', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const chosen = session.store.getModelServiceRouteConnection('opencode-go')!;
+      const defaultConnection = session.store.getModelServiceRouteConnection('deepseek-open-platform')!;
+      session.store.saveModelServiceConnection(defaultConnection.connectionName, defaultConnection.credentialReference, 'ready', 'deepseek-open-platform');
+      session.store.selectModelServiceRoute('deepseek-open-platform');
+      const defaults = session.store.getConfiguredModelRoleBinding('main-editorial');
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE,
+        executionConfig: { modelConnectionId: chosen.connectionId, modelId: 'account-future-model', reasoningEffort: 'high' } };
+      const launched = session.store.launchReviewRun(input, launchPolicy).projection.run!;
+      await session.driver.drive(launched.reviewRunId);
+      expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(session.capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
+      const run = session.store.generateReviewReport(book.bookId, launched.reviewRunId).run!;
+      expect(run.state).toBe('settled');
+      expect(run.modelLabel).toBe('account-future-model@high');
+      expect(run.report!.record.run.modelLabel).toBe('account-future-model@high');
+      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, run.findings.find(finding => finding.markId !== null)!.markId!);
+      expect(card.source.modelLabel).toBe('account-future-model@high');
+      expect(session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items).find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === run.reviewRunId)!.item.modelLabel).toBe('account-future-model@high');
+      expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
+    });
+});
+
+
+it('reconnects an offline ordinary review with every category on its launched model after defaults change (#1455)', async () => {
+  const session = await openLayeredSelection();
+  try {
+    const book = await importBook(session), defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+    const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
+    const launched = session.store.launchReviewRun(input, launchPolicy, 'when-online');
+    expect(launched.projection.run!.state).toBe('waiting');
+    const repeated = session.store.launchReviewRun(input, launchPolicy);
+    expect(repeated).toMatchObject({ repeated: true, projection: { run: { reviewRunId: launched.projection.run!.reviewRunId, state: 'waiting' } } });
+    await driveLaunchedReviewRun(session.driver, repeated);
+    expect(eventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
+    expect(session.capture!.wireRequests).toHaveLength(0);
+    session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    const changedDefault = session.store.getConfiguredModelRoleBinding('main-editorial');
+    const waiting = session.store.waitingTaskRuns(book.bookId).find(run=>run.kind==='review-run')!;
+    expect(session.store.taskPreflightDrift(waiting)).toEqual([]);
+    let driven = Promise.resolve();
+    session.store.admitWaitingReviewRun(waiting.ref, () => { driven = session.driver.drive(waiting.ref); });
+    await driven;
+    const run = session.store.generateReviewReport(book.bookId, waiting.ref).run!;
+    expect(run.state).toBe('settled');
+    expect(run.modelLabel).toBe('account-future-model@high');
+    expect(run.report!.record.run.modelLabel).toBe(run.modelLabel);
+    for (const definition of [TYPOS_AND_USAGE, STYLE_AND_FORMAT]) {
+      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(definition));
+      expect(category.providerResolutionPlan!.executionRoute).toMatchObject({ model: 'account-future-model', reasoningEffort: 'high' });
+      expect(category.taskOutcome!.report!.modelLabel).toBe(run.modelLabel);
+    }
+    expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+    expect(session.capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+    expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(changedDefault);
+  } finally { await close(session); }
+});
+
+it('cancels an offline ordinary review before any category starts and immediately relaunches them (#1455)', async () => {
+  const session = await openLayeredSelection();
+  try {
+    const book = await importBook(session);
+    const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
+    const waiting = session.store.launchReviewRun(input, launchPolicy, 'when-online').projection.run!;
+    session.store.cancelWaitingTask({ bookId: book.bookId, kind: 'review-run', ref: waiting.reviewRunId });
+    const cancelled = workspace(session, book, waiting.reviewRunId).run!;
+    expect(cancelled.state).toBe('cancelled');
+    expect(cancelled.categories.map(category=>category.state)).toEqual(['refused','refused']);
+    expect(session.capture!.wireRequests).toHaveLength(0);
+    const next = session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy);
+    await driveLaunchedReviewRun(session.driver, next);
+    expect(workspace(session, book, next.projection.run!.reviewRunId).run!.state).toBe('settled');
+  } finally { await close(session); }
+});
+
+it('continues an ordinary launched review after its running ledger view is evicted from the bounded cache (#1455)', async () => {
+  const session = await openLayeredSelection();
+  const gated = new GatedOwner(session.owner, 2), driver = new ReviewRunDriver(session.store.reviewRunDriveSteps, gated);
+  try {
+    const book = await importBook(session);
+    const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } }, launchPolicy).projection.run!;
+    const driving = driver.drive(run.reviewRunId); await gated.reached;
+    for (let index = 0; index < 33; index += 1) {
+      const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
+      await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
+      const launched = session.store.launchReviewRun({ bookId: other.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
+      session.store.inspectReviewWorkspace(other.bookId, launched.projection.run!.reviewRunId);
+    }
+    const restored = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+    expect(restored.state).toBe('running'); expect(restored.modelLabel).toBe('account-future-model@high');
+    const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+    session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    gated.release(); await driving;
+    const settled = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!;
+    expect(settled.state).toBe('settled'); expect(settled.modelLabel).toBe('account-future-model@high');
+    expect(settled.categories.every(category=>category.state==='settled')).toBe(true);
+    expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+    expect(session.capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+  } finally { gated.release(); await close(session); }
+});
+
+it('replays a committed launch after restart and drives it once without a second send (#1455)', async () => {
+  let book!: Book;
+  const clientCommandId = randomUUID();
+  let reviewRunId!: string;
+  await withSession('sample1-review-cross-chapter-authored', async session => {
+    book = await importBook(session);
+    reviewRunId = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
+    // The process closes after commit, before it could acknowledge or start the driver.
+  });
+  await withSession('sample1-review-cross-chapter-authored', async session => {
+    const input = { bookId: book.bookId, clientCommandId, categoryIds: [TYPOS, STYLE], scope: WHOLE };
+    const repeated = session.store.launchReviewRun(input, launchPolicy);
+    expect(repeated.repeated).toBe(true);
+    expect(repeated.projection.run!.reviewRunId).toBe(reviewRunId);
+    await Promise.all([driveLaunchedReviewRun(session.driver, repeated), driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy))]);
+    const events = eventTrail(reviewRunId);
+    expect(events.filter(([, state]) => state === 'dispatched')).toHaveLength(2);
+    expect(workspace(session, book, reviewRunId).run!.state).toBe('settled');
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
+    expect(eventTrail(reviewRunId)).toEqual(events);
+  });
+});
+
+it('replays a shutdown-interrupted ordinary review without resending its ended category and keeps later categories on the launch binding (#1455)', async () => {
+  let reached!: () => void, release!: () => void;
+  const held = new Promise<void>(resolve => { reached = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  let checkpointHeld = false;
+  const first = await openLayeredSelection({ unitHold: async settled => {
+    if (settled > 0 && !checkpointHeld) { checkpointHeld = true; reached(); await gate; }
+  } });
+  const book = await importBook(first);
+  const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE, PLOT], scope: WHOLE,
+    executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
+  const run = first.store.launchReviewRun(input, launchPolicy).projection.run!;
+  const loop = first.driver.driveLaunch(run.reviewRunId);
+  try {
+    await Promise.race([held, loop.then(() => { throw new Error('review-ended-before-checkpoint-hold'); })]);
+  } finally {
+    const closing = close(first); release(); await closing; await loop;
+  }
+  const earlierRequests = [...first.capture!.requests], earlierWire = [...first.capture!.wireRequests];
+  const second = await openLayeredSelection();
+  try {
+    second.store.reconcileStoppedReviewCategoryRuns();
+    const defaults = second.store.getConfiguredModelRoleBinding('main-editorial')!;
+    second.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    const replay = second.store.launchReviewRun(input, launchPolicy);
+    expect(replay).toMatchObject({ repeated: true });
+    expect(replay.projection.run!.reviewRunId).toBe(run.reviewRunId);
+    expect(second.store.reviewRunDriveSteps.launchDriveMode!(run.reviewRunId)).toBe('start');
+    await driveLaunchedReviewRun(second.driver, replay);
+    const resumed = workspace(second, book, run.reviewRunId).run!;
+    // Ordinary non-factual categories end on shutdown; their kept partial result is never sent again.
+    expect(resumed.state).toBe('partial');
+    expect(resumed.categories.map(category => category.state)).toEqual(['interrupted', 'settled', 'settled']);
+    const units = [...earlierRequests, ...second.capture!.requests].filter(request => request.stage === 'units');
+    expect(new Set(units.map(request => request.requestDigest)).size).toBe(units.length);
+    expect([...earlierWire, ...second.capture!.wireRequests].every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
+    const sent = second.capture!.wireRequests.length;
+    await driveLaunchedReviewRun(second.driver, second.store.launchReviewRun(input, launchPolicy));
+    expect(second.capture!.wireRequests).toHaveLength(sent);
+  } finally { await close(second); }
+});
+
+it('launches historical model-free baseline leads offline without a credential or waiting candidate (#1455)', async () => {
+  // Explicitly reconstruct the retained v1 category owner; current v2 plot review remains model-backed.
+  const session = await open('sample1-review-cross-chapter-authored', undefined, 1);
+  try {
+    const book = await importBook(session); await runBaseline(session, book);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);
+    session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', live: null, policy });
+    session.store.waitingTaskRuns(null);
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [PLOT], scope: WHOLE }, policy, 'when-online');
+    expect(launched.projection.run!.categories[0]!.taskIntentId).toBeNull();
+    expect(session.store.waitingTaskRuns(book.bookId)).toEqual([]);
+    await driveLaunchedReviewRun(session.driver, launched);
+    expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
+  } finally { await close(session); }
 });

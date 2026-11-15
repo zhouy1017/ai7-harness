@@ -1,3 +1,4 @@
+import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
@@ -10,7 +11,7 @@ import type { PersistenceBackend, SessionPersistenceRevision, StoredPrefix } fro
  * JSONL file per technical Session. AI7's own records never copy the log: a dialogue's Execution Binding and Harness
  * Execution Span name a Session and a range of its sequence numbers, and its question and answer are read back here.
  *
- * The file's first line is the Session's header and every later line one event, exactly as DSH recorded it. A line is
+ * The file's first line is the Session's header and every later line one event with model thinking projected to digests before append; all other data stays as DSH recorded it. A line is
  * written whole and then synced; a line cut off by a crash has no newline, and a read drops it as the torn tail it is.
  * A complete line that does not parse is damage, and a read refuses it rather than guess.
  *
@@ -152,8 +153,29 @@ function writeAll(fd: number, text: string): void {
   while (written < buffer.length) written += writeSync(fd, buffer, written, buffer.length - written);
 }
 
+/** Model thinking is attempt-memory only (#1453). Project a detached durable copy, never the live SDK events. */
+function retainAssistantValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(retainAssistantValue);
+  if (!isRecord(value)) return value;
+  if (value.type === 'reasoning' || value.type === 'reasoning-delta') {
+    return { type: value.type, ...(value.type === 'reasoning-delta' ? { index: value.index } : {}), text: '', reasoningDigest: sha256Hex(canonicalJson(value)) };
+  }
+  const retained: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'replayState') retained.replayStateDigest = sha256Hex(canonicalJson(item));
+    else retained[key] = retainAssistantValue(item);
+  }
+  return retained;
+}
+
+/** Preserve editorial/tool history and event identity; native thinking is never a durable restart dependency. */
+function retainedLogValue(value: unknown): unknown {
+  return isRecord(value) && typeof value.type === 'string' && value.type.startsWith('assistant/')
+    ? { ...value, data: retainAssistantValue(value.data) } : value;
+}
+
 function lines(values: ReadonlyArray<unknown>): string {
-  return values.map((value) => `${JSON.stringify(value)}\n`).join('');
+  return values.map((value) => `${JSON.stringify(retainedLogValue(value))}\n`).join('');
 }
 
 /**

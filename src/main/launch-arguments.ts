@@ -271,7 +271,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
     modelAdapterControlValue === undefined ||
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
         process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11' || process.env.AI7_E2E_JOURNEY === 'J-13' ||
-        process.env.AI7_E2E_JOURNEY === 'J-07') &&
+        process.env.AI7_E2E_JOURNEY === 'J-07' || process.env.AI7_E2E_JOURNEY === 'J-12') &&
         modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);

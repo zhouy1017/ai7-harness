@@ -1,3 +1,8 @@
+import { reduceFactualReview } from '../../src/service/analysis/factual-review-reducers.js';
+import { FixtureReplayResearchCapability } from '../../src/service/capabilities/research.js';
+import { factualClaimKindDefinition } from '../../src/service/analysis/factual-claim-contract.js';
+import { freezeFactualClaimLedger } from '../../src/service/analysis/factual-claim-ledger.js';
+import { deriveCoverageManifest } from '../../src/service/analysis/coverage-manifest.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -45,17 +50,18 @@ import {
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 describe('Factual Review Contract /2 is additive', () => {
-  it('leaves v1 byte for byte: its prompt contract, the research wrap and 快速整理 all keep their digests', () => {
+  it('retains pre-occurrence factual prompt identities alongside the current instructions', () => {
     // Synchronized pins (Issue #901): the v1 and research digests are the ones every earlier plan and capture froze.
-    expect(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST).toBe('22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37');
+    expect(factualReviewKindDefinition(undefined, false).promptContractDigest).toBe('22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37');
+    expect(FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt).toContain('occurrence');
     expect(FACTUAL_REVIEW_PROMPT_CONTRACT.responseSchema).toBe(FACTUAL_REVIEW_UNIT_RESULT_SCHEMA);
-    expect(withFactualResearch(factualReviewKindDefinition()).promptContractDigest).toBe('639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b');
+    expect(withFactualResearch(factualReviewKindDefinition(undefined, false)).promptContractDigest).toBe('639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b');
     const quick = factualReviewLevelDefinition('quick');
     expect(quick.promptContractDigest).toBe(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST);
     expect(quick.systemPrompt).toBe(FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt);
     expect(quick.researchDeclaration).toEqual({ webSearch: false, searchEngine: null });
-    const standard = factualReviewLevelDefinition('standard');
-    const strict = factualReviewLevelDefinition('strict');
+    const standard = factualReviewLevelDefinition('standard', undefined, false);
+    const strict = factualReviewLevelDefinition('strict', undefined, false);
     expect(standard.promptContractDigest).toBe('692604f0d48c52ed7f82b43855eab7bdcda2192791c38c22dbc785415bd7db9e');
     expect(strict.promptContractDigest).toBe('610e96937f4aae95da53f1673c6967dc1f359ee01cc42ffa36039bc817177090');
     expect(standard.unitResultSchema).toBe(FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA);
@@ -66,11 +72,16 @@ describe('Factual Review Contract /2 is additive', () => {
     const blocks = new Map([['blk_000000000000000000000001', { blockId: 'blk_000000000000000000000001', kind: 'paragraph', level: null, text: '合成段落。' }]]);
     expect(standard.buildUnitMessage(unit, 1, blocks as never)).toBe(buildFactualReviewUnitMessage(unit, 1, blocks as never));
     // Recorded from the integration baseline de8227ca: the complete /1 system + user message bytes, not just schema identity.
-    expect(sha(JSON.stringify([{ role: 'system', content: quick.systemPrompt },
+    expect(sha(JSON.stringify([{ role: 'system', content: factualReviewKindDefinition(undefined, false).systemPrompt },
       { role: 'user', content: quick.buildUnitMessage(unit, 1, blocks as never) }]))).toBe('b94f66cbc24ffdac111bc6f1e32f7f68cc3326e57c3b82d8f3ddf8fdc1ee8f54');
     // Every frozen factual plan finds its own definition back by digest, the two predecessors included.
-    expect([...factualReviewDefinitionsByDigest().keys()].sort()).toEqual([standard.promptContractDigest, strict.promptContractDigest,
-      '639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b', FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST].sort());
+    expect([...factualReviewDefinitionsByDigest().keys()].sort()).toEqual([
+      standard.promptContractDigest, strict.promptContractDigest,
+      '639d98f1576761aa320d4d48e7df182d389ba537ddef9da2de4a36f45a44592b',
+      '22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37',
+      factualReviewLevelDefinition('standard').promptContractDigest, factualReviewLevelDefinition('strict').promptContractDigest,
+      withFactualResearch(factualReviewKindDefinition()).promptContractDigest, FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST,
+    ].sort());
     expect(FACTUAL_REVIEW_PROMPT_CONTRACT_V2_STANDARD.unitMessageHeader).toBe(FACTUAL_REVIEW_PROMPT_CONTRACT.unitMessageHeader);
   });
 
@@ -360,4 +371,22 @@ describe('the factual verification ledger', () => {
       recorded_at, canonical_json, sha256) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, 'r', ?, 0, 1, 'quick', ?, 'verified', '未核查', '证据支持', 'AI7', 'x', '{}', ?)`)
       .run(randomUUID(), BOOK, sha('k'), REVIEW, `rvf_${'e'.repeat(24)}`, `fnd_${'e'.repeat(24)}`, randomUUID(), randomUUID(), BLOCK, sha('p'), sha('row'))).toThrow();
   });
+});
+
+it('keeps the 0.7.0 claim contract and raw width-folded claim identity', () => {
+  expect(factualClaimKindDefinition('standard').promptContractDigest).toBe('4e02f8ac6ef312647bb04b6133df6602643e0885c1f8abc3a26e7ef4d5f7846c');
+  expect(factualClaimKindDefinition('strict').promptContractDigest).toBe('e51740389b4f7e2d6789dc49b8f51a03cf8091b621479f4e614c20c3da918f40');
+  const text = '１９００年';
+  const block = { blockId: 'blk_000000000000000000000001', position: 1, kind: 'paragraph' as const, level: null, text,
+    digest: sha(text), graphemes: 5 };
+  const manifest = deriveCoverageManifest({ bookId: '11111111-1111-4111-8111-111111111111', manuscriptId: '22222222-2222-4222-8222-222222222222',
+    branchId: '33333333-3333-4333-8333-333333333333', revisionId: '44444444-4444-4444-8444-444444444444', revisionLabel: 'r1', revisionDigest: sha(text), blocks: [block] });
+  const ledger = freezeFactualClaimLedger({ manifest, blocks: new Map([[block.blockId, block]]), units: [{ sourceUnitMessage: '公开合成断言', result: {
+    unitOrdinal: 1, assertions: [{ quote: '1900年', blockOrdinal: 1, assertionClass: 'real-world-fact', category: '时间', severity: 'A', question: '哪一年？', basis: '合成回归。' }] } }] });
+  expect(ledger.claims[0]!.occurrence.quote).toBe('1900年');
+  expect(`fnd_${ledger.claims[0]!.claimId.slice(0, 24)}`).toBe('fnd_7540682dd93e0a76d3a1321b');
+  const reduction = reduceFactualReview({ manifest, blocks: new Map([[block.blockId, block]]), research: new FixtureReplayResearchCapability(), exactOccurrences: true,
+    outcomes: [{ unitOrdinal: 1, state: 'closed', result: { schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: 1, assertions: [ledger.claims[0]!.producers[0]!.assertion] } }] });
+  expect(reduction.findings[0]).toMatchObject({ findingId: 'fnd_7540682dd93e0a76d3a1321b', quote: '１９００年' });
+
 });

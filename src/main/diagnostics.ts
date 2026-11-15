@@ -103,7 +103,7 @@ export function buildDiagnosticsBundle(inputs: DiagnosticsInputs): Readonly<Reco
   const files: Record<string, string> = {
     'summary.json': JSON.stringify({
       appVersion: facts.appVersion, buildIdentity: facts.buildIdentity, dataVersion: count(inputs.facts.dataVersion), schemaRevision: facts.schemaRevision, protocol: facts.protocol,
-      policySetVersion: /^v\d+$/u.test(inputs.facts.policySetVersion) ? inputs.facts.policySetVersion : 'unknown',
+      policySetVersion: (inputs.facts.policySetVersion === 'no-policy-lock' || /^v\d+$/u.test(inputs.facts.policySetVersion)) ? inputs.facts.policySetVersion : 'unknown',
       platform: facts.platform, arch: facts.arch, electron: facts.electron, node: version(inputs.facts.node),
       locale: /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(inputs.facts.locale) ? inputs.facts.locale : 'unknown',
       uptimeSeconds: facts.uptimeSeconds, windowCount: count(inputs.facts.windowCount),

@@ -276,7 +276,7 @@ describe('live material references (#809)', () => {
     }
   });
 
-  it.each(kinds.flatMap((kind) => (['category', 'flag'] as const).map((term) => ({ kind, term }))))('keeps the exact predecessor refusal for $kind when its rule lacks the material $term', ({ kind, term }) => {
+  it.each(kinds.flatMap((kind) => (['flag'] as const).map((term) => ({ kind, term }))))('keeps the exact predecessor refusal for $kind when its rule lacks the material $term', ({ kind, term }) => {
     deny(kind, term);
     expect(thrown(() => prepare(kind))).toMatchObject(refusalOf(kind));
     expect(sent).toHaveLength(0);

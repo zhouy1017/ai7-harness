@@ -132,8 +132,9 @@ export function parseFactualAssertion(candidate: unknown, expected: { blockCount
   const question = reader.text(candidate.question, MAX_QUESTION_GRAPHEMES, 'assertions', index, true);
   const basis = reader.text(candidate.basis, MAX_BASIS_GRAPHEMES, 'assertions', index, true);
   if (question === null || basis === null) { reader.drop('assertions', index, 'text-invalid'); return null; }
+  const occurrence = typeof candidate.occurrence === 'string' ? Number(candidate.occurrence) : candidate.occurrence;
   return { quote: candidate.quote, blockOrdinal: ordinal as number,
-    ...(Number.isSafeInteger(candidate.occurrence) && (candidate.occurrence as number) > 0 ? { occurrence: candidate.occurrence as number } : {}),
+    ...(Number.isSafeInteger(occurrence) && (occurrence as number) > 0 ? { occurrence: occurrence as number } : {}),
     assertionClass: reader.enum(candidate.assertionClass, FACTUAL_ASSERTION_CLASSES, CLASS_ALIASES, 'judgment', 'assertions', index),
     category: reader.enum(candidate.category, FACTUAL_ASSERTION_CATEGORIES, CATEGORY_ALIASES, '其他', 'assertions', index),
     severity: reader.enum(candidate.severity, FACTUAL_SEVERITY_TIERS, SEVERITY_ALIASES, 'C', 'assertions', index), question, basis };
@@ -166,10 +167,11 @@ export const FACTUAL_REVIEW_PROMPT_CONTRACT = {
     '可核查断言包括：年代与日期、地点与行政区划、人物与身份、机构与官职、器物与工艺、数字与度量、明确归属于某来源的引文、史实陈述、技术陈述。',
     '不改写稿件、不给出修改建议、不下事实结论、不调用任何工具、不引用外部资料。你只负责列出断言并提出应当核查的问题。',
     '每条断言必须给出稿件中的逐字引文：原样复制，不加省略号、不合并、不改标点、不超过 80 字素，并指明该引文所在内容块的序号。',
+    '优先选用在该内容块中只出现一次的引文；无法做到时，必须给出 occurrence 整数，表示第几次出现（从 1 开始，1 表示第一处）；只出现一次时可省略。',
     '内容块序号从 1 开始，按用户消息中列出的顺序计数：先是重叠上下文的内容块，然后是本单元的内容块。',
     '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
     'schema（固定为 "ai7.factual-review.unit-result/1"）、unitOrdinal（与用户消息头部的单元序号一致）、assertions（数组）。',
-    'assertions 的每一项精确包含以下键：quote（逐字引文）、blockOrdinal（内容块序号）、assertionClass、category、severity、question、basis。',
+    'assertions 的每一项精确包含以下键：quote（逐字引文）、blockOrdinal（内容块序号）、assertionClass、category、severity、question、basis；另可包含 occurrence。',
     'assertionClass 取 real-world-fact/quotation/report-about-manuscript/fictional-canon/judgment 之一：',
     'real-world-fact 是可对照真实世界核查的事实断言；quotation 是明确归属于某来源的引文；report-about-manuscript 是关于稿件自身叙述的陈述；',
     'fictional-canon 是仅在作品内部成立的虚构设定；judgment 是评价或判断。虚构作品中的虚构人物、地点与事件属于 fictional-canon，不是 real-world-fact。',
@@ -394,11 +396,10 @@ function locateFoldedQuotation(blockText: string, quote: string, occurrence: num
 }
 
 /**
- * Keep previously verified quote text stable: authored replay requests bind those bytes. Newly
- * located quotations use their exact source slice; legacy width/space alignment follows R2/R3.
+ * Store every located quotation as the manuscript's own grapheme slice (#1471).
  */
 export function quotationForLocation(blockText: string, quote: string, location: QuotationLocation): string {
-  if (location.state !== 'verified' || locateFoldedQuotation(blockText, quote, undefined, false).state === 'verified') return quote;
+  if (location.state !== 'verified') return quote;
   return sliceGraphemes(blockText, location.fromGrapheme, location.toGrapheme);
 }
 
@@ -419,3 +420,9 @@ export function sliceGraphemes(text: string, fromGrapheme: number, toGrapheme: n
 }
 
 export { graphemeCount } from './canonical.js';
+
+/** Reconstruct prompt bytes frozen before occurrence instructions (#1471). */
+export function preOccurrenceFactualPrompt(prompt: string): string {
+  return prompt.split('\n').filter((line) => !line.startsWith('优先选用在该内容块中只出现一次的引文')).join('\n')
+    .replace('；另可包含 occurrence。', '。');
+}

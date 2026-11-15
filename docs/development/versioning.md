@@ -25,7 +25,8 @@ Wave 23 targets **0.5.0 Beta** under [#1279](https://github.com/zhouy1017/ai7-ha
 | 0.6.2 | integrated | Owner [#1400](https://github.com/zhouy1017/ai7-harness/issues/1400) five-batch Beta closure (#1401–#1414; batch PRs #1417, #1418, #1421, #1422, #1424); human acceptance pending | `80845316e3d0a1c020f5f85bd4e1b76d7398bb07` ([PR #1425](https://github.com/zhouy1017/ai7-harness/pull/1425)) | none |
 | 0.6.3 | integrated | Owner [#1426](https://github.com/zhouy1017/ai7-harness/issues/1426) after-wave-24c Beta closure (#1427–#1431; slice PRs #1436–#1440); human acceptance pending | `1d2487cda357118d4e619e5d2d077ade4ade9f43` ([PR #1442](https://github.com/zhouy1017/ai7-harness/pull/1442)) | none |
 | 0.6.5 | integrated | Owner [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) fix-only Beta closure of the two known 0.6.3 issues (#1445, #1446; slice PRs #1447, #1448); human acceptance pending | `6fdb6a8bcadb6be58c82d10c22788faa16bf186d` ([PR #1457](https://github.com/zhouy1017/ai7-harness/pull/1457)) | none |
-| 0.7.0 | candidate | Owner [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) R1 Alpha closure (#1451, #1452, #1454, #1435; slice PRs #1460, #1461, #1462, #1465, #1466) | the dev commit named in the closure record of the wave pull request | none |
+| 0.7.0 | integrated | Owner [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) R1 Alpha (#1451, #1452, #1454, #1435; slice PRs #1460, #1461, #1462, #1465, #1466; repair #1469); human acceptance pending | `2026a9ee952133e8927649419d3f537d6117d798` ([PR #1468](https://github.com/zhouy1017/ai7-harness/pull/1468)) | none |
+| 0.7.1 | candidate | Owner [#1472](https://github.com/zhouy1017/ai7-harness/issues/1472) R2 Alpha (#1470, #1453, #1471, #1475, #1455, #1476, #1491; slice PRs #1473, #1480, #1474, #1478, #1477, #1485, #1487, #1488, #1489, #1493; stage repairs #1482, #1484, #1486, #1490 / PR #1492) | pending final ladder and dev integration | none |
 
 Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev` at `b3fe090d` through PR #1398 with schema 109, protocol 198 and Data Version 1.
 
@@ -35,18 +36,20 @@ Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev
 
 #1444 → **0.6.5 Beta** (the Owner's explicit number, 「标记为版本0.6.5beta」; 0.6.4 is intentionally unused) is delivered on `dev` at `6fdb6a8b` through PR #1457 with schema 113, protocol 201 and Data Version 1.
 
-#1459 → **0.7.0 Alpha** is the Owner’s R1 number. The closure candidate uses protocol 202 because PR #1462 adds `guessed-anchor` to `ProposalDraftBatchProjection.excluded.reason`; nothing else in R1 changes IPC. Schema 113, Data Version 1 and policy v35 / set v26 are unchanged. The final ladder, dev delivery and human-test refresh remain pending; no tag or release is claimed.
+#1459 → **0.7.0 Alpha** (the Owner's R1 number) is delivered on `dev` at `2026a9ee` through PR #1468 with schema 113, protocol 202 (PR #1462 adds `guessed-anchor` to `ProposalDraftBatchProjection.excluded.reason`) and Data Version 1.
+
+#1472 → **0.7.1 Alpha** is the Owner's R2 number and a closure candidate on `codex/integration-0.7.1`, not dev delivery. Protocol 203 records reasoning effort in role inputs/settings (#1478), one-step review launch, scoped execution choice and frozen labels (#1487), six task launches, preview, remembered choices and result labels (#1488), and optional analysis `planEnvelope.procedureContent { editorInstruction, exemptionRules }` (#1489). #1491 / PR #1493 makes pre-start and frozen plans name this start’s model service and 「模型@思考强度」 from the chosen execution, without changing IPC or persisted plan digests. Schema 115 includes the two additive in-place migrations, 113 → 114 (#1478) and 114 → 115 (#1487); Data Version stays 1. No tag or release is claimed.
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.7.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**113** at this head) and service protocol (**202**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.7.1`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**115** at this head) and service protocol (**203**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.7.0",
+  "softwareVersion": "0.7.1",
   "dataVersion": 1,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

@@ -53,7 +53,19 @@
         { "modelId": "claude-fable-5-1", "displayName": "Claude Fable 5.1", "capabilities": { "answerChannel": { "value": "content-text-blocks", "evidence": "claude-text-answer-docs" } }, "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
         { "modelId": "claude-sonnet-5", "displayName": "Claude Sonnet 5", "capabilities": { "answerChannel": { "value": "content-text-blocks", "evidence": "claude-text-answer-docs" } }, "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
         { "modelId": "claude-haiku-4-5", "displayName": "Claude Haiku 4.5", "capabilities": { "answerChannel": { "value": "content-text-blocks", "evidence": "claude-text-answer-docs" } }, "context": { "tokens": 200000, "evidence": "claude-platform-docs" } }
-      ]
+      ],
+      "reasoning": {
+        "control": "anthropic-messages",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "source": "https://platform.claude.com/docs/en/build-with-claude/effort",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [

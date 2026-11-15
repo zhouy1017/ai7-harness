@@ -189,11 +189,9 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBe('series');
     });
   }, 300_000);
-  it('pins an admitted review category, refuses evaluation plus Series, and retains membership pins after removal', async () => {
-    // Replaces the former hypothetical successor-policy evaluation positive with actual current-policy coverage (#1161 rev5).
+  it('pins an admitted review category and retains membership pins after removal', async () => {
     await withSession(async ({ store, seriesId }, bookId) => {
       const policy = launchPolicy;
-      expect(() => store.createInitialEvaluationPreparationWork(bookId, launchPolicy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
       let review = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
       while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
       const category = review.projection!.run!.categories[0]!;
@@ -254,7 +252,6 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
         expect(pinned('typos-and-usage')).toEqual([store.inspectSeries(seriesId).knowledge.items.find((item) => item.itemId !== consistencyOnly)!.itemId]);
       } finally { db.close(); }
 
-      expect(() => store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
       const reviewed = review.projection!.run!;
       store.authorizeReviewRun(bookId, reviewed.reviewRunId, reviewed.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
       const runRecordId = store.reviewRunDriveSteps.start(reviewed.reviewRunId, 'typos-and-usage')!.runRecordId;

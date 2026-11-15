@@ -1111,11 +1111,14 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
   });
 
   it.each([{ model: 'deepseek-flash', effort: undefined, label: 'DeepSeek V4.1 Flash' },
-    { model: 'deepseek-v4-pro', effort: 'high', label: 'deepseek-v4-pro@high' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
+    { model: 'deepseek-v4-pro', effort: 'high', label: 'deepseek-v4-pro@high' },
+    { model: 'account-custom-model', effort: 'vendor-future-level', label: 'account-custom-model@vendor-future-level' }])('freezes baseline memory and producing $model effort through execution and restart', async ({ model, effort, label }) => {
     const { store, production } = await openProductionStore();
     const credentialReference = await configure(store, production, 'deepseek-open-platform');
-    store.selectMainRoleModel('deepseek-open-platform', model);
-    const configured = { ...OFFICIAL, model, credentialReference };
+    store.selectMainRoleModel('deepseek-open-platform', model, effort ?? 'off');
+    const selected = store.getConfiguredModelRoleBinding('main-editorial')!;
+    const configured = { ...OFFICIAL, model, credentialReference,
+      ...(selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort }) };
     production.live = { ...configured, scope: 'ordinary-production', runBudgetCeiling: 'unset' };
     production.policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
     const egress = vi.spyOn(egressGate, 'evaluateEgress');
@@ -1124,6 +1127,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
       text: '对合成引用应区分作者观点和外部证据。', effect: 'guide' });
     const prepared = prepare(store, bookId, production.policy);
     const digest = prepared.planEnvelope!.promptContractDigest;
+    store.selectMainRoleModel('deepseek-open-platform', model, 'low');
+    production.live = { ...configured, reasoningEffort: 'low', scope: 'ordinary-production', runBudgetCeiling: 'unset' };
     expect(store.baselineAnalysisLedger.definitionForDigest(digest).systemPrompt).toContain('对合成引用应区分作者观点和外部证据。');
     const calls: StubCall[] = [];
     const settled = await run(store, owner(store, production, stubTransport(calls, await chainAnswers(prepared)), []), bookId, prepared);
@@ -1330,7 +1335,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(calls).toHaveLength(1);
   });
 
-  it('lifts exact-sample1 lineage only in production, with development-ci and developer-live still refusing', async () => {
+  it('accepts editor manuscripts in production and local CI, while developer-live retains its Public SampleBook boundary', async () => {
     const selectedPath = join(roots.inputRoot, `${randomUUID()}.docx`);
     await composeManuscriptDocx(selectedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 12, title: '编辑自己的书稿' });
     const importOwn = async (store: EditorialStore): Promise<string> => {
@@ -1350,12 +1355,12 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.manuscriptPin?.sourceDigest).not.toBe('b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
     store.close();
     opened = opened.filter((candidate) => candidate !== store);
-    // The same Book under development-ci: the exact-sample1 requirement stands.
+    // The same Book is available to the local development-ci fixture route, which has no live transport.
     const ci = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     opened.push(ci);
     ci.saveModelServiceConnection('L2 官方', null, 'needs-attention');
     const ciPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'development-ci');
-    expect(code(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, ciPolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    expect(() => ci.createBaselineAnalysisPreparationWork(own, BASELINE_ANALYSIS_TASK_GOAL, null, ciPolicy)).not.toThrow();
     const livePolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
     ci.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: livePolicy, live: {
       ...GO, credentialReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['opencode-go'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
@@ -1412,6 +1417,33 @@ describe('schema 72 (Issue #811)', () => {
 
 
 describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
+  it('sends the Fast role default and freezes its answer attribution when the default later changes (#1453)', async () => {
+    const { store } = await openProductionStore();
+    const connection = store.saveModelServiceConnection('Fast effort', null, 'ready', 'openai-platform');
+    store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'high');
+    const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
+    const bodies: Array<Record<string, unknown>> = [];
+    const transport: typeof fetch = async (url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return responsesTransport([], 'Public synthetic answer.')(url, init);
+    };
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
+      { scope: 'ordinary-production', nativeFetch: transport }, () => policy, () => connection.credentialReference,
+      { resolve: async () => 'public-synthetic-placeholder' }, undefined, undefined,
+      () => store.getConfiguredModelRoleBinding('fast-interaction')?.reasoningEffort) });
+    try {
+      const answer = await owner.ask('material-translation', 'Public synthetic reference text.', 'effort-proof');
+      expect(answer).toMatchObject({ kind: 'answered', binding: { model: 'custom-fast-model', reasoningEffort: 'high' } });
+      expect(bodies).toHaveLength(1); expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } });
+      store.selectFastRoleModel('openai-platform', 'custom-fast-model', 'low');
+      const second = await owner.ask('material-translation', 'Public synthetic second reference text.', 'second-effort-proof');
+      expect(second).toMatchObject({ kind: 'answered', binding: { reasoningEffort: 'low' } });
+      expect(bodies).toHaveLength(2); expect(bodies[1]).toMatchObject({ reasoning: { effort: 'low' } });
+      expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } });
+    } finally { owner.dispose(); }
+  });
+
   function responsesTransport(calls: Array<{ url: string; model: string; cap: number }>, answer: string): typeof fetch {
     return (async (url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
@@ -1711,7 +1743,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 113, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 115, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

@@ -17,6 +17,7 @@ const details = (className: string | undefined, ...rows: HTMLElement[]) => { con
 const profile = BUILTIN_EVALUATION_PROFILE;
 const total = { score: 70, fullMarks: 100, notRated: 0, unscored: 0 };
 const latest = {
+  modelLabel: 'chosen-model@high',
   revisionId: 'report-1', ordinal: 1, revisionLabel: 'r1', createdAt: '2026-11-07T00:00:00.000Z', current: true, complete: true, unitsTotal: 2, unreadUnits: [],
   total, strengths: ['悬念清楚'], weaknesses: ['中段拖沓'], nextStep: '压缩中段。', suggestedConclusion: 'revise' as const,
   items: profile.items.map((item, index) => ({ itemId: item.itemId, score: 14, comment: `第 ${index + 1} 项的评语。`, sufficiency: 'sufficient' as const,
@@ -48,6 +49,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(root.dataset['evaluationView']).toBe('report');
   expect(root.querySelector('.evaluation-record')).toBeNull();
   const report = root.querySelector('.evaluation-report')!;
+  expect(report.querySelector('.evaluation-report-model')!.textContent).toBe('模型 chosen-model@high');
   expect(report.querySelectorAll('.evaluation-report-comment')).toHaveLength(profile.items.length);
   expect(report.querySelector('.evaluation-report-comment')!.textContent).toBe('第 1 项的评语。');
   expect(report.querySelectorAll('.evaluation-item-ai7-evidence li')).toHaveLength(profile.items.length);
@@ -62,6 +64,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(startEvaluation).toHaveBeenCalledWith({ fromInitial: true, skipDamaged: false });
   expect(root.querySelector('.evaluation-report')).toBeNull();
   expect(root.querySelector('.evaluation-record h3')!.textContent).toContain('详细评估报告');
+  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('初评模型 chosen-model@high');
   expect(root.querySelector('.evaluation-record .evaluation-report-next-step')!.textContent).toBe('下一步建议：压缩中段。');
   // The 评语 field holds AI7's words until the editor changes them; they are not repeated beside it.
   expect(root.querySelectorAll('.evaluation-record .evaluation-item-ai7-comment')).toHaveLength(0);
@@ -120,10 +123,11 @@ function rewriting(saveEvaluation: (input: { content: { verdict?: string | null 
   const inspectTaskPlan = vi.fn(async () => ({ kind: 'evaluation-rewrite', start: { readiness: 'ready', planEnvelopeDigest: 'plan', categoryDigests: [] } }));
   const authorizeEvaluationRewrite = vi.fn(async () => undefined);
   const openRewritePlan = vi.fn();
+  const openLaunch = vi.fn();
   const api = { inspectEvaluation: async () => page, startEvaluation: async () => editing, saveEvaluation: vi.fn(saveEvaluation), prepareEvaluationRewrite, inspectTaskPlan, authorizeEvaluationRewrite };
   const surface = mountEvaluation({ root: root as unknown as HTMLElement, api, bookId: 'book', technicalDetails: details, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
-    awaitServiceJob: async () => ({ state: 'completed', kind: 'evaluation-rewrite-preparation', result: prepared }), openRewritePlan } as unknown as MountEvaluationOptions);
-  return { root, surface, api, editing, openRewritePlan };
+    awaitServiceJob: async () => ({ state: 'completed', kind: 'evaluation-rewrite-preparation', result: prepared }), openRewritePlan, openLaunch } as unknown as MountEvaluationOptions);
+  return { root, surface, api, editing, openRewritePlan, openLaunch };
 }
 async function typeVerdict(root: ReturnType<typeof miniDocument.createElement>, words: string): Promise<void> {
   root.querySelector('[data-evaluation-action="edit-report"]')!.click();
@@ -132,16 +136,17 @@ async function typeVerdict(root: ReturnType<typeof miniDocument.createElement>, 
   verdict.value = words; verdict.dispatchEvent({ type: 'input', bubbles: true });
 }
 
-it('saves the edits still in the form, then prepares and starts 按我的修改重新生成 in the same click', async () => {
+it('saves the edits still in the form before opening the regeneration start bar', async () => {
   let view!: ReturnType<typeof rewriting>;
   view = rewriting(async (input) => ({ ...view.editing, record: { ...record, entries: 2, content: { ...record.content, verdict: input.content.verdict ?? null } } }));
   await view.surface.load();
   await typeVerdict(view.root, '按编辑意见收紧中段。');
   view.root.querySelector('[data-evaluation-action="prepare-rewrite"]')!.click();
-  await vi.waitFor(() => expect(view.api.authorizeEvaluationRewrite).toHaveBeenCalledWith({ taskIntentId: 'rewrite-task', planEnvelopeDigest: 'plan' }));
+  await vi.waitFor(() => expect(view.openLaunch).toHaveBeenCalledWith({ bookId: 'book', operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', input: { recordId: 'report' } }));
   expect(view.api.saveEvaluation).toHaveBeenCalledWith(expect.objectContaining({ recordId: 'report', finalize: false, content: expect.objectContaining({ verdict: '按编辑意见收紧中段。' }) }));
-  expect(view.api.saveEvaluation.mock.invocationCallOrder[0]!).toBeLessThan(view.api.prepareEvaluationRewrite.mock.invocationCallOrder[0]!);
-  expect(view.api.prepareEvaluationRewrite).toHaveBeenCalledWith({ recordId: 'report' });
+  expect(view.api.saveEvaluation.mock.invocationCallOrder[0]!).toBeLessThan(view.openLaunch.mock.invocationCallOrder[0]!);
+  expect(view.api.prepareEvaluationRewrite).not.toHaveBeenCalled();
+  expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.openRewritePlan).not.toHaveBeenCalled();
 });
 
@@ -154,5 +159,6 @@ it('starts nothing when the save before regenerating is refused, and keeps the t
   await vi.waitFor(() => expect(view.root.querySelector('.evaluation-refusal')).not.toBeNull());
   expect(view.api.prepareEvaluationRewrite).not.toHaveBeenCalled();
   expect(view.api.authorizeEvaluationRewrite).not.toHaveBeenCalled();
+  expect(view.openLaunch).not.toHaveBeenCalled();
   expect(view.root.querySelector('.evaluation-lists [data-evaluation-field="verdict"]')!.value).toBe('按编辑意见收紧中段。');
 });

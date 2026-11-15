@@ -1,6 +1,11 @@
+import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
+import { createDispatchChooser } from './components/dispatch-chooser.js';
+import type { RuntimeExecutionConfig, LedgerTaskLaunchOperation, TaskExecutionLaunchResult } from '../shared/runtime-execution-config.js';
+import type { ServiceOperationMap } from '../shared/protocol.js';
+import type { PlanEditsProjection } from '../shared/protocol/analysis-plan.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
-import { reviewPlanReferenceField } from './task-material-selection.js';
-import { evaluationPlanReferenceField } from './evaluation.js';
+import { reviewPlanReferenceField, similarMaterialsField } from './task-material-selection.js';
+import { evaluationPlanReferenceField, evaluationMaterialsField } from './evaluation.js';
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { taskPlanWording } from './task-drawer-labels.js';
@@ -184,7 +189,15 @@ export interface TaskPlanRequest {
   readonly ref: string | null;
 }
 
+export type TaskLaunchOperation = LedgerTaskLaunchOperation;
+export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; operation: K; title: string;
+  /** Surface behavior after the launch commits; never sent to the service. */
+  onStarted?: () => void;
+  readInput?: () => Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'>;
+  input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
+
 export interface TaskDrawerSurface {
+  openLaunch(request: TaskLaunchRequest, returnFocus: () => HTMLElement | null): void;
   /**
    * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
@@ -207,7 +220,7 @@ export interface TaskDrawerSurface {
   openComposer(seed: TaskComposerSeed, returnFocus: () => HTMLElement | null): void;
   openDraft(bookId: string, draftId: string, returnFocus: () => HTMLElement | null): void;
   /** What the drawer shows now: one Task's plan, a Book's 任务 panel, a dialogue, the composer, or nothing. */
-  view(): { readonly kind: 'plan' | 'panel' | 'dialogue' | 'composer'; readonly bookId: string } | null;
+  view(): { readonly kind: 'plan' | 'panel' | 'dialogue' | 'composer' | 'launch'; readonly bookId: string } | null;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -220,7 +233,10 @@ export interface TaskDrawerSurface {
 
 type DrawerApi = Pick<
   RendererApi,
+  | TaskLaunchOperation
+  | 'getModelServiceSettings'
   | 'inspectEvaluation'
+  | 'previewTaskLaunch'
   | 'prepareInitialEvaluation'
   | 'prepareReadersReport'
   | 'inspectReviewWorkspace'
@@ -450,7 +466,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * What the slot shows (Issue #423, S77a): one Task's plan, the Book's 任务 panel, one dialogue (Issue #52, S17a), or the
    * Context-bound Task Composer (Issue #423, slice 7a).
    */
-  let view: 'plan' | 'panel' | 'dialogue' | 'composer' = 'plan';
+  let view: 'plan' | 'panel' | 'dialogue' | 'composer' | 'launch' = 'plan';
   /** Where 收起 takes the composer: back to the plan or the panel it was opened from, or closed. */
   let composerReturn: (() => void) | null = null;
   /** An unfinished draft — or unsaved words — left beside another Book (TASK-006): collapsed, never following the new Book. */
@@ -501,6 +517,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   identity.append(back, heading);
   header.append(identity, modes, close);
   const body = el('div', 'task-drawer-body');
+  let invalidateLaunchPreview: (() => void) | null = null;
+  for (const event of ['input', 'change']) document.addEventListener(event, () => {
+    if (view === 'launch' && !root.hidden) invalidateLaunchPreview?.();
+  });
   // The open questions stand first in the body, and a repaint of the plan below them never removes them: a note being
   // written keeps its focus and its composition while the Run reads on (Issue #422, S76d).
   const questions = el('div', 'task-drawer-questions');
@@ -630,7 +650,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     back.hidden = view === 'panel';
     title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : view === 'composer' ? TASK_COMPOSER_TITLES.draft : TASK_DRAWER_TITLE;
     modes.hidden = view !== 'plan';
-    foot.hidden = view !== 'plan';
+    foot.hidden = view !== 'plan' && view !== 'launch';
+    footer.hidden = view === 'launch';
     // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
     if (view !== 'dialogue') dialogueSurface.stop();
     if (view !== 'plan') {
@@ -2793,7 +2814,166 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       composer.openDraft(bookId, draftId);
       title.focus();
     },
+    openLaunch(next, finder) {
+      ticket += 1; const current = ticket;
+      clearPoll(); panel.stop(); dialogueSurface.stop();
+      view = 'launch'; panelBookId = next.bookId; request = null; plan = null;
+      for (const key of ['taskPlanKind', 'taskPlanRef', 'taskPlanStart', 'taskPlanState', 'taskDetailView']) delete root.dataset[key];
+      returnFocus = finder;
+      root.hidden = false; root.dataset['taskDrawer'] = 'open'; shell.dataset['taskDrawer'] = 'open';
+      showView(); title.textContent = next.title; modes.hidden = true;
+      const kinds = LEDGER_TASK_LAUNCH_KINDS;
+      root.dataset['taskLaunchKind'] = kinds[next.operation];
+      const description = el('p', undefined, '开始时使用当前稿件，并固定本次任务的模型与思考强度。');
+      const estimate = el('details', 'task-launch-estimate'), usage = el('div');
+      const refreshPreview = control('更新计划', '', 'preview-launch');
+      estimate.append(el('summary', undefined, '先看计划'), usage, refreshPreview);
+      body.replaceChildren(description, estimate);
+      let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
+      let commandId = crypto.randomUUID();
+      let previewVersion = 0;
+      invalidateLaunchPreview = () => {
+        previewVersion += 1;
+        usage.replaceChildren(el('p', 'task-launch-preview-stale', '选项已变化，请更新计划。'));
+      };
+      const runOptions = el('details', 'task-launch-options');
+      runOptions.append(el('summary', undefined, '本次运行选项'));
+      const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text';
+      budget.value = String(next.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? '');
+      budget.dataset['taskLaunchOption'] = 'budget';
+      budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
+      const budgetLabel = el('label', undefined, '本次预算上限 · 词元（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
+      usage.textContent = '计划预览按当前稿件和本次选项计算，不记录任务；开始时固定当前稿件。';
+      runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
+      const baselineOptions = next.operation === 'launchBaselineAnalysis';
+      const retry = el('select'); retry.dataset['taskLaunchOption'] = 'retry'; retry.setAttribute('aria-label', '遇到可重试的失败');
+      for (const [value, label] of [['auto', '自动重试'], ['ask-first', '先问我'], ['never', '不重试']]) {
+        if (value === 'ask-first' && !baselineOptions) continue;
+        const option = el('option', undefined, label); option.value = value!; retry.append(option);
+      }
+      retry.value = next.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : next.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
+      const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
+      sampling.checked = !next.input.planEdits?.removedSteps.includes('assurance-sampling');
+      const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
+      runOptions.append(retryLabel);
+      if (baselineOptions) {
+        const samplingLabel = el('label', undefined, '完成后核对与抽检'); samplingLabel.prepend(sampling);
+        runOptions.append(samplingLabel);
+      }
+      for (const event of ['input', 'change']) runOptions.addEventListener(event, () => { commandId = crypto.randomUUID(); });
+      const timing = el('select'); timing.dataset['taskStartWhen'] = ''; timing.setAttribute('aria-label', '开始时间');
+      for (const [value, label] of [['now', '立即'], ['idle', '空闲时处理'], ['when-online', '联网后开始任务']]) {
+        const option = el('option', undefined, label); option.value = value!; timing.append(option);
+      }
+      timing.value = next.input.startWhen ?? 'now';
+      timing.addEventListener('change', () => { commandId = crypto.randomUUID(); });
+      const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing); runOptions.append(timingLabel);
+      body.append(runOptions);
+      const references = el('div', 'task-launch-references');
+      body.append(references);
+      const readReferences = next.operation !== 'launchInitialEvaluation' && next.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
+        if (ticket !== current || page.bookId !== next.bookId) return;
+        const selected = new Set(next.input.materialIds ?? []);
+        const materials = el('div'); references.append(materials);
+        const paintReferences = (): void => {
+          materials.replaceChildren(evaluationMaterialsField(page, next.operation === 'launchInitialEvaluation' ? 'initial' : 'readersReport', selected, true, false, () => {
+            next.input = { ...next.input, materialIds: [...selected] };
+            commandId = crypto.randomUUID(); invalidateLaunchPreview?.(); paintReferences();
+          }));
+        };
+        paintReferences();
+        references.append(similarMaterialsField(api, next.bookId, page.materials?.items ?? [], selected, id => {
+          selected.add(id); next.input = { ...next.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidateLaunchPreview?.(); paintReferences();
+        }));
+        if (next.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
+          const label = el('label', undefined, '书系参考');
+          const select = el('select'); select.setAttribute('aria-label', '本次任务的书系参考');
+          for (const [value, title] of [['', '仅本书'], ...page.market.series.map(series => [series.seriesId, `书系《${series.title}》`])]) {
+            const option = el('option', undefined, title); option.value = value!; select.append(option);
+          }
+          select.value = next.input.seriesId ?? '';
+          select.addEventListener('change', () => { next.input = { ...next.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
+          label.append(select); references.append(label);
+        }
+      }).catch(error => { if (ticket === current) references.append(el('p', undefined, options.errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
+      const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); invalidateLaunchPreview?.(); } });
+      const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
+      const applyOptions = (): boolean => {
+        const latestInput = next.readInput?.();
+        if (latestInput !== undefined) {
+          const { planEdits: _edits, startWhen: _when, ...previous } = next.input;
+          if (JSON.stringify(latestInput) !== JSON.stringify(previous)) commandId = crypto.randomUUID();
+          next.input = { ...next.input, ...latestInput };
+        }
+        const tokens = budget.value.trim() === '' ? null : parseBudgetCeiling(budget.value);
+        if (tokens === null && budget.value.trim() !== '') { problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return false; }
+        const planEdits: PlanEditsProjection = {
+          removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : next.input.planEdits?.removedSteps ?? [],
+          disallowedAdaptations: retry.value === 'never' ? ['safe-retry'] : [],
+          ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
+          ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
+        };
+        next.input = { ...next.input, planEdits, startWhen: timing.value === 'idle' ? 'idle' : timing.value === 'when-online' ? 'when-online' : 'now' };
+        return true;
+      };
+      const readPreview = async (): Promise<void> => {
+        const version = previewVersion;
+        if (refreshPreview.disabled || !applyOptions() || !(await options.settle()) || version !== previewVersion) return;
+        refreshPreview.disabled = true;
+        try {
+          const launch = { operation: next.operation, input: { ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice } } as import('../shared/protocol.js').TaskLaunchPreviewInput['launch'];
+          const preview = await api.previewTaskLaunch({ launch });
+          if (ticket !== current || version !== previewVersion) return;
+          const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, step));
+          usage.replaceChildren(el('p', undefined, `处理范围：${preview.scope}`), steps,
+            ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, `会发送：${preview.send}`), el('p', undefined, preview.usage),
+            ...preview.adaptations.map(line => el('p', undefined, line)));
+        } catch (error) { if (ticket === current && version === previewVersion) usage.textContent = options.errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
+        finally { refreshPreview.disabled = false; }
+      };
+      estimate.addEventListener('toggle', () => { if (estimate.open) void readPreview(); });
+      refreshPreview.addEventListener('click', () => { void readPreview(); });
+      const start = control('开始任务', 'primary', 'launch'); start.disabled = true;
+      start.addEventListener('click', () => { void (async () => {
+        if (start.disabled) return;
+        start.disabled = true;
+        problem.textContent = '';
+        const controls = [...body.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button'),
+          ...chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button')].map(control => ({ control, disabled: control.disabled }));
+        for (const { control } of controls) control.disabled = true;
+        const restore = (): void => { for (const { control, disabled } of controls) control.disabled = disabled; };
+        try {
+          if (!applyOptions()) { restore(); start.disabled = false; return; }
+          if (!(await options.settle())) { restore(); start.disabled = false; return; }
+          let result: TaskExecutionLaunchResult;
+          switch (next.operation) {
+            case 'launchBaselineAnalysis': result = await api.launchBaselineAnalysis({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchCustomAnalysis': result = await api.launchCustomAnalysis({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchWritingTask': result = await api.launchWritingTask({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchInitialEvaluation': result = await api.launchInitialEvaluation({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchReadersReport': result = await api.launchReadersReport({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+            case 'launchEvaluationRewrite': result = await api.launchEvaluationRewrite({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
+          }
+          const kind = next.operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kinds[next.operation] as TaskPlanKind;
+          next.onStarted?.();
+          options.onRecorded(kind, next.bookId, result.taskIntentId);
+          options.setStatus(result.launchNotice ?? (result.waitingForNetwork ? '已记录任务，联网后开始。' : '已开始任务'), 'success');
+          if (ticket === current) surface.open({ bookId: next.bookId, kind, ref: result.taskIntentId }, finder, result.launchNotice, { view: 'run' });
+        } catch (error) { if (ticket === current) { restore(); start.disabled = false; problem.textContent = options.errorMessage(error, '无法开始任务。'); } }
+      })(); });
+      bar.hidden = false; bar.replaceChildren(chooser.element, start, problem);
+      options.onOpen(); title.focus();
+      void Promise.allSettled([api.getModelServiceSettings(), api.getPreferences(), readReferences]).then(([settings, preferences]) => {
+        if (ticket !== current) return;
+        executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices'][kinds[next.operation]] ?? {} : {};
+        rememberedChoice = Object.keys(executionConfig).length > 0;
+        if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, executionConfig);
+        else chooser.unavailable();
+      }).catch(() => { if (ticket === current) chooser.unavailable(); }).finally(() => { if (ticket === current) start.disabled = interrupted; });
+      if (interrupted) disableAll();
+    },
     open(next, finder, note, how) {
+      delete root.dataset['taskLaunchKind'];
       ticket += 1;
       panel.stop();
       view = 'plan';
@@ -2892,13 +3072,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     view() {
       if (root.hidden) return null;
+      if (view === 'launch') return panelBookId === null ? null : { kind: 'launch', bookId: panelBookId };
       if (view === 'composer') return panelBookId === null ? null : { kind: 'composer', bookId: panelBookId };
       if (view === 'dialogue') return panelBookId === null ? null : { kind: 'dialogue', bookId: panelBookId };
       if (view === 'panel') return panelBookId === null ? null : { kind: 'panel', bookId: panelBookId };
       return request === null ? null : { kind: 'plan', bookId: request.bookId };
     },
     refresh(kind) {
-      if (root.hidden || interrupted || view === 'dialogue' || view === 'composer') return;
+      if (root.hidden || interrupted || view === 'dialogue' || view === 'composer' || view === 'launch') return;
       if (view === 'panel') {
         panel.refresh();
         return;
@@ -2949,7 +3130,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         surface.close(false);
         return;
       }
-      if (view === 'dialogue') return;
+      if (view === 'dialogue' || view === 'launch') return;
       if (view === 'panel') {
         panel.refresh();
         return;

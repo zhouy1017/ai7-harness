@@ -1,12 +1,37 @@
-# AI7 development plan — #1459 · R1 → 0.7.0 Alpha candidate
+# AI7 development plan — #1472 · R2 → 0.7.1 Alpha candidate
 
-This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `6fdb6a8bcadb6be58c82d10c22788faa16bf186d` (0.6.5 Beta, #1444). The post-0.6.5 order was settled on the plan board [#1458](https://github.com/zhouy1017/ai7-harness/issues/1458) ([final conclusion](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6825225507)); its first round R1 runs under wave Issue [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) on `codex/integration-0.7.0` and targets 0.7.0 Alpha. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
+This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `2026a9ee952133e8927649419d3f537d6117d798` (0.7.0 Alpha, #1459). The post-0.6.5 order was settled on the plan board [#1458](https://github.com/zhouy1017/ai7-harness/issues/1458); its second round R2 runs under wave Issue [#1472](https://github.com/zhouy1017/ai7-harness/issues/1472) on `codex/integration-0.7.1` and targets 0.7.1 Alpha. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
 
 The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) (procedures as the central object, the execution governor and idle lane, DSH as the complex-task harness, review contract v2 with evidence on cards, one production policy with a runtime model table, the learning agent's reason asks) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (structural editing, structure recognition, import fidelity, less ceremony). They build on [ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md); F-05 and F-06 keep their design and their core priority. The plan was revised through [#1065](https://github.com/zhouy1017/ai7-harness/issues/1065). The Owner's 2026-10-24 platform decision is [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): Windows is the only delivery platform, and every macOS gate and target is deferred indefinitely (revised through [#1098](https://github.com/zhouy1017/ai7-harness/issues/1098)). The programme is versioned under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md): one `x.y.z` in `package.json` names the software in releases and in this plan — Wave 21 → 0.2.0, Wave 22 → 0.3.0, its follow-up integration Wave 22b → 0.4.0 (the Owner's 2026-10-31 maintenance sub-wave carrying the policy successor and the admitted channels), Wave 23 → 0.5.0 — and the former "v3.2" planning name is retired (revised through [#1100](https://github.com/zhouy1017/ai7-harness/issues/1100)).
 
-## Current R1 → 0.7.0 Alpha (#1459)
+## Current R2 → 0.7.1 Alpha (#1472)
 
-R1 starts from delivered 0.6.5 Beta at `dev@6fdb6a8b`. All four slices are merged into `codex/integration-0.7.0` at `3cc53efd`; the 0.7.0 Alpha closure candidate awaits its final ladder, dev merge and human-test refresh. Protocol 202 records PR #1462’s addition of `guessed-anchor` to `ProposalDraftBatchProjection.excluded.reason`; schema 113, Data Version 1 and policy v35 / set v26 stay unchanged.
+R2 starts from `dev@2026a9ee`. Under the Owner's [2026-11-14 decisions](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6870691052): the frozen fixture manifest retires with the runtime policy lock (SampleBook-based samples stay, no fixture fingerprints, not synthetic samples alone); the ADR that supersedes the lock clauses is written as accepted; recordings made unusable are listed at closure for the Owner to authorize re-recording.
+
+| Slice | What the editor can newly do | PRs / integration commits |
+| --- | --- | --- |
+| #1470 | See the connector in the narrow overlay 批注栏; select a loading card and keep that selection when it arrives | #1473, #1480 / `a5b2ad9c`, `5b2b4b8f` |
+| #1453 | Choose models freely with the runtime policy lock and frozen fixture manifest retired; set 思考强度 per role and see the actually sent level on cards | #1474, #1478 / `f505cff4`, `bbcfed72` |
+| #1471 | Let the model identify an occurrence of a repeated word; pinned 修改建议 join 接受并应用全部 | #1477 / `a9fad5b7` |
+| #1475 | Repeatedly split and merge paragraphs on a slow disk without checkpointing inside the save making the editor read-only | #1485 / `410771ff` |
+| #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
+| #1476 | Use a 工序 carrying 编辑任务说明 / 豁免规则 for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成; see what it adds to sending in the plan | #1489 / `a3a19670` |
+| #1491 | Read the model service and 「模型@思考强度」 chosen for this start in the pre-start and frozen plans, including after another service was used; waiting tasks keep their frozen attribution | #1493 / `6196f3ed` |
+| #1490 stage fix | Click a settled target when opening a retained plan revision; the shared real-click helper waits for rectangle stability across animation frames after drawer close | #1492 / `1cb2cf1d` |
+
+The candidate is package 0.7.1, protocol 203, schema 115 and Data Version 1. All outcomes above await final closure evidence and dev delivery; #1489 is integrated at `a3a19670` and #1493 at `6196f3ed`.
+
+Remaining delivery order:
+
+1. All R2 slices and stage repairs are merged through `1cb2cf1d`; run host checks, the full guest ladder and two unbound hosted runs at the final closure head.
+2. Open a draft closure PR into `codex/integration-0.7.1`; the Commander then integrates the wave into dev and refreshes the fixed human-test folder.
+3. R3 (#1433, #1434, #1147, #1152, #1074) follows as 0.7.2 Alpha. Owner re-record authorization and human acceptance remain pending.
+
+The hosted J-02 structure-burst failure was fixed by #1475 / PR #1485: automatic checkpointing ran inside commit after a structural edit appended about 48.5 MB in a roughly 46,000-block manuscript. It also reproduces on delivered 0.6.5 (hosted 43563912248), so it was not an R1 regression. Write amplification itself is deferred to R5.
+
+## Delivered R1 → 0.7.0 Alpha (#1459)
+
+R1 is delivered as `dev@2026a9ee` through [PR #1468](https://github.com/zhouy1017/ai7-harness/pull/1468) (hosted Full Gate 15 of 15): protocol 202 for PR #1462's `guessed-anchor` value, schema 113, Data Version 1 and policy v35 / set v26 unchanged.
 
 | Lane | Slice | Outcome | Integration commit |
 | --- | --- | --- | --- |
@@ -16,18 +41,11 @@ R1 starts from delivered 0.6.5 Beta at `dev@6fdb6a8b`. All four slices are merge
 | 3 (service) | [#1435](https://github.com/zhouy1017/ai7-harness/issues/1435) | Repeated or punctuation-variant quotations keep their replacement; guessed locations keep one-click 接受 and stay out of bulk apply | `106a47e5` (#1462) |
 | repair | [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) | The 批注栏 works in the 1008×681 overlay form and a click on a mark is no longer dropped; found by the hosted Gate | `bedddbca` (#1469) |
 
-Remaining delivery order:
 
-1. Verify the committed 0.7.0 closure candidate with host checks and the final full ladder split over the three background guests.
-2. Merge the draft closure PR into `codex/integration-0.7.0` after review; no dev delivery is claimed here.
-3. Commander opens and merges the wave-to-`dev` PR with exact head/base evidence, closes #1459 and its slices, then refreshes `C:\Users\Chooo\Playground\AI7-human-test` with `pwsh tools/human-test-build.ps1` ([source checkout](source-checkout.md#unsigned-host-native-distribution-issue-966)).
-4. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
-
-## After R1 (#1458)
+## After R2 (#1458)
 
 | Round | Target | Scope | Starts after |
 | --- | --- | --- | --- |
-| R2 | 0.7.1 Alpha | Model and 思考强度 chosen freely, one-step dispatch, retirement of the runtime policy lock ([#1453](https://github.com/zhouy1017/ai7-harness/issues/1453) and [#1455](https://github.com/zhouy1017/ai7-harness/issues/1455), Brief revision 2) | R1 on `dev` |
 | R3 | 0.7.2 Alpha | Whole-book review synthesis and integer position indexes ([#1433](https://github.com/zhouy1017/ai7-harness/issues/1433), [#1434](https://github.com/zhouy1017/ai7-harness/issues/1434)), the memory facade and navigation guards, and the retained follow-ups [#1147](https://github.com/zhouy1017/ai7-harness/issues/1147), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1074](https://github.com/zhouy1017/ai7-harness/issues/1074) | R2's dispatch and execution contract |
 | R4 | 0.7.3 Alpha | Service-layer domain split and the fast in-memory domain tests ([#1075](https://github.com/zhouy1017/ai7-harness/issues/1075), [#1033](https://github.com/zhouy1017/ai7-harness/issues/1033)) | R2 and R3 service slices |
 | R5 | 0.8.0 Alpha | Storage baseline fold and the in-app database upgrade tool | R4; a measured read-path baseline on `SampleBooks/` and the Owner's decision on per-step undo across the upgrade |

@@ -145,8 +145,7 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     expect(liveWritingRule(policy, DEVELOPER_LIVE_POLICY_BINDING)?.ruleId).toBe('developer-live-public-samplebook-writing');
     expect(store.inspectWritingTask(imported.bookId)).toMatchObject({ unavailable: null, consequences: { send: WRITING_LIVE_SEND_CONSEQUENCE } });
     for (const denied of [withoutRuleFor(policy, 'writing'), withRepeatedRuleFor(policy, 'writing'), withRuleFor(policy, 'writing', { model: 'other' }),
-      withRuleFor(policy, 'writing', { crossUnitSynthesisAllowed: false }), withRuleFor(policy, 'writing', { modelRole: 'Fast Interaction Role' }),
-      withRuleFor(policy, 'writing', { outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] })]) {
+      withRuleFor(policy, 'writing', { crossUnitSynthesisAllowed: false }), withRuleFor(policy, 'writing', { modelRole: 'Fast Interaction Role' })]) {
       expect(liveWritingRule(denied, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
       store.baselineAnalysisLedger.bindLaunch({ ...store.baselineAnalysisLedger.launch, policy: denied });
       expect(store.inspectWritingTask(imported.bookId).unavailable).toBe(WRITING_LIVE_UNAVAILABLE);
@@ -294,7 +293,7 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     expect(liveKindAdmission(policy, withoutDerivation, binding)).toBeNull();
     expect(liveKindAdmission(policy, writingKindDefinition({ ...input, materials: [{ title: '合成资料', paragraphs: ['合成资料段落。'] }] }), binding)).toBeNull();
     expect(liveKindAdmission(policy, { ...definition, materialReferences: {} }, binding)).toBeNull();
-    expect(liveKindAdmission(withRuleFor(policy, 'writing', { outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] }), definition, binding)).toBeNull();
+    expect(liveKindAdmission(withRuleFor(policy, 'writing', { outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] }), definition, binding)).not.toBeNull();
     expect(liveKindAdmission(policy, definition, { ...binding, model: 'another-model' })).toBeNull();
   });
 

@@ -4,6 +4,8 @@ status: accepted
 
 # Separate Provider Processing by operational scope
 
+Runtime policy-lock, selected-policy/content-admission and frozen-fixture clauses are superseded by [ADR 0102](0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md) under the Owner’s 2026-11-12 and 2026-11-14 decisions. Unrelated authority, provenance, credential and effect boundaries remain; the dated decisions below retain their historical meaning.
+
 This ADR records the Owner-approved Provider Processing correction for Issue #86. It defines policy and authority contracts only; no Provider adapter, endpoint, model, credential, launch selector, call, policy activation or implementation follows from it.
 
 ## Decision

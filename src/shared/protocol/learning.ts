@@ -232,7 +232,7 @@ export interface EnabledLearningEnvelope {
   budget: LearningCurationBudget;
   contractDigest: string;
   policy: import('../protocol.js').SelectedPolicyIdentity;
-  binding: { route: import('./model-service.js').OrdinaryProductionRouteId; endpoint: string; model: string; credentialSlot: import('../protocol.js').CredentialSlotId; credentialReference: string };
+  binding: { route: import('./model-service.js').OrdinaryProductionRouteId; endpoint: string; model: string; reasoningEffort?: string; credentialSlot: import('../protocol.js').CredentialSlotId; credentialReference: string };
   sourceKinds: readonly ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'];
   scope: 'eligible-local-books';
   supervisionDigest: string;

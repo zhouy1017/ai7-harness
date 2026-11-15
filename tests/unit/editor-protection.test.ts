@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('pins protocol 202 at the 0.7.0 R1 closure for guessed-anchor batch exclusions (Issue #1435, #1459)', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(202);
+  it('pins protocol 203 at the 0.7.1 R2 closure for task choices and reasoning (Issue #1472)', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(203);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

@@ -367,7 +367,7 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
     case 'manuscript-conflict':
       return object.conflictKind === 'reversal' ? '已应用的修改建议 · 稿件冲突' : '修改建议 · 稿件冲突';
     case 'analysis':
-      return `基线分析 · ${BASELINE_ANALYSIS_MODE_LABELS[object.mode]}`;
+      return object.customTitle === undefined ? `基线分析 · ${BASELINE_ANALYSIS_MODE_LABELS[object.mode]}` : `自定义分析 · ${object.customTitle}`;
     // A ledger Task of another kind waiting to start once online, or whose plan moved meanwhile (Issue #760, S74c).
     case 'task':
       return GLOBAL_ATTENTION_TASK_KIND_LABELS[object.taskKind];

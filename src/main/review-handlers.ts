@@ -1,3 +1,4 @@
+import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import {
   IPC_CHANNELS,
@@ -14,6 +15,7 @@ import { envelope, requireDesktop } from './handler-guards.js';
 import type { EditorResourceCapability, ManuscriptCapability, OwnedRendererWindow } from './application-types.js';
 
 export function registerReviewHandlers(context: {
+  rememberDispatchChoice(kind: DispatchTaskKind, choice: RuntimeExecutionConfig | undefined, notice?: string): void;
   requireSender: (event: IpcMainInvokeEvent | IpcMainEvent) => OwnedRendererWindow;
   serializeEffect: <Result>(operation: () => Promise<Result>) => Promise<Result>;
   requireAuthority: () => void;
@@ -67,11 +69,25 @@ export function registerReviewHandlers(context: {
         if (typeof input === 'object' && input !== null) {
           for (const key of REVIEW_FINDING_PAGE_KEYS) if (Object.hasOwn(input, key)) Object.assign(page, { [key]: input[key] });
         }
-        const result = await service.call('inspectReviewWorkspace', { ...page, bookId: route.bookId, reviewRunId });
+        const result = await service.call('inspectReviewWorkspace', { ...page, bookId: route.bookId, reviewRunId, ...(input?.executionConfig === undefined ? {} : { executionConfig: input.executionConfig }) });
         requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
         return requireReviewWorkspaceOfRoute(route, result, reviewRunId);
       }),
   );
+
+  ipcMain.handle(IPC_CHANNELS.launchReviewRun, (event, input: Omit<ServiceOperationMap['launchReviewRun']['input'], 'bookId'>) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const generation = owned.routeGeneration;
+        const result = await service.call('launchReviewRun', { ...input, bookId: route.bookId });
+        if (input.executionConfig !== undefined) context.rememberDispatchChoice('review-run', input.executionConfig, result.launchNotice);
+        requireCurrentRouteGeneration(owned, generation);
+        return requireReviewWorkspaceOfRoute(route, result, null);
+      });
+    }));
 
   ipcMain.handle(
     IPC_CHANNELS.prepareReviewRun,

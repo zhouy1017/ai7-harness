@@ -1,5 +1,5 @@
+import type { TaskLaunchRequest } from './task-drawer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
-import { startPreparedTask } from './one-action-start.js';
 import type {
   DefaultExecutionRuleReference,
   ProductionDocumentProjection,
@@ -78,6 +78,7 @@ export interface MountWritingTaskOptions {
   awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** The writing Task's plan in the Task Drawer, whose bar starts it; `note` says why a quick start stopped there. */
   openPlan(taskIntentId: string, note?: string): void;
+  openLaunch(request: TaskLaunchRequest): void;
   /** 打开草稿's document on its own surface, as 交付物's 打开 opens one. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void>;
   /** A document was made: 交付 · 生产文档 and 图书交付包 read again. */
@@ -199,6 +200,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const task = page.task;
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
+      if (task.modelLabel) line.append(` · ${task.modelLabel}`);
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
       if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', task.refusal));
@@ -219,6 +221,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         item.dataset['writingTypeId'] = type.typeId;
         item.dataset['revisionId'] = type.drafted.revisionId;
         item.append(el('p', 'writing-drafted-line', writingDraftedLine(type.label, localInstantLabel(type.drafted.createdAt))));
+        if (type.drafted.modelLabel) item.append(el('p', 'writing-drafted-model', `模型 ${type.drafted.modelLabel}`));
         const title = el('input');
         title.setAttribute('aria-label', '草稿题目');
         title.dataset['writingField'] = `draft-title-${type.drafted.revisionId}`;
@@ -368,8 +371,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null, true));
-    const start = action('开始写作', 'primary', 'start', () => void prepare(null));
+    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null));
+    const start = action('开始写作', 'primary', 'start', () => void prepare(null, true));
     plan.disabled = busy || page.unavailable !== null;
     start.disabled = plan.disabled;
     plan.setAttribute('aria-controls', 'task-drawer');
@@ -461,7 +464,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null, preview = false): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false): Promise<void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -479,6 +482,21 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const title = state.title.trim();
     if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
     else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
+    if (rule === null) {
+      const typeId = state.typeId;
+      options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {
+        typeId: state.typeId, audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds],
+      }, readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] }),
+      onStarted: () => {
+        const currentTitle = state.title.trim();
+        if (currentTitle !== '') rememberedTitles.set(titleKey(projection!.bookId, state.typeId ?? typeId), currentTitle);
+        if (sheet === state) { sheet = null; paint(null); }
+        if (openDraftOnStart) awaitDraft(state.typeId ?? typeId);
+      } });
+      return;
+    }
     busy = true;
     options.setStatus(WRITING_STATUS.preparing, 'busy');
     paint(null);
@@ -507,21 +525,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       sheet = null;
       const ref = result.task?.taskIntentId ?? null;
       const planEnvelopeDigest = result.task?.planEnvelopeDigest ?? null;
-      if (rule === null || ref === null) {
-        options.setStatus(WRITING_STATUS.prepared, 'success');
-        paint(null);
-        if (ref !== null) {
-          if (preview) options.openPlan(ref);
-          else {
-            awaitDraft(state.typeId);
-            await startPreparedTask(api, 'writing', ref);
-            projection = await api.inspectWritingTask();
-            paint(null);
-            follow();
-          }
-        }
-        return;
-      }
+      if (ref === null) throw new Error(WRITING_STATUS.failed);
       if (planEnvelopeDigest === null) {
         // A quick start whose preparation froze no plan stops at it, and says so (#701 review P3-5).
         const note = taskPlanQuickStartFellBack([WRITING_STATUS.quickNoPlan]);

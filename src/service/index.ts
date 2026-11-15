@@ -1,3 +1,4 @@
+import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
 import { controlOverviewTasks } from './task-overview.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
@@ -77,7 +78,7 @@ import type { CooperativeJobOwner } from './cooperative-jobs.js';
 import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacementWaits } from './replacement-gate.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/baseline-analysis-store.js';
-import type { ReviewRunDriver } from './review/review-run-driver.js';
+import { driveLaunchedReviewRun, type ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
 // Session-only, scoped to the open store; never written into the device setting or database.
@@ -100,9 +101,10 @@ function failureResponse(
  * and that refusal is the operation's answer. A store refusal is already coded, and a fatal store error
  * must reach the service's own handling unchanged.
  */
-function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false): void {
+function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false,
+  launched?: Parameters<typeof driveLaunchedReviewRun>[1]): void {
   try {
-    void (resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId));
+    void (launched === undefined ? resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId) : driveLaunchedReviewRun(reviewRuns, launched));
   } catch (error) {
     if (error instanceof StoreErrorClass || !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
     throw new StoreErrorClass(error.code, error.message.length > 0 ? error.message : '审阅未能开始。');
@@ -175,6 +177,8 @@ async function dispatch(
   probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
   refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<import('../shared/protocol.js').ModelDiscoveryResult> = async () => ({ status: 'failure', code: 'MODEL_DISCOVERY_UNAVAILABLE', reason: '模型列表暂不可用' }),
 ): Promise<ServiceSuccessResponse> {
+  // Wait before even the ordinary preflight reads can meet an idle checkpoint's lock.
+  if (request.op === 'flushJournalEdit') await store.waitForJournalCheckpoint();
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
   // is lost with the data the replacement replaces — only reads, a search, and 取消替换 are taken.
@@ -212,12 +216,15 @@ async function dispatch(
     case 'probeSearchBackend':
       return { id: request.id, ok: true, op: request.op, result: await probeBackend(request.input) };
     case 'selectFastRoleModel':
-      store.selectFastRoleModel(request.input.route, request.input.modelId);
+      store.selectFastRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectBothRoleModels':
+      store.selectBothRoleModels(request.input.route, request.input.modelId, request.input.reasoningEffort, request.input.fastReasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'selectMainRoleModel':
-    case 'selectBothRoleModels':
-      store[request.op](request.input.route, request.input.modelId);
+      store.selectMainRoleModel(request.input.route, request.input.modelId, request.input.reasoningEffort);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'refreshModelServiceModels':
@@ -459,6 +466,29 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
+    case 'previewTaskLaunch':
+      return { id: request.id, ok: true, op: request.op, result: store.previewTaskLaunch(request.input, launchPolicy) };
+    case 'launchBaselineAnalysis':
+    case 'launchCustomAnalysis':
+    case 'launchWritingTask':
+    case 'launchInitialEvaluation':
+    case 'launchReadersReport':
+    case 'launchEvaluationRewrite': {
+      const startWhen = connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now';
+      const { ledger, repeated: _repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy, startWhen)
+        : request.op === 'launchCustomAnalysis' ? store.launchCustomAnalysis(request.input, launchPolicy, startWhen)
+        : request.op === 'launchWritingTask' ? store.launchWritingTask(request.input, launchPolicy, startWhen)
+        : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy, startWhen)
+        : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy, startWhen)
+        : store.launchEvaluationRewrite(request.input, launchPolicy, startWhen);
+      try { driveLaunchedLedgerRun(analysisExecution, { ...result, ledger }); }
+      catch (error) {
+        const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+        throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+      }
+      if (ledger.currentRunState(result.runRecordId) === 'awaiting-connectivity') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,
@@ -1129,19 +1159,27 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
+        result: { ...store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
           findingsAfterOrdinal: request.input.findingsAfterOrdinal ?? null,
           excludedAfterOrdinal: request.input.excludedAfterOrdinal ?? null,
           categoryId: request.input.categoryId ?? null,
           severity: request.input.severity ?? null,
           status: request.input.status ?? null,
           chapterBlockId: request.input.chapterBlockId ?? null,
-        }),
+        }, request.input.executionConfig), connectivity: connectivity.planConnectivity.reading() },
       };
     case 'inspectHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };
     case 'saveHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
+    case 'launchReviewRun': {
+      const launched = store.launchReviewRun(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
+      if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
+        connectivity: connectivity.planConnectivity.reading(),
+        ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
+    }
     case 'prepareReviewRun':
       return {
         id: request.id,
@@ -1763,9 +1801,15 @@ async function dispatch(
         ),
       };
     case 'shutdown':
-      store.markCleanShutdown();
       return { id: request.id, ok: true, op: request.op, result: { state: 'stopping' } };
   }
+}
+
+/** The clean lifetime marker precedes potentially slow owner/checkpoint cleanup. */
+async function prepareCleanShutdown(store: EditorialStore, stopOwners: () => Promise<void>): Promise<void> {
+  store.markCleanShutdown(false);
+  await stopOwners();
+  await store.stopCheckpointWorker(true);
 }
 
 /** The Book-less dialogue's route (Issue #1083), refused before anything is recorded unless the selected policy admits one. */
@@ -1979,6 +2023,7 @@ function productionLaunchBindingOf(configured: ConfiguredProviderBinding | null)
     endpoint: allowed.endpoint,
     credentialSlot: allowed.credentialSlot,
     credentialReference: configured.credentialReference,
+    ...(configured.reasoningEffort === undefined ? {} : { reasoningEffort: configured.reasoningEffort }),
     runBudgetCeiling: 'unset',
   };
 }
@@ -2111,6 +2156,36 @@ async function run(): Promise<void> {
   let backupTimer: NodeJS.Timeout | undefined;
   let background: BackgroundAnalysisDispatcher | undefined;
   let transportFailure: 'proxy-unreachable' | 'model-service-unreachable' | null = null;
+  let ownersStopped: Promise<void> | undefined;
+  const stopOwners = (): Promise<void> => {
+    ownersStopped ??= (async () => {
+      if (preflightTimer !== undefined) clearInterval(preflightTimer);
+      if (backupTimer !== undefined) clearInterval(backupTimer);
+      const backupsStopped = store?.stopScheduledBackups();
+      // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
+      const exportsStopped = store?.stopDatabaseExports();
+      // The dispatcher starts nothing more: a preparation it has under way stops at its next step.
+      await background?.dispose();
+      await jobs?.dispose();
+      // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
+      await dialogues?.dispose();
+      // A 润色这段 or 重新生成建议 request in flight is interrupted and settles before the store closes (Issue #842).
+      fastRole?.owner.dispose();
+      await fastRole?.requests.settled();
+      // The Review Run loop stops first and starts no further category; the owner then interrupts the
+      // Run in flight, and the loop records what that Run came to before the store closes.
+      const reviewRunsStopped = reviewRuns?.dispose();
+      await analysisExecution?.dispose();
+      await reviewRunsStopped;
+      await harness?.dispose();
+      requestGovernor.close();
+      await requestGovernor.whenIdle();
+      await backupsStopped;
+      await exportsStopped;
+    })();
+    return ownersStopped;
+  };
+
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const buildIdentity = await readBuiltIdentity(codeRoot);
@@ -2168,6 +2243,7 @@ async function run(): Promise<void> {
     // change; a plan freezes whichever binding is configured when it is frozen, so a route switch reaches new Tasks only.
     const productionState: { live: OrdinaryProductionLaunchBinding | null; fast: ConfiguredProviderBinding | null } = { live: null, fast: null };
     const openedStore = store;
+    void openedStore.startCheckpointWorker();
     const modelServiceChanged = async (): Promise<LaunchPolicyProjection> => {
       if (production === null) return launchPolicy;
       const configured = configuredRoleBindingOf(openedStore);
@@ -2288,8 +2364,8 @@ async function run(): Promise<void> {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
       }
     }
-    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
-    // itself after a restart (ADR 0034), and the editor starts them again when they choose. A Run the editor had answered before
+    // Legacy starts the governor had not admitted were blocked with why by reconciliation (ADR 0034). Committed one-step
+    // launches retain the recorded start decision and restore their admission queue below (ADR 0104). A Run answered before
     // AI7 closed, and that was not yet taken on, is left 可续行 with its answer the same way (Issue #767).
     // Every ledger kind now keeps its continuation checkpoint; reconciliation leaves it for an explicit 续行.
     store.reconcileStoppedInitialEvaluationRuns();
@@ -2324,6 +2400,12 @@ async function run(): Promise<void> {
       }
       catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
     }
+    try {
+      for (const launched of store.pendingLaunchedLedgerRuns()) {
+        try { driveLaunchedLedgerRun(analysisExecution, launched); }
+        catch { /* Admission records its refusal; the task's ordinary controls remain available. */ }
+      }
+    } catch { /* An unreadable retained contract must not prevent the service and its task controls from opening. */ }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —
@@ -2340,7 +2422,7 @@ async function run(): Promise<void> {
         ? dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver())
         // Ordinary production (Issue #811): the route and reference the editor configured, read at each question.
         : production !== null
-          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver())
+          ? productionDialogueRoute(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(), () => productionState.fast?.reasoningEffort)
           : null,
       answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
     });
@@ -2356,11 +2438,19 @@ async function run(): Promise<void> {
           ? productionFastRoleRoutes(production, () => launchPolicy, () => productionState.fast?.credentialReference ?? null, createKeyringSecretResolver(),
             (reference, route) => { const current = openedStore.getConfiguredModelRoleBinding('fast-interaction');
               return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model &&
-                current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
-            () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null)
+                  current.endpoint === route.profile.endpoint && current.credentialSlot === route.profile.credentialSlot; },
+            () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null,
+            () => productionState.fast?.reasoningEffort)
           : null,
     });
-    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store), connectionTesting: () => requestLoop?.probing === true };
+    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store, () => new Date(), binding => {
+      if (production === null || binding === null) return fastRoleOwner;
+      const policy = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', null, binding);
+      const unchanged = (): boolean => openedStore.getModelServiceConnections().some(connection => connection.credentialReference === binding.credentialReference && connection.credentialOperationState === 'ready');
+      return fastRoleOwner.fork(productionFastRoleRoutes(production, () => policy, () => binding.credentialReference, createKeyringSecretResolver(),
+        () => unchanged(), () => openedStore.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference)?.credentialUpdatedAt ?? null,
+        () => binding.reasoningEffort));
+    }), connectionTesting: () => requestLoop?.probing === true };
     // Agent 工作区 (Issue #90, slice 13a): its rounds run on the dialogue's owner and are held in this service's memory only.
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
@@ -2476,6 +2566,7 @@ async function run(): Promise<void> {
         if (serving.store.replacementWaiting()) throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
       },
       dispatch: async (request) => {
+        if (request.op === 'shutdown') await prepareCleanShutdown(serving.store, stopOwners);
         let response: ServiceResponse;
         try {
           response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
@@ -2499,13 +2590,14 @@ async function run(): Promise<void> {
             foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
           throw new Error('E2E interruption before foreground boundary response.');
         }
-        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) serving.background.nudge();
+        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare') || request.op.startsWith('launch'))) serving.background.nudge();
         return response;
       },
       afterResponse: (request, response) => {
         if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
           throw new Error('E2E interruption after acknowledged journal edit.');
         }
+        if (request.op !== 'shutdown') serving.store.checkpointAfterResponse(process.stdin.readableLength === 0);
       },
     });
     await requestLoop.run();
@@ -2518,27 +2610,8 @@ async function run(): Promise<void> {
     try {
       // A backup under way stops at once and removes what it wrote, so none is left half-made when the store closes (Issue
       // #434 review).
-      const backupsStopped = store?.stopScheduledBackups();
-      // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
-      const exportsStopped = store?.stopDatabaseExports();
-      // The dispatcher starts nothing more: a preparation it has under way stops at its next step.
-      await background?.dispose();
-      await jobs?.dispose();
-      // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
-      await dialogues?.dispose();
-      // A 润色这段 or 重新生成建议 request in flight is interrupted and settles before the store closes (Issue #842).
-      fastRole?.owner.dispose();
-      await fastRole?.requests.settled();
-      // The Review Run loop stops first and starts no further category; the owner then interrupts the
-      // Run in flight, and the loop records what that Run came to before the store closes.
-      const reviewRunsStopped = reviewRuns?.dispose();
-      await analysisExecution?.dispose();
-      await reviewRunsStopped;
-      await harness?.dispose();
-      requestGovernor.close();
-      await requestGovernor.whenIdle();
-      await backupsStopped;
-      await exportsStopped;
+      await stopOwners();
+      await store?.stopCheckpointWorker();
     } finally {
       store?.close();
     }

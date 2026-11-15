@@ -1,3 +1,4 @@
+import { anonymousPlatformTools } from '../support/platform-tools.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -56,12 +57,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function v7Rule(): Promise<PlatformToolsRule> {
-  const document = JSON.parse(await readFile(resolve(REPO_ROOT, 'docs/policies/provider-processing-policy.v7.json'), 'utf8')) as {
-    decision: { providerAllowRules: unknown[] };
-  };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule;
-}
+async function v7Rule(): Promise<PlatformToolsRule> { return anonymousPlatformTools(); }
 
 /** The real composition on the remote route, its adapter answered only by the recorded exchanges. */
 async function compose(recorded: RecordedLoop, options: {
@@ -73,7 +69,7 @@ async function compose(recorded: RecordedLoop, options: {
   const binding: EgressBindingFacts = {
     bindingDigest: BINDING_DIGEST,
     route: DEEPSEEK_ROUTE,
-    model: DEEPSEEK_MODEL,
+    model: DEEPSEEK_MODEL, reasoningEffort: 'high',
     systemPrompt: SYSTEM,
     outboundDataCategory: 'public-or-synthetic',
     policy: { operationalScope: 'developer-live', providerProcessingVersion: 'v8', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -121,11 +117,12 @@ async function compose(recorded: RecordedLoop, options: {
   const handle = await prepareExecution({
     sessionId,
     route: DEEPSEEK_ROUTE,
-    model: DEEPSEEK_MODEL,
+    model: DEEPSEEK_MODEL, reasoningEffort: 'high',
     systemPrompt: SYSTEM,
     promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
     adapterFactory: (codes) => {
       adapter = new DeepSeekOpenAiCompatibleAdapter({
+        reasoningEffort: 'high',
         // A placeholder secret: the broker hands it to the transport, which only a recorded exchange answers.
         broker: new CredentialBroker({ resolve: async () => 'placeholder-not-a-credential' }),
         slotBinding: { bindingDigest: BINDING_DIGEST, modelRole: 'Main Editorial Role', slot: DEEPSEEK_ROUTE_PROFILE.credentialSlot, credentialReference: randomUUID() },

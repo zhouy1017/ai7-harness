@@ -337,7 +337,8 @@ export function buildRunReport(facts: RunReportFacts, reflection: RunReportRefle
 }
 
 export function runReportDigest(report: RunReportRecord): string {
-  return sha256Hex(canonicalJson(report));
+  const { modelLabel: _displayLabel, ...record } = report as RunReportRecord & { modelLabel?: string };
+  return sha256Hex(canonicalJson(record));
 }
 
 /** The report as a reader receives it: the recorded record with the digest of its own canonical JSON beside it. */

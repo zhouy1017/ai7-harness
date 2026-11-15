@@ -319,6 +319,28 @@ export class EditorialCardCache {
   }
 }
 
+/** Last exposed point on one words fragment, in viewport coordinates. */
+export function editorialCommentStart(words: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'height'>, pane?: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'>): { x: number; y: number } | undefined {
+  if (words.right <= words.left || words.height <= 0) return undefined;
+  const y = words.top + Math.min(words.height, 20) / 2;
+  if (!pane || y < pane.top || y >= pane.bottom || words.right <= pane.left || words.left >= pane.right) return { x: words.right, y };
+  if (words.right > pane.right) return { x: words.right, y };
+  // Keep the centre strictly inside the exposed fragment, even for a sliver.
+  if (words.left < pane.left) return { x: pane.left - Math.min(1, (pane.left - words.left) / 2), y };
+  return undefined;
+}
+
+/** Keep the first-line endpoint; if covered, continue through later fragments in reading order. */
+export function editorialCommentStartFromFragments(words: readonly Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'height'>[], pane: Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'>): { x: number; y: number } | undefined {
+  const top = words[0]?.top;
+  const ordered = [...words.filter(rect => rect.top === top).sort((a, b) => b.right - a.right), ...words.filter(rect => rect.top !== top)];
+  for (const rect of ordered) {
+    const point = editorialCommentStart(rect, pane);
+    if (point) return point;
+  }
+  return undefined;
+}
+
 /** Measured cards stay in anchor order and remain reachable in the pane's own scroll area. */
 export function stackEditorialComments<T extends { desiredTop: number; measuredHeight: number }>(items: readonly T[], selectedIndex = -1, viewport?: { top: number; height: number }): Array<T & { top: number }> {
   let bottom = 8;
@@ -789,6 +811,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const sequence = pressSequence;
     setTimeout(() => { if (pressSequence === sequence) releaseCommentPress(); }, 100);
   };
+  function focusComment(mark: EditorialMarkAnchorProjection): void {
+    if (pressedComment !== undefined) return;
+    const rect = commentAnchor(mark)?.getBoundingClientRect();
+    const viewport = options.scroll.getBoundingClientRect();
+    if (rect && (rect.bottom < viewport.top || rect.top > viewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
+    activateComment(mark.markId);
+  }
   function layoutComments(): void {
     if (pressedComment !== undefined || textPointerDown) { layoutAfterPress = true; return; }
     const visible = options.comments?.enabled() === true && options.comments.host.getClientRects().length > 0;
@@ -865,6 +894,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           pending.tabIndex = 0; pending.dataset['commentPending'] = pending.dataset['commentCard'] = mark.markId;
           pending.dataset['expanded'] = String(mark.markId === activeComment);
           pending.addEventListener('pointerdown', (event) => { if (event.button === 0) { pressSequence++; pressedComment = mark.markId; } });
+          pending.addEventListener('focusin', () => focusComment(mark));
           pending.addEventListener('click', () => activateComment(mark.markId));
           commentsCanvas.append(pending);
         }
@@ -882,7 +912,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         items.push({ mark, anchor: rect, node: pending, desiredTop: rect.top - base.top + commentsFrameScroll, measuredHeight: pending.getBoundingClientRect().height });
         continue;
       }
-      commentsCanvas.querySelector(`[data-comment-pending="${CSS.escape(mark.markId)}"]`)?.remove();
+      const pending = commentsCanvas.querySelector<HTMLElement>(`[data-comment-pending="${CSS.escape(mark.markId)}"]`);
+      const restoreFocus = pending?.contains(document.activeElement) === true;
+      pending?.remove();
       const readState = freshCard ? 'ready' : cardCache.failed(mark.markId) ? 'failed' : 'pending';
       const stale = readState !== 'ready';
       present.add(mark.markId);
@@ -897,13 +929,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         node.addEventListener('pointerdown', (event) => { if (event.button === 0) { pressSequence++; pressedComment = mark.markId; } });
         node.addEventListener('pointerenter', () => hoverComment(mark.markId));
         node.addEventListener('pointerleave', () => hoverComment(undefined));
-        node.addEventListener('focusin', () => {
-          if (pressedComment !== undefined) return;
-          const rect = commentAnchor(mark)?.getBoundingClientRect();
-          const currentViewport = options.scroll.getBoundingClientRect();
-          if (rect && (rect.bottom < currentViewport.top || rect.top > currentViewport.bottom)) commentAnchor(mark)?.scrollIntoView({ block: 'center', behavior: 'instant' });
-          activateComment(mark.markId);
-        });
+        node.addEventListener('focusin', () => focusComment(mark));
         node.addEventListener('click', (event) => {
           activateComment(mark.markId);
           const anchor = commentAnchor(mark);
@@ -980,6 +1006,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       entry.node.dataset['expanded'] = String(expanded);
       entry.node.dataset['revalidating'] = String(stale);
       entry.node.setAttribute('aria-busy', String(readState === 'pending'));
+      if (restoreFocus) entry.node.focus({ preventScroll: true });
       const replySend = replyForm?.querySelector<HTMLButtonElement>('[data-mark-action="send-reply"]');
       if (replySend) replySend.disabled = stale || replyForm?.dataset['sending'] === 'true';
       entry.node.hidden = false;
@@ -1044,19 +1071,27 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const target = active.node.getBoundingClientRect();
       if (target.bottom >= base.top && target.top <= base.bottom) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const firstLine = commentAnchor(active.mark)?.getClientRects()[0] || active.anchor;
-        const x = Math.min(firstLine.right, viewport.right) - origin.left;
-        const y = firstLine.top + Math.min(firstLine.height, 20) / 2 - origin.top;
-        const endX = target.left - origin.left;
-        const endY = Math.max(base.top, target.top) + 12 - origin.top;
-        line.dataset['commentLeader'] = active.mark.markId;
-        line.dataset['markCategory'] = active.mark.categoryKey;
-        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        dot.dataset['markCategory'] = active.mark.categoryKey;
-        dot.setAttribute('cx', String(x)); dot.setAttribute('cy', String(y)); dot.setAttribute('r', '3');
-        leaders.append(dot);
-        line.setAttribute('d', `M ${x} ${y} L ${endX - 8} ${y} L ${endX - 8} ${endY} L ${endX} ${endY}`);
-        leaders.append(line);
+        const rects = Array.from(options.host.querySelectorAll<HTMLElement>(`[data-mark-id="${CSS.escape(active.mark.markId)}"]`)).flatMap(node => Array.from(node.getClientRects()));
+        const firstLine = rects[0] || active.anchor;
+        const pane = options.comments!.host;
+        const overlay = getComputedStyle(pane).position === 'absolute';
+        const start = overlay
+          ? editorialCommentStartFromFragments(rects.map(rect => ({ left: rect.left, right: Math.min(rect.right, viewport.right), top: rect.top, height: rect.height })), pane.getBoundingClientRect())
+          : editorialCommentStart({ left: firstLine.left, right: Math.min(firstLine.right, viewport.right), top: firstLine.top, height: firstLine.height });
+        if (start) {
+          const x = start.x - origin.left;
+          const y = start.y - origin.top;
+          const endX = target.left - origin.left;
+          const endY = Math.max(base.top, target.top) + 12 - origin.top;
+          line.dataset['commentLeader'] = active.mark.markId;
+          line.dataset['markCategory'] = active.mark.categoryKey;
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dot.dataset['markCategory'] = active.mark.categoryKey;
+          dot.setAttribute('cx', String(x)); dot.setAttribute('cy', String(y)); dot.setAttribute('r', '3');
+          leaders.append(dot);
+          line.setAttribute('d', `M ${x} ${y} L ${endX - 8} ${y} L ${endX - 8} ${endY} L ${endX} ${endY}`);
+          leaders.append(line);
+        }
       }
     }
     commentsCanvas.dataset['loading'] = String(commentsReading > 0);

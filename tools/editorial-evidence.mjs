@@ -148,7 +148,7 @@ export function comparable(metrics) {
   return { outcome: metrics.outcome, findings: metrics.findings, concerns: metrics.concerns, checks: metrics.checks, effort: metrics.effort,
     delivery: metrics.delivery, result: metrics.result, replay: { answered: metrics.replay.answered, unmatched: metrics.replay.unmatched },
     recordedUsage: metrics.evidence.recordedUsage, contractsAgree: metrics.evidence.contractsAgree,
-    fixtures: metrics.evidence.fixtures.map((fixture) => fixture.sha256) };
+    fixtures: metrics.evidence.fixtures.map((fixture) => fixture.identity) };
 }
 
 /** Aggregate concerns by kind without mixing the measured pass, earlier captures and authored synthetic controls. */

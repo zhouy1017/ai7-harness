@@ -22,34 +22,17 @@ import { describeComposition } from '../../src/service/harness/primary-agent-har
 import { AGENT_WORKSPACE_COMPOSITION_OPTIONS } from '../../src/service/agent-workspace/capabilities.js';
 import { LOCAL_FIXTURE_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, type SelectedPolicyIdentity } from '../../src/shared/protocol.js';
 
-describe('v29 catalog and profile partitions (#1161)', () => {
-  const checkout = fileURLToPath(new URL('../../', import.meta.url));
-  const selected: SelectedPolicyIdentity = { providerProcessingVersion: 'v29', providerProcessingSha256: LOCAL_FIXTURE_POLICY_SHA256,
-    activePolicySetVersion: 'v21', activePolicySetSha256: ORIGINAL_FIELDS_ACTIVE_SET_SHA256 };
-  it('reads all47 actual fixture/profile pairs without combining profiles that share a fixture', async () => {
-    const catalog = LocalFixturePolicyCatalog.read(checkout);
-    expect(catalog.tuples).toHaveLength(47);
-    expect(new Set(catalog.tuples.map((tuple) => `${tuple.fixtureIdentity}/${tuple.registeredProfile}`)).size).toBe(47);
-    for (const tuple of catalog.tuples) {
-      const fixture = await loadModelFixture(join(checkout, 'tests/fixtures/model'), tuple.fixtureIdentity);
-      expect(fixture.identity).toBe(tuple.fixtureIdentity);
-      expect(catalog.profile(selected, fixture, tuple.registeredProfile)).toMatchObject({
-        kind: 'legacy', registeredProfile: tuple.registeredProfile, policyVersion: 'v29' });
-    }
-    const fixture = await loadModelFixture(join(checkout, 'tests/fixtures/model'), 'sample1-agent-workspace');
-    const baseline = catalog.entriesFor({ selectedPolicyIdentity: selected, profile: catalog.profile(selected, fixture, 'baseline'),
-      kind: 'baseline-manuscript-analysis', purpose: null, contractId: 'ai7.baseline-manuscript-analysis/1', categories: ['public-or-synthetic'],
-      composition: describeComposition('ai7-local-deterministic', 'ai7-deterministic-fixture', BASELINE_PROMPT_CONTRACT_DIGEST) },
-    fixture, BASELINE_PROMPT_CONTRACT_DIGEST);
-    const workspace = catalog.entriesFor({ selectedPolicyIdentity: selected, profile: catalog.profile(selected, fixture, 'workspace'),
-      kind: null, purpose: 'agent-workspace', contractId: null, categories: ['editor-selected-manuscript-excerpt'],
-      composition: describeComposition('ai7-local-deterministic', 'ai7-deterministic-fixture', AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST,
-        AGENT_WORKSPACE_COMPOSITION_OPTIONS) }, fixture, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST);
-    expect(baseline.size).toBeGreaterThan(0); expect(workspace.size).toBeGreaterThan(0);
-    expect([...baseline].some((key) => workspace.has(key))).toBe(false);
-    expect(() => catalog.profile(selected, fixture, 'polish')).toThrow();
-    expect(() => catalog.profile(selected, { ...fixture, identity: 'missing-fixture' }, 'review', 'development-ci-fixture-review')).toThrow();
-  });
+it('loads the retained SampleBook fixture after byte changes without a frozen manifest (#1453)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ai7-unpinned-fixture-'));
+  try {
+    const identity = 'sample1-recorded-v41-baseline';
+    const original = await readFile(new URL(`../fixtures/model/${identity}.json`, import.meta.url), 'utf8');
+    await writeFile(join(root, `${identity}.json`), original + '\n');
+    const fixture = await loadModelFixture(root, identity);
+    expect(fixture.identity).toBe(identity);
+    expect(fixture.entries.size).toBeGreaterThan(0);
+    expect(LocalFixturePolicyCatalog.read('/no-policy-documents')).toBeInstanceOf(LocalFixturePolicyCatalog);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 // The protected cache is never consulted. These files contain synthetic request/response stand-ins only.

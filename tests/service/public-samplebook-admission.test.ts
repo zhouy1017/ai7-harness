@@ -186,10 +186,10 @@ describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issu
     },
   );
 
-  it('still refuses a Book composed from an admitted file under development-ci and developer-live, with the new refusal text', async () => {
+  it('refuses a Book composed from an admitted file under developer-live before dispatch', async () => {
     const selectedPath = join(roots.inputRoot, `${randomUUID()}.docx`);
     await composeManuscriptDocx(selectedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '非公开示例书血缘' });
-    for (const [scope, policy] of [['development-ci', ciPolicy], ['developer-live', livePolicy]] as const) {
+    for (const [scope, policy] of [['developer-live', livePolicy]] as const) {
       const store = await openStore(scope);
       const { bookId, sourceDigest } = await importBook(store, selectedPath);
       expect(PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS.has(sourceDigest)).toBe(false);

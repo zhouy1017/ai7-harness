@@ -4,6 +4,8 @@ status: accepted
 
 # Use sample1 as the compatibility and recording baseline
 
+Partly superseded by [ADR 0102](./0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md): only frozen reviewed-fixture fingerprint admission; sample1’s compatibility baseline, provenance and developer-live public-material boundary stay.
+
 This ADR partially supersedes [ADR 0043](./0043-allow-public-samplebooks-in-repository-and-ci.md) only for exact [`SampleBooks/sample1.docx`](../../SampleBooks/sample1.docx). It makes that exact file the standing development compatibility baseline and permits a governed local development capture plus reviewed-fixture path. ADR 0043 continues to govern every other Public SampleBook, and [ADR 0016](./0016-proprietary-license-and-local-only-sample-manuscripts.md) continues to govern ordinary and private manuscripts.
 
 The Owner accepted this decision for intended integration target `dev`, and Commander integration made it repository-current there. A later task branch inherits this target-qualified design authority without gaining adjacent implementation authority. The decision authorizes canonical design and policy records only. It performs and authorizes no immediate Provider call, credential setup, fixture generation, product implementation, CI-workflow change, export, learning, publication, release, or `main` promotion.

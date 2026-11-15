@@ -104,7 +104,7 @@ export function asRevision102(db: DatabaseSync): void {
   for (const [table, sql] of [['model_service_connections', MODEL_SERVICE_CONNECTION_REVISION_84_SQL], ['dialogue_execution_bindings', DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL]] as const) {
     const dependents = db.prepare("SELECT sql FROM sqlite_schema WHERE type IN ('index', 'trigger') AND tbl_name = ? AND sql IS NOT NULL")
       .all(table).map((row) => String(row.sql));
-    const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).filter((name) => table !== 'model_service_connections' || !['fast_model_id', 'cached_models'].includes(name)).join(', ');
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).filter((name) => table !== 'model_service_connections' || !['fast_model_id', 'cached_models', 'reasoning_effort', 'fast_reasoning_effort'].includes(name)).join(', ');
     db.exec(`CREATE TEMP TABLE kept_${table} AS SELECT rowid AS prior_rowid, ${columns} FROM ${table} ORDER BY rowid; DROP TABLE ${table}`);
     db.exec(sql);
     db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM kept_${table} ORDER BY prior_rowid; DROP TABLE kept_${table}`);

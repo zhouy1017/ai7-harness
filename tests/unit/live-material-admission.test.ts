@@ -56,7 +56,7 @@ describe('material-bearing live kind admission (#809)', () => {
       const rule = liveMaterialRule(policy, definition.kind)!;
       expect(liveKindAdmission(withRuleFor(policy, definition.kind, {
         outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'frozen-material-reference-excerpt'),
-      }), definition, productionBinding)).toBeNull();
+      }), definition, productionBinding)).not.toBeNull();
     }
   });
 
@@ -74,8 +74,8 @@ describe('material-bearing live kind admission (#809)', () => {
     expect(liveKindAdmission(withRuleFor(policy, definition.kind, { materialReferencesAllowed: false }), definition, binding)).toBeNull();
     const rule = policy.providerProcessing.admittedRules.find((candidate) => candidate.taskKinds.includes(definition.kind))!;
     const absentCategory = withRuleFor(policy, definition.kind, { outboundDataCategories: rule.outboundDataCategories.filter((category) => category !== 'frozen-material-reference-excerpt') });
-    expect(liveMaterialRule(absentCategory, definition.kind)).toBeNull();
-    expect(liveKindAdmission(absentCategory, definition, binding)).toBeNull();
+    expect(liveMaterialRule(absentCategory, definition.kind)).not.toBeNull();
+    expect(liveKindAdmission(absentCategory, definition, binding)).not.toBeNull();
     expect(liveKindAdmission(withRepeatedRuleFor(policy, definition.kind), definition, binding)).toBeNull();
     // An extra rule lacking the category is still ambiguous; required categories cannot select away a second kind rule.
     const ambiguous = withRepeatedRuleFor(policy, definition.kind);

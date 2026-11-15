@@ -1,3 +1,5 @@
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
+export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
@@ -340,10 +342,18 @@ export * from './protocol/scoped-edit.js';
  * mark category/source fields on mark projections (#1429); inline editor revisions with apply/revert card actions (#1428);
  * the one-click `book-review-report` DOCX export target and its report sections (#1430).
  *
+ * Protocol 203 (#1472 R2 closure, 0.7.1): PR #1478 adds reasoning effort to role
+ * selection inputs and settings projections. PR #1487 adds launchReviewRun, optional
+ * execution choice on scoped edit and review-workspace inspection, and frozen model
+ * labels. PR #1488 adds six launch operations, launch preview, remembered task choices
+ * and model labels on evaluation, writing and report projections. PR #1489 adds the
+ * optional analysis planEnvelope.procedureContent { editorInstruction, exemptionRules } (#1476).
+ * Schema 115 and Data Version 1 remain separate compatibility identities.
+ *
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 202 as const;
+export const SERVICE_PROTOCOL_VERSION = 203 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -483,6 +493,7 @@ export type J04ModelAdapterControl = string;
 export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const IPC_CHANNELS = {
+  previewTaskLaunch: 'ai7:j04:preview-task-launch',
   getStartup: 'ai7:j08:get-startup',
   getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
   viewRecoveryCandidate: 'ai7:j08:view-recovery-candidate',
@@ -516,6 +527,7 @@ export const IPC_CHANNELS = {
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   inspectBookFindings: 'ai7:inspect-book-findings',
   inspectParagraphAnalysis: 'ai7:inspect-paragraph-analysis',
+  launchBaselineAnalysis: 'ai7:j04:launch-baseline-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
@@ -582,6 +594,7 @@ export const IPC_CHANNELS = {
   saveCustomAnalysisDimension: 'ai7:kb:save-custom-analysis-dimension',
   enableCustomAnalysisDimension: 'ai7:kb:enable-custom-analysis-dimension',
   stopCustomAnalysisDimension: 'ai7:kb:stop-custom-analysis-dimension',
+  launchCustomAnalysis: 'ai7:j04:launch-custom-analysis',
   prepareCustomAnalysis: 'ai7:j04:prepare-custom-analysis',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
   saveDeveloperProposalFile: 'ai7:j15:save-developer-proposal-file',
@@ -602,15 +615,19 @@ export const IPC_CHANNELS = {
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
   startEvaluation: 'ai7:j11:start-evaluation',
   saveEvaluation: 'ai7:j11:save-evaluation',
+  launchInitialEvaluation: 'ai7:j11:launch-initial-evaluation',
   prepareInitialEvaluation: 'ai7:j11:prepare-initial-evaluation',
   authorizeInitialEvaluation: 'ai7:j11:authorize-initial-evaluation',
+  launchReadersReport: 'ai7:j11:launch-readers-report',
   prepareReadersReport: 'ai7:j11:prepare-readers-report',
   authorizeReadersReport: 'ai7:j11:authorize-readers-report',
   createReadersReportDraft: 'ai7:j11:create-readers-report-draft',
+  launchEvaluationRewrite: 'ai7:j11:launch-evaluation-rewrite',
   prepareEvaluationRewrite: 'ai7:j11:prepare-evaluation-rewrite',
   authorizeEvaluationRewrite: 'ai7:j11:authorize-evaluation-rewrite',
   decideEvaluationRewrite: 'ai7:j11:decide-evaluation-rewrite',
   inspectWritingTask: 'ai7:j07:inspect-writing-task',
+  launchWritingTask: 'ai7:j07:launch-writing-task',
   prepareWritingTask: 'ai7:j07:prepare-writing-task',
   authorizeWritingTask: 'ai7:j07:authorize-writing-task',
   quickStartWritingTask: 'ai7:j07:quick-start-writing-task',
@@ -626,6 +643,7 @@ export const IPC_CHANNELS = {
   inspectHouseWordList: 'ai7:inspect-house-word-list',
   saveHouseWordList: 'ai7:save-house-word-list',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
+  launchReviewRun: 'ai7:j04:launch-review-run',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
   continueReviewRun: 'ai7:j04:continue-review-run',
@@ -2727,9 +2745,14 @@ export interface ModelTextAttemptProvenance {
   readonly failureCode: string | null;
 }
 
-export interface FastModelSelectionInput {
+export interface FastModelSelectionInput extends Pick<RuntimeExecutionConfig, 'reasoningEffort'> {
   route: ModelServiceRouteId;
   modelId: string;
+}
+
+/** Atomic two-role selection carries independent defaults. */
+export interface BothRoleModelSelectionInput extends FastModelSelectionInput {
+  fastReasoningEffort?: RuntimeExecutionConfig['reasoningEffort'];
 }
 
 /**
@@ -2755,16 +2778,16 @@ export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' 
 export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
 
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
+export type ActivePolicySetVersion = 'no-policy-lock' | 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
 
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
 /** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
 export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
 
-export const CURRENT_ACTIVE_SET_SHA256 = '20ce6301a65f5a661117d66d1c5f9d185d8211c65c65c660f5ad3d2976809eaa';
+export const RECORDED_V26_ACTIVE_SET_SHA256 = '20ce6301a65f5a661117d66d1c5f9d185d8211c65c65c660f5ad3d2976809eaa';
 
-export const CURRENT_PRODUCTION_POLICY_SHA256 = 'ca506c18c7d84308be2cb69f08400187a6ae49d595d32211356ea987dfbe3bcb';
+export const RECORDED_V35_PRODUCTION_POLICY_SHA256 = 'ca506c18c7d84308be2cb69f08400187a6ae49d595d32211356ea987dfbe3bcb';
 
 export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
 
@@ -2786,7 +2809,7 @@ export function isSupportedProviderProcessingVersion(scope: unknown, version: un
 export interface SelectedPolicyIdentity {
   readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31' | 'v32' | 'v33' | 'v34' | 'v35';
   readonly providerProcessingSha256: string;
-  readonly activePolicySetVersion: 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
+  readonly activePolicySetVersion: 'no-policy-lock' | 'v21' | 'v22' | 'v23' | 'v24' | 'v25' | 'v26';
   readonly activePolicySetSha256: string;
 }
 
@@ -2824,7 +2847,7 @@ const SELECTED_PROVIDER_DIGESTS = {
   v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
   v29: LOCAL_FIXTURE_POLICY_SHA256,
   v30: ORIGINAL_FIELDS_POLICY_SHA256,
-  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5', v35: CURRENT_PRODUCTION_POLICY_SHA256,
+  v31: '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5', v32: '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad', v33: '2e7bb2d6f771c3e7bf280355b5248c0e60a9b3d8d60bd7e10463c383d6ae8184', v34: '5e773f9c23b32bdff427796c07abdfa64f506550a2ae62774f6708059db7bfc5', v35: RECORDED_V35_PRODUCTION_POLICY_SHA256,
 } as const;
 
 const LOCAL_FIXTURE_REGISTERED_PROFILES: readonly LocalFixtureRegisteredProfile[] = [
@@ -2839,9 +2862,12 @@ export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
 /** A closed persisted interpretation, without substituting today's selection for an absent historical field. */
 export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
+  if (value['activePolicySetVersion'] === 'no-policy-lock' && ['v1', 'v24', 'v35'].includes(String(value['providerProcessingVersion'])) &&
+      value['providerProcessingSha256'] === '0'.repeat(64) && value['activePolicySetSha256'] === '0'.repeat(64))
+    return value as unknown as SelectedPolicyIdentity;
   const version = value['providerProcessingVersion'];
   const set = value['activePolicySetVersion'];
-  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d' : set === 'v26' ? CURRENT_ACTIVE_SET_SHA256 : null;
+  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' : set === 'v23' ? 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' : set === 'v24' ? '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' : set === 'v25' ? '2bc2f4d506d12596fd4b100793c31e423336269450def6cb97d892a5f358835d' : set === 'v26' ? RECORDED_V26_ACTIVE_SET_SHA256 : null;
   if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31' && (version !== 'v32' && version !== 'v33' && version !== 'v34' && version !== 'v35')) ||
       value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] || setSha256 === null || value['activePolicySetSha256'] !== setSha256 ||
       !((set === 'v21' && ['v24', 'v29', 'v30'].includes(version)) || (set === 'v22' && ['v1', 'v24', 'v31'].includes(version)) || (set === 'v23' && ['v1', 'v24', 'v32'].includes(version)) || (set === 'v24' && ['v1', 'v24', 'v33'].includes(version)) || (set === 'v25' && ['v1', 'v24', 'v34'].includes(version)) || (set === 'v26' && ['v1', 'v24', 'v35'].includes(version)))) return null;
@@ -2946,7 +2972,8 @@ export function isResultSetPolicyPin(value: unknown): value is ResultSetPolicyPi
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['operationalScope', 'providerProcessingVersion', 'activePolicySetVersion', 'liveTransmissions'])) return false;
   const scope = value.operationalScope;
   return (scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production') &&
-    RECORDED_POLICY_PINS[scope].some(([version, set]) => version === value.providerProcessingVersion && set === value.activePolicySetVersion) &&
+    (RECORDED_POLICY_PINS[scope].some(([version, set]) => version === value.providerProcessingVersion && set === value.activePolicySetVersion) ||
+      value.activePolicySetVersion === 'no-policy-lock' && value.providerProcessingVersion === (scope === 'development-ci' ? 'v1' : scope === 'developer-live' ? 'v24' : 'v35')) &&
     value.liveTransmissions === (scope === 'development-ci' ? 0 : 'bounded-by-run');
 }
 
@@ -3396,7 +3423,7 @@ export interface AdmittedLocalTools {
 }
 
 export interface LaunchPolicyProjection {
-  /** Present only after the resolver verified the exact selected document bytes. */
+  /** Historical document identity, or the fixed no-policy-lock compatibility marker. */
   selectedPolicyIdentity?: SelectedPolicyIdentity;
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
@@ -3485,11 +3512,11 @@ export interface LaunchPolicyProjection {
     version: 'v2' | null;
     policyEligibilityIsEffectApproval: false;
     /**
-     * Whether a local export Effect can be offered (Issue #413): only once External Export Policy v2 verified at
-     * this launch; policy eligibility is still no approval.
+     * Whether the existing local export capability can be offered. Preparation, approval and receipt authority
+     * remain with the export owner; no policy fingerprint participates.
      */
     currentExportEffectAvailable: boolean;
-    label: '对外导出策略独立；当前未提供导出受控动作' | '对外导出策略 v2 已校验：只导出到本机所选位置，每个文件单独批准';
+    label: '对外导出策略独立；当前未提供导出受控动作' | '对外导出：只导出到本机所选位置，每个文件单独批准';
   };
   publicReleasePermission: {
     present: false;
@@ -4562,7 +4589,7 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
-  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
+  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode; customTitle?: string }
   // A ledger Task of another kind whose Run waits to start once online, or whose plan moved meanwhile (Issue #760, S74c).
   | { kind: 'task'; taskKind: Exclude<StartWhenOnlineTaskKind, 'review-run'> }
   // A Review Run; `onSelection` for one that reads only the selection 就这段发起任务… handed over (Issue #423, S77b).
@@ -4603,6 +4630,8 @@ export interface GlobalAttentionFactsProjection {
 
 /** One Attention Projection Item (V2-UX-ATTN-007): a pointer to its record, never an authority of its own. */
 export interface GlobalAttentionItemProjection {
+  /** Frozen producing model and sent effort, when this item names a model-backed run. */
+  modelLabel?: string;
   /** Stable across reads: the record's kind and identity. */
   itemId: string;
   group: GlobalAttentionGroupKey;
@@ -4746,10 +4775,14 @@ export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', '
   'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
   'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
   'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
-  'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
+  'previewTaskLaunch', 'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
 export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
+
+export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in LedgerTaskLaunchOperation]: {
+  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
+} }[LedgerTaskLaunchOperation] };
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
@@ -5887,6 +5920,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
   inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
+  launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  previewTaskLaunch: { input: TaskLaunchPreviewInput; output: TaskLaunchPreviewProjection };
   prepareBaselineAnalysis: {
     /**
      * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
@@ -6167,6 +6202,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   /** `停用`: final for the version; Runs prepared under it keep naming it. */
   stopCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
   /** ②A 自定义 › 运行: the dimension's enabled version prepared as a Task on the Book; its plan opens in the Task Drawer. */
+  launchCustomAnalysis: { input: ServiceOperationMap['prepareCustomAnalysis']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareCustomAnalysis: { input: PrepareCustomAnalysisInput; output: { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
@@ -6285,6 +6321,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 准备 AI7 初评 (Issue #429, S81b1): the evaluation kind's Task prepared as one cooperative job — the first 初评, or 重新初评
    * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
    */
+  launchInitialEvaluation: { input: ServiceOperationMap['prepareInitialEvaluation']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareInitialEvaluation: {
     input: { bookId: string; materialIds?: ReadonlyArray<string>; seriesId?: string | null };
     output: ServiceJobProjection;
@@ -6298,6 +6335,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one
    * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
    */
+  launchReadersReport: { input: ServiceOperationMap['prepareReadersReport']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareReadersReport: {
     input: { bookId: string; template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> };
     output: ServiceJobProjection;
@@ -6316,6 +6354,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 按我的评分重写评语 (Issue #429, S81b2; EVAL-008): the evaluation rewrite kind's Task over one version's latest saved entry,
    * prepared as one cooperative job. The completed job's result is 评估 with that version on show and the prepared Task named.
    */
+  launchEvaluationRewrite: { input: ServiceOperationMap['prepareEvaluationRewrite']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareEvaluationRewrite: {
     input: { bookId: string; recordId: string };
     output: ServiceJobProjection;
@@ -6342,6 +6381,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 先看计划 of a writing Task: one house type and the editor's audience, channel and requirements, prepared as one cooperative
    * job. The completed job's result is 新建文档 · 写作任务 with the prepared Task named, whose plan the Task Drawer opens.
    */
+  launchWritingTask: { input: ServiceOperationMap['prepareWritingTask']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareWritingTask: {
     /** `materialIds` (Issue #428): the 资料库 items the editor ticked under 允许参考, in the order offered; none when absent. */
     input: { bookId: string; typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> };
@@ -6383,6 +6423,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
+  launchReviewRun: { input: PrepareReviewRunInput & TaskExecutionLaunchInput & {
+    evidenceAssuranceLevel?: EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' }; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
@@ -6779,7 +6821,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
-  selectBothRoleModels: { input: FastModelSelectionInput; output: void };
+  selectBothRoleModels: { input: BothRoleModelSelectionInput; output: void };
   refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
@@ -6906,6 +6948,8 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisWireProjection>;
   inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
   inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
+  launchBaselineAnalysis(input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
+  previewTaskLaunch(input: Omit<TaskLaunchPreviewInput, 'bookId'>): Promise<TaskLaunchPreviewProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
@@ -7011,6 +7055,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   enableCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
   stopCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
   /** The current Book's Task of one dimension; the window's route names the Book. */
+  launchCustomAnalysis(input: Omit<ServiceOperationMap['launchCustomAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareCustomAnalysis(input: Omit<PrepareCustomAnalysisInput, 'bookId'>): Promise<{ taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection }>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
@@ -7051,16 +7096,19 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
+  launchInitialEvaluation(input: Omit<ServiceOperationMap['launchInitialEvaluation']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
+  launchReadersReport(input: Omit<ServiceOperationMap['launchReadersReport']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareReadersReport(input: { template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for 审稿意见. */
   authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
   createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
   /** 按我的评分重写评语 (Issue #429, S81b2): an `evaluation-rewrite-preparation` job over one version; its plan opens in the Task Drawer. */
+  launchEvaluationRewrite(input: Omit<ServiceOperationMap['launchEvaluationRewrite']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareEvaluationRewrite(input: { recordId: string }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for 按我的评分重写评语. */
   authorizeEvaluationRewrite(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
@@ -7069,6 +7117,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 新建文档 · 写作任务 of the Book the window is showing (Issue #432, S84a); the renderer never names the Book. */
   inspectWritingTask(): Promise<WritingTaskProjection>;
   /** 先看计划 of a writing Task: a `writing-preparation` job; its plan opens in the Task Drawer. */
+  launchWritingTask(input: Omit<ServiceOperationMap['launchWritingTask']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for a writing Task. */
   authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;
@@ -7084,6 +7133,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
    */
   inspectReviewWorkspace(input?: Omit<InspectReviewWorkspaceInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   /** 先看计划: a `review-run-preparation` job, followed with `pollServiceJob` and stopped with `cancelServiceJob`. */
+  launchReviewRun(input: Omit<ServiceOperationMap['launchReviewRun']['input'], 'bookId'>): Promise<ServiceWireOutput<ReviewWorkspaceProjection>>;
   prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The one approval — the Task Drawer bar's 开始任务 since Issue #420 (S74a); the Run is already being driven
@@ -7337,7 +7387,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
-  selectBothRoleModels(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectBothRoleModels(input: BothRoleModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;

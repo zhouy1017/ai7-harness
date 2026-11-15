@@ -20,7 +20,7 @@ export interface AssembledContentBlock {
 export interface AssembledMessage {
   readonly role: string;
   readonly content: ReadonlyArray<AssembledContentBlock>;
-  readonly source: { readonly kind: string; readonly provider?: string; readonly model?: string; readonly callId?: string };
+  readonly source: { readonly kind: string; readonly provider?: string; readonly model?: string; readonly callId?: string; readonly replayState?: unknown };
 }
 
 /** One tool call an assistant message carries, as the adapter and the gate read it. */
@@ -75,9 +75,22 @@ export function toolResultOf(message: AssembledMessage): { callId: string; text:
 export interface AssembledModelPayload {
   readonly provider: string;
   readonly model: string;
+  readonly reasoningEffort?: string;
   readonly system?: string;
   readonly tools?: ReadonlyArray<unknown>;
   readonly messages: ReadonlyArray<AssembledMessage>;
+}
+
+/** Adapter-owned native items, carried by DSH without exposing them as editorial answer text. */
+export function familyReplayItems(message: AssembledMessage, family: string): ReadonlyArray<Record<string, unknown>> | null {
+  const state = message.source.replayState;
+  if (state === undefined) return null;
+  if (message.role !== 'assistant' || message.source.kind !== 'model' || state === null || typeof state !== 'object' ||
+      !('family' in state) || state.family !== family || !('items' in state) || !Array.isArray(state.items) ||
+      state.items.some((item) => item === null || typeof item !== 'object' || Array.isArray(item))) {
+    throw new Error('PROVIDER_REASONING_REPLAY_INVALID');
+  }
+  return state.items;
 }
 
 /** Recheck the current Series restriction after assembly, immediately before the final transmission decision. */

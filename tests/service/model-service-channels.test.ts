@@ -20,16 +20,23 @@ describe('the model-service channel catalogue', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
     store.saveModelServiceConnection('Synthetic Gemini', null, 'ready', 'google-gemini');
-    store.selectMainRoleModel('anthropic-claude', 'account-opus');
-    store.selectFastRoleModel('anthropic-claude', 'account-haiku');
+    store.selectMainRoleModel('anthropic-claude', 'account-opus', 'high');
+    store.selectFastRoleModel('anthropic-claude', 'account-haiku', 'low');
     const bindings = () => ['main-editorial', 'fast-interaction'].map((role) => store!.getConfiguredModelRoleBinding(role as 'main-editorial' | 'fast-interaction'));
     expect(bindings()).toMatchObject([{ model: 'account-opus', credentialReference: claude.credentialReference }, { model: 'account-haiku', credentialReference: claude.credentialReference }]);
     store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
+    expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['high', 'low']);
+    expect(store.getConfiguredModelRoleBinding('main-editorial', { modelConnectionId: claude.connectionId,
+      modelId: 'account-future-model', reasoningEffort: 'vendor-future-level' })).toMatchObject({ model: 'account-future-model', reasoningEffort: 'vendor-future-level' });
+    expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
     store.selectMainRoleModel('google-gemini', 'gemini-custom');
     expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['google-gemini', 'gemini-custom'], ['anthropic-claude', 'account-haiku']]);
-    store.selectBothRoleModels('anthropic-claude', 'claude-custom');
+    store.selectBothRoleModels('anthropic-claude', 'claude-custom', 'high', 'low');
+    expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['high', 'low']);
+    store.selectBothRoleModels('anthropic-claude', 'claude-custom', 'vendor-future-level');
     expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['anthropic-claude', 'claude-custom'], ['anthropic-claude', 'claude-custom']]);
+    expect(bindings().map((binding) => binding?.reasoningEffort)).toEqual(['vendor-future-level', 'vendor-future-level']);
     expect(() => store!.selectBothRoleModels('google-gemini', 'invalid model')).toThrow();
     expect(bindings().map((binding) => binding?.model)).toEqual(['claude-custom', 'claude-custom']);
   });

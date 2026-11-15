@@ -6,11 +6,11 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 ## Three senses of "supported"
 
-Provider documents and the runtime model table supply catalogue defaults and labels. The selected ordinary-production policy admits channels, rather than individual model IDs (#1281). Unknown model IDs receive a profile from their route protocol; optional context limits and model-specific reasoning or structured-output settings remain unknown unless declared. Developer-live retains its exact approved binding. Live model discovery and role selection are tracked separately in #1282.
+Provider documents and the runtime model table supply catalogue defaults and labels. Unknown model IDs inherit their configured route protocol. Role defaults select the effort actually sent, independently of historical per-model capability observations. Only vendor-documented route/model controls advertise suggestions; other routes advertise none and disclose that manual entry is subject to upstream acceptance. Gemini 2.5 budgets are numeric and newer model levels are declared independently. Suggested effort identifiers are editable suggestions, never model admission lists: another bounded identifier reaches the provider, which decides whether that model accepts it. Unset or off omits the control and uses the service default; it does not promise that provider thinking is disabled. Developer-live retains its exact approved binding.
 
 - **Declared** — catalogue metadata and historical evidence for a model. Runtime text, stream and function tools inherit the implemented route protocol; optional model-specific settings remain recorded separately.
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
-- **Bindable** — a selected policy channel permits its route, endpoint host, protocol family and credential slot. The editor chooses the exact model ID, and each Run freezes that binding. An account can still reject a model; adapter support is not live validation or account availability. CI and ordinary regression use no provider credentials.
+- **Bindable** — a configured channel supplies its route, endpoint, protocol family and credential slot. The editor chooses the exact model ID and effort, and each Run freezes that binding. An account can still reject a model or effort; adapter support is not live validation or account availability. CI and ordinary regression use no provider credentials.
 
 Task research declarations resolve to `webSearch: true` only when the task declares research, the selected rule admits platform tools, and model/search setup is ready. All four implemented protocol families support AI7 websearch/webfetch and local function tools without per-model live evidence. Existing source scopes, task research declarations, frozen search bindings and final egress checks remain enforced. Provider-free tests establish adapter behavior; they do not claim a live account result.
 
@@ -30,8 +30,8 @@ All four implemented protocol families support text, streaming and function tool
 | accountLimit | supported | supported | supported | supported |
 | rateLimit | supported | supported | supported | supported |
 | structuredOutput | supported | unsupported | unsupported | unsupported |
-| reasoningControl | supported | unsupported | unsupported | unsupported |
-| reasoningContinuation | supported | unsupported | unsupported | unsupported |
+| reasoningControl | supported | supported | supported | supported |
+| reasoningContinuation | supported | supported | supported | supported |
 | providerTools | unsupported | unsupported | unsupported | unsupported |
 
 ## 阿里云百炼 Qwen
@@ -97,6 +97,8 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | 32,768 |
+| Reasoning control / suggestions | `anthropic-messages` / `low`, `medium`, `high`, `xhigh`, `max` |
+| Reasoning protocol source | https://platform.claude.com/docs/en/build-with-claude/effort, read 2026-11-14 |
 
 The shape requires a per-turn output cap; the route declares the same 32,768 as the OpenCode Go `/messages` route for the same reason — headroom above the largest unit output observed (24,225 tokens), one turn only — and below every listed model's output limit.
 
@@ -194,6 +196,8 @@ Open:
 | DSH attribution headers | sent — `frozen-request-baseline`, since adapter revision 1 |
 | OpenCode session header | not sent — `frozen-request-baseline`, since adapter revision 1 |
 | Per-turn output cap | none |
+| Reasoning control / suggestions | `deepseek-thinking` / `low`, `high`, `max` |
+| Reasoning protocol source | https://api-docs.deepseek.com/guides/thinking_mode/, read 2026-11-14 |
 
 The production connection's route, unchanged: the one route that sends the DSH attribution headers and reads a 429 as a retryable rate limit. Chat completions names no output cap, so the route sends no such field.
 
@@ -212,6 +216,7 @@ Inert: 0 of 2 (no declared answer channel). Established:
 - `deepseek-v4-pro` · `toolCalling: function` — `vendor-documentation`, DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls, read 2026-09-11
 - every model · `webSearchTool: none` — `vendor-documentation`, DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com), read 2026-09-10
 - every model · context 1,000,000 — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
+- `deepseek-v4-pro` · pre-114 selected-role effective effort high; retained during upgrade only
 - `deepseek-flash` · `requestShape: openai-chat-completions` — `vendor-documentation`, DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them, read 2026-09-10
 - `deepseek-flash` · `answerChannel: message-content-string` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
 - `deepseek-flash` · `reasoningChannel: message-reasoning-content` — `vendor-documentation`, DeepSeek official Create Chat Completion reference, api-docs.deepseek.com/api/create-chat-completion, read 2026-10-15
@@ -228,7 +233,7 @@ Readings:
 
 Open:
 
-- Every read-side capability of the production route — answer channel beyond the request baseline, structured output, reasoning channel, usage attribution — must be established by vendor documentation or a named live test item before the first production Run (ADR 0080 §4).
+- Historical model-specific read-side evidence remains unchanged. Runtime protocol support and effort control have provider-free family coverage; model/effort availability is decided by the configured service (#1453, ADR 0102/0103).
 
 ## Gemini 官方
 
@@ -265,6 +270,8 @@ Inert: 0 of 3 (no declared answer channel). Established:
 - every model · `requestShape: google-generate-content` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
 - every model · `answerChannel: candidate-parts-text` — `vendor-documentation`, https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash ; https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview ; https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro ; https://ai.google.dev/api/generate-content, read 2026-10-31
 - every model · context 1,048,576 — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
+- `gemini-3.8-flash`, `gemini-3.1-pro-preview` · reasoning control google-generate-content; suggestions low, medium, high — https://ai.google.dev/gemini-api/docs/generate-content/thinking, read 2026-11-14
+- `gemini-2.5-pro` · reasoning control google-thinking-budget; suggestions 128, 1024, 8192, 32768 — https://ai.google.dev/gemini-api/docs/generate-content/thinking, read 2026-11-14
 
 Readings:
 
@@ -370,7 +377,7 @@ Readings:
 Open:
 
 - The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
-- Structured output (`json_object`, `json_schema`) is documented but stays absent until a live item establishes it; `kimi-k3` always reasons, and its reasoning channel is not yet read.
+- Structured output (`json_object`, `json_schema`) remains separately declared. The Chat family preserves reasoning_content during tools (#1453); the historical kimi-k3 model observation has not been refreshed live.
 
 ## OpenAI 官方
 
@@ -391,6 +398,8 @@ Open:
 | DSH attribution headers | not sent — `unverified` |
 | OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | 8,192 |
+| Reasoning control / suggestions | `openai-responses` / `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| Reasoning protocol source | https://developers.openai.com/api/docs/guides/reasoning, read 2026-11-14 |
 
 Buffered text only with max_output_tokens 8192. The explicit synthetic connection test narrows this to 512; neither probe nor saved credential proves tools or native streaming.
 
@@ -419,7 +428,7 @@ Readings:
 Open:
 
 - Account/model access requires the editor-initiated exact-binding text test; no live access was tested by Issue #1044.
-- Function tools, opaque reasoning replay, structured outputs, reasoning control and native streaming remain unadmitted.
+- Function tools, native reasoning replay, effort control and streaming have provider-free family coverage (#1180, #1453); structured outputs remain unsupported. This does not establish live account/model access.
 - 429/account denial is classified by the existing adapter; AI7 does not automatically retry or choose another binding.
 
 ## OpenCode Go

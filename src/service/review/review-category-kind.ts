@@ -63,15 +63,18 @@ import { withModelClarification } from '../provider/clarification-contract.js';
  * The reducer descriptor is shared by the whole family: how findings are located, merged and excluded
  * does not depend on the category.
  */
-// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
+// Describes occurrence selection and manuscript-slice quotation storage (#1471).
 export const REVIEW_CATEGORY_REDUCER_DESCRIPTOR = {
   schema: 'ai7.editorial-review.reducers/2',
   stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'declared-block-first-message-search-first-ambiguous-match-or-whole-block-annotation',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
-  sourceRangeIntegrity: 'sole-candidate-normalized-grapheme-slice-equals-quotation',
+  sourceRangeIntegrity: 'located-quotation-is-manuscript-grapheme-slice',
+  wholeBlockAnnotation: 'unmatched-model-quote-kept-distinct',
+  occurrence: 'optional-one-based-invalid-falls-back-to-ambiguous',
+  punctuation: 'equivalent-punctuation-alignment',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
-  mergeRule: 'same-block-same-normalized-quotation-same-replacement',
+  mergeRule: 'same-block-same-range-same-normalized-quotation-same-replacement',
   exclusionReasons: ['missing-block', 'not-exact-fetched'],
   certaintyPolicy: 'list-and-locate-never-decide',
 } as const;
@@ -124,11 +127,11 @@ const HISTORICAL_REVIEW_TOOL_NAMES = Object.freeze([
 export function historicalReviewCategoryDefinitions(input: ReviewCategoryContractInput, version: 1 | 2): readonly AnalysisKindDefinition[] {
   if (version === 1) return [compileReviewCategory(input, 1, [])];
   if (version !== 2) throw new Error('REVIEW_CONTRACT_VERSION_UNSUPPORTED');
-  return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES)];
+  return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES), compileReviewCategory(input, 2, [], false), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES, false)];
 }
 
-function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 2, names: readonly string[]): AnalysisKindDefinition {
-  const contract = reviewCategoryContract(input, version, names);
+function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 2, names: readonly string[], occurrencePrompt = version !== 1): AnalysisKindDefinition {
+  const contract = reviewCategoryContract(input, version, names, occurrencePrompt);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
@@ -171,7 +174,7 @@ function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 
     outOfScope: 'leave-unreviewed',
     systemPrompt: contract.systemPrompt,
     promptContractDigest,
-    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version, names)) }),
+    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version, names, occurrencePrompt)) }),
     unitResultSchema: contract.responseSchema,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,
@@ -321,13 +324,19 @@ export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: 
 export function pinnedReviewDefinition(definition: AnalysisKindDefinition, digest: string): AnalysisKindDefinition {
   const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;
   const predecessor = (definition as AnalysisKindDefinition & { toolPromptPredecessor?: AnalysisKindDefinition }).toolPromptPredecessor;
-  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract]) {
-    if (candidate === undefined) continue;
-    if (candidate.promptContractDigest === digest) return candidate;
-    if (candidate.clarificationBase === undefined) {
-      const clarified = withModelClarification(candidate);
-      if (clarified.promptContractDigest === digest) return clarified;
+  const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
+  const resolve = (candidates: readonly (AnalysisKindDefinition | undefined)[]): AnalysisKindDefinition | undefined => {
+    for (const candidate of candidates) {
+      if (candidate === undefined) continue;
+      if (candidate.promptContractDigest === digest) return candidate;
+      if (candidate.clarificationBase === undefined) {
+        const clarified = withModelClarification(candidate);
+        if (clarified.promptContractDigest === digest) return clarified;
+      }
     }
-  }
-  return definition;
+    return undefined;
+  };
+  // Most reads already name the current contract; reconstruct historical grammars only for an old pin.
+  return resolve([definition, predecessor, numbered, definition.legacyReviewContract])
+    ?? (input === undefined ? undefined : resolve(historicalReviewCategoryDefinitions(input, 2))) ?? definition;
 }

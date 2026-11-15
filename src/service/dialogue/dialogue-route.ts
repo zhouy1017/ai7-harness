@@ -21,6 +21,7 @@ export const DIALOGUE_OUTBOUND_CATEGORY = 'editor-selected-manuscript-excerpt' a
 
 /** The live route one admitted rule binds, resolved against the declared route and model profiles. */
 export interface AdmittedFastRoleRoute {
+  readonly reasoningEffort?: string;
   readonly globalAgentDialogue?: AdmittedProviderRule['globalAgentDialogue'];
   readonly globalAgentScopedDialogue?: AdmittedProviderRule['globalAgentScopedDialogue'];
   readonly localTools?: LocalToolsRule | null;

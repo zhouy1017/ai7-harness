@@ -185,7 +185,8 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
     const key = input.exactOccurrences === true ? canonicalJson({ bookId: manifest.manuscript.bookId,
       revision: manifest.manuscript.revisionId, block: entry.blockId,
       exactRange: { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },
-      quote: assertion.quote, assertionClass: assertion.assertionClass, question: assertion.question })
+      // Frozen claim identities retain their predecessor quotation; display still uses the source slice.
+      quote: locateExactQuotation(blocks.get(entry.blockId)!.text, entry.assertion.quote).state === 'verified' ? entry.assertion.quote : assertion.quote, assertionClass: assertion.assertionClass, question: assertion.question })
       : `${entry.blockId}\u0000${normalized}\u0000${entry.location.fromGrapheme}:${entry.location.toGrapheme}`;
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {

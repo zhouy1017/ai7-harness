@@ -1,3 +1,4 @@
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -2884,7 +2885,7 @@ async function main() {
     // 先看计划 prepares the Task and opens its plan in the Task Drawer: the type and the editor's words, each reference part, its
     // two steps, and that it copies no 范例; no button of the drawer carries 授权.
     await clickSelector(renderer, '[data-screen="editor"] .writing-task [data-writing-action="plan"]', 'writing-plan-open');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-plan-ready', 120_000);
+    await launchTaskFromBar(renderer, waitFor, 'writing');
     const writingPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label), plan.notDo.editorial.includes('不照抄范例：与范例有连续 12 个字以上相同（跨标点、空格或外文词时 16 个字；拉丁字母文字为 8 个词，跨标点、数字或编号时 11 个词）的草稿不予采用')]))`);
     requireJourney(writingPlan === JSON.stringify([
@@ -2894,20 +2895,24 @@ async function main() {
       ['逐章读取，找出文档可以取用的看点、人物与主题', '依据参考材料写出「宣传文章」'], true,
     ]), 'writing-plan-words', writingPlan);
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('#task-drawer button'), (button) => button.textContent ?? '').every((label) => !label.includes('授权'))`, 'writing-plan-shown');
-    const writingPrepared = await readWriting((page) => page.state === 'prepared', 'writing-prepared');
-    requireJourney(writingPrepared.task === '写作任务「宣传文章」：尚未开始' && !writingPrepared.open, 'writing-prepared-words', writingPrepared);
 
     at('writing-run');
     // 开始任务 in the bar: the Run reads the eight ranges, writes the draft and settles; the drawer says so and closes.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'writing-start');
     const writingEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'writing-ended');
     requireJourney(writingEnded.state === 'settled', 'writing-settled', writingEnded);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-drawer-settled', 30_000);
     // AI7's draft waits to be opened: a plan started from the drawer leaves 打开草稿 to the editor.
     const writingDrafted = await readWriting((page) => page.drafted.length === 1, 'writing-drafted');
-    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成' && writingDrafted.drafted[0][0] === 'promotion-article' &&
+    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成 · AI7 本地检查' && writingDrafted.drafted[0][0] === 'promotion-article' &&
       (writingDrafted.drafted[0][1] ?? '').startsWith('「宣传文章」的草稿已写好（') &&
       (writingDrafted.drafted[0][1] ?? '').endsWith('）；打开后成为这本书的宣传文章，处于「起草」阶段。'), 'writing-drafted-words', writingDrafted);
+
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(() => {const mark=document.querySelector('.writing-drafted-model');return mark?.textContent==='模型 AI7 本地检查' && mark.clientWidth>0 && mark.scrollWidth<=mark.clientWidth;})()`, 'writing-producing-model');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
     at('writing-rule');
     // 设为快速开始默认… (Issue #432, S84b; AUTH-009, TASK-019): the settled plan offers it in 完整, the standard start having set
@@ -2935,14 +2940,14 @@ async function main() {
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'writing-drawer-closed');
 
     at('writing-quick-start');
-    // The ordinary primary action prepares and starts without a rule or plan drawer.
+    // The ordinary primary action opens the model/start bar; starting there opens the completed draft automatically.
     await openDerivativePanel(renderer, { title: '宣传文章', typeId: WRITING_REQUEST.typeId, mode: 'writing' }, 'writing-direct-new');
     await readWriting((page) => page.open, 'writing-direct-sheet');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
     await fill(renderer, '.writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-direct-channel');
     await clickSelector(renderer, '.writing-task [data-writing-action="start"]', 'writing-direct-start');
-    await assertRenderer(renderer, `document.body.dataset.taskDrawer !== 'open' && !document.querySelector('.writing-task [data-writing-action="quick"]')`, 'writing-no-plan-wall');
+    await launchTaskFromBar(renderer, waitFor, 'writing-direct-start');
 
     at('writing-draft');
     // 开始写作 begun on 稿件 opens its draft by itself once written (Issue #1403): the Book's 宣传文章 under the title written first —
@@ -3028,7 +3033,8 @@ async function main() {
     await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');
     await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="channel"]', WRITING_LIBRARY_REQUEST.channel, 'writing-library-channel');
     await clickSelector(renderer, '[data-screen="editor"] .writing-task [data-writing-action="plan"]', 'writing-library-plan-open');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-library-plan-ready', 120_000);
+    at('writing-preview-material');
+    await launchTaskFromBar(renderer, waitFor, 'writing-library', undefined, [WRITING_LIBRARY_TITLE]);
     const libraryPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.scope.send, plan.technical.find((row) => row.key === 'material-references')?.value ?? null,
         plan.notDo.editorial.includes('不照抄资料库资料：与任何一份资料有连续 12 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用'), plan.defaultRule.canSet]))`);
@@ -3043,8 +3049,7 @@ async function main() {
     at('writing-library-draft');
     // 开始任务 runs it on the authored fixture, reading the item through the index at its pin, and the 评论文章's draft is written;
     // 打开草稿 makes it the Book's 评论文章, its words the fixture's.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'writing-library-start');
-    const libraryEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state) && page.task === '写作任务「评论文章」：已完成', 'writing-library-ended');
+    const libraryEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state) && page.task === '写作任务「评论文章」：已完成 · AI7 本地检查', 'writing-library-ended');
     requireJourney(libraryEnded.drafted.length === 1 && libraryEnded.drafted[0][0] === WRITING_LIBRARY_REQUEST.typeId, 'writing-library-drafted', libraryEnded);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-library-drawer-settled', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'writing-library-drawer-close');

@@ -183,7 +183,6 @@ describe('reference-free review on the Go execution path', () => {
     const absent: LaunchPolicyProjection = { ...admitted, providerProcessing: { ...admitted.providerProcessing,
       admittedRules: admitted.providerProcessing.admittedRules.map(({ seriesKnowledgeAllowed: _flag, ...rule }) => rule) } };
     for (const closed of [absent, withRuleFor(admitted, kind, { seriesKnowledgeAllowed: false }),
-      withRuleFor(admitted, kind, { outboundDataCategories: ruleFor(admitted, kind).outboundDataCategories.filter((category) => category !== 'series-knowledge-excerpt') }),
       withRuleFor(admitted, kind, { taskKinds: ruleFor(admitted, kind).taskKinds.filter((listed) => listed !== kind) })]) {
       store.baselineAnalysisLedger.bindLaunch({ ...original, policy: closed });
       expect(store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason).toBe('当前策略未开放书系知识');

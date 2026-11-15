@@ -1,3 +1,4 @@
+import { anonymousPlatformTools } from '../support/platform-tools.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,12 +35,7 @@ import {
 const REPO_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const CITED = 'https://example.org/source';
 
-async function v7Rule(): Promise<PlatformToolsRule> {
-  const document = JSON.parse(await readFile(resolve(REPO_ROOT, 'docs/policies/provider-processing-policy.v7.json'), 'utf8')) as {
-    decision: { providerAllowRules: unknown[] };
-  };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule;
-}
+async function v7Rule(): Promise<PlatformToolsRule> { return anonymousPlatformTools(); }
 
 function binding(rule: PlatformToolsRule): EgressBindingFacts {
   return {

@@ -27,6 +27,47 @@ import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../.
 
 const encoder = new TextEncoder();
 
+describe('one-step drawer launch frames (#1455)', () => {
+  const bookId = '11111111-1111-4111-8111-111111111111';
+  const commands = [
+    ['launchBaselineAnalysis', { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }],
+    ['launchCustomAnalysis', { dimensionId: bookId, update: null }],
+    ['launchWritingTask', { typeId: 'promotion-article', audience: '读者', channel: '本社', requirements: null }],
+    ['launchInitialEvaluation', {}], ['launchReadersReport', { template: 'author' }],
+    ['launchEvaluationRewrite', { recordId: bookId }],
+  ] as const;
+  it.each(commands)('decodes %s with a closed choice and command identity', (op, task) => {
+    const input = { bookId, ...task, clientCommandId: randomUUID(), executionConfig: { modelConnectionId: 'instance-reference', modelId: 'account/model', reasoningEffort: 'high' }, rememberedChoice: true };
+    const frame = { id: randomUUID(), op, input };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    const { bookId: _book, ...previewRequest } = input;
+    const preview = { id: randomUUID(), op: 'previewTaskLaunch', input: { bookId, launch: { operation: op, input: previewRequest } } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(preview)))).toEqual(preview);
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...preview, input: { ...preview.input, launch: { ...preview.input.launch, input: { ...previewRequest, bookId } } } })))).toThrow(ProtocolError);
+    const options = { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } };
+    expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, planEdits: options, startWhen: 'idle' } })))).toMatchObject({ input: { planEdits: options, startWhen: 'idle' } });
+    expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, startWhen: 'when-online' } })))).toMatchObject({ input: { startWhen: 'when-online' } });
+    for (const invalid of [{ ...input, clientCommandId: 'broken' }, { ...input, executionConfig: { endpoint: 'private' } },
+      { ...input, rememberedChoice: 'yes' }, { ...input, startWhen: 'later' }, { ...input, authorize: true },
+      { ...input, planEdits: { ...options, endpoint: 'private' } }, { ...input, planEdits: { ...options, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 0 } } }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
+    }
+    if (op === 'launchBaselineAnalysis') expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, reconfirm: false } })))).toThrow(ProtocolError);
+  });
+});
+
+it('carries the factual assurance and offline start in one review launch without widening legacy preparation (#1455)', () => {
+  const input = { bookId: randomUUID(), clientCommandId: randomUUID(), categoryIds: ['factual-review'],
+    scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, evidenceAssuranceLevel: 'strict', startWhen: 'when-online' };
+  const frame = { id: randomUUID(), op: 'launchReviewRun', input };
+  expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+  for (const invalid of [{ ...input, evidenceAssuranceLevel: 'unknown' }, { ...input, startWhen: 'later' },
+    { ...input, categoryIds: ['typos-and-usage'] }]) {
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
+  }
+  expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, op: 'prepareReviewRun' })))).toThrow(ProtocolError);
+});
+
 describe('editable procedure commands (#1170)', () => {
   it('carries exact version selections and new versions without accepting execution authority', () => {
     const document = baselineProcedureDefinition();
@@ -2409,4 +2450,14 @@ it('accepts editable derivative categories and workspace metadata, and refuses m
     { op: 'reorderProductionDocumentTypes', input: { typeIds: [false] } },
     { op: 'updateProductionDocumentMeta', input: { bookId, documentId, finalized: 'yes' } },
   ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...body })))).toThrow(ProtocolError);
+});
+
+
+it('decodes independent two-role efforts only on the atomic two-role selector (#1453 review)', () => {
+  const input = { route: 'openai-platform', modelId: 'custom-model', reasoningEffort: 'high', fastReasoningEffort: 'low' };
+  const frame = { id: randomUUID(), op: 'selectBothRoleModels', input };
+  expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toMatchObject(frame);
+  for (const op of ['selectMainRoleModel', 'selectFastRoleModel', 'testModelServiceConnection'])
+    expect(() => decodeRequest(new TextEncoder().encode(JSON.stringify({ ...frame, op })))).toThrow(ProtocolError);
+  expect(() => decodeRequest(new TextEncoder().encode(JSON.stringify({ ...frame, input: { ...input, fastReasoningEffort: 'invalid value' } })))).toThrow(ProtocolError);
 });

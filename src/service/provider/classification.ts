@@ -32,6 +32,7 @@ export const AI7_FAILURE_CODES = {
   RATE_LIMIT: 'RATE_LIMIT',
   PROVIDER_ERROR: 'PROVIDER_ERROR',
   INVALID_RESPONSE: 'INVALID_RESPONSE',
+  REASONING_EFFORT_REJECTED: 'MODEL_REASONING_EFFORT_REJECTED',
   TRANSPORT_FAILED: 'TRANSPORT_FAILED',
   MODEL_SERVICE_UNREACHABLE: 'MODEL_SERVICE_UNREACHABLE',
   PROXY_UNREACHABLE: 'AI7_PROXY_UNREACHABLE',
@@ -111,6 +112,9 @@ export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailu
   }
   if (code === AI7_FAILURE_CODES.MODEL_SERVICE_UNREACHABLE) {
     return classified('failed', 'adapter-failure', '模型服务不可达：请检查网络或网络代理设置。');
+  }
+  if (code === AI7_FAILURE_CODES.REASONING_EFFORT_REJECTED) {
+    return classified('failed', 'adapter-failure', '模型服务没有接受所选思考强度；请换一个强度后再试。');
   }
   if (code === codes.QUOTA_EXCEEDED_CODE) {
     return classified('failed', 'provider-account-limit', 'Provider Account Limit：模型服务账户限额阻止了本次请求。');

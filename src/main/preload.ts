@@ -264,6 +264,20 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
   inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
+  previewTaskLaunch: (input: Omit<ServiceOperationMap['previewTaskLaunch']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['previewTaskLaunch']['output']>(IPC_CHANNELS.previewTaskLaunch, input),
+  launchBaselineAnalysis: (input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchBaselineAnalysis']['output']>(IPC_CHANNELS.launchBaselineAnalysis, input),
+  launchCustomAnalysis: (input: Omit<ServiceOperationMap['launchCustomAnalysis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchCustomAnalysis']['output']>(IPC_CHANNELS.launchCustomAnalysis, input),
+  launchWritingTask: (input: Omit<ServiceOperationMap['launchWritingTask']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchWritingTask']['output']>(IPC_CHANNELS.launchWritingTask, input),
+  launchInitialEvaluation: (input: Omit<ServiceOperationMap['launchInitialEvaluation']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchInitialEvaluation']['output']>(IPC_CHANNELS.launchInitialEvaluation, input),
+  launchReadersReport: (input: Omit<ServiceOperationMap['launchReadersReport']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchReadersReport']['output']>(IPC_CHANNELS.launchReadersReport, input),
+  launchEvaluationRewrite: (input: Omit<ServiceOperationMap['launchEvaluationRewrite']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchEvaluationRewrite']['output']>(IPC_CHANNELS.launchEvaluationRewrite, input),
   prepareBaselineAnalysis: (input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareBaselineAnalysis']['output']>(IPC_CHANNELS.prepareBaselineAnalysis, input),
   authorizeBaselineAnalysis: (input: Omit<ServiceOperationMap['authorizeBaselineAnalysis']['input'], 'bookId'>) =>
@@ -459,6 +473,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   saveHouseWordList: (input: ServiceOperationMap['saveHouseWordList']['input']) => invoke<ServiceOperationMap['saveHouseWordList']['output']>(IPC_CHANNELS.saveHouseWordList, input),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
+  launchReviewRun: (input: Omit<ServiceOperationMap['launchReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchReviewRun']['output']>(IPC_CHANNELS.launchReviewRun, input),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareReviewRun']['output']>(IPC_CHANNELS.prepareReviewRun, input),
   authorizeReviewRun: (input: Omit<ServiceOperationMap['authorizeReviewRun']['input'], 'bookId'>) =>

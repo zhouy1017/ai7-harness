@@ -61,6 +61,7 @@
       "models": [
         {
           "modelId": "deepseek-v4-pro",
+          "pre114ReasoningEffort": "high",
           "displayName": "DeepSeek V4 Pro High",
           "capabilities": {
             "reasoningControl": { "value": "deepseek-thinking", "evidence": "production-baseline" },
@@ -81,10 +82,20 @@
           "context": { "tokens": 1000000, "evidence": "models-and-pricing" },
           "note": "The vendor's current id for V4.1 Flash, named by Provider Processing v19's ordinary-production binding for the DeepSeek 开放平台（官方） route (Issue #811). Answer and reasoning channels are the vendor's documented response contract, which the #811 ordinary-production observation of 2026-10-15 (one baseline Task, recorded on the Issue, no ledger line by design) agreed with; it sends no unverified format, reasoning-control or tool parameters."
         }
-      ]
+      ],
+      "reasoning": {
+        "control": "deepseek-thinking",
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "source": "https://api-docs.deepseek.com/guides/thinking_mode/",
+        "readOn": "2026-11-14"
+      }
     }
   ],
   "openQuestions": [
-    "Every read-side capability of the production route — answer channel beyond the request baseline, structured output, reasoning channel, usage attribution — must be established by vendor documentation or a named live test item before the first production Run (ADR 0080 §4)."
+    "Historical model-specific read-side evidence remains unchanged. Runtime protocol support and effort control have provider-free family coverage; model/effort availability is decided by the configured service (#1453, ADR 0102/0103)."
   ]
 }

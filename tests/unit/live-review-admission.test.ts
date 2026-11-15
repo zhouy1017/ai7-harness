@@ -52,7 +52,7 @@ describe('reference-free live review admission (#809)', () => {
     expect(liveReviewRule({ ...policy, operationalScope: 'development-ci' }, category)).toBeNull();
     expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [rule, rule] } }, category)).toBeNull();
     expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...rule, taskKinds: [] }] } }, category)).toBeNull();
-    expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...rule, outboundDataCategories: [] }] } }, category)).toBeNull();
+    expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [{ ...rule, outboundDataCategories: [] }] } }, category)).not.toBeNull();
   });
 
   it('keeps leads, undeclared web, unavailable and Series Knowledge executors outside model admission', () => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../src/shared/provider-configuration.generated.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
 import { kindResearchDeclaration, liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
-import { bindOrdinaryProductionRules, resolveSourceCheckoutLaunchPolicy, verifyOrdinaryProductionPolicy } from '../../src/service/launch-policy.js';
+import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { readFileSync } from 'node:fs';
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
@@ -60,12 +60,9 @@ describe('publication-risk policy admission', () => {
     expect(liveKindAdmission(policy, definition, binding)).not.toBeNull();
     expect(kindResearchDeclaration(policy, definition.kind, { webSearch: true, searchEngine: 'user-selected-backend' }))
       .toEqual({ webSearch: false, searchEngine: null });
-    const predecessor = JSON.parse(readFileSync(new URL('../../docs/policies/provider-processing-policy.v25.json', import.meta.url), 'utf8')) as Record<string, unknown>;
-    const v25 = { ...policy, providerProcessing: { ...policy.providerProcessing, version: 'v25' as const,
-      admittedRules: bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(predecessor), binding)! } };
-    for (const denied of [v25, await resolveSourceCheckoutLaunchPolicy(root, 'developer-live'), await resolveSourceCheckoutLaunchPolicy(root)]) {
-      expect(liveReviewRule(denied, entry)).toBeNull();
-      expect(liveKindAdmission(denied, definition, binding)).toBeNull();
-    }
+    const ci = await resolveSourceCheckoutLaunchPolicy(root);
+    expect(liveReviewRule(ci, entry)).toBeNull();
+    expect(liveKindAdmission(ci, definition, binding)).toBeNull();
+
   });
 });

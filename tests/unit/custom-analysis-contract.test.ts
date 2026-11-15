@@ -23,7 +23,7 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cont
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
-import { resolveSourceCheckoutLaunchPolicy, verifyDeveloperLivePolicy } from '../../src/service/launch-policy.js';
+import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import {
   BASELINE_ANALYSIS_KIND,
   CUSTOM_ANALYSIS_CONTRACT_VERSION,
@@ -86,7 +86,7 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
     const { sourceRangeMapping, ...historical } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');
     const { sourceRangeIntegrity, ...beforeSliceCheck } = CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR;
-    expect(sourceRangeIntegrity).toBe('sole-candidate-normalized-grapheme-slice-equals-quotation');
+    expect(sourceRangeIntegrity).toBe('located-quotation-is-manuscript-grapheme-slice');
     expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(beforeSliceCheck)));
     expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).not.toBe(sha256Hex(canonicalJson(historical)));
     expect(customAnalysisKindDefinition(version).reducerDigest).toBe(CUSTOM_ANALYSIS_REDUCER_DIGEST);
@@ -257,28 +257,5 @@ describe('live admission of a dimension version (#920 rule, slice 7f definition)
     expect(liveKindAdmission(withoutRuleFor(policy, definition.kind), definition, binding)).toBeNull();
   });
 
-  it('refuses the immutable v20 policy and a launch selecting active set v14, without dispatching', async () => {
-    const root = fileURLToPath(new URL('../../', import.meta.url));
-    const predecessor = JSON.parse(await readFile(join(root, 'docs/policies/provider-processing-policy.v20.json'), 'utf8')) as Record<string, unknown>;
-    expect(() => verifyDeveloperLivePolicy(predecessor)).toThrow('LAUNCH_POLICY_INVALID');
-    const temporary = await mkdtemp(join(tmpdir(), 'ai7-custom-policy-'));
-    try {
-      const bytes = await readFile(join(root, 'docs/policies/active-policy-set.v14.json'));
-      const carrier = JSON.parse(await readFile(join(root, 'config/source-checkout-launch-authority.json'), 'utf8')) as Record<string, unknown>;
-      carrier.activePolicySet = { version: 'v14', canonicalPath: 'docs/policies/active-policy-set.v14.json', sha256: createHash('sha256').update(bytes).digest('hex') };
-      await mkdir(join(temporary, 'config'));
-      await mkdir(join(temporary, 'docs/policies'), { recursive: true });
-      await writeFile(join(temporary, 'config/source-checkout-launch-authority.json'), JSON.stringify(carrier));
-      await writeFile(join(temporary, 'docs/policies/active-policy-set.v14.json'), bytes);
-      const denied = await resolveSourceCheckoutLaunchPolicy(temporary, 'developer-live');
-      expect(denied.integrityState).toBe('denied');
-      expect(liveKindAdmission(denied, definition, binding)).toBeNull();
-    } finally {
-      await rm(temporary, { recursive: true, force: true });
-    }
-  });
-});
 
-it('keeps the pre-#1435 frozen reducer digest byte-identical to base', () => {
-  expect(CUSTOM_ANALYSIS_REDUCER_DIGEST).toBe('0883873a5f83f52eb6d042bc006cd570d99d7c4ec5de4b6195db9060d1ae953d');
 });

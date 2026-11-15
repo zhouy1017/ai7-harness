@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountCustomAnalysisDimensions, mountCustomAnalysisTab, ANALYSIS_TAB_SHOWN_EVENT } from '../../src/renderer/custom-analysis.js';
-import { CUSTOM_TAB_EMPTY, CUSTOM_TAB_FEEDBACK_NOTE, CUSTOM_TAB_NOT_RUN, CUSTOM_TAB_PREPARED, CUSTOM_TAB_STARTED, customRowAnchorLabel, customTabCountsLine } from '../../src/renderer/custom-analysis-labels.js';
+import { CUSTOM_TAB_EMPTY, CUSTOM_TAB_FEEDBACK_NOTE, CUSTOM_TAB_NOT_RUN, customRowAnchorLabel, customTabCountsLine } from '../../src/renderer/custom-analysis-labels.js';
 import { CUSTOM_DIMENSIONS_HEADING, CUSTOM_DIMENSION_FIXED_LINES, customDimensionVersionLine } from '../../src/renderer/knowledge-base-labels.js';
-import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, TaskPlanProjection, BaselineAnalysisWireProjection } from '../../src/shared/protocol.js';
+import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
@@ -61,16 +61,13 @@ async function settle(): Promise<void> {
   for (let index = 0; index < 5; index += 1) await Promise.resolve();
 }
 
-function mountTab(reading: CustomAnalysisDimensionsProjection, readiness = 'ready') {
+function mountTab(reading: CustomAnalysisDimensionsProjection) {
   const panel = miniDocument.createElement('section');
   miniDocument.body.append(panel);
   const api = {
     inspectCustomAnalysisDimensions: vi.fn(async () => reading),
-    prepareCustomAnalysis: vi.fn(async () => ({ taskIntentId: '55555555-5555-4555-8555-555555555555', dimensions: reading })),
-    inspectTaskPlan: vi.fn(async () => ({ kind: 'baseline-analysis', start: { readiness, planEnvelopeDigest: 'digest', categoryDigests: [] } }) as unknown as TaskPlanProjection),
-    authorizeBaselineAnalysis: vi.fn(async () => undefined as unknown as BaselineAnalysisWireProjection),
   };
-  const options = { bookId: bookId(), api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, openPlan: vi.fn(), jump: vi.fn() };
+  const options = { bookId: bookId(), api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback, openLaunch: vi.fn(), openPlan: vi.fn(), jump: vi.fn() };
   mountCustomAnalysisTab(panel as unknown as HTMLElement, options);
   return { panel, api, options };
 }
@@ -85,30 +82,15 @@ describe('②A › 自定义', () => {
     expect(panel.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('lists an enabled dimension that has not run as 尚未运行, and 运行 prepares its first Task and starts it at once', async () => {
-    const { panel, api, options } = mountTab(projection([dimension({ taskState: null, latest: null, unavailableReason: null })]));
+  it('opens the start bar for an enabled dimension without preparing a Task', async () => {
+    const { panel, options } = mountTab(projection([dimension({ taskState: null, latest: null, unavailableReason: null })]));
     await settle();
     const run = panel.querySelector(`[data-dimension-id="${DIMENSION}"] [data-analysis-action="custom-run"]`) as MiniElement;
     run.click();
     await settle();
-    expect(api.authorizeBaselineAnalysis).toHaveBeenCalledWith({ taskIntentId: '55555555-5555-4555-8555-555555555555', planEnvelopeDigest: 'digest' });
+    expect(options.openLaunch).toHaveBeenCalledWith({ bookId: bookId(), operation: 'launchCustomAnalysis', title: '自定义分析', input: { dimensionId: DIMENSION, update: null } });
     expect(options.openPlan).not.toHaveBeenCalled();
-    expect(options.setStatus).toHaveBeenCalledWith(CUSTOM_TAB_STARTED, 'success');
-  });
-
-  it('opens the plan instead when its route waits for a decision', async () => {
-    const { panel, api, options } = mountTab(projection([dimension({ taskState: null, latest: null, unavailableReason: null })]), 'needs-connection');
-    await settle();
-    const card = panel.querySelector(`[data-dimension-id="${DIMENSION}"]`)!;
-    expect(card.querySelector('[data-custom-empty="not-run"]')?.textContent).toBe(CUSTOM_TAB_NOT_RUN);
-    const run = card.querySelector('[data-analysis-action="custom-run"]') as MiniElement;
-    expect(run.disabled).toBe(false);
-    run.click();
-    await settle();
-    expect(api.prepareCustomAnalysis).toHaveBeenCalledWith({ dimensionId: DIMENSION, update: null });
-    expect(options.openPlan).toHaveBeenCalledWith('55555555-5555-4555-8555-555555555555');
-    expect(api.authorizeBaselineAnalysis).not.toHaveBeenCalled();
-    expect(options.setStatus).toHaveBeenLastCalledWith(CUSTOM_TAB_PREPARED, 'success');
+    expect(panel.querySelector('[data-custom-empty="not-run"]')?.textContent).toBe(CUSTOM_TAB_NOT_RUN);
   });
 
   it('shows the latest result: axes, gaps, rows with a located quotation as a jump link and an unlocated one said so', async () => {
@@ -136,7 +118,7 @@ describe('②A › 自定义', () => {
     // A result that still reads the current manuscript is read again whole.
     (panel.querySelector('[data-analysis-action="custom-run"]') as MiniElement).click();
     await settle();
-    expect(api.prepareCustomAnalysis).toHaveBeenCalledWith({ dimensionId: DIMENSION, update: { mode: 'reanalyze-book', selectedRange: null } });
+    expect(options.openLaunch).toHaveBeenCalledWith(expect.objectContaining({ operation: 'launchCustomAnalysis', input: { dimensionId: DIMENSION, update: { mode: 'reanalyze-book', selectedRange: null } } }));
     (panel.querySelector('[data-analysis-action="custom-open-plan"]') as MiniElement).click();
     expect(options.openPlan).toHaveBeenLastCalledWith('66666666-6666-4666-8666-666666666666');
   });

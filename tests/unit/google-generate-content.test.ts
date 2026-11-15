@@ -196,7 +196,7 @@ describe('assembleProviderRequest · google-generate-content', () => {
       .toBe(`${GENERATIVE_LANGUAGE_MODELS}/gemini-3.0-flash_001:generateContent`);
   });
 
-  it('refuses the capability spellings that belong to another shape', () => {
+  it('still refuses unimplemented structured-output spellings and unknown shapes', () => {
     // `json-object` and `deepseek-thinking` are chat-completions fields. This shape has mechanisms of
     // its own for both — `generationConfig.responseMimeType` with `responseSchema`, and
     // `generationConfig.thinkingConfig` — and neither is implemented, so declaring either here
@@ -205,8 +205,6 @@ describe('assembleProviderRequest · google-generate-content', () => {
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, geminiModel({ structuredOutput: 'json-schema' }), payload(), context))
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
-    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, geminiModel({ reasoningControl: 'deepseek-thinking' }), payload(), context))
-      .toThrowError(/PROVIDER_REASONING_CONTROL_UNSUPPORTED/u);
     // A shape no profile in the table declares still refuses: a profile is data, and the union cannot
     // rule one out at runtime.
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, geminiModel({ requestShape: 'a-shape-nobody-declared' as ProviderModelProfile['capabilities']['requestShape'] }), payload(), context))

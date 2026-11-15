@@ -1,5 +1,6 @@
+import { chooseDispatch } from './dispatch-chooser.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -10,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -427,11 +429,11 @@ async function assertProgressiveSelect(renderer) {
 async function assertOrdinaryModelReachability(renderer) {
   const native = await renderer.evaluate(`({width:innerWidth,height:innerHeight,outerWidth,outerHeight})`);
   if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-native ${JSON.stringify(native)}`);
-  for (const viewport of [native, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
+  for (const viewport of [native, { width: 1280, height: 800 }, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-model-supported-viewport');
     const geometry = await renderer.evaluate(`(async () => {
-      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','[data-favorite-model]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
+      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','input[aria-label="主编辑思考强度"]', 'input[aria-label="快速交互思考强度"]','[data-favorite-model]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
       const controls=[];
       for (const [index,selector] of selectors.entries()) {
         const native=document.querySelector(selector);
@@ -460,6 +462,43 @@ async function assertOrdinaryModelReachability(renderer) {
 async function dispatchTab(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
+}
+
+/** #1453: role defaults are saved by the visible action, then survive leaving and reopening settings. */
+async function assertModelEffortDefaults(renderer) {
+  const original = await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings => Object.fromEntries(settings.roles.filter(role => ['main-editorial','fast-interaction'].includes(role.roleId)).map(role => [role.roleId,role.binding?.reasoningEffort ?? 'off'])))`);
+  const save = async (role, effort) => {
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('input[data-reasoning-effort="${role}"]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.focus(); input.value=${JSON.stringify(effort === 'off' ? '' : effort)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'model-effort-enter');
+    const point = await renderer.evaluate(`(async () => { const button=document.querySelector('[data-action="select-${role}-role-model"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return null; button.scrollIntoView({block:'center',behavior:'instant'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); if(!button.isConnected)return null; const box=button.getBoundingClientRect(); const x=box.left+box.width/2,y=box.top+box.height/2; return {x,y,visible:box.top>=document.querySelector('#context-header').getBoundingClientRect().bottom && box.bottom<=innerHeight && document.elementFromPoint(x,y)===button}; })()`);
+    requireJourney(point?.visible === true, 'model-effort-save-visible');
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    const roleId = role === 'main' ? 'main-editorial' : 'fast-interaction';
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => (settings.roles.find(role => role.roleId===${JSON.stringify(roleId)})?.binding?.reasoningEffort ?? 'off')===${JSON.stringify(effort)})`, 'model-effort-saved');
+    await waitFor(renderer, `document.querySelector('[data-model-role="${roleId}"]')?.textContent.includes(${JSON.stringify(effort === 'off' ? '服务默认' : '@' + effort)})`, 'model-effort-role-label');
+  };
+  try {
+    for (const [width, height] of [[1280,800],[1008,681]]) {
+      if (width === 1280) at('model-effort-defaults-wide');
+      else at('model-effort-defaults-gate');
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, 'model-effort-viewport');
+      await save('main', 'high');
+      await save('fast', 'low');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-effort-leave');
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'model-effort-settings-ready');
+      await click(renderer, '模型服务', 'model-effort-reopen');
+      await waitFor(renderer, `document.querySelector('input[aria-label="主编辑思考强度"]')?.value==='high' && document.querySelector('input[aria-label="快速交互思考强度"]')?.value==='low' && document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('@high') && document.querySelector('[data-model-role="fast-interaction"]')?.textContent.includes('@low')`, 'model-effort-reopened-defaults');
+      await save('fast', 'low');
+      await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.reasoningEffort==='high')`, 'model-effort-other-role-kept');
+      await save('main', original['main-editorial']);
+      await save('fast', original['fast-interaction']);
+    }
+  } finally {
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await renderer.evaluate(`document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'})`);
+  }
+  at('model-service-first-save');
 }
 
 async function tabUntil(renderer, expression, name, maximumTabs = 12) {
@@ -496,10 +535,10 @@ async function createEmptyBook(renderer, title) {
   return bookId;
 }
 
-async function importBook(renderer, title, bundled = false) {
+async function importBook(renderer, title, bundled = false, distinct = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)})??document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
   await click(renderer, '查看导入详情', 'import-review');
@@ -507,7 +546,9 @@ async function importBook(renderer, title, bundled = false) {
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, 'import-acknowledged', 180_000);
-  const identity = await renderer.evaluate(`(() => ({ bookId: document.querySelector('.book-overview')?.dataset.bookId, revisionId: document.querySelector('button[data-record-kind="revision"]')?.dataset.recordId }))()`);
+  const identity = await renderer.evaluate(`(async () => { const bookId=document.querySelector('.book-overview')?.dataset.bookId;
+    if(!bookId)return null;const overview=await window.ai7.getBookOverview({bookId,historyCursor:null});
+    return {bookId,revisionId:overview.manuscriptAnchor?.revisionId}; })()`);
   requireJourney(UUID_PATTERN.test(identity?.bookId) && UUID_PATTERN.test(identity?.revisionId), 'import-identities');
   return identity;
 }
@@ -563,6 +604,9 @@ async function saveMilestone(renderer) {
   await click(renderer, '保存里程碑版本', 'milestone-save');
   await waitFor(renderer, milestonePersisted(before, 'r2'), 'milestone-saved', 120_000);
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-revision-caption');
+  // #1483: persistence can precede the editor/outline reconciliation that releases the write guard.
+  // Follow the enabled milestone controls and cleared close risk before asking the shell to leave.
+  await waitFor(renderer, `(() => { const label=document.querySelector('#milestone-label'); return label instanceof HTMLInputElement && !label.disabled && document.documentElement.dataset.ai7CloseRisk==='false'; })()`, 'milestone-write-settled');
 }
 
 /**
@@ -833,6 +877,7 @@ async function main() {
     }), { flag: 'wx' });
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
+    let dispatchFixture = false;
     const launch = async (picker, savePath, startupDataRoot = dataRoot) => {
       const startupShellRoot = await ensureCanonicalDataDirectory(startupDataRoot, 'shell');
       const args = [
@@ -842,6 +887,7 @@ async function main() {
         '--j12-observe-reveal', 'true', '--launcher-pid', String(process.pid),
         '--j12-diagnostics-folder', diagnosticsDestination,
       ];
+      if (dispatchFixture) args.push('--j04-model-adapter', 'sample1-baseline-happy');
       if (picker) args.splice(args.length - 4, 0, '--j12-picker-path', picker);
       // 导出数据库's Save dialog, answered once (Issue #434, S86a).
       if (savePath) args.splice(args.length - 4, 0, '--j12-save-path', savePath);
@@ -878,7 +924,8 @@ async function main() {
     [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'sample-onboarding-window');
     await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'sample-onboarding-ready');
     const sampleBook = await importBook(onboardingPage, 'J12 示例图书', true);
-    await requireJourney(await onboardingPage.evaluate(`(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest==='b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483') && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`), 'sample-admitted-source-and-completion');
+    const onboardingSampleDigest = createHash('sha256').update(await readFile(resolve(ROOT, 'SampleBooks', 'sample1.docx'))).digest('hex');
+    await requireJourney(await onboardingPage.evaluate(`(async () => { const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(sampleBook.bookId)},historyCursor:null}); return overview.records.some(record=>record.kind==='source' && record.sourceDigest===${JSON.stringify(onboardingSampleDigest)}) && (await window.ai7.getPreferences()).values['onboarding.state']==='completed'; })()`), 'sample-admitted-source-and-completion');
     at('guided-strip');
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-guidance="sample-book"]')`, 'guided-strip-visible');
     await requireJourney(await onboardingPage.evaluate(`(async () => { const labels=Array.from(document.querySelectorAll('[data-onboarding-step]')).map(node=>node.textContent); const tasks=await window.ai7.inspectBookTasks(); return labels.join(',')==='分析,审阅,标记,导出' && !tasks.running && tasks.groups.every(group=>group.total===0 && group.items.length===0); })()`), 'guided-strip-navigation-only');
@@ -928,7 +975,7 @@ async function main() {
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
     // #1371: ordinary mode keeps the native source explanation and unmeasured disclosure, with five manual cards.
     // Production admission/request construction is exercised by composed ordinary-production service tests; this Journey sends nothing.
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v26' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='no-policy-lock' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backend]').length===5 && ['openai-native-search-v1','anthropic-native-search-v1'].every(id => { const card=document.querySelector('[data-search-candidate="'+id+'"]'); return card?.textContent.includes('未实测') && card.textContent.includes('自动用于随渠道检索') && !card.textContent.includes('不能用于任务'); })`, 'ordinary-native-source-disclosure');
 
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
@@ -1301,11 +1348,11 @@ async function main() {
     // Synchronized delta with Issue #405: move the editor off the manuscript's start, so that what the
     // restart below returns to is a position this editor chose rather than the place every manuscript
     // opens at. The 40-block synthetic manuscript is longer than one window, so paging forward has
-    // somewhere to go, and the moved-to window is what is remembered. `已到达` is written after the
-    // position is durable, so reading it is enough to know the product may be closed; the overview is
-    // then asked what it would enter at, because that is what the restart below has to match.
+    // somewhere to go, and the moved-to window is what is remembered. Issue #1481: hosted
+    // diagnosis observed a cursor load and persisted position 9 while the arrival announcement was
+    // absent from the status line. Wait for the durable position the restart actually consumes.
     await click(primary, '向后浏览', 'page-away-from-start');
-    await waitFor(primary, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'paged-away-from-start');
+    await waitFor(primary, `window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}).then((overview)=>Number.isSafeInteger(overview.manuscriptAnchor?.entry?.blockPosition) && overview.manuscriptAnchor.entry.blockPosition>1)`, 'paged-away-from-start');
     const pagedAwayPosition = await primary.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}).then((overview)=>overview.manuscriptAnchor?.entry?.blockPosition??null,()=>null)`);
     requireJourney(Number.isSafeInteger(pagedAwayPosition) && pagedAwayPosition > 1, 'paged-away-position-remembered-off-the-start');
 
@@ -1779,10 +1826,9 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v26.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 202 &&
-      diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 203 &&
+      diagnosticsSummary.policySetVersion === 'no-policy-lock' && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
     await waitFor(primary, `document.querySelector('[data-reveal-state="requested"]')`, 'diagnostics-revealed');
@@ -1978,6 +2024,7 @@ async function main() {
     await click(primary, '模型服务', 'ordinary-poll-draft-reopen');
     await waitFor(primary, `document.querySelector('select[aria-label="网络代理方式"]')?.value==='direct' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash'`, 'ordinary-poll-draft-cleared');
     await assertOrdinaryModelReachability(primary);
+    await assertModelEffortDefaults(primary);
     await assertRenderer(primary, `(() => {
       const select=document.querySelector('select[aria-label="AI7 使用的模型"]');
       const filter=document.querySelector('input[aria-label="筛选模型"]');
@@ -2111,7 +2158,7 @@ async function main() {
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
         // Synchronized delta with Issue #1408: selected active set v26; new local Plans use Provider Processing v1.
-        firstConnection.policy?.activePolicySetVersion === 'v26' &&
+        firstConnection.policy?.activePolicySetVersion === 'no-policy-lock' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
@@ -2513,6 +2560,68 @@ async function main() {
     const refusedPrediction = await primary.evaluate(`window.ai7.setEvaluationPreferences({ expectedEntries: 2, predictionEnabled: true, calibrationEnabled: true }).then(() => ({ recorded: true }), (error) => ({ code: error?.code ?? null, message: error?.message ?? null }))`);
     requireJourney(refusedPrediction?.code === 'PREDICTION_UNAVAILABLE' && refusedPrediction.message === '至少 30 本已发稿图书录入实际数据后，才能打开定价与首印预测。', 'prediction-refused', refusedPrediction);
 
+    // #1455: reuse the existing local fixture composition for starts; the process network denial remains in force.
+    dispatchFixture = true;
+    let rememberedLabel;
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        at(width === 1280 ? 'dispatch-model-wide' : 'dispatch-model-gate');
+        await close();
+        manager = await launch(resolve(ROOT, 'SampleBooks', 'sample1.docx'));
+        [primary] = await waitForRendererCount(manager, 1, 'dispatch-window');
+        await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-landing');
+        await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-settings');
+        await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dispatch-settings-ready');
+        await click(primary, '帮助', 'dispatch-help');
+        await assertRenderer(primary, `(() => {const toggle=document.querySelector('.help-developer-mode input');if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false;if(!toggle.checked)toggle.click();return true;})()`, 'dispatch-development-controls');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-model-settings');
+        await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dispatch-model-settings-ready');
+        await click(primary, '模型服务', 'dispatch-model-settings-entry');
+        await waitFor(primary, `document.querySelector('[data-model-channel="deepseek-open-platform"] input')`, 'dispatch-channel');
+        await primary.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
+        await fill(primary, '#main-editorial-credential', secretTwo, 'dispatch-placeholder-credential');
+        credentialMutationReached = true; productCredentialCleanupSucceeded = false;
+        await click(primary, '保存并获取模型', 'dispatch-credential-save');
+        await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.connection?.credentialOperationState==='ready')`, 'dispatch-credential-ready');
+        await fill(primary, '[data-custom-model-id]', 'j12-ordinary-fast', 'dispatch-alternative-model');
+        await assertRenderer(primary, `(() => {const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-alternative-save');
+        await waitFor(primary, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j12-ordinary-fast')`, 'dispatch-alternative-ready');
+        const defaults = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
+        const otherKinds = await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(Object.entries(preferences.values['model.dispatchChoices']).filter(([kind])=>kind!=='baseline-analysis')))`);
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-ordinary-settings');
+        await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dispatch-ordinary-settings-ready');
+        await click(primary, '帮助', 'dispatch-ordinary-help');
+        await assertRenderer(primary, `(() => {const toggle=document.querySelector('.help-developer-mode input');if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false;if(toggle.checked)toggle.click();return true;})()`, 'dispatch-ordinary-mode');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-library');
+        await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-library-ready');
+        const imported = await importBook(primary, `J12 本次模型 ${width}`, false, true);
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-import-return');
+        await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-import-library');
+        await clickBook(primary, imported.bookId, 'dispatch-book');
+        await waitFor(primary, `document.querySelector('[data-screen="editor"]')`, 'dispatch-manuscript');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('analysis')), 'dispatch-analysis');
+        await waitFor(primary, `document.querySelector('.baseline-analysis-card [data-analysis-action="prepare"]')?.disabled===false`, 'dispatch-analysis-ready');
+        await assertRenderer(primary, `(() => {document.querySelector('.baseline-analysis-card [data-analysis-action="prepare"]').click();return true;})()`, 'dispatch-open-bar');
+        await waitFor(primary, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false && document.querySelector('#task-drawer .dispatch-chooser select')?.options.length>1`, 'dispatch-bar-ready');
+        requireJourney(await primary.evaluate(`window.ai7.inspectBaselineAnalysis().then(reading=>reading.taskIntent===null && reading.run===null)`), 'dispatch-preview-creates-no-task');
+        const beforeChoice = await primary.evaluate(`document.querySelector('#task-drawer .dispatch-chooser summary').textContent`);
+        if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
+        const picked = await chooseDispatch(primary, waitFor, '#task-drawer .dispatch-chooser', 'dispatch-pointer',
+          width === 1008 ? { model: 'next' } : { model: 'j12-ordinary-fast' });
+        requireJourney(picked.includes('@') && (width===1008 || picked.includes('j12-ordinary-fast@')), 'dispatch-chosen-model-and-level');
+        const chosen = { label: width===1008 ? await chooseDispatch(primary, waitFor, '#task-drawer .dispatch-chooser', 'dispatch-default-pointer', { reset: true }) : picked, focused: true };
+        if (width === 1280) rememberedLabel = chosen.label;
+        await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });
+        await waitFor(primary, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'dispatch-settled', 180_000);
+        const label = chosen.label.replace(/^模型 /u, '').replace(/ ▾$/u, '');
+        requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`) === defaults, 'dispatch-keeps-role-defaults');
+        requireJourney(await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(Object.entries(preferences.values['model.dispatchChoices']).filter(([kind])=>kind!=='baseline-analysis')))` ) === otherKinds, 'dispatch-keeps-other-task-choices');
+        if (width === 1008) requireJourney(await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(preferences.values['model.dispatchChoices']['baseline-analysis'])==='{}')`), 'dispatch-restores-default');
+        await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-tasks');
+        await waitFor(primary, `Array.from(document.querySelectorAll('.task-overview-model')).some(node=>node.textContent===${JSON.stringify(label)})`, 'dispatch-frozen-task-row');
+      }
+    } finally { await primary.send('Emulation.clearDeviceMetricsOverride'); }
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');
     await close();
     await loopback.close();

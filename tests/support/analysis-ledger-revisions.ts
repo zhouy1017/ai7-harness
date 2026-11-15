@@ -42,10 +42,10 @@ export function constructPre94PolicyEncoding(database: DatabaseSync): void {
     }
     // Only the scope/version fields of actual policy pins change; no /2 prompt, result or body is relabeled.
     if (next.operationalScope === 'development-ci' && next.version === 'v29') next.version = 'v1';
-    if (next.operationalScope === 'ordinary-production' && ['v30', 'v31', 'v32', 'v33'].includes(String(next.version))) next.version = 'v27';
-    if (['v21', 'v22', 'v23'].includes(String(next.activePolicySetVersion)) && Object.hasOwn(next, 'providerProcessingVersion')) {
+    if (next.operationalScope === 'ordinary-production' && ['v30', 'v31', 'v32', 'v33', 'v34', 'v35'].includes(String(next.version))) next.version = 'v27';
+    if (['v21', 'v22', 'v23', 'no-policy-lock'].includes(String(next.activePolicySetVersion)) && Object.hasOwn(next, 'providerProcessingVersion')) {
       if (next.operationalScope === 'development-ci' && ['v1', 'v29'].includes(String(next.providerProcessingVersion))) next.providerProcessingVersion = 'v1';
-      else if (next.operationalScope === 'ordinary-production' && ['v30', 'v31', 'v32', 'v33'].includes(String(next.providerProcessingVersion))) next.providerProcessingVersion = 'v27';
+      else if (next.operationalScope === 'ordinary-production' && ['v30', 'v31', 'v32', 'v33', 'v34', 'v35'].includes(String(next.providerProcessingVersion))) next.providerProcessingVersion = 'v27';
       else if (next.operationalScope !== 'developer-live' || next.providerProcessingVersion !== 'v24') fail();
       next.activePolicySetVersion = 'v19';
     }

@@ -151,8 +151,8 @@ function adapter(options: {
 
 describe('assembleDeepSeekRequest', () => {
   it('assembles a deterministic revision-1 request and digests it without any credential', () => {
-    const first = assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
-    const second = assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
+    const first = assembleDeepSeekRequest({ ...request(), reasoningEffort: 'high' as NonNullable<GenerateOptions['reasoningEffort']> }, attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
+    const second = assembleDeepSeekRequest({ ...request(), reasoningEffort: 'high' as NonNullable<GenerateOptions['reasoningEffort']> }, attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
     expect(first).toEqual(second);
     expect(first.url).toBe(DEEPSEEK_ENDPOINT);
     expect(first.method).toBe('POST');
@@ -172,8 +172,8 @@ describe('assembleDeepSeekRequest', () => {
     expect(first.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
   });
 
-  it('sends the exact production bytes frozen before the profile split', () => {
-    const assembly = assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
+  it('retains the historical DeepSeek wire bytes when high is explicitly selected', () => {
+    const assembly = assembleDeepSeekRequest({ ...request(), reasoningEffort: 'high' as NonNullable<GenerateOptions['reasoningEffort']> }, attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
     expect(assembly.body).toBe(PRODUCTION_REQUEST_BODY);
     expect(assembly.requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
     // A capability another profile declares does not reach this route: the live profile now requires
@@ -231,7 +231,7 @@ describe('provider route generalization', () => {
     });
     expect(OPENCODE_GO_RESPONSES_ROUTE_PROFILE.credentialSlot).toBe(OPENCODE_GO_ROUTE_PROFILE.credentialSlot);
     expect(OPENCODE_GO_RESPONSES_ROUTE_PROFILE.credentialHeaderEvidence).toMatchObject({ kind: 'vendor-documentation', source: expect.stringContaining('ADR 0067') });
-    expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
+    expect(assembleDeepSeekRequest({ ...request(), reasoningEffort: 'high' as NonNullable<GenerateOptions['reasoningEffort']> }, attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
     expect(assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, liveRequest(), {
       attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
     }).requestDigest).toBe(OPENCODE_GO_REQUEST_DIGEST);
@@ -564,7 +564,7 @@ describe('model capability profiles', () => {
     expect(required.requestDigest).not.toBe(asked.requestDigest);
     // A profile that declares nothing sends nothing, which is why the production route is untouched.
     expect(asked.body).not.toContain('response_format');
-    expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
+    expect(assembleDeepSeekRequest({ ...request(), reasoningEffort: 'high' as NonNullable<GenerateOptions['reasoningEffort']> }, attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
   });
 });
 

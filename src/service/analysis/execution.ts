@@ -536,6 +536,14 @@ export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSampli
  */
 export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS;
 
+/** New and replayed one-step starts share the execution owner's existing admission and continuation gates. */
+export function driveLaunchedLedgerRun(owner: BaselineAnalysisExecutionOwner, launched: { runRecordId: string; ledger: BaselineAnalysisStore }): void {
+  const { ledger, runRecordId } = launched;
+  const state = ledger.currentRunState(runRecordId);
+  if (state === 'authorized') owner.admitOrQueue(runRecordId, ledger);
+  else if (state === 'resumable' && ledger.launchWasInterruptedByRestart(runRecordId)) owner.resumeOrQueue(runRecordId, ledger);
+}
+
 export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
   readonly #broker: CredentialBroker;
@@ -578,12 +586,14 @@ export class BaselineAnalysisExecutionOwner {
       producer = this.#deps.requestGovernor.registerProducer({ key: `curation:${frozen.runRecordId}`, kind: 'analysis-stage', lane: 'background' });
       let ticket: TransmitTicket | null = null, admitted = false;
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
+        ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
         systemPrompt: CURATION_CONTRACT.systemPrompt, outboundDataCategory: 'editorial-learning-example',
         policy: { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.bundle.emittedText]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
         contractCategories: new Set(['editorial-learning-example', 'house-review-preference-excerpt']),
         learningCurationScope: { messageDigest: frozen.bundle.emittedDigest, current } };
       harness = await prepareExecution({ sessionId, route: binding.route, model: binding.model,
+        ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
         systemPrompt: CURATION_CONTRACT.systemPrompt, promptContractDigest: CURATION_CONTRACT_DIGEST,
         compositionOptions: { version: 2, learningCuration: { bundleDigest: frozen.bundle.digest, contractDigest: CURATION_CONTRACT_DIGEST } },
         acquireRequest: async (_payload, requestSignal) => {
@@ -606,6 +616,7 @@ export class BaselineAnalysisExecutionOwner {
         onTransmitTicket: (value) => { ticket = value; },
         adapterFactory: (codes) => {
           adapter = new DeepSeekOpenAiCompatibleAdapter({ broker: this.#broker,
+            ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
             slotBinding: { bindingDigest: bound.bindingDigest, modelRole: 'Main Editorial Role', slot: binding.credentialSlot, credentialReference: binding.credentialReference },
             tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
             promptContractDigest: CURATION_CONTRACT_DIGEST, codes, signal, beforeSend: requireCurrent,
@@ -681,6 +692,7 @@ export class BaselineAnalysisExecutionOwner {
         return evaluateRunBudgetCeiling(spent, { kind: 'tokens', maxTotalTokens: frozen.maximumTokens }).state === 'reached' ? 'reached' : 'within';
       };
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
+        ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
         systemPrompt: frozen.prompt, outboundDataCategory: 'unpublished-excerpts',
         policy: { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.message]), ruleOutboundCategories: new Set(rule!.outboundDataCategories),
@@ -695,6 +707,7 @@ export class BaselineAnalysisExecutionOwner {
           searchResult: (digest) => owner.claimSearchResult(frozen.session.sessionId, digest),
           recordSearchResult: (digest, value) => owner.recordClaimSearchResult(frozen.session.sessionId, digest, value) } });
       harness = await prepareExecution({ sessionId: frozen.session.sessionId, route: binding.route, model: binding.model,
+        ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
         systemPrompt: frozen.prompt, promptContractDigest: frozen.promptDigest,
         compositionOptions: { version: 2, procedure: frozen.procedure, platformTools: true, localTools: false, researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } },
         platformTools: platform,
@@ -716,6 +729,7 @@ export class BaselineAnalysisExecutionOwner {
         onTransmitTicket: (value) => { ticket = value; }, onRequestError: async () => false,
         adapterFactory: (codes) => {
           adapter = new DeepSeekOpenAiCompatibleAdapter({ broker: this.#broker,
+            ...(binding.reasoningEffort === undefined ? {} : { reasoningEffort: binding.reasoningEffort }),
             slotBinding: { bindingDigest: bound.bindingDigest, modelRole: 'Main Editorial Role', slot: binding.credentialSlot, credentialReference: binding.credentialReference },
             tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
             promptContractDigest: frozen.promptDigest, codes, signal, beforeSend: requireCurrent,
@@ -1033,7 +1047,7 @@ export class BaselineAnalysisExecutionOwner {
     /** The 后台分析登记 dispatcher's start takes the background place (Issue #864); its plan's origin is checked again at admission. */
     origin: 'foreground' | 'background' = 'foreground',
   ): 'admitted' | 'queued' {
-    // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
+    // AI7 is closing: the start stays `authorized`; startup restores a committed launch or blocks a legacy start with why.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
@@ -1733,6 +1747,7 @@ export class BaselineAnalysisExecutionOwner {
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
     const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
+    const effortConfig = facts.productionBinding?.reasoningEffort === undefined ? {} : { reasoningEffort: facts.productionBinding.reasoningEffort };
     // The live route's profiles: the Go route's under developer-live, the frozen route's under ordinary production.
     const routeProfile: ProviderRouteProfile = production === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
     let liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
@@ -1962,6 +1977,7 @@ export class BaselineAnalysisExecutionOwner {
             ...(localRule === null ? {} : { localTools: localRule }) }) } : null;
       try {
         harness = await prepareExecution({
+          ...effortConfig,
           ...(live === null ? {} : {
             acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, signal: AbortSignal, requestIdentity: import('../harness/primary-agent-harness.js').HarnessRequestIdentity) => {
               if (producer === null || turnIdentity === null) throw new ExecutionAdmissionError('EXECUTION_REQUEST_IDENTITY_ABSENT', '模型请求没有当前单元或阶段标识。');
@@ -2039,6 +2055,7 @@ export class BaselineAnalysisExecutionOwner {
                 { ...assurance, ...profile, sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
             }
             liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
+              ...effortConfig,
               broker: broker,
               get slotBinding(): CredentialSlotBinding {
                 return { bindingDigest: bindingDigestForSlot, modelRole, slot: credentialSlot, credentialReference };
@@ -2256,6 +2273,7 @@ export class BaselineAnalysisExecutionOwner {
         : ledger.beginRequestAdmissions(facts.runRecordId, parallelEligible ? 3 : 1, selectedRule!.ruleId);
       const frozenMaterial = liveMaterialContract(definition.clarificationBase ?? definition);
       const bindingFactsForRun: EgressBindingFacts = {
+        ...effortConfig,
         bindingDigest,
         route,
         model,

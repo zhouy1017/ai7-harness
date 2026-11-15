@@ -1,3 +1,4 @@
+import { markModelLabels } from './editorial-mark-source.js';
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
@@ -312,7 +313,7 @@ export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
 const PRODUCTION_UNSET_USAGE = '发送到所选模型服务；模型用量按实际调用记录，未设任务运行预算上限';
 type PlannedExecutionRoute = NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>['executionRoute'];
-function isRemoteExecutionRoute(route: PlannedExecutionRoute): route is Extract<PlannedExecutionRoute, { endpoint: string }> {
+export function isRemoteExecutionRoute(route: PlannedExecutionRoute): route is Extract<PlannedExecutionRoute, { endpoint: string }> {
   return MODEL_SERVICE_ROUTES.some((remote) => remote === route.kind);
 }
 function liveDecision(pin: ProviderProcessingPin): string {
@@ -360,6 +361,12 @@ function roleLabel(role: string): string {
 
 function providerLabel(providerId: string): string {
   return PROVIDER_LABELS[providerId] ?? providerId;
+}
+
+/** Editorial display only: reads the plan's frozen route and never changes stored plan bytes. */
+function planModelDestination(route: { kind: string; model: string; reasoningEffort?: string | null }): string {
+  return `${providerLabel(route.kind)} · ${markModelLabels({ route: route.kind, model: route.model,
+    ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) }).modelLabel}`;
 }
 
 function outboundLabel(category: string): string {
@@ -1002,7 +1009,7 @@ export function baselineAnalysisPlan(input: {
       reference: update === null || update.predecessor === null
         ? []
         : [`上一份基线分析（第 ${update.predecessor.ordinal} 份，读的是 ${update.predecessor.manuscriptPin.revisionLabel}）`],
-      send: live ? `所读阅读范围的稿件正文（${spans ?? `${recomputed} 个`}）` : '不发送任何内容',
+      send: live ? `所读阅读范围的稿件正文（${spans ?? `${recomputed} 个`}）${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     // PLAN-011 (Issue #419): of the analysis's steps only 核对与抽检 can be left out with the result still formed.
@@ -1032,7 +1039,7 @@ export function baselineAnalysisPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
       // It is evaluated before each request (MODEL-016), so the turn under way when it is reached still counts: nothing
@@ -1266,7 +1273,7 @@ export function initialEvaluationPlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${profile.title}（第 ${profile.version} 版）：${items}`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1282,7 +1289,7 @@ export function initialEvaluationPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1424,7 +1431,7 @@ export function readersReportPlan(input: {
         `评估记录${basis}（${task.profile.title} 第 ${task.profile.version} 版）：各项得分与评语、主要优点与问题、风险与结论`,
         task.exemplars,
       ],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1440,7 +1447,7 @@ export function readersReportPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与评估记录发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与评估记录发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1709,7 +1716,7 @@ export function writingPlan(input: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: writingReferenceLines(task, exemplarsHere, materials, projection.authorization !== null),
       send: live
-        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}`
         : '不发送任何内容',
       notRead: NOT_READ,
     },
@@ -1729,7 +1736,7 @@ export function writingPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与参考材料发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与参考材料发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1879,7 +1886,7 @@ export function evaluationRewritePlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${basis}：你的评分（${scored}）、调分原因、现在的评语、优点、问题、总评、风险与结论，以及 AI7 原报告`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1895,7 +1902,7 @@ export function evaluationRewritePlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -2476,12 +2483,13 @@ function frozenCeiling(components: Readonly<Record<string, unknown>>): RunBudget
   return 'unset';
 }
 
-function frozenRoute(components: Readonly<Record<string, unknown>>): { kind: string; model: string } {
+function frozenRoute(components: Readonly<Record<string, unknown>>): { kind: string; model: string; reasoningEffort?: string } {
   const provider = components['provider-resolution-plan'];
   const route = typeof provider === 'object' && provider !== null ? (provider as { executionRoute?: unknown }).executionRoute : undefined;
   if (typeof route === 'object' && route !== null) {
-    const { kind, model } = route as { kind?: unknown; model?: unknown };
-    return { kind: typeof kind === 'string' ? kind : 'none', model: typeof model === 'string' ? model : '' };
+    const { kind, model, reasoningEffort } = route as { kind?: unknown; model?: unknown; reasoningEffort?: unknown };
+    return { kind: typeof kind === 'string' ? kind : 'none', model: typeof model === 'string' ? model : '',
+      ...(typeof reasoningEffort === 'string' ? { reasoningEffort } : {}) };
   }
   return { kind: 'none', model: '' };
 }
@@ -2519,12 +2527,15 @@ export function reviewRunPlan(input: {
   const preferences = facts.housePreferences ?? [];
   const preferenceLines = facts.housePreferences === undefined ? [] : preferences.length === 0 ? [HOUSE_PREFERENCE_CLOSED]
     : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
-  const preferenceSent = preferences.length === 0 ? '' : `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
+  const instructionSent = tasksWithInstruction(facts);
+  const preferenceSent = preferences.length === 0 ? instructionSent : instructionSent + `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
   const tasks = categories.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
   const ceilings = tasks.map((category) => frozenCeiling(category.task!.components));
   const route = tasks.length === 0 ? null : frozenRoute(tasks[0]!.task!.components);
+  const destinations = [...new Set(tasks.map(category => frozenRoute(category.task!.components))
+    .filter(value => MODEL_SERVICE_ROUTES.some(remote => remote === value.kind)).map(planModelDestination))].join('、');
   const live = MODEL_SERVICE_ROUTES.some((remote) => remote === route?.kind);
   const production = tasks.some((category) => (category.task!.components['provider-resolution-plan'] as { remoteBinding?: { providerProcessing?: { operationalScope?: unknown } } }).remoteBinding?.providerProcessing?.operationalScope === 'ordinary-production');
   const allSet = ceilings.length > 0 && ceilings.every((ceiling) => ceiling !== 'unset');
@@ -2582,8 +2593,8 @@ export function reviewRunPlan(input: {
       ...(preferences.length === 0 ? {} : {
         scopeSend: [facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始'
           : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取'
-            : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}，以及本社审阅偏好的摘录`],
-        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录，发往为审阅配置的模型服务` : NOTHING_SENT],
+            : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}，以及本社审阅偏好的摘录${instructionSent}`],
+        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录${instructionSent}，发往 ${destinations}` : NOTHING_SENT],
       }),
     },
     state: reviewState(facts),
@@ -2636,7 +2647,7 @@ export function reviewRunPlan(input: {
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往 ${destinations}` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
       usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
@@ -2705,4 +2716,18 @@ export function reviewRunPlan(input: {
     clarifications: [],
     budgetStop: null,
   };
+}
+
+/** Name the fields the editor sees in the procedure editor, from the frozen content. */
+function procedureInstructionSent(content: NonNullable<BaselineAnalysisProjection['planEnvelope']>['procedureContent']): string {
+  const fields = [...(content?.editorInstruction === true ? ['编辑任务说明'] : []),
+    ...(content?.exemptionRules === true ? ['豁免规则'] : [])];
+  return fields.length === 0 ? '' : `，以及所选工序中的${fields.join('和')}`;
+}
+
+function tasksWithInstruction(facts: ReviewRunPlanFacts): string {
+  return procedureInstructionSent({
+    editorInstruction: facts.categories.some(category => category.task?.procedureContent?.editorInstruction === true),
+    exemptionRules: facts.categories.some(category => category.task?.procedureContent?.exemptionRules === true),
+  });
 }

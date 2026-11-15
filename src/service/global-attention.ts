@@ -118,6 +118,8 @@ export interface ConflictAttentionReading {
 
 /** The Book's latest baseline analysis Task, read by the baseline ledger. */
 export interface AnalysisTaskAttentionReading {
+  readonly customTitle?: string;
+  readonly modelLabel?: string;
   readonly bookId: string;
   readonly bookTitle: string;
   readonly taskIntentId: string;
@@ -186,6 +188,7 @@ export interface UnconfirmedAttentionReading {
  * kinds: their own surfaces follow them, and only the wait is one the editor may have left behind.
  */
 export interface WaitingTaskAttentionReading {
+  readonly modelLabel?: string;
   readonly control?: AnalysisTaskAttentionReading;
   readonly kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing' | 'review-run';
   readonly bookId: string;
@@ -202,6 +205,8 @@ export interface WaitingTaskAttentionReading {
 
 /** One completed baseline Task Outcome of the recent window. */
 export interface AnalysisOutcomeAttentionReading {
+  readonly customTitle?: string;
+  readonly modelLabel?: string;
   readonly bookId: string;
   readonly bookTitle: string;
   readonly taskIntentId: string;
@@ -218,6 +223,7 @@ export interface AnalysisOutcomeAttentionReading {
 
 /** One Review Run as the Review Run ledger reads it: the Book's latest, or one that completed recently. */
 export interface ReviewRunAttentionReading {
+  readonly modelLabel?: string;
   readonly control?: AnalysisTaskAttentionReading;
   readonly bookId: string;
   readonly bookTitle: string;
@@ -402,6 +408,7 @@ function item(
   group: GlobalAttentionGroupKey,
   state: GlobalAttentionStateKey,
   fields: {
+    modelLabel?: string;
     itemId: string;
     blocked: boolean;
     at: string;
@@ -414,6 +421,7 @@ function item(
   },
 ): GlobalAttentionItemProjection {
   return {
+    ...(fields.modelLabel === undefined ? {} : { modelLabel: fields.modelLabel }),
     itemId: fields.itemId,
     group,
     state,
@@ -507,8 +515,13 @@ function conflictItem(reading: ConflictAttentionReading): GlobalAttentionItemPro
 
 /** The analysis Task's item, if its latest state asks for one; a settled Run is 最近完成's, read from its outcome. */
 function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
+  const result = analysisTaskItemWithoutAttribution(reading, waitingFor);
+  return result === null || reading.modelLabel === undefined ? result : { ...result, modelLabel: reading.modelLabel };
+}
+
+function analysisTaskItemWithoutAttribution(reading: AnalysisTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
   const book = { bookId: reading.bookId, title: reading.bookTitle };
-  const object: GlobalAttentionObjectProjection = { kind: 'analysis', mode: reading.mode };
+  const object: GlobalAttentionObjectProjection = { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) };
   const target: GlobalAttentionTarget = { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId };
   const run = reading.run;
   if (run === null) {
@@ -655,6 +668,10 @@ function unconfirmedItem(reading: UnconfirmedAttentionReading): GlobalAttentionI
 }
 
 function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
+  return { ...analysisOutcomeItemWithoutAttribution(reading), ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }) };
+}
+
+function analysisOutcomeItemWithoutAttribution(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
   const state = reading.classification === 'completed' ? 'analysis-completed'
     : reading.classification === 'cancelled' ? 'analysis-cancelled' : 'analysis-completed-with-gaps';
   return item('recent', state, {
@@ -662,7 +679,7 @@ function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAt
     blocked: false,
     at: reading.recordedAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'analysis', mode: reading.mode },
+    object: { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) },
     facts: { revisionOrdinal: reading.revisionOrdinal, ...(reading.completion === undefined ? {} : { completion: reading.completion }) },
     nextStep: 'view-run',
     target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
@@ -696,6 +713,11 @@ function reviewObject(reading: ReviewRunAttentionReading): GlobalAttentionObject
 
 /** The Book's latest Review Run's item, if its state asks for one; a Run that reached the manuscript is 最近完成's. */
 function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFor = 'admitting'): GlobalAttentionItemProjection | null {
+  const result = reviewRunItemWithoutAttribution(reading, waitingFor);
+  return result === null || reading.modelLabel === undefined ? result : { ...result, modelLabel: reading.modelLabel };
+}
+
+function reviewRunItemWithoutAttribution(reading: ReviewRunAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection | null {
   const controlled = reading.control === undefined ? null : analysisTaskItem(reading.control, waitingFor);
   if (controlled !== null) return { ...controlled, itemId: `review:${reading.reviewRunId}`, object: reviewObject(reading),
     facts: { ...controlled.facts, categories: reading.categories.map(categoryFact) },
@@ -765,6 +787,7 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
     object: { kind: 'task', taskKind: kind },
     target: { kind: 'task-plan', bookId: reading.bookId, taskKind: kind, ref: reading.taskIntentId } };
   const fields = {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `task:${reading.taskIntentId}`,
     at: reading.stateAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
@@ -787,6 +810,7 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
 function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {
   const at = reading.lastEventAt ?? reading.authorizedAt ?? reading.createdAt;
   return item('recent', 'review-completed', {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `review:${reading.reviewRunId}`,
     blocked: false,
     at,
@@ -1123,7 +1147,7 @@ function preparedAnalysisItem(reading: AnalysisTaskAttentionReading): GlobalAtte
     blocked: false,
     at: reading.createdAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'analysis', mode: reading.mode },
+    object: { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) },
     nextStep: 'view-plan',
     target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
     technical: [
@@ -1136,6 +1160,7 @@ function preparedAnalysisItem(reading: AnalysisTaskAttentionReading): GlobalAtte
 /** A Review Run prepared and not started: its plan in the drawer, whose bar starts it. */
 function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {
   return item('decisions', 'review-prepared', {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `review:${reading.reviewRunId}`,
     blocked: false,
     at: reading.createdAt,
@@ -1164,11 +1189,12 @@ function followedRun(run: NonNullable<AnalysisTaskAttentionReading['run']>): boo
  */
 function cancelledBeforeStartItem(reading: AnalysisTaskAttentionReading, run: NonNullable<AnalysisTaskAttentionReading['run']>): GlobalAttentionItemProjection {
   return item('recent', 'analysis-cancelled', {
+    ...(reading.modelLabel === undefined ? {} : { modelLabel: reading.modelLabel }),
     itemId: `analysis:${reading.taskIntentId}`,
     blocked: false,
     at: run.stateAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'analysis', mode: reading.mode },
+    object: { kind: 'analysis', mode: reading.mode, ...(reading.customTitle === undefined ? {} : { customTitle: reading.customTitle }) },
     facts: { revisionOrdinal: null },
     nextStep: 'view-run',
     target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },

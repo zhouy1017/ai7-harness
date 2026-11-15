@@ -27,6 +27,7 @@ import { MODEL_SERVICE_ROW_COLUMNS } from './model-service-connections.js';
 import { DatabaseSync } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, asString, requireStore, type SqlRow } from './store-records.js';
 import { readModelConnectionTest } from './store-schema.js';
+import { resolveRuntimeExecutionConfig, validReasoningEffort, type RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 
 export interface ModelSearchSettingsHost {
   assertAvailable: () => void;
@@ -38,7 +39,7 @@ export interface ModelSearchSettingsHost {
   getModelServiceRouteConnection: (route: ModelServiceRouteId) => ModelServiceConnectionProjection | null;
   getSearchBackendConnections: () => import('../shared/protocol.js').SearchBackendConnectionProjection[];
   modelServiceBinding: (route: ModelServiceRouteId, modelId: string) => import('../shared/protocol.js').ModelServiceBindingProjection;
-  selectRoleModel: (route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both') => void;
+  selectRoleModel: (route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string) => void;
 }
 
 export function getSearchBackendSettings(host: ModelSearchSettingsHost): import('../shared/protocol.js').SearchBackendSettingsProjection {
@@ -97,7 +98,7 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
   const target = { connectionId: MODEL_SERVICE_CONNECTION_IDS[route], binding: MODEL_SERVICE_ROUTE_BINDINGS[route] };
   requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
   const row = host.authority.prepare(
-      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id
+      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id, reasoning_effort, fast_reasoning_effort
        FROM model_service_connections
        WHERE connection_id = ?`,
   ).get(target.connectionId) as SqlRow | undefined;
@@ -119,8 +120,8 @@ export function getModelServiceRouteConnection(host: ModelSearchSettingsHost, ro
     roleId: 'main-editorial',
     connectionName: asString(row.connection_name),
     // A connection saved before revision 72 named `deepseek-v4-pro`; the migration moved it to the route's current model.
-    binding: host.modelServiceBinding(route, asString(row.model_id)),
-    fastBinding: host.modelServiceBinding(route, asString(row.fast_model_id) || asString(row.model_id)),
+    binding: { ...host.modelServiceBinding(route, asString(row.model_id)), ...(row.reasoning_effort === null ? {} : { reasoningEffort: asString(row.reasoning_effort) }) },
+    fastBinding: { ...host.modelServiceBinding(route, asString(row.fast_model_id) || asString(row.model_id)), ...(row.fast_reasoning_effort === null ? {} : { reasoningEffort: asString(row.fast_reasoning_effort) }) },
     credentialReference,
     credentialOperationState: state,
     createdAt: asString(row.created_at),
@@ -224,32 +225,39 @@ export function selectModelServiceRoute(host: ModelSearchSettingsHost, route: Mo
   return host.getModelServiceRouteConnection(route)!;
 }
 
-export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: 'main-editorial' | 'fast-interaction'): ConfiguredProviderBinding | null {
+export function getConfiguredModelRoleBinding(host: ModelSearchSettingsHost, role: 'main-editorial' | 'fast-interaction', override: RuntimeExecutionConfig = {}): ConfiguredProviderBinding | null {
   const connections = host.getModelServiceConnections();
   const chosen = connections.find((connection) => role === 'main-editorial' ? connection.selected : connection.fastSelected);
-  const connection = chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready');
+  const connection = override.modelConnectionId === undefined
+    ? chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready')
+    : connections.find((candidate) => candidate.connectionId === override.modelConnectionId);
   if (connection === undefined || connection.credentialOperationState !== 'ready') return null;
   // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
   const selectedBinding = role === 'fast-interaction' ? connection.fastBinding ?? connection.binding : connection.binding;
-  const record = modelServiceRuntimeBinding(selectedBinding.providerId, selectedBinding.modelId, role === 'fast-interaction' ? 'fast' : 'main');
+  const execution = resolveRuntimeExecutionConfig({ modelConnectionId: connection.connectionId, modelId: selectedBinding.modelId,
+    ...(selectedBinding.reasoningEffort === undefined ? {} : { reasoningEffort: selectedBinding.reasoningEffort }) }, override);
+  const record = modelServiceRuntimeBinding(selectedBinding.providerId, execution.modelId!, role === 'fast-interaction' ? 'fast' : 'main');
   if (record === undefined) return null;
-  const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint };
+  const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint,
+    ...(execution.reasoningEffort === undefined ? {} : { reasoningEffort: execution.reasoningEffort }) };
   return (role === 'fast-interaction' ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding;
 }
 
-export function selectFastRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string): void {
-  host.selectRoleModel(route, modelId, 'fast');
+export function selectFastRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
+  host.selectRoleModel(route, modelId, 'fast', reasoningEffort);
 }
 
-export function selectMainRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string): void {
-  host.selectRoleModel(route, modelId, 'main');
+export function selectMainRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string): void {
+  host.selectRoleModel(route, modelId, 'main', reasoningEffort);
 }
 
-export function selectBothRoleModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string): void {
-  host.selectRoleModel(route, modelId, 'both');
+export function selectBothRoleModels(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, reasoningEffort?: string, fastReasoningEffort?: string): void {
+  host.selectRoleModel(route, modelId, 'both', reasoningEffort, fastReasoningEffort);
 }
 
-export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both'): void {
+export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both', reasoningEffort?: string, fastReasoningEffort?: string): void {
+  requireStore(reasoningEffort === undefined || validReasoningEffort(reasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
+  requireStore(fastReasoningEffort === undefined || validReasoningEffort(fastReasoningEffort), 'MODEL_EFFORT_INVALID', '请填写有效的思考强度。');
   const connection = host.getModelServiceRouteConnection(route);
   const roles = role === 'both' ? ['main', 'fast'] as const : [role];
   requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
@@ -261,6 +269,11 @@ export function selectRoleModel(host: ModelSearchSettingsHost, route: ModelServi
       host.authority.prepare(`UPDATE model_service_connections SET ${selected} = NULL WHERE ${selected} = 1`).run();
       host.authority.prepare(`UPDATE model_service_connections SET ${selected} = 1, ${model} = ?, updated_at = ? WHERE connection_id = ?`)
         .run(modelId, new Date().toISOString(), connection.connectionId);
+      const chosenEffort = item === 'fast' && fastReasoningEffort !== undefined ? fastReasoningEffort : reasoningEffort;
+      if (chosenEffort !== undefined) {
+        const effort = item === 'main' ? 'reasoning_effort' : 'fast_reasoning_effort';
+        host.authority.prepare(`UPDATE model_service_connections SET ${effort} = ? WHERE connection_id = ?`).run(chosenEffort === 'off' ? null : chosenEffort, connection.connectionId);
+      }
     }
   });
 }

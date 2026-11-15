@@ -179,7 +179,7 @@ describe('v30 Book-less Global Agent', () => {
     const ask = { ...input(), question: '合成责编甲的建议适用于何处？' };
     const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     expect(prepared).toMatchObject({ textProcessing: 'qualified-original-fields', question: ask.question,
-      selectedPolicyIdentity: { providerProcessingVersion: 'v35', activePolicySetVersion: 'v26' } });
+      selectedPolicyIdentity: { providerProcessingVersion: 'v35', activePolicySetVersion: 'no-policy-lock' } });
     expect(prepared.sources[0]!.text).toBe('合成责编甲建议保留短句。');
     const turn = startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256);
     await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');

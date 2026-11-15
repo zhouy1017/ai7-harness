@@ -10,6 +10,7 @@ import {
 } from '../../src/renderer/scoped-ai-edit.js';
 import type { DialogueSelectionInput, ManuscriptWindowProjection, ScopedAiEditProjection, StartScopedAiEditInput } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
+import { preferenceDefaults } from '../../src/shared/preferences.js';
 
 // 就选中部分让 AI 修改 and 🔒 锁定 as the manuscript surface mounts them (Issue #1412): the composer names the window's base and
 // lock set and the exact selected pins, reads the request again until it settles and has the surface reload; the lock calls
@@ -35,9 +36,11 @@ function host(overrides: Partial<ScopedAiEditHost['api']> = {}) {
   const value: ScopedAiEditHost = {
     api: {
       startScopedAiEdit: vi.fn(), inspectScopedAiEdit: vi.fn(), setAiEditLocks: vi.fn(),
+      getModelServiceSettings: vi.fn(async () => { throw new Error('settings unavailable'); }),
       inspectAiEditLocks: vi.fn(async () => ({ manuscriptId: 'doc', branchId: 'branch', blockIds: [], sectionHeadingBlockIds: [], digest: LOCKS, label: '' })),
       ...overrides,
     } as ScopedAiEditHost['api'],
+    preferences: async () => preferenceDefaults(),
     flush: flushed,
     current: () => window0,
     refresh: async (result) => { refreshed.push(result); },
@@ -78,7 +81,7 @@ it('sends the selected pins on the window base and lock set, reads the request u
   const result = await settled;
   expect(flushed).toHaveBeenCalled();
   expect(started).toEqual({ manuscriptId: 'doc', branchId: 'branch', baseRevisionId: 'rev', expectedJournalSequence: 7, expectedLocksDigest: LOCKS,
-    instruction: '改得更紧凑', scope: { mode: 'selected-only', span: span.span } });
+    instruction: '改得更紧凑', scope: { mode: 'selected-only', span: span.span }, clientCommandId: expect.any(String), executionConfig: {}, rememberedChoice: false });
   expect(result?.state).toBe('applied');
   expect(refreshed).toEqual([result]);
   expect(statuses.at(-1)).toEqual([result!.label, 'success']);
@@ -97,6 +100,54 @@ it('offers only the unlocked ranges with nothing selected, and sends the chosen 
   miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!.dispatchEvent({ type: 'submit' });
   await settled;
   expect(started?.scope).toEqual({ mode: 'unlocked-only', range: { kind: 'section', headingBlockId: 'blk_h' } });
+});
+
+it.each([new Error('response lost'), { code: 'SERVICE_RESPONSE_COMMITTED', message: '任务已经启动，偏好未能保存。' }])('retries an uncertain or committed response with the original pin and command after the visible window moves (%j)', async error => {
+  const startScopedAiEdit = vi.fn().mockRejectedValueOnce(error).mockResolvedValue(projection('unchanged'));
+  const { value, statuses } = host({ startScopedAiEdit });
+  let current = window0;
+  value.current = () => current;
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: span,
+    mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.value = '保留原意';
+  const form = miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!;
+  form.dispatchEvent({ type: 'submit' });
+  await vi.waitFor(() => expect(statuses.at(-1)?.[1]).toBe('error'));
+  current = { ...window0, revisionId: 'next-revision', journalSequence: 8 };
+  form.dispatchEvent({ type: 'submit' });
+  await settled;
+  expect(startScopedAiEdit).toHaveBeenCalledTimes(2);
+  expect(startScopedAiEdit.mock.calls[1]![0]).toEqual(startScopedAiEdit.mock.calls[0]![0]);
+  expect(startScopedAiEdit.mock.calls[1]![0]).toMatchObject({ baseRevisionId: 'rev', expectedJournalSequence: 7 });
+});
+
+it('pins a new command after a coded refusal while retaining the instruction', async () => {
+  const startScopedAiEdit = vi.fn().mockRejectedValueOnce({ code: 'MARK_BINDING_CHANGED', message: '稿件已有新的写入，请重新选择要修改的范围。' }).mockResolvedValue(projection('unchanged'));
+  const { value, statuses } = host({ startScopedAiEdit });
+  let current = window0; value.current = () => current;
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: null,
+    mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.value = '保留原意';
+  const form = miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!;
+  form.dispatchEvent({ type: 'submit' });
+  await vi.waitFor(() => expect(statuses.at(-1)?.[1]).toBe('error'));
+  current = { ...window0, revisionId: 'next-revision', journalSequence: 8 };
+  form.dispatchEvent({ type: 'submit' }); await settled;
+  expect(startScopedAiEdit.mock.calls[1]![0]).toMatchObject({ instruction: '保留原意', baseRevisionId: 'next-revision', expectedJournalSequence: 8 });
+  expect(startScopedAiEdit.mock.calls[1]![0].clientCommandId).not.toBe(startScopedAiEdit.mock.calls[0]![0].clientCommandId);
+});
+
+it('sends the remembered scoped-edit choice and keeps its unavailable-model notice visible', async () => {
+  const notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
+  const remembered = { modelConnectionId: 'previous-connection', modelId: 'previous-model', reasoningEffort: 'high' };
+  const startScopedAiEdit = vi.fn(async (_input: StartScopedAiEditInput) => ({ ...projection('unchanged'), launchNotice: notice }));
+  const { value, statuses } = host({ startScopedAiEdit });
+  value.preferences = async () => ({ ...preferenceDefaults(), 'model.dispatchChoices': { 'scoped-ai-edit': remembered } });
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: null, mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.value = '保留原意';
+  miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!.dispatchEvent({ type: 'submit' }); await settled;
+  expect(startScopedAiEdit.mock.calls[0]![0]).toMatchObject({ rememberedChoice: true, executionConfig: remembered });
+  expect(statuses.at(-1)?.[0]).toContain(notice);
 });
 
 it('locks a selection against the lock set on screen, reloads, and the badge unlocks', async () => {

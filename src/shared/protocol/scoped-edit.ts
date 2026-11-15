@@ -1,3 +1,4 @@
+import type { RuntimeExecutionConfig } from '../runtime-execution-config.js';
 import type { SelectionSpanBlockPin } from './selection-span.js';
 
 // ---- 局部 AI 修改与 🔒 锁定 (Issue #1412) ------------------------------------------------------------------------------
@@ -63,6 +64,9 @@ export type ScopedAiEditScope =
   | { readonly mode: 'unlocked-only'; readonly range: { readonly kind: 'document' } | { readonly kind: 'section'; readonly headingBlockId: string } };
 
 export interface StartScopedAiEditInput {
+  readonly rememberedChoice?: boolean;
+  readonly clientCommandId?: string;
+  readonly executionConfig?: RuntimeExecutionConfig;
   readonly manuscriptId: string;
   readonly branchId: string;
   readonly baseRevisionId: string;
@@ -82,6 +86,7 @@ export interface InspectScopedAiEditInput {
  * moved while it answered, so nothing was applied; `failed`: it did not complete.
  */
 export interface ScopedAiEditProjection {
+  readonly launchNotice?: string;
   readonly bookId: string;
   readonly requestId: string;
   readonly manuscriptId: string;

@@ -154,24 +154,6 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     expect(sheet.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
     expect(sheet.querySelector(`[data-procedure-definition="${procedureId}@1"]`)).not.toBeNull();
   });
-  it('cancels a preparation arriving after the sheet was dismissed without authorizing it', async () => {
-    const view = mount(); const next = workspace();
-    const available = { available: true, unavailableReason: null };
-    next.newReview = available; next.scopeOptions.whole = available;
-    next.categories = [{ categoryId: 'typos-and-usage', label: '文字审阅', description: '给出修改建议。', output: 'change-suggestion', riskPointsOnly: false,
-      batchApply: true, searchEngine: false, modelFree: false, available: true, unavailableReason: null,
-      basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '文字审阅', version: '1' } },
-      guidelineDocuments: [], procedure: { title: '文字审阅', version: '1' }, scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
-    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
-    const pending = deferred<Awaited<ReturnType<RendererApi['prepareReviewRun']>>>();
-    const prepare = vi.fn(() => pending.promise); const cancel = vi.fn(async () => undefined);
-    const authorize = vi.fn(); Object.assign(view.api, { prepareReviewRun: prepare, cancelServiceJob: cancel, authorizeReviewRun: authorize });
-    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
-    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
-    expect(prepare).toHaveBeenCalledOnce(); view.root.querySelector('dialog')!.close();
-    pending.resolve({ jobId: OTHER, kind: 'review-run-preparation', state: 'running', progress: { completed: 0, total: 2, label: '正在准备' }, result: null, failure: null });
-    await flush(); expect(cancel).toHaveBeenCalledWith({ jobId: OTHER }); expect(authorize).not.toHaveBeenCalled();
-  });
   it.each([true, false])('shows truthful native search availability in the new-review dialog (admitted: %s)', async (admitted) => {
     setTechnicalLayerVisible(false);
     const view = mount();
@@ -360,7 +342,7 @@ async function selectionSheet(composite = false) {
     basis: { categoryId, executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } },
     guidelineDocuments: [], procedure: { title: '审阅', version: '1' }, scopes: { whole: available, chapters: available, changed: categoryId === 'style-and-format' ? unavailable : available, selection: unavailable } }));
   const prepare = vi.fn(async () => { throw new Error('synthetic preparation refusal retains the sheet'); });
-  Object.assign(view.api, { prepareReviewRun: prepare });
+  Object.assign(view.api, { launchReviewRun: prepare });
   view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
   view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
   const box = (id: string) => view.root.querySelector(`[data-review-category-option="${id}"] input`)!;
@@ -379,12 +361,12 @@ describe('configuration selection memory (#1374)', () => {
     expect(view.box('style-and-format').disabled).toBe(true);
     for (const action of ['prepare', 'start']) expect(view.root.querySelector(`[data-review-action="${action}"]`)!.disabled).toBe(true);
     expect(view.root.querySelector('.review-sheet-problem')!.textContent).toContain('未开放');
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush(); expect(view.prepare).not.toHaveBeenCalled();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush(); expect(view.prepare).not.toHaveBeenCalled();
     view.scope('whole');
     expect(view.root.querySelector('.review-sheet-problem')!.hidden).toBe(true);
     expect(view.box('style-and-format').checked).toBe(true);
     expect(view.box('typos-and-usage').checked).toBe(true);
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['style-and-format', 'typos-and-usage'],
       procedureDefinition: { procedureId: 'ai7-procedure/selection-memory', version: 1, digest: 'a'.repeat(64) } }));
   });
@@ -394,12 +376,12 @@ describe('configuration selection memory (#1374)', () => {
     const wholeCost = cost(); view.scope('changed');
     expect(view.box('style-and-format').checked).toBe(false); expect(view.box('style-and-format').disabled).toBe(true);
     expect(cost()).not.toBe(wholeCost);
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['typos-and-usage'] }));
     view.scope('whole'); expect(view.box('style-and-format').checked).toBe(true); expect(cost()).toBe(wholeCost);
     view.scope('chapters'); view.change(view.root.querySelector('[data-review-chapter="from"]')!, 'chapter-1');
     view.scope('whole'); view.scope('chapters'); expect(view.root.querySelector('[data-review-chapter="from"]')!.value).toBe('chapter-1');
-    view.scope('whole'); view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.scope('whole'); view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['typos-and-usage', 'style-and-format'] }));
     view.change(view.box('typos-and-usage'), false); view.scope('changed');
     expect(view.root.querySelector('[data-review-action="prepare"]')!.disabled).toBe(true);
@@ -415,10 +397,10 @@ describe('configuration selection memory (#1374)', () => {
     expect(view.root.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
     view.change(view.root.querySelector('[data-local-check-numerals]')!, 'off');
     expect(view.root.querySelector('[data-local-check-numerals-note]')!.hidden).toBe(true);
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['local-text-check'], localCheck: expect.objectContaining({ numeralsConfirmed: false }) }));
     view.change(view.root.querySelector('[data-local-check-numerals]')!, 'editor-convention');
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ numeralsConfirmed: true, numeralRules: ['N01', 'N02'] }) }));
     view.change(view.box('local-text-check'), false);
     expect(view.box('typos-and-usage').checked).toBe(true); expect(view.box('style-and-format').checked).toBe(true);
@@ -437,7 +419,7 @@ describe('configuration selection memory (#1374)', () => {
     view.root.querySelector('[data-house-action="save"]')!.click(); await flush();
     expect(saveHouse).toHaveBeenCalledOnce(); house = view.root.querySelector('[data-local-house-word-list]')!;
     expect(house.checked).toBe(wanted);
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ tables: expect.objectContaining({ houseWordList: wanted ? page().current : null }) }) }));
   });
   it('blocks a wanted wordlist while the post-save current-version read is pending', async () => {
@@ -455,10 +437,10 @@ describe('configuration selection memory (#1374)', () => {
     view.root.querySelector('[data-house-action="save"]')!.click(); await flush();
     for (const action of ['prepare', 'start']) expect(view.root.querySelector(`[data-review-action="${action}"]`)!.disabled).toBe(true);
     expect(view.root.querySelector('.review-sheet-problem')!.textContent).toContain('本社词表');
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); expect(view.prepare).not.toHaveBeenCalled();
+    view.root.querySelector('[data-review-action="start"]')!.click(); expect(view.prepare).not.toHaveBeenCalled();
     refreshed.resolve(page()); await flush(); expect(house.checked).toBe(true);
     expect(view.root.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
-    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ tables: expect.objectContaining({ houseWordList: page().current }) }) }));
   });
   it('keeps excluded sources through dispositions and excludes them only from request-evidence submissions', async () => {

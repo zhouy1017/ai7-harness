@@ -1,3 +1,6 @@
+import { writingPlan } from './task-plan.js';
+import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
+import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { taskDeliverableStale } from './task-deliverable-target.js';
 import { TASK_MATERIAL_OFFER_DAMAGED, type TaskMaterialSource } from './task-material-references.js';
 import { randomUUID } from 'node:crypto';
@@ -457,6 +460,14 @@ export function internalWritingField(host: WritingTaskOperationsHost, value: unk
 }
 
 export function createWritingPreparationWork(host: WritingTaskOperationsHost, bookId: string, request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }, launchPolicy: LaunchPolicyProjection, redoOf: string | null = null, intentDraft: DraftPromotion | null = null): AnalysisPreparationResult<WritingProjection> {
+  return buildWritingTask(host, bookId, request, launchPolicy, redoOf, intentDraft, (ledger, input) => ledger.prepare(input));
+}
+
+export function launchWritingTask(host: WritingTaskOperationsHost, bookId: string, request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }, launchPolicy: LaunchPolicyProjection, redoOf: string | null, intentDraft: DraftPromotion | null, context: TaskLaunchContext): WritingProjection {
+  return buildWritingTask(host, bookId, request, launchPolicy, redoOf, intentDraft, launchedTaskPlan(context)).projection!;
+}
+
+function buildWritingTask(host: WritingTaskOperationsHost, bookId: string, request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }, launchPolicy: LaunchPolicyProjection, redoOf: string | null, intentDraft: DraftPromotion | null, createPlan: TaskPlanCreator): AnalysisPreparationResult<WritingProjection> {
   // 允许参考's 资料库 items the editor ticked (Issue #428): each once, by identity.
   const materialIds = request.materialIds ?? [];
   requireStore(Array.isArray(materialIds) && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) &&
@@ -511,7 +522,7 @@ export function createWritingPreparationWork(host: WritingTaskOperationsHost, bo
       contract: input, promptContractSha256: ledger.definition.promptContractDigest, copyRules,
     }));
   };
-  const result = host.analysisCall(() => ledger.prepare({
+  const result = host.analysisCall(() => createPlan(ledger, {
     phase: 'start',
     bookId,
     goal: intentDraft === null ? WRITING_MODE_GOALS[mode] : intentDraft.goal as typeof WRITING_MODE_GOALS[typeof mode],
@@ -526,10 +537,10 @@ export function createWritingPreparationWork(host: WritingTaskOperationsHost, bo
         intentDraft.promoted({ taskIntentId, reviewRunId: null });
       } },
     }),
-  }));
+  }, (projection, blocks, bookTitle) => writingPlan({ projection: projection as WritingProjection, bookTitle, blocks, input, copyRules, materials: materials.map(material => ({ source: material.source, refusal: null })) })));
   // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
   if (intentDraft === null) {
-    const taskIntentId = internalWritingCall(host, () => host.writingTasks.latestTaskIntentId(bookId));
+    const taskIntentId = internalWritingCall(host, () => result.projection?.taskIntent?.taskIntentId ?? host.writingTasks.latestTaskIntentId(bookId));
     requireStore(taskIntentId !== null, 'WRITING_RECORD_INVALID', '写作任务没有准备出来。');
     host.transaction(host.authority, () => recordWritingTask(taskIntentId));
   }
@@ -691,11 +702,12 @@ export function inspectWritingTask(host: WritingTaskOperationsHost, bookId: stri
         label: type.label,
         prepare,
         exemplars: { count: exemplars.length, statement: writingExemplarStatement(writingExemplarLine(type.label, exemplars), exemplars.length, unread) },
-        drafted: drafted.get(type.typeId) ?? null,
+        drafted: drafted.has(type.typeId) ? { ...drafted.get(type.typeId)!, ...launchedRevisionModelLabels(host.authority, drafted.get(type.typeId)!.revisionId) } : null,
         quickStart: internalWritingQuickStart(host, bookId, type.typeId, prepare, facts),
       };
     }),
     task: latest === null || latest.projection.taskIntent === null ? null : {
+      ...launchedTaskModelLabels(host.authority, latest.projection.taskIntent.taskIntentId),
       taskIntentId: latest.projection.taskIntent.taskIntentId,
       typeId: latest.task.typeId,
       typeLabel: latest.task.input.type.label,

@@ -48,13 +48,14 @@ import { carryPositionalResult } from './reused-result.js';
  *
  * The reducer lists and locates; it never synthesizes across units (the Authority Ceiling). Its counts are the revision's summary.
  */
-// Frozen pre-#1435 descriptor bytes: occurrence/punctuation/range extensions await manifest retirement (R2) or integer contracts (#1434, R3).
+// Describes quotation alignment and manuscript-slice storage; repeated quotes remain ambiguous.
 export const CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR = {
   schema: 'ai7.custom-analysis.reducers/1',
   stages: ['unit-validation', 'reference-integrity'],
   referenceIntegrity: 'deterministic-normalized-exact-match-in-committed-block',
   sourceRangeMapping: 'folded-utf16-code-units-to-source-graphemes',
-  sourceRangeIntegrity: 'sole-candidate-normalized-grapheme-slice-equals-quotation',
+  sourceRangeIntegrity: 'located-quotation-is-manuscript-grapheme-slice',
+  punctuation: 'equivalent-punctuation-alignment',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   anchorStates: ['located', 'not-found', 'ambiguous'],
   crossUnitSynthesis: 'none',

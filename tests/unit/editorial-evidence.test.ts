@@ -1,3 +1,4 @@
+import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -260,14 +261,13 @@ const AUTHORED: Record<string, { category: typeof TYPOS_AND_USAGE; findings: Aut
   ] },
 };
 
-it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('authors the synthetic review fixture', async () => {
+it('authors the synthetic review fixture without unreachable committed entries', async () => {
   const entries = new Map<string, ModelFixtureEntry>();
   const fixture: ResolvedModelFixture = { identity: SYNTHETIC_FIXTURE, description: 'generator', provenance: 'authored',
     lineage: [{ identity: SYNTHETIC_FIXTURE, sha256: 'e'.repeat(64) }], entries, sha256: 'f'.repeat(64) };
   const add = (entry: ModelFixtureEntry) => { if (!entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry); };
   const base = await loadModelFixture(join(ROOT, 'tests', 'fixtures', 'model'), SYNTHETIC_FIXTURE_BASE);
   base.entries.forEach(add);
-  parseModelFixture(JSON.parse(await readFile(join(ROOT, 'tests', 'fixtures', 'model', `${SYNTHETIC_FIXTURE}.json`), 'utf8'))).entries.forEach(add);
   const policy = await resolveSourceCheckoutLaunchPolicy(ROOT);
   for (let pass = 0; pass < 4; pass += 1) {
     const before = entries.size;
@@ -338,5 +338,10 @@ it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('aut
     entries: [...entries.values()].filter((entry) => !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
       .map((entry) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
-  await writeFile(join(ROOT, 'tests', 'fixtures', 'model', `${SYNTHETIC_FIXTURE}.json`), `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  body.entries.sort((left, right) => left.unitOrdinal - right.unitOrdinal || left.requestDigest.localeCompare(right.requestDigest, 'en'));
+  for (const entry of body.entries) entry.response = JSON.parse(canonicalJson(entry.response));
+  const path = join(ROOT, 'tests', 'fixtures', 'model', `${SYNTHETIC_FIXTURE}.json`);
+  const contents = `${JSON.stringify(body, null, 2)}\n`;
+  if (process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1' || process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1') await writeFile(path, contents, 'utf8');
+  else expect(await readFile(path, 'utf8') === contents, 'Committed synthetic fixture must equal fresh generator output').toBe(true);
 }, 600_000);
