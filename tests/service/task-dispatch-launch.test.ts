@@ -217,9 +217,13 @@ it('drives a committed baseline launch after restart once and retains actual req
     expect(launchedRevisionModelLabels(attributionDb, store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId)).toEqual({ modelLabel: report.modelLabel });
     expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
     expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
+    const admittedRuns = attributionDb.prepare(`SELECT DISTINCT run_record_id FROM analysis_run_states
+      WHERE json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'
+      AND json_extract(canonical_json, '$.requestAdmission.data.event.request.requestId') IN (${capture!.requests.map(() => '?').join(',')})`)
+      .all(...capture!.requests.map(request => request.requestId));
+    expect(admittedRuns).toEqual([{ run_record_id: committed.runRecordId }]);
   }
   finally { attributionDb.close(); }
-  expect(new Set(capture!.requests.map(request => request.runRecordId))).toEqual(new Set([committed.runRecordId]));
   expect(capture!.requests.some(request => request.stage === 'cross-unit-reduction')).toBe(true);
   expect(capture!.wireRequests.length).toBeGreaterThan(0);
   expect(capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
