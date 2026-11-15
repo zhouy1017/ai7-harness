@@ -253,6 +253,11 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     let settled: ScopedAiEditProjection;
     try {
       await choiceReady;
+      // Settings may finish painting the chooser while this launch is waiting for its remembered choice.
+      for (const control of chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button')) {
+        if (!controls.some(entry => entry.control === control)) controls.push({ control, disabled: control.disabled });
+        control.disabled = true;
+      }
       if (sentInput === undefined) {
         await host.flush();
         const window = host.current();

@@ -545,7 +545,9 @@ async function importBook(renderer, title, bundled = false, distinct = false) {
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 180_000);
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, 'import-acknowledged', 180_000);
-  const identity = await renderer.evaluate(`(() => ({ bookId: document.querySelector('.book-overview')?.dataset.bookId, revisionId: document.querySelector('button[data-record-kind="revision"]')?.dataset.recordId }))()`);
+  const identity = await renderer.evaluate(`(async () => { const bookId=document.querySelector('.book-overview')?.dataset.bookId;
+    if(!bookId)return null;const overview=await window.ai7.getBookOverview({bookId,historyCursor:null});
+    return {bookId,revisionId:overview.manuscriptAnchor?.revisionId}; })()`);
   requireJourney(UUID_PATTERN.test(identity?.bookId) && UUID_PATTERN.test(identity?.revisionId), 'import-identities');
   return identity;
 }
