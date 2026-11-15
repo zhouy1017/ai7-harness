@@ -17,7 +17,6 @@ export class NavigationGeneration {
   }
 
   commit(): void {
-    this.intent += 1;
     this.page += 1;
   }
 

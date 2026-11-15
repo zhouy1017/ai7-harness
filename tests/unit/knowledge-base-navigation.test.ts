@@ -1,3 +1,4 @@
+import { navigation as shellNavigation } from '../../src/renderer/navigation-generation.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createKnowledgeBase, type KnowledgeBaseOptions } from '../../src/renderer/knowledge-base.js';
 import type { DefaultExecutionRulesProjection, ExemplarBookProjection, ExemplarProjection } from '../../src/shared/protocol.js';
@@ -88,8 +89,10 @@ it('does not report a late knowledge load error on the next page', async () => {
   vi.stubGlobal('window', { ai7: { inspectEvaluationProfiles: vi.fn(() => response) } });
   const page = navigation();
   const pending = page.renderKnowledgeBase('evaluation');
+  const old = page.root.children[0]!;
   const help = document.createElement('section'); help.textContent = '帮助';
   page.root.replaceChildren(help);
+  shellNavigation.commit(); miniDocument.body.append(old as unknown as MiniElement);
   page.setStatus.mockClear();
   fail(new Error('delayed load failure'));
   await pending;

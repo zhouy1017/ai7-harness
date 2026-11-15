@@ -1239,6 +1239,7 @@ async function main() {
     electronExecutableForCleanup = executable;
     // J-10's unit hold, admitted under J-11 (#641): absent until feedback-pending-submit writes it, so nothing before is held.
     const unitHoldPath = resolve(runRoot, 'j11-unit-hold.txt');
+    const navigationHoldPath = resolve(runRoot, 'j11-navigation-hold.txt');
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     let modelFixtureIdentity = FIXTURE_IDENTITY;
@@ -1255,7 +1256,7 @@ async function main() {
         // The calibration gate lowered to two Books (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the house offset
         // is proven over 评估旅程丙 and one more Book, with the product's own ten untouched in every other launch.
         args.push('--j11-picker-path', pickerPath, '--j04-model-adapter', modelFixtureIdentity, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
-          '--j11-calibration-min-books', '2');
+          '--j11-calibration-min-books', '2', '--j11-navigation-answer-hold-path', navigationHoldPath);
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       if (!forCleanup) cancellation.throwIfRequested();
@@ -1439,6 +1440,43 @@ async function main() {
       })()`, `late-${action}-keeps-destination`);
       await click(renderer, '取消', `late-${action}-cancel`);
       await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, `late-${action}-landing`);
+    }
+
+    // #1497: on the base, the late global-entry answer repaints over Knowledge.
+    // Main holds only the acknowledgement, after ownership has already been revoked.
+    at('navigation-late-answer');
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await rm(`${navigationHoldPath}.held`, { force: true });
+        await rm(`${navigationHoldPath}.released`, { force: true });
+        await writeFile(navigationHoldPath, 'hold');
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('global-agent'), 'navigation-open-global');
+        const deadline = Date.now() + 20_000;
+        while (!existsSync(`${navigationHoldPath}.held`) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+        requireJourney(existsSync(`${navigationHoldPath}.held`), 'navigation-answer-held');
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'navigation-open-knowledge');
+        await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-ready');
+        await renderer.evaluate(`window.__j11NavigationSnapshot = {screen:document.querySelector('#screen').firstElementChild,focus:document.activeElement,status:document.querySelector('#persistence-status').textContent}`);
+        requireJourney(!existsSync(`${navigationHoldPath}.released`), 'navigation-still-held');
+        await writeFile(navigationHoldPath, 'release');
+        const releasedDeadline = Date.now() + 20_000;
+        while (!existsSync(`${navigationHoldPath}.released`) && Date.now() < releasedDeadline) await new Promise((resolve) => setTimeout(resolve, 50));
+        requireJourney(existsSync(`${navigationHoldPath}.released`), 'navigation-answer-released');
+        // A subsequent ownership read crosses main after the released acknowledgement; two frames paint its microtasks.
+        await renderer.evaluate(`(async () => {await window.ai7.getBookWorkbenchRoute();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));})()`);
+        await assertRenderer(renderer, `(() => {
+          const held=window.__j11NavigationSnapshot; delete window.__j11NavigationSnapshot;
+          return document.querySelector('#screen').firstElementChild===held.screen && document.activeElement===held.focus &&
+            document.querySelector('#persistence-status').textContent===held.status && document.querySelector('[data-screen="knowledge-base"]');
+        })()`, 'navigation-late-answer-keeps-page-focus-status');
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'navigation-restore-library');
+        await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, 'navigation-library-restored');
+      }
+    } finally {
+      await writeFile(navigationHoldPath, 'release');
+      await renderer.evaluate(`delete window.__j11NavigationSnapshot`);
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
     }
 
     at('restart-keeps-people');
@@ -1682,50 +1720,6 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'feedback-analysis-settled-state');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'feedback-drawer-closed');
-
-    // #1497: after the existing fixture setup and baseline, hold a successful analysis read while the editor opens another tab.
-    at('navigation-late-answer');
-    try {
-      for (const [width, height] of [[1280, 800], [1008, 681]]) {
-        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-        await assertRenderer(renderer, `(() => {
-          const original = Promise.prototype.then;
-          const held = { release: null, restore: () => { Promise.prototype.then = original; } };
-          window.__j11HeldNavigation = held;
-          Promise.prototype.then = function (success, failure) {
-            return original.call(this, (value) => {
-              if (typeof success === 'function' && value && typeof value === 'object' && 'resultSetRevision' in value && 'bookId' in value && held.release === null) {
-                held.restore();
-                return new Promise((resolve) => { held.release = () => resolve(success(value)); });
-              }
-              return typeof success === 'function' ? success(value) : value;
-            }, failure);
-          };
-          return true;
-        })()`, 'navigation-install-hold');
-        await pointerClick(renderer, waitFor, SIDEBAR.section('analysis'), 'navigation-open-analysis');
-        await waitFor(renderer, `typeof window.__j11HeldNavigation?.release === 'function'`, 'navigation-answer-held');
-        await pointerClick(renderer, waitFor, SIDEBAR.section('evaluation'), 'navigation-open-evaluation');
-        await readEvaluation(renderer, (page) => page.state === 'ready', 'navigation-evaluation-ready');
-        await assertRenderer(renderer, `(async () => {
-          const held = window.__j11HeldNavigation;
-          const screen = document.querySelector('#screen').firstElementChild;
-          const focus = document.activeElement;
-          const status = document.querySelector('#persistence-status')?.textContent;
-          held.release();
-          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          delete window.__j11HeldNavigation;
-          return document.querySelector('#screen').firstElementChild === screen && document.activeElement === focus &&
-            document.querySelector('#persistence-status')?.textContent === status && !document.querySelector('.book-analysis');
-        })()`, 'navigation-late-answer-keeps-page-focus-status');
-      }
-    } finally {
-      await renderer.evaluate(`window.__j11HeldNavigation?.restore(); delete window.__j11HeldNavigation;`);
-      await renderer.send('Emulation.clearDeviceMetricsOverride');
-    }
-
-    await pointerClick(renderer, waitFor, SIDEBAR.section('analysis'), 'navigation-restore-analysis');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState === 'settled'`, 'navigation-analysis-restored');
 
     at('feedback-card-offered');
     // Every item of the revision offers 反馈… and nothing is judged: the tally says so, and what it is and is not.

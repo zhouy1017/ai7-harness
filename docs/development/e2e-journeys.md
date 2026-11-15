@@ -2,7 +2,7 @@
 
 ## Navigation results after leaving a page (#1497)
 
-J-11 adds `navigation-late-answer`: the real analysis read is held while the editor opens the evaluation tab with the shared real-pointer helper. Releasing the old answer preserves the destination, focused control and status at both 1280×800 and 1008×681, then restores the native viewport. No existing stage or editorial choice is removed. Renderer regressions also cover global entries, knowledge-base load failures, a second Book, re-opened hosts, superseded notification lookups and failed or refused navigation whose original page still completes.
+J-11's `navigation-late-answer` holds the global-entry leave acknowledgement after main has revoked Book ownership, opens Knowledge with the shared real-pointer helper, then releases the answer and checks destination identity, focus and status at 1280×800 and 1008×681. This replaces the earlier analysis-read hold, whose connected-host guard already passed on the base. The base global-entry loader repaints over the newer destination; a differential renderer probe reproduces that failure. The file control is admitted only by J-11's development-ci launch, has a 30-second autonomous release, adds no renderer API or product setting, and is refused by other scopes and packaged launches. The stage restores the library and native viewport. No editorial choice or existing Journey stage is removed. Renderer regressions also cover real shell repaints, both leave/Book orders with a usable Book route, evaluation drafts, task-plan drawers, workspace returns, late errors, second Books, superseded notifications and surviving-page reads after failed or refused navigation.
 
 ## #1472 synchronized deltas (0.7.1, `codex/integration-0.7.1`)
 

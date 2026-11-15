@@ -1,4 +1,4 @@
-import { navigation } from './navigation-generation.js';
+import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
 import { filterChoices, stateTerm } from './components/controls.js';
 import { EXEMPLARS_FILTER_EMPTY, EXEMPLAR_ELIGIBILITY_LABELS, exemplarTitle, exemplarKind, exemplarKindFilter, exemplarFacts, readersReportExemplarFacts, readersReportExemplarAdmission } from './knowledge-base-labels.js';
@@ -62,7 +62,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it; `materialId` is
    * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
    */
-  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null): Promise<void> {
+  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null, current: NavigationCheckpoint = navigation.begin()): Promise<void> {
     if (tab === 'home') {
       const content = panel();
       content.classList.add('knowledge-base');
@@ -79,8 +79,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       return;
     }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
-      await renderKnowledgeBase();
-      setStatus('该页在开发者模式下显示');
+      await renderKnowledgeBase('home', false, null, current);
+      if (current.isCurrent()) setStatus('该页在开发者模式下显示');
       return;
     }
     if (tab === 'rules') {
@@ -363,10 +363,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * A Book's 学习准入待处理 deep link still opens that exact Book in the developer eligibility view.
    */
   async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'preferences', bookId: string | null = null, tabFocused = false,
-    openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
+    openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null, current: NavigationCheckpoint = navigation.begin()): Promise<void> {
     if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
-      await renderQualityLearning('preferences', null);
-      setStatus('该页在开发者模式下显示');
+      await renderQualityLearning('preferences', null, false, null, null, current);
+      if (current.isCurrent()) setStatus('该页在开发者模式下显示');
       return;
     }
     const qualityTabs = visibleQualityLearningTabs(technicalLayerVisible);
