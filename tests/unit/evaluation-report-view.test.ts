@@ -17,6 +17,7 @@ const details = (className: string | undefined, ...rows: HTMLElement[]) => { con
 const profile = BUILTIN_EVALUATION_PROFILE;
 const total = { score: 70, fullMarks: 100, notRated: 0, unscored: 0 };
 const latest = {
+  modelLabel: 'chosen-model@high',
   revisionId: 'report-1', ordinal: 1, revisionLabel: 'r1', createdAt: '2026-11-07T00:00:00.000Z', current: true, complete: true, unitsTotal: 2, unreadUnits: [],
   total, strengths: ['悬念清楚'], weaknesses: ['中段拖沓'], nextStep: '压缩中段。', suggestedConclusion: 'revise' as const,
   items: profile.items.map((item, index) => ({ itemId: item.itemId, score: 14, comment: `第 ${index + 1} 项的评语。`, sufficiency: 'sufficient' as const,
@@ -48,6 +49,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(root.dataset['evaluationView']).toBe('report');
   expect(root.querySelector('.evaluation-record')).toBeNull();
   const report = root.querySelector('.evaluation-report')!;
+  expect(report.querySelector('.evaluation-report-model')!.textContent).toBe('模型 chosen-model@high');
   expect(report.querySelectorAll('.evaluation-report-comment')).toHaveLength(profile.items.length);
   expect(report.querySelector('.evaluation-report-comment')!.textContent).toBe('第 1 项的评语。');
   expect(report.querySelectorAll('.evaluation-item-ai7-evidence li')).toHaveLength(profile.items.length);
@@ -62,6 +64,7 @@ it('shows the newest report past an unfinished empty version, and 修改报告 o
   expect(startEvaluation).toHaveBeenCalledWith({ fromInitial: true, skipDamaged: false });
   expect(root.querySelector('.evaluation-report')).toBeNull();
   expect(root.querySelector('.evaluation-record h3')!.textContent).toContain('详细评估报告');
+  expect(root.querySelector('.evaluation-record .evaluation-report-model')!.textContent).toBe('初评模型 chosen-model@high');
   expect(root.querySelector('.evaluation-record .evaluation-report-next-step')!.textContent).toBe('下一步建议：压缩中段。');
   // The 评语 field holds AI7's words until the editor changes them; they are not repeated beside it.
   expect(root.querySelectorAll('.evaluation-record .evaluation-item-ai7-comment')).toHaveLength(0);
