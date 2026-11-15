@@ -2035,8 +2035,10 @@ async function main() {
     await assertRenderer(renderer, `['prepare','start'].every((action) => { const button=document.querySelector('dialog.review-sheet [data-review-action="'+action+'"]'); return button instanceof HTMLButtonElement && !button.disabled; })`, 'series-sheet-selected-actions-enabled');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')===null && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
     await launchReviewFromSheet(renderer, waitFor);
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'series-prepared', 180_000);
+    await waitFor(renderer, `['settled','failed'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(seriesRun?.state === 'settled', 'series-start-settled', { state: seriesRun?.state,
+      categories: seriesRun?.categories.map(category => ({ categoryId: category.categoryId, state: category.state, detail: category.detail })) });
     requireJourney(['running','settled'].includes(seriesRun?.state) && seriesRun.procedure?.procedureId === seriesProcedureId && seriesRun.procedure.version === 1 &&
       JSON.stringify(seriesRun.procedure.leftOut) === JSON.stringify([]) &&
       JSON.stringify(seriesRun.categories.map((category) => category.categoryId)) === JSON.stringify(['series-consistency']), 'series-pinned', seriesRun?.procedure);
