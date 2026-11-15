@@ -11,7 +11,7 @@ Closure candidate identity is 0.7.1 Alpha, protocol 203, schema 115, Data Versio
 | #1471 (#1477) | J-04 repeated-word occurrence hints and bulk Apply; see review grounding stages. |
 | #1475 (#1485) | J-02 structure burst waits on durable saves with checkpointing off commit; amplification remains for R5. |
 | #1455 (#1487, #1488) | Existing launch/preview, model-choice and frozen task-row stages below replace ordinary prepare/authorize ceremony across J-04/J-05/J-07/J-09/J-10/J-11/J-12/J-13/J-16; retained plan editing stays covered. |
-| #1476 (#1489) | Instruction-carrying analysis/初评 procedure coverage; integration commit `<#1489 commit>` pending. |
+| #1476 (#1489) | Instruction-carrying procedures for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成, with frozen plan sending disclosures; integration commit `a3a19670`. |
 | #1482, #1484, #1486 | J-16 and J-12 wait on durable state rather than transient toasts. |
 
 The fixture route retains its fixture-model attribution. Chosen provider labels are proved with captured ordinary transport in real-store service tests; Journeys prove selection, one-step launch and frozen task rows. No live call or new closure evidence is claimed.

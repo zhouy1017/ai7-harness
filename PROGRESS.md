@@ -13,7 +13,7 @@ What R2 newly lets the editor do:
 | #1471 | Let the model identify an occurrence of a repeated word; pinned 修改建议 join 接受并应用全部 | #1477 / `a9fad5b7` |
 | #1475 | Repeatedly split and merge paragraphs on a slow disk without checkpointing inside the save making the editor read-only | #1485 / `410771ff` |
 | #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
-| #1476 | Use a 工序 carrying an editor instruction for 初评 and analysis | #1489 / `<#1489 commit>` (pending integration) |
+| #1476 | Use a 工序 carrying 编辑任务说明 / 豁免规则 for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成; see what it adds to sending in the plan | #1489 / `a3a19670` |
 
 Stage repairs #1482, #1484 and #1486 (`0089cc73`, `621cd767`, `5b4db618`) make J-16 and J-12 wait on durable state. R1's text-to-card selection, compact cards and one-row toolbar remain delivered; R2 adds occurrence hints and the overlay connector.
 
@@ -162,7 +162,7 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 ## In flight and remaining risks
 
 - The provider-free fixture route records the fixture model. Chosen provider model@思考强度 on cards is proved by real-store service tests with captured ordinary transport; Journeys prove the choice is shown, sent, launched in one step and frozen on the task row.
-- No live model call was made in R2. Developer-live recordings invalidated in PRs #1474, #1477 and #1478 await Owner re-record authorization; #1476's final invalidation list must be confirmed after integration. PR #1477 identifies 8 factual quick /1 items, 15 standard /2 items, 4 strict /2 items and 2 earlier factual research-wrapper items; claim extraction and retained historical review /1 remain reusable. PR #1478 adds no further invalidation relative to its integration base. Gateway Responses routes (no `store` / `include`) and level lists on routes without declared reasoning control remain untested against real services.
+- No live model call was made in R2. Developer-live recordings invalidated in PRs #1474, #1477 and #1478 await Owner re-record authorization; #1476 invalidates no developer-live recording: that scope still refuses instruction-bearing procedures. PR #1477 identifies 8 factual quick /1 items, 15 standard /2 items, 4 strict /2 items and 2 earlier factual research-wrapper items; claim extraction and retained historical review /1 remain reusable. PR #1478 adds no further invalidation relative to its integration base. Gateway Responses routes (no `store` / `include`) and level lists on routes without declared reasoning control remain untested against real services.
 - A level typed by hand on a route without declared reasoning control is still sent and shown, at the editor's own risk with a notice.
 - #1475 moves automatic checkpointing off the commit path. The hosted J-02 structure-burst failure is explained: one structural edit in about 46,000 blocks appends about 48.5 MB to the write-ahead log and automatic checkpointing ran inside commit. It reproduces on delivered 0.6.5 (hosted run 43563912248), so it was not an R1 regression. The amplification remains for R5. A worker hung in native I/O keeps the process alive until the main process kills it.
 - The guests' 1164×781 window differs from hosted Gate's 1008×681; UI stages emulate both required sizes (#1463).
@@ -170,4 +170,4 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 
 ## Resume
 
-Read this checkpoint, the development plan, Orca dispatch and #1472. Continue the dispatched closure: merge the supplied #1489 integration tip without rebasing, resolve its placeholder, rerun host checks, run the final guest ladder and two unbound hosted runs, then open a draft PR into `codex/integration-0.7.1`. The Commander owns dev integration and the fixed human-test refresh; Owner human acceptance, tags, release and main promotion remain separate.
+Read this checkpoint, the development plan, Orca dispatch and #1472. Continue the dispatched closure: run the early host checks and guest ladder, then merge the supplied #1490 stage-repair tip without rebasing, rerun host checks, the final guest ladder and two unbound hosted runs, then open a draft PR into `codex/integration-0.7.1`. The Commander owns dev integration and the fixed human-test refresh; Owner human acceptance, tags, release and main promotion remain separate.

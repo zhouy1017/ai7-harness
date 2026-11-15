@@ -59,7 +59,7 @@ afterEach(async () => {
   capture = undefined; setupOwner = undefined;
 });
 
-async function book(kind: Kind) {
+async function book(kind: Kind, instruction = false) {
   const imported = await importSample1Book(store, roots.codeRoot, 'sample1 任务派发');
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
   let recordId = '';
@@ -69,7 +69,20 @@ async function book(kind: Kind) {
     finalizeAsJ11(store, imported.bookId);
     if (kind === 'evaluation-rewrite') recordId = beginRewriteAsJ11(store, imported.bookId).recordId;
   }
+  if (instruction) selectInstruction(kind, imported.bookId);
   return { ...imported, recordId };
+}
+
+const INSTRUCTION = '保留叙述中的短句。';
+function selectInstruction(kind: Kind, bookId: string, instruction = INSTRUCTION, exemptions = false): void {
+  // Custom dimensions have no registered procedure selection surface.
+  if (kind === 'custom-analysis') return;
+  const executor = kind === 'initial-evaluation' ? 'evaluation' : kind === 'baseline-analysis' ? 'baseline-manuscript-analysis' : kind;
+  const original = store.procedureLibrary({ action: 'inspect' }).procedures.find(entry => entry.executorKind === executor)!;
+  const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId,
+    basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
+    title: original.document.title, editorInstruction: instruction, stages: original.document.stages.map((stage, index) => exemptions && index === 0 ? { ...stage, exemptionRules: ['方言对白不算语病。'] } : stage) } }).procedures.find(entry => entry.procedureId === original.procedureId)!;
+  store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
 }
 
 function ordinary(answer: CapturedOrdinaryAnswer = () => undefined, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): void {
@@ -160,8 +173,8 @@ async function lifecycleAnswers(kind: Kind) {
   };
 }
 
-async function launchedLifecycle(kind: Kind) {
-  const target = await book(kind), answer = await lifecycleAnswers(kind);
+async function launchedLifecycle(kind: Kind, instruction: boolean) {
+  const target = await book(kind, instruction), answer = await lifecycleAnswers(kind);
   let held!: () => void, release!: () => void, holding = true;
   const reached = new Promise<void>(resolve => { held = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
   let launched!: LaunchedTask;
@@ -297,7 +310,7 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
   it('refuses the preview while a same-kind task is active instead of describing an unavailable launch', async () => {
-    const target=await book(kind);ordinary();
+    const target=await book(kind, true);ordinary();
     command(kind,target,{reasoningEffort:'high'},randomUUID(),false,undefined,'when-online')();
     const launch=launchRequest(kind,target,{reasoningEffort:'low'});
     const expectedCode=kind==='writing'?'WRITING_UNAVAILABLE':kind==='evaluation-rewrite'?'EVALUATION_REWRITE_UNAVAILABLE':'ANALYSIS_TASK_ACTIVE';
@@ -306,7 +319,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it('previews exactly the frozen editorial plan with selected references, range, sampling, retry and budget', async () => {
-    const target = await book(kind), answer = await lifecycleAnswers(kind);
+    const target = await book(kind, true), answer = await lifecycleAnswers(kind);
     let definition!: LaunchedTask['ledger']['definition'];
     ordinary(request => answer(request, definition));
     if (kind === 'baseline-analysis' || kind === 'custom-analysis') {
@@ -343,7 +356,8 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       const plan=store.inspectTaskPlan({bookId:target.bookId,kind:kind==='custom-analysis'?'baseline-analysis':kind,ref:launched.taskIntentId});
       expect(preview.steps).toEqual(plan.steps.map(step=>`${step.label}${step.removed?'（本次不做）':''}`));
       expect(preview.scope).toBe(plan.scope.process); expect(preview.reference).toEqual(plan.scope.reference);
-      expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`); expect(preview.usage).toBe(plan.service.usage);
+      expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`);
+      if (kind !== 'custom-analysis') expect(preview.send).toContain('所选工序中的编辑任务说明'); expect(preview.usage).toBe(plan.service.usage);
       expect(preview.adaptations).toEqual(plan.boundary.adaptable.map(entry=>`${entry.label}：${entry.removed?'不允许':entry.askFirst?'先问我':'允许'}`));
       if(materialId!==undefined)expect(preview.reference.join('')).toContain('样书背景资料');
       if(kind==='readers-report')expect(preview.send).toContain('定稿的评估记录');
@@ -352,7 +366,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it('drives concurrent choices to completion and keeps an earlier revision labelled after a later model runs', async () => {
-    const a = await book(kind), b = await book(kind), answer = await lifecycleAnswers(kind);
+    const a = await book(kind, true), b = await book(kind, true), answer = await lifecycleAnswers(kind);
     let definition!: LaunchedTask['ledger']['definition'];
     ordinary(request=>answer(request, definition));
     const first = command(kind, a, { modelId: 'account-future-a', reasoningEffort: 'high' })(); definition = first.ledger.definition;
@@ -373,7 +387,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(capture!.wireRequests.some(request=>request.model==='account-future-b' && request.reasoning_effort==='low')).toBe(true);
   });
   it('previews current manuscript and options without writing a task or checkpoint', async () => {
-    const target = await book(kind); ordinary(); typeBeforeLaunch(target);
+    const target = await book(kind, true); ordinary(); typeBeforeLaunch(target);
     const launch = launchRequest(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false,
       { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 12345 } });
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -390,7 +404,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it('replays the original cancelled command after a newer task exists', async () => {
-    const target = await book(kind); ordinary();
+    const target = await book(kind, true); ordinary();
     const firstCommand = command(kind, target, { reasoningEffort: 'high' }, randomUUID(), false, undefined, 'when-online');
     const first = firstCommand(); cancelQueued(kind, target, first);
     const second = command(kind, target, { reasoningEffort: 'low' }, randomUUID(), false, undefined, 'when-online')();
@@ -401,7 +415,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it('restores a launch queued behind two active tasks after restart without replay', async () => {
-    const firstBook = await book(kind), secondBook = await book(kind), queuedBook = await book(kind), answer = await lifecycleAnswers(kind);
+    const firstBook = await book(kind, true), secondBook = await book(kind, true), queuedBook = await book(kind, true), answer = await lifecycleAnswers(kind);
     let definition!: LaunchedTask['ledger']['definition'], ready!: () => void, release!: () => void, held = 0;
     const reached = new Promise<void>(resolve=>{ ready=resolve; }), gate = new Promise<void>(resolve=>{ release=resolve; });
     const schedule: CapturedOrdinaryAnswer = request=>answer(request, definition);
@@ -423,12 +437,13 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       expect(store.executionLedgerForRun(queued.runRecordId).currentRunState(queued.runRecordId)).toMatch(/^completed/u);
       expectProducedAttribution(kind, queuedBook, queued, 'account-future-model@high');
       expect(capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(capture!.wireRequests.some(request => request.messages.some(message => message.role === 'system' && message.content.includes(INSTRUCTION)))).toBe(kind !== 'custom-analysis');
       expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
     } finally { release(); }
   });
 
   it.each(['now', 'idle', 'when-online'] as const)('restores an unadmitted %s launch after restart without a replay', async timing => {
-    const target = await book(kind), answer = await lifecycleAnswers(kind); let definition!: LaunchedTask['ledger']['definition'];
+    const target = await book(kind, true), answer = await lifecycleAnswers(kind); let definition!: LaunchedTask['ledger']['definition'];
     const schedule: CapturedOrdinaryAnswer = request => answer(request, definition);
     ordinary(schedule);
     const first = command(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false, undefined, timing)();
@@ -453,7 +468,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it.each(['now', 'idle', 'when-online'] as const)('cancels a restored %s launch through its waiting control', async timing => {
-    const target = await book(kind); ordinary();
+    const target = await book(kind, true); ordinary();
     const first = command(kind, target, { reasoningEffort: 'high' }, randomUUID(), false, undefined, timing)();
     await restart(); reconcileAll(); capture!.owner.freezeQueue(true);
     for (const pending of store.pendingLaunchedLedgerRuns()) driveLaunchedLedgerRun(capture!.owner, pending);
@@ -462,11 +477,12 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(store.executionLedgerForRun(first.runRecordId).currentRunState(first.runRecordId)).toBe('cancelled');
     expect(capture!.requests).toHaveLength(0);
   });
-  it.each(['cancel', 'pause', 'restart'] as const)('releases an ordinary-production launched task after %s', async action => {
-    const test = await launchedLifecycle(kind);
+  it.each([false, true].flatMap(instruction => (['cancel', 'pause', 'restart'] as const).map(action => ({ instruction, action }))))('releases an ordinary-production launched task after $action (instruction=$instruction)', async ({ action, instruction }) => {
+    const test = await launchedLifecycle(kind, instruction);
     try {
       await test.reached;
       expect(capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(capture!.wireRequests.some(request => request.messages.some(message => message.role === 'system' && message.content.includes(INSTRUCTION)))).toBe(instruction && kind !== 'custom-analysis');
       expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
       if (action === 'restart') {
         const stopping = capture!.owner.dispose(); test.release(); await stopping;
@@ -508,7 +524,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it('queues an offline launch in the same snapshot and preserves cancellation and replay without a send', async () => {
-    const target = await book(kind); ordinary();
+    const target = await book(kind, true); ordinary();
     const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
     const config = { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId = randomUUID();
     // Connectivity is service context, outside the command's identity; retrying after reconnect returns the original wait.
@@ -533,7 +549,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 
   it('freezes concurrent choices, launches no approval-only records and replays after settings change', async () => {
-    const a = await book(kind), b = await book(kind), fallbackBook = await book(kind);
+    const a = await book(kind, true), b = await book(kind, true), fallbackBook = await book(kind, true);
     ordinary();
     const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
     const alternative = store.getModelServiceRouteConnection('deepseek-open-platform')
@@ -674,16 +690,19 @@ it('records a development-ci launch without a route and lets the existing admiss
   expect(result.planRevisions).toHaveLength(0);
 });
 
-it('refuses the preview and launch of the unsupported 初评 procedure instruction with the same guidance (#1476 unchanged)', async () => {
-  const target=await book('initial-evaluation');ordinary();
-  const search=store.saveSearchBackendCredential('search-tinyfish',null,'needs-attention');
-  store.saveSearchBackendCredential('search-tinyfish',search.credentialReference,'ready');store.selectSearchBackend('search-tinyfish');
-  const original=store.procedureLibrary({action:'inspect'}).procedures.find(entry=>entry.executorKind==='evaluation')!;
-  const changed=store.procedureLibrary({action:'save',input:{procedureId:original.procedureId,basedOn:{procedureId:original.procedureId,version:original.version,digest:original.digest},title:original.document.title,editorInstruction:'保留叙述中的短句。',stages:original.document.stages}}).procedures.find(entry=>entry.procedureId===original.procedureId)!;
-  store.procedureLibrary({action:'select',bookId:target.bookId,procedure:{procedureId:changed.procedureId,version:changed.version,digest:changed.digest}});
-  const launch=launchRequest('initial-evaluation',target,{reasoningEffort:'high'});
-  const refusal=expect.objectContaining({code:'PROCEDURE_INSTRUCTION_NOT_ADMITTED',message:'这项任务暂不支持带编辑指令的工序。'});
-  expect(()=>store.previewTaskLaunch({bookId:target.bookId,launch},policy)).toThrowError(refusal);
-  expect(()=>commitLaunch(target,launch)).toThrowError(refusal);
-  expect(capture!.requests).toHaveLength(0);
+it.each([
+  { instruction: INSTRUCTION, exemptions: false, words: '编辑任务说明' },
+  { instruction: '', exemptions: true, words: '豁免规则' },
+  { instruction: INSTRUCTION, exemptions: true, words: '编辑任务说明和豁免规则' },
+])('names $words from frozen procedure content in equal preview and launch plans', async ({ instruction, exemptions, words }) => {
+  const target = await book('initial-evaluation'); ordinary();
+  selectInstruction('initial-evaluation', target.bookId, instruction, exemptions);
+  const launch = launchRequest('initial-evaluation', target, { reasoningEffort: 'high' });
+  const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy);
+  const committed = commitLaunch(target, launch);
+  const plan = store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: committed.taskIntentId });
+  expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`);
+  expect(plan.scope.send).toContain(`所选工序中的${words}`);
+  if (instruction === '') expect(plan.scope.send).not.toContain('编辑任务说明');
+  if (!exemptions) expect(plan.scope.send).not.toContain('豁免规则');
 });

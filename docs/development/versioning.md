@@ -38,7 +38,7 @@ Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev
 
 #1459 → **0.7.0 Alpha** (the Owner's R1 number) is delivered on `dev` at `2026a9ee` through PR #1468 with schema 113, protocol 202 (PR #1462 adds `guessed-anchor` to `ProposalDraftBatchProjection.excluded.reason`) and Data Version 1.
 
-#1472 → **0.7.1 Alpha** is the Owner's R2 number and a closure candidate on `codex/integration-0.7.1`, not dev delivery. Protocol 203 records reasoning effort in role inputs/settings (#1478), one-step review launch, scoped execution choice and frozen labels (#1487), six task launches, preview, remembered choices and result labels (#1488), and optional analysis `planEnvelope.basePromptContractDigest` (#1489). Schema 115 includes the two additive in-place migrations, 113 → 114 (#1478) and 114 → 115 (#1487); Data Version stays 1. No tag or release is claimed.
+#1472 → **0.7.1 Alpha** is the Owner's R2 number and a closure candidate on `codex/integration-0.7.1`, not dev delivery. Protocol 203 records reasoning effort in role inputs/settings (#1478), one-step review launch, scoped execution choice and frozen labels (#1487), six task launches, preview, remembered choices and result labels (#1488), and optional analysis `planEnvelope.procedureContent { editorInstruction, exemptionRules }` (#1489). Schema 115 includes the two additive in-place migrations, 113 → 114 (#1478) and 114 → 115 (#1487); Data Version stays 1. No tag or release is claimed.
 
 ## Canonical inputs
 
