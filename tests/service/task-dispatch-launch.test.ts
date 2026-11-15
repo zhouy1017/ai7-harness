@@ -83,6 +83,16 @@ async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
   ordinary(answer);
 }
 
+/** Instance preferences can outlive a database replacement; this is a real connection from the previous database. */
+async function previousConnectionId(): Promise<string> {
+  const previousRoots = await createServiceTestRoots('ai7-previous-dispatch-');
+  const previous = await EditorialStore.open(previousRoots.dataRoot, previousRoots.codeRoot);
+  try {
+    const connection = previous.saveModelServiceConnection('旧实例选择', null, 'needs-attention', 'opencode-go');
+    return previous.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'opencode-go').connectionId;
+  } finally { previous.markCleanShutdown(); previous.close(); await previousRoots.dispose(); }
+}
+
 function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' = 'now') {
   const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice, startWhen, ...(planEdits === undefined ? {} : { planEdits }) };
   switch (kind) {
@@ -104,6 +114,9 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     const a = await book(kind), b = await book(kind), fallbackBook = await book(kind);
     ordinary();
     const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
+    const alternative = store.getModelServiceRouteConnection('deepseek-open-platform')
+      ?? store.saveModelServiceConnection('另一渠道', null, 'needs-attention', 'deepseek-open-platform');
+    store.saveModelServiceConnection(alternative.connectionName, alternative.credentialReference, 'ready', 'deepseek-open-platform');
     const shown = store.getManuscriptWindow(a.manuscriptId, a.branchId, null);
     const paragraph = shown.blocks.find(block => block.kind === 'paragraph')!;
     store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: a.manuscriptId, branchId: a.branchId,
@@ -114,15 +127,16 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     const clientCommandId = randomUUID();
     const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId, false,
       { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } }, 'idle');
-    const secondCommand = command(kind, b, { modelId: 'account-future-model', reasoningEffort: 'low' });
+    const secondCommand = command(kind, b, { modelConnectionId: alternative.connectionId, modelId: 'account-future-model', reasoningEffort: 'low' });
     const [first, second] = await Promise.all([Promise.resolve().then(firstCommand), Promise.resolve().then(secondCommand)]);
     expect(first.runRecordId).not.toBe(second.runRecordId);
     expect(first.ledger.inspect(a.bookId).authorization?.startWhen).toBe('idle');
     expect(second.ledger.inspect(b.bookId).authorization?.startWhen).toBe('now');
     expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.journalSequence).toBe(current.journalSequence);
+    expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.revisionDigest).toBe(current.workingDigest);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 50_000 });
     expect(first.ledger.loadExecutionPlan(first.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
-    expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
+    expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ credentialReference: alternative.credentialReference, model: 'account-future-model', reasoningEffort: 'low' });
     expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
     for (const [target, launched, effort] of [[a, first, 'high'], [b, second, 'low']] as const) {
       const task = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
@@ -143,6 +157,9 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     try {
       expect(db.prepare('SELECT count(*) n FROM task_launch_snapshots WHERE task_kind = ?').get(kind)?.n).toBe(2);
       for (const launched of [first, second]) {
+        // Units, reductions and sampling share this one Run; no later step is reserved as another authorized Run.
+        expect(db.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(1);
+        expect(db.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(1);
         const authority = db.prepare(`SELECT a.canonical_json FROM analysis_run_records r JOIN analysis_run_authorizations a USING(authorization_id) WHERE r.run_record_id = ?`).get(launched.runRecordId);
         expect(JSON.parse(String(authority?.canonical_json)).launchSnapshotId).toEqual(expect.any(String));
         expect(db.prepare('SELECT count(*) n FROM analysis_plan_revisions WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(0);
@@ -157,7 +174,9 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(recovered).toMatchObject({ repeated: true, runRecordId: first.runRecordId });
     expect(recovered.ledger.currentRunState(recovered.runRecordId)).toBe('authorized');
     expect(recovered.ledger.loadExecutionPlan(recovered.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
-    const fallback = command(kind, fallbackBook, { modelConnectionId: 'removed-instance-connection', modelId: 'removed-model' }, randomUUID(), true)();
+    const goneConnection = await previousConnectionId();
+    expect(store.getModelServiceConnections().some(connection => connection.connectionId === goneConnection)).toBe(false);
+    const fallback = command(kind, fallbackBook, { modelConnectionId: goneConnection, modelId: defaults.model }, randomUUID(), true)();
     expect(fallback.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
     expect(fallback.ledger.loadExecutionPlan(fallback.runRecordId).productionBinding).toMatchObject({ model: defaults.model });
     expect(capture!.requests).toHaveLength(0);
@@ -194,8 +213,14 @@ it('drives a committed baseline launch after restart once and retains actual req
   const report = store.inspectBaselineAnalysis(target.bookId).taskOutcome!.report!;
   expect(report.modelLabel).toBe('account-future-model@high');
   const attributionDb = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-  try { expect(launchedRevisionModelLabels(attributionDb, store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId)).toEqual({ modelLabel: report.modelLabel }); }
+  try {
+    expect(launchedRevisionModelLabels(attributionDb, store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId)).toEqual({ modelLabel: report.modelLabel });
+    expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
+    expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
+  }
   finally { attributionDb.close(); }
+  expect(new Set(capture!.requests.map(request => request.runRecordId))).toEqual(new Set([committed.runRecordId]));
+  expect(capture!.requests.some(request => request.stage === 'cross-unit-reduction')).toBe(true);
   expect(capture!.wireRequests.length).toBeGreaterThan(0);
   expect(capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
   const sent = capture!.wireRequests.length;
