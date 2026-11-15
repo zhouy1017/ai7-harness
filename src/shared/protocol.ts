@@ -323,6 +323,7 @@ export * from './protocol/task-kinds.js';
 export * from './protocol/analysis-plan.js';
 export * from './protocol/factual-verification.js';
 export * from './protocol/review-runs.js';
+export * from './protocol/review-synthesis.js';
 export * from './protocol/evaluation.js';
 export * from './protocol/writing.js';
 export * from './protocol/task-plan.js';

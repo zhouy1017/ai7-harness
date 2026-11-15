@@ -178,6 +178,65 @@
       "plusOneCrossUnitSynthesisTurn": true
     },
     {
+      "ruleId": "ordinary-production-review-synthesis",
+      "taskKinds": [
+        "editorial-review/run-synthesis"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "frozen-material-reference-excerpt",
+        "house-review-preference-excerpt",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content",
+        "editor-task-instruction",
+        "house-review-guideline-clause"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "plusDeclaredContractRetryAdaptations": false,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "seriesKnowledgeAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": true,
+      "webSearchToolAllowed": false,
+      "editorTaskInstruction": {
+        "category": "editor-task-instruction",
+        "maxGraphemes": 1200,
+        "attributedToProcedureVersion": true,
+        "contractFramingOverrideAllowed": false,
+        "textProcessing": {
+          "mode": "qualified-original-field-processing",
+          "qualificationRef": "ordinary-production-original-fields-adr0099",
+          "unqualified": {
+            "personNamesAllowed": false
+          },
+          "qualifiedOriginalWords": "preserve-within-existing-field-contract"
+        }
+      },
+      "houseReviewGuidelineClause": {
+        "category": "house-review-guideline-clause",
+        "maxClauses": 40,
+        "maxGraphemesPerClause": 300,
+        "attributedToImportedDocumentVersion": true,
+        "textProcessing": {
+          "mode": "qualified-original-field-processing",
+          "qualificationRef": "ordinary-production-original-fields-adr0099",
+          "unqualified": {
+            "personNamesAllowed": false
+          },
+          "qualifiedOriginalWords": "preserve-within-existing-field-contract"
+        }
+      },
+      "plusOneCrossUnitSynthesisTurn": true,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false
+    },
+    {
       "ruleId": "ordinary-production-writing",
       "taskKinds": [
         "writing"
@@ -893,6 +952,32 @@
       "platformTools": 1,
       "localTools": 2,
       "sourceTranslationAllowed": true
+    },
+    {
+      "ruleId": "developer-live-public-samplebook-review-synthesis",
+      "taskKinds": [
+        "editorial-review/run-synthesis"
+      ],
+      "modelRole": "Main Editorial Role",
+      "outboundDataCategories": [
+        "public-or-synthetic",
+        "frozen-material-reference-excerpt",
+        "house-review-preference-excerpt"
+      ],
+      "crossUnitSynthesisAllowed": true,
+      "materialReferencesAllowed": true,
+      "editorialDeliverablesAllowed": false,
+      "seriesKnowledgeAllowed": false,
+      "clarificationQuestionAllowed": false,
+      "clarificationTimeoutHours": 24,
+      "backgroundOrigin": false,
+      "matchingActiveDefaultExecutionRuleAllowed": true,
+      "webSearchToolAllowed": false,
+      "plusOneCrossUnitSynthesisTurn": true,
+      "plusDeclaredContractRetryAdaptations": false,
+      "platformTools": null,
+      "localTools": null,
+      "sourceTranslationAllowed": false
     },
     {
       "ruleId": "developer-live-public-samplebook-writing",

@@ -1,4 +1,5 @@
 import { editorialMemoryDefinition, editorialMemoryDigest, editorialMemoryPrompt } from '../learning/editorial-memory.js';
+import { RUN_SYNTHESIS_PROMPT, RUN_SYNTHESIS_PROMPT_DIGEST } from '../review/run-synthesis-contract.js';
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
 import { withProcedureDefinition } from '../procedures/execution.js';
 import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
@@ -171,6 +172,12 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
+  if (definition.kind === 'editorial-review/run-synthesis') {
+    const rule = liveKindRule(policy, definition.kind);
+    if (rule === null || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
+      definition.systemPrompt !== RUN_SYNTHESIS_PROMPT || definition.promptContractDigest !== RUN_SYNTHESIS_PROMPT_DIGEST) return null;
+    return { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, payloadCategories: ['public-or-synthetic'] };
+  }
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
     const stages = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;

@@ -1,4 +1,5 @@
 import { launchedTaskPlan } from './task-plan-creation.js';
+import { runSynthesisKind } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
 import { TaskLaunchPreview } from './task-plan-creation.js';
@@ -3634,7 +3635,7 @@ export class EditorialStore {
       return ledger;
     };
     const seriesRule = definition.seriesScopes === undefined ? '' : sha256(canonicalJson(this.#baselineAnalysis.launch.policy?.providerProcessing.admittedRules ?? []));
-    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}`, make) : make();
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}\n${definition.structuredInputKey ?? ''}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -3709,7 +3710,9 @@ export class EditorialStore {
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
-    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const base = entry.synthesisKey === undefined
+      ? this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)))
+      : runSynthesisKind(this.#authority, entry.synthesisKey);
     const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition

@@ -41,6 +41,7 @@ export function liveReviewRule(
       modelAdmitsPlatformTools(rule.route, rule.model) ? rule : null;
   }
   if (entry.executor !== 'review-category-contract') return null;
+  if (entry.categoryId === 'run-synthesis') return liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);
   if (entry.categoryId === 'cross-deliverable-consistency') {
     if (entry.deliverables?.unavailableReason !== null || entry.deliverables.participants.length === 0) return null;
     const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic', 'editorial-deliverable-excerpt']);

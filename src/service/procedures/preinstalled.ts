@@ -6,6 +6,7 @@ import {
 } from '../../shared/protocol/procedures.js';
 import { baselineAnalysisKindDefinition, factualReviewKindDefinition, type AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from '../review/category-configuration.js';
+import { RUN_SYNTHESIS_ENTRY } from '../review/run-synthesis-kind.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 } from '../review/review-category-contract.js';
 import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
@@ -156,18 +157,26 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
 export function preinstalledProcedureDefinitions(version: 1 | 2 | 3 = 3): readonly ProcedureDefinitionDocument[] {
   return [...(version === 3 ? BUILTIN_REVIEW_CATEGORY_CONFIGURATION : HISTORICAL_REVIEW_CATEGORY_CONFIGURATION).categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition(),
     ...(version >= 2 ? [localCheckProcedureDefinition()] : []),
-    ...(version === 3 ? [factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition()] : [])];
+    ...(version === 3 ? [factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition(), runSynthesisProcedureDefinition()] : [])];
+}
+
+export function runSynthesisProcedureDefinition(): ProcedureDefinitionDocument {
+  return { schema: PROCEDURE_DEFINITION_SCHEMA, id: reviewProcedureId(RUN_SYNTHESIS_ENTRY.categoryId), version: 1,
+    title: RUN_SYNTHESIS_ENTRY.label, role: RUN_SYNTHESIS_ENTRY.description, editorInstruction: '',
+    stages: [{ ...stage('cross-unit-reduction', ['review-findings', 'baseline-chapter-synopses'], 'ai7.review.run-synthesis-result/1'), budgetShare: 1 }],
+    outputKinds: ['record'] };
 }
 
 /** Immutable predecessors remain admitted beside the current versions. */
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
   return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3(),
     ...preinstalledProcedureDefinitions(3).filter((document) => document.id === reviewProcedureId('style-and-format') || document.id === reviewProcedureId('plot-consistency')),
-    factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition()];
+    factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition(), runSynthesisProcedureDefinition()];
 }
 
 /** Kind identity selects the behavior-preserving pre-installed procedure. */
 export function procedureIdForKind(kind: string): string | null {
+  if (kind === 'editorial-review/run-synthesis') return reviewProcedureId('run-synthesis');
   if (kind === BASELINE_ANALYSIS_KIND) return BASELINE_PROCEDURE_ID;
   if (kind === FACTUAL_REVIEW_KIND) return reviewProcedureId('factual-review');
   if (['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].includes(kind)) return `ai7-procedure/${kind}`;

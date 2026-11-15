@@ -253,6 +253,10 @@ export interface ResearchDeclaration {
 }
 
 export interface AnalysisKindDefinition {
+  /** A review-run summary consumes stored editorial outputs only, with no manuscript unit turns. */
+  readonly structuredOnly?: boolean;
+  readonly structuredInputKey?: string;
+  readonly priorBudgetUsage?: () => { inputTokens: number; outputTokens: number };
   readonly manuscriptTarget?: { readonly manuscriptId: string; readonly branchId: string };
   readonly procedureBinding?: import('../procedures/execution.js').ProcedureKindBinding;
   readonly factualClaims?: { readonly level: 'standard' | 'strict'; readonly verificationPrompt: string; readonly verificationPromptDigest: string };
