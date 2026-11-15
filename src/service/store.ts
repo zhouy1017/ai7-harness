@@ -773,6 +773,7 @@ import {
   withAnswerBlockers,
   withResumeBlockers,
   withLedgerRunControls,
+  isRemoteExecutionRoute,
   withResend,
   categoryResendDisclosure,
   RESUME_BLOCKED_BINDING,
@@ -4157,8 +4158,17 @@ export class EditorialStore {
   }
 
   previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection): import('../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
-    const preview: NonNullable<import('./task-plan-creation.js').TaskLaunchContext['preview']> = (ledger, task) => {
-      throw new TaskLaunchPreview(ledger.previewLaunch(task, input.launch.input.planEdits));
+    const preview: NonNullable<import('./task-plan-creation.js').TaskLaunchContext['preview']> = (ledger, task, describe) => {
+      return ledger.previewLaunch(task, input.launch.input.planEdits, (projection, blocks) => {
+        const bookTitle = this.#evaluationBookTitle(input.bookId);
+        const plan = describe === undefined ? baselineAnalysisPlan({ projection: projection as BaselineAnalysisProjection, bookTitle, blocks })
+          : describe(projection, blocks, bookTitle);
+        const controlled = withLedgerRunControls(plan, projection as BaselineAnalysisProjection, blocks);
+        throw new TaskLaunchPreview({ steps: controlled.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`),
+          scope: controlled.scope.process, units: projection.coverageManifest!.units.length, reference: controlled.scope.reference,
+          send: `${controlled.scope.send}；${controlled.service.send}`, usage: controlled.service.usage,
+          adaptations: controlled.boundary.adaptable.map(entry => `${entry.label}：${entry.removed ? '不允许' : entry.askFirst ? '先问我' : '允许'}`) });
+      });
     };
     const launch = input.launch;
     try {
@@ -4472,7 +4482,7 @@ export class EditorialStore {
         liveCancellation: this.#liveCancellationRanges(projection, ledger) }));
       const routeKind = projection.providerResolutionPlan?.executionRoute.kind ?? null;
       const plan = custom === null ? baseline : customAnalysisPlan(baseline, { ...customAnalysisVersionInput(custom), version: custom.version },
-        routeKind === 'opencode-go' || routeKind === 'deepseek-open-platform');
+        projection.providerResolutionPlan !== null && isRemoteExecutionRoute(projection.providerResolutionPlan.executionRoute));
       return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'readers-report') {

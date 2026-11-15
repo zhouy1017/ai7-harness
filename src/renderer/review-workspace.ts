@@ -2958,7 +2958,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.choicePending = false;
       projection = next;
       renderSheet(next, state);
-      if (focused instanceof HTMLElement) focused.focus();
+      if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
     } catch (error) {
       if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
       state.choicePending = false;

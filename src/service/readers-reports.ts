@@ -1,3 +1,4 @@
+import { readersReportPlan, evaluationMaterialPlan } from './task-plan.js';
 import { launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
@@ -674,7 +675,7 @@ function buildReadersReportTask(host: ReadersReportStoreHost, bookId: string, te
     reconfirm: false,
     launchPolicy,
     ...(noteChanged || storeCanonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) !== storeCanonicalJson(ledger.definition.materialReferences?.sources ?? []) ? { newTask: true } : {}),
-  }));
+  }, (projection, blocks, bookTitle) => evaluationMaterialPlan(readersReportPlan({ projection: projection as ReadersReportProjection, bookTitle, blocks, task: { template, recordOrdinal: host.evaluationRecordOrdinal(basis.recordId), profile: input.record.profile, exemplars: readersReportExemplarStatement(host, readings) } }), host.taskMaterialReadings({ bookId, references: ledger.definition.materialReferences?.sources ?? [] }, '评估'))));
   // Which 定稿 version and template the Task drafts from, recorded once for it and this contract, and what that preparation
   // left out for damage: a plan is frozen, so its exemplar line names what was skipped when it was drafted (Issue #792).
   const taskIntentId = host.readersReportCall(() => result.projection?.taskIntent?.taskIntentId ?? host.readersReports.latestTaskIntentId(bookId));

@@ -1,3 +1,4 @@
+import { initialEvaluationPlan, evaluationMaterialPlan, seriesScopePlan } from './task-plan.js';
 import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
@@ -301,7 +302,7 @@ function buildInitialEvaluationTask(host: InitialEvaluationOperationsHost, bookI
     reconfirm: false,
     launchPolicy,
     ...(canonicalJson(host.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
-  }));
+  }, (projection, blocks, bookTitle) => evaluationMaterialPlan(seriesScopePlan(initialEvaluationPlan({ projection: projection as InitialEvaluationProjection, bookTitle, blocks, profile }), projection.runSourceScope?.seriesScopes), host.taskMaterialReadings({ bookId, references: ledger.definition.materialReferences?.sources ?? [] }, '评估'))));
   // The snapshot pins the Task the preparation returned, inside `#snapshotInitialPreparation`, never a separate
   // "latest evaluation Task" query (Issue #798, P3-2): that query could pin an unrelated earlier row.
   internalSnapshotInitialPreparation(host, result, profile, ledger);

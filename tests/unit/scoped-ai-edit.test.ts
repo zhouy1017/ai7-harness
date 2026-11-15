@@ -102,8 +102,8 @@ it('offers only the unlocked ranges with nothing selected, and sends the chosen 
   expect(started?.scope).toEqual({ mode: 'unlocked-only', range: { kind: 'section', headingBlockId: 'blk_h' } });
 });
 
-it('retries a lost launch response with the original pin and command after the visible window moves', async () => {
-  const startScopedAiEdit = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue(projection('unchanged'));
+it.each([new Error('response lost'), { code: 'SERVICE_RESPONSE_COMMITTED', message: '任务已经启动，偏好未能保存。' }])('retries an uncertain or committed response with the original pin and command after the visible window moves (%j)', async error => {
+  const startScopedAiEdit = vi.fn().mockRejectedValueOnce(error).mockResolvedValue(projection('unchanged'));
   const { value, statuses } = host({ startScopedAiEdit });
   let current = window0;
   value.current = () => current;

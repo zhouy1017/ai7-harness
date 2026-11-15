@@ -24,15 +24,26 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     panel.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8))}px`;
     panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, window.innerHeight - bounds.height - 8))}px`;
   };
+  const stopListening = (): void => {
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('scroll', scrolled, true);
+    window.removeEventListener('resize', dismiss);
+  };
+  const dismiss = (): void => { element.open = false; if (topLayer && panel.matches(':popover-open')) panel.hidePopover(); stopListening(); };
+  const outside = (event: Event): void => { if (!element.contains(event.target as Node)) dismiss(); };
+  const scrolled = (event: Event): void => { if (!panel.contains(event.target as Node)) dismiss(); };
   const refreshPanel = (): void => {
     if (topLayer && element.isConnected && element.open) {
       if (!panel.matches(':popover-open')) panel.showPopover();
       placePanel();
+      document.addEventListener('pointerdown', outside, true);
+      document.addEventListener('scroll', scrolled, true);
+      window.addEventListener('resize', dismiss);
     }
   };
   element.addEventListener('toggle', event => {
     if (!topLayer || event.target !== element) return;
-    if (element.open) refreshPanel(); else panel.hidePopover();
+    if (element.open) refreshPanel(); else dismiss();
   });
   let settings: ModelServiceSettingsProjection | null = null;
   let choices: Array<{ config: RuntimeExecutionConfig; label: string; levels: readonly string[] }> = [];
@@ -65,7 +76,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     const index = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
     models.selectedIndex = index; paint(defaultChoice.reasoningEffort); options.changed({});
   });
-  element.addEventListener('keydown', event => { if (event.key === 'Escape') { element.open = false; summary.focus(); } });
+  element.addEventListener('keydown', event => { if (event.key === 'Escape') { dismiss(); summary.focus(); } });
   return {
     element,
     /** Moving a chooser into a rebuilt sheet dismisses its native popover while retaining the details state. */

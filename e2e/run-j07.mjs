@@ -3033,7 +3033,8 @@ async function main() {
     await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');
     await fill(renderer, '[data-screen="editor"] .writing-task [data-writing-field="channel"]', WRITING_LIBRARY_REQUEST.channel, 'writing-library-channel');
     await clickSelector(renderer, '[data-screen="editor"] .writing-task [data-writing-action="plan"]', 'writing-library-plan-open');
-    await launchTaskFromBar(renderer, waitFor, 'writing-library');
+    at('writing-preview-material');
+    await launchTaskFromBar(renderer, waitFor, 'writing-library', undefined, [WRITING_LIBRARY_TITLE]);
     const libraryPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
       .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.scope.send, plan.technical.find((row) => row.key === 'material-references')?.value ?? null,
         plan.notDo.editorial.includes('不照抄资料库资料：与任何一份资料有连续 12 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用'), plan.defaultRule.canSet]))`);

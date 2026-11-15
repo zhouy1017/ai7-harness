@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises';
+import { setLibraryDecision } from '../support/library-materials.js';
 import { launchedRevisionModelLabels, markModelLabels } from '../../src/service/editorial-mark-source.js';
 import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTES } from '../../src/shared/protocol/model-service.js';
 import { randomUUID } from 'node:crypto';
@@ -121,6 +123,11 @@ function launchRequest(kind: Kind, target: Awaited<ReturnType<typeof book>>, exe
 function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' | 'when-online' = 'now', serviceStartWhen: 'now' | 'when-online' = 'now') {
   const launch = launchRequest(kind, target, executionConfig, clientCommandId, rememberedChoice, planEdits, startWhen);
   return () => {
+    return commitLaunch(target, launch, serviceStartWhen);
+  };
+}
+
+function commitLaunch(target: { bookId: string }, launch: import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'], serviceStartWhen: 'now' | 'when-online' = 'now') {
     switch (launch.operation) {
       case 'launchBaselineAnalysis': return store.launchBaselineAnalysis({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
       case 'launchCustomAnalysis': return store.launchCustomAnalysis({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
@@ -129,7 +136,6 @@ function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, execution
       case 'launchReadersReport': return store.launchReadersReport({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
       case 'launchEvaluationRewrite': return store.launchEvaluationRewrite({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
     }
-  };
 }
 
 type LaunchBook = Awaited<ReturnType<typeof book>>;
@@ -290,6 +296,61 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
+  it('refuses the preview while a same-kind task is active instead of describing an unavailable launch', async () => {
+    const target=await book(kind);ordinary();
+    command(kind,target,{reasoningEffort:'high'},randomUUID(),false,undefined,'when-online')();
+    const launch=launchRequest(kind,target,{reasoningEffort:'low'});
+    const expectedCode=kind==='writing'?'WRITING_UNAVAILABLE':kind==='evaluation-rewrite'?'EVALUATION_REWRITE_UNAVAILABLE':'ANALYSIS_TASK_ACTIVE';
+    expect(()=>store.previewTaskLaunch({bookId:target.bookId,launch},policy)).toThrowError(expect.objectContaining({code:expectedCode,message:expect.stringMatching(/等待|任务|运行/u)}));
+    expect(capture!.requests).toHaveLength(0);
+  });
+
+  it('previews exactly the frozen editorial plan with selected references, range, sampling, retry and budget', async () => {
+    const target = await book(kind), answer = await lifecycleAnswers(kind);
+    let definition!: LaunchedTask['ledger']['definition'];
+    ordinary(request => answer(request, definition));
+    if (kind === 'baseline-analysis' || kind === 'custom-analysis') {
+      const first = command(kind, target, { reasoningEffort: 'high' })(); definition = first.ledger.definition;
+      driveLaunchedLedgerRun(capture!.owner, first); await capture!.owner.whenIdle();
+    }
+    let materialId: string | undefined;
+    if (kind === 'writing' || kind === 'initial-evaluation' || kind === 'readers-report') {
+      const path = join(roots.inputRoot, 'sample-reference.txt');
+      await writeFile(path, store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).filter(block=>block.kind==='paragraph').slice(0,2).map(block=>block.text).join('\n\n'));
+      const preview = await store.previewLibraryMaterial(path);
+      const item = await store.addLibraryMaterial({ previewId: preview.previewId, title: '样书背景资料', kind: 'document' });
+      setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: target.bookId } } });
+      setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      store.startMaterialIndexing(); await store.settleMaterialIndexing(); materialId = item.materialId;
+    }
+    typeBeforeLaunch(target);
+    const launch = launchRequest(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false,
+      { removedSteps: kind==='baseline-analysis'?['assurance-sampling']:[], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 12345 } }, 'idle');
+    if (launch.operation==='launchWritingTask'||launch.operation==='launchInitialEvaluation'||launch.operation==='launchReadersReport') launch.input={...launch.input,materialIds:[materialId!]};
+    if (launch.operation==='launchReadersReport') launch.input={...launch.input,template:'editorial'};
+    if (launch.operation==='launchBaselineAnalysis'||launch.operation==='launchCustomAnalysis') {
+      const selectedRange={startPosition:26,endPosition:43};
+      if(launch.operation==='launchBaselineAnalysis')launch.input={...launch.input,goal:BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],update:{mode:'reanalyze-range',selectedRange}};
+      else launch.input={...launch.input,update:{mode:'reanalyze-range',selectedRange}};
+    }
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const before=db.prepare('PRAGMA data_version').get(), window=store.getManuscriptWindow(target.manuscriptId,target.branchId,null);
+      const preview=store.previewTaskLaunch({bookId:target.bookId,launch},policy);
+      expect(db.prepare('PRAGMA data_version').get()).toEqual(before);
+      expect(store.getManuscriptWindow(target.manuscriptId,target.branchId,null)).toEqual(window);
+      const launched=commitLaunch(target,launch);
+      const plan=store.inspectTaskPlan({bookId:target.bookId,kind:kind==='custom-analysis'?'baseline-analysis':kind,ref:launched.taskIntentId});
+      expect(preview.steps).toEqual(plan.steps.map(step=>`${step.label}${step.removed?'（本次不做）':''}`));
+      expect(preview.scope).toBe(plan.scope.process); expect(preview.reference).toEqual(plan.scope.reference);
+      expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`); expect(preview.usage).toBe(plan.service.usage);
+      expect(preview.adaptations).toEqual(plan.boundary.adaptable.map(entry=>`${entry.label}：${entry.removed?'不允许':entry.askFirst?'先问我':'允许'}`));
+      if(materialId!==undefined)expect(preview.reference.join('')).toContain('样书背景资料');
+      if(kind==='readers-report')expect(preview.send).toContain('定稿的评估记录');
+      if(kind==='baseline-analysis')expect(preview.steps).toContain('核对与抽检（本次不做）');
+    } finally {db.close();}
+  });
+
   it('drives concurrent choices to completion and keeps an earlier revision labelled after a later model runs', async () => {
     const a = await book(kind), b = await book(kind), answer = await lifecycleAnswers(kind);
     let definition!: LaunchedTask['ledger']['definition'];
@@ -321,7 +382,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       const window = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
       const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy);
       expect(preview.units).toBeGreaterThan(0); expect(preview.steps.length).toBeGreaterThan(0);
-      expect(preview.scope).toContain('阅读单元'); expect(preview.send).toContain('会发送'); expect(preview.usage).toContain('12345');
+      expect(preview.scope).toContain('阅读范围'); expect(preview.send).toContain('发往'); expect(preview.usage).toContain('12,345');
       expect(db.prepare('PRAGMA data_version').get()).toEqual(before);
       expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null)).toEqual(window);
       expect(capture!.requests).toHaveLength(0);
@@ -611,4 +672,18 @@ it('records a development-ci launch without a route and lets the existing admiss
   expect(result.run?.state).toBe('blocked-before-dispatch');
   expect(result.authorization).not.toBeNull();
   expect(result.planRevisions).toHaveLength(0);
+});
+
+it('refuses the preview and launch of the unsupported 初评 procedure instruction with the same guidance (#1476 unchanged)', async () => {
+  const target=await book('initial-evaluation');ordinary();
+  const search=store.saveSearchBackendCredential('search-tinyfish',null,'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish',search.credentialReference,'ready');store.selectSearchBackend('search-tinyfish');
+  const original=store.procedureLibrary({action:'inspect'}).procedures.find(entry=>entry.executorKind==='evaluation')!;
+  const changed=store.procedureLibrary({action:'save',input:{procedureId:original.procedureId,basedOn:{procedureId:original.procedureId,version:original.version,digest:original.digest},title:original.document.title,editorInstruction:'保留叙述中的短句。',stages:original.document.stages}}).procedures.find(entry=>entry.procedureId===original.procedureId)!;
+  store.procedureLibrary({action:'select',bookId:target.bookId,procedure:{procedureId:changed.procedureId,version:changed.version,digest:changed.digest}});
+  const launch=launchRequest('initial-evaluation',target,{reasoningEffort:'high'});
+  const refusal=expect.objectContaining({code:'PROCEDURE_INSTRUCTION_NOT_ADMITTED',message:'这项任务暂不支持带编辑指令的工序。'});
+  expect(()=>store.previewTaskLaunch({bookId:target.bookId,launch},policy)).toThrowError(refusal);
+  expect(()=>commitLaunch(target,launch)).toThrowError(refusal);
+  expect(capture!.requests).toHaveLength(0);
 });

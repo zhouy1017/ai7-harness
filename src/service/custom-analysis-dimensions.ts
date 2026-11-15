@@ -1,3 +1,5 @@
+import { baselineAnalysisPlan, isRemoteExecutionRoute } from './task-plan.js';
+import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import { randomUUID } from 'node:crypto';
@@ -695,7 +697,7 @@ function buildCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCu
   let progress = host.analysisCall(() => createPlan(ledger, {
     phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(update?.mode ?? 'first-baseline'), update,
     reconfirm: again?.reconfirm ?? false, redoOf: again?.redoOf ?? null, launchPolicy,
-  }));
+  }, (projection, blocks, bookTitle) => customAnalysisPlan(baselineAnalysisPlan({ projection: projection as unknown as BaselineAnalysisProjection, bookTitle, blocks }), { ...customAnalysisVersionInput(version), version: version.version }, projection.providerResolutionPlan !== null && isRemoteExecutionRoute(projection.providerResolutionPlan.executionRoute))));
   while (!progress.done) {
     const workId = progress.workId;
     requireStore(workId !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');

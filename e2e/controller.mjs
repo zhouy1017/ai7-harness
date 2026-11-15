@@ -1305,6 +1305,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'writing-card',
     // Issue #428: a 评论文章 that lists a 资料库 item under 允许参考, read through the Material Index at the build its plan pins.
     'writing-library-material',
+    'writing-preview-material',
     'writing-library-plan',
     'writing-library-draft',
     'multi-documents-ordinary',
@@ -1484,6 +1485,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // reason a Proposal Decision is asked for once, on 修改建议 of the Journey's own words (Issue #61, S26a), and 质量与学习 ›
   // 学习准入 on the material those records make (Issue #61, S26b).
   'J-11': Object.freeze([
+    'readers-report-preview-basis',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'evaluation-ai-lock',

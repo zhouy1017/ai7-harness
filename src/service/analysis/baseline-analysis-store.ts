@@ -3101,33 +3101,35 @@ export class BaselineAnalysisStore {
 
   // ---- preparation -----------------------------------------------------------------------------
 
-  /** Derive this start's plan over the acknowledged working manuscript. No checkpoint or task record is written. */
-  previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection = { removedSteps: [], disallowedAdaptations: [] }): import('../../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
+  /** Build the same frozen components in memory, then let the kind's editorial plan owner describe them. */
+  previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection | undefined,
+    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never): never {
+    this.#requireDeniedPolicy(input.launchPolicy);
+    requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
+    const existing = this.inspect(input.bookId);
+    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
     const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);
-    const mode = update?.mode ?? this.#definition.initialMode, selectedRange = update?.selectedRange ?? null;
-    requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
-    const manifest = deriveCoverageManifest({ bookId: input.bookId, manuscriptId: binding.manuscriptId, branchId: head.branchId,
-      revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel, revisionDigest: head.currentWorkingDigest, blocks });
-    const canonical = canonicalPlanEdits(edits);
+    const mode = update?.mode ?? this.#definition.initialMode, modeDefinition = this.#definition.mode(mode);
+    requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
+    const predecessor = modeDefinition.initial ? null : existing.resultSetRevision;
+    requireAnalysis(modeDefinition.initial || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
+    const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, blocks.length) : null;
+    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] });
     requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
-    let definition = this.#planDefinition(canonical, mode);
     const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
-    if (selected !== null) definition = withProcedureDefinition(definition, resolveProcedureForKind(this.#db, selected, definition.kind).document, selected);
-    definition = withEditorialMemoryDefinition(definition, this.#currentEditorialMemory(input.bookId));
-    const previous = this.#revisionRows(input.bookId).at(-1);
-    const reuse = this.#carriesPlan(mode) ? this.#derivePlan(mode, selectedRange, manifest,
-      previous === undefined ? null : this.#planPredecessor(previous), definition) : null;
-    const units = reuse?.counts.recomputed ?? manifest.units.length;
-    const covered = selectedRange === null ? blocks : blocks.filter(block => block.position >= selectedRange.startPosition && block.position <= selectedRange.endPosition);
-    const scope = selectedRange === null ? '全书' : `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段`;
-    const reference = [...(definition.materialReferences?.sources ?? []).map(source => `资料《${source.title}》（${source.characters} 字）`),
-      ...(definition.seriesScopes ?? []).map(series => `书系《${series.title}》`)];
-    const remote = this.#launch.live !== null;
-    return { steps: this.#isInitial(mode) ? definition.executionSteps : definition.updateExecutionSteps,
-      scope: `${scope} · ${covered.reduce((sum, block) => sum + block.graphemes, 0)} 字素 · ${units} 个阅读单元${reuse === null ? '' : `（复用 ${reuse.counts.reused} 个单元）`}`,
-      units, reference, send: remote ? '会发送：本次阅读单元内的稿件片段、任务要求，以及上面列出的参考资料；未选资料不会发送。' : '本环境只做本地检查，不会发送到模型服务。',
-      usage: remote ? `用量暂无可靠估计；按 ${units} 个阅读单元与后续归并步骤实际记录。${edits.runBudgetCeiling === undefined ? '未设置任务预算上限。' : `本次词元预算上限 ${edits.runBudgetCeiling.maxTotalTokens}，达到后停止新请求。`}` : '不发送，没有模型用量。' };
+    const instant = new Date().toISOString(), taskIntentId = randomUUID();
+    const record = { bookId: input.bookId, taskIntentId, mode, goal: input.goal, createdAt: instant,
+      expectedOutcome: this.#definition.expectedOutcome, selectedRange, predecessorRevisionId: predecessor?.revisionId ?? null,
+      ...(selected === null ? {} : { procedure: selected }) };
+    const intent: IntentFacts = { ...record, record, redoOfRunRecordId: null, preparedByEnrollmentVersionId: null,
+      backgroundRunBudgetCeiling: null, intentDraftVersionId: null, intentDraftParagraphs: null };
+    this.#writePlanVersion({ policy: input.launchPolicy, intent, checkpoint: { bookId: input.bookId, manuscriptId: binding.manuscriptId,
+      branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
+      revisionDigest: head.currentWorkingDigest, journalSequence: head.currentJournalSequence, createdForDirtyJournal: false },
+      checkpointDigest: canonicalRecord(record).digest, ordinal: 1, selectedRange, planRevisionId: null, instant, edits: canonical,
+      preview: { blocks, consume: projection => describe(projection, blocks) } });
+    throw new AnalysisError('ANALYSIS_PREVIEW_INVALID', '这次计划暂时无法读取。');
   }
 
   forkForLaunch(launch: LaunchBinding): BaselineAnalysisStore {
@@ -3597,6 +3599,7 @@ export class BaselineAnalysisStore {
      * material input, so an edit leaves the provider component as it froze. Absent, the connection is read now.
      */
     credentialReadiness?: ModelCredentialOperationState;
+    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
@@ -3604,8 +3607,8 @@ export class BaselineAnalysisStore {
     'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于标准前台全文首次审阅。');
     const taskIntentId = intent.taskIntentId;
     // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
-    const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
-    const blocks = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
+    const facts = input.preview === undefined ? this.#binding(checkpoint.bookId, checkpoint, ordinal === 1) : this.#binding(checkpoint.bookId);
+    const blocks = input.preview?.blocks ?? this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
     const factualRange = this.#definition.kind === FACTUAL_REVIEW_KIND && input.selectedRange !== null;
     const priorManifest = !factualRange || intent.predecessorRevisionId === null ? null
       : this.#planPredecessor(this.#revisionRowById(intent.predecessorRevisionId)).manifest;
@@ -3880,6 +3883,29 @@ export class BaselineAnalysisStore {
       predecessorRevisionDigest: reusePlan.predecessor?.digest ?? null,
       reusePlanDigest: records['reuse-plan']!.digest,
     });
+    if (input.preview !== undefined) {
+      const components = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, parseCanonicalJson(value.json)]));
+      components['plan-envelope'] = parseCanonicalJson(envelope.json);
+      const version: BaselineAnalysisPlanVersionProjection = { planVersionId: taskIntentId, ordinal, planEnvelopeDigest: envelope.digest,
+        planRevisionId: null, createdAt: instant, edits, state: 'current' };
+      const { compositionVersion: _compositionVersion, ...projectedEnvelope } = envelopeBase;
+      input.preview.consume(this.#asProjection({ ...this.#shape(checkpoint.bookId), state: 'prepared', stateLabel: '计划就绪',
+        taskIntent: { taskIntentId, goal: intent.goal, expectedOutcome: intent.expectedOutcome, createdAt: instant,
+          mode: intent.mode, modeLabel: this.#recordedMode(intent.mode).label, redoOf: null },
+        checkpoint: { ...checkpoint, purpose: TASK_INPUT_CHECKPOINT_PURPOSE },
+        manuscriptPin: components['manuscript-pin'] as BaselineAnalysisProjection['manuscriptPin'],
+        artifactPin: components['artifact-pin'] as BaselineAnalysisProjection['artifactPin'],
+        runSourceScope: components['run-source-scope'] as BaselineAnalysisProjection['runSourceScope'],
+        coverageManifest: manifest, providerResolutionPlan: components['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'],
+        executionPlan: components['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
+        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null,
+          providerStatus: envelopeBase.providerStatus as NonNullable<BaselineAnalysisProjection['planEnvelope']>['providerStatus'],
+          boundary: envelopeBase.boundary, ...(composition.version === 1 ? {} : { compositionVersion: composition.version }) },
+        planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],
+        update: this.#carriesPlan(intent.mode) ? this.#updateProjection(intent, reusePlan, records['reuse-plan']?.digest ?? null,
+          this.inspect(checkpoint.bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null) : null,
+        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }));
+    }
     const insert = this.#db.prepare(
       'INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     );

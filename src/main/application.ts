@@ -3153,9 +3153,14 @@ export function registerRendererHandlers(
           instruction: input.instruction, scope: input.scope, ...(input.clientCommandId === undefined ? {} : { clientCommandId: input.clientCommandId }),
           ...(input.executionConfig === undefined ? {} : { executionConfig: input.executionConfig }),
           ...(input.rememberedChoice === undefined ? {} : { rememberedChoice: input.rememberedChoice }) });
-        requireCurrentRouteGeneration(owned, routeGeneration);
-        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
-        if (input.executionConfig !== undefined) rememberDispatchChoice('scoped-ai-edit', input.executionConfig, result.launchNotice);
+        try {
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
+          if (input.executionConfig !== undefined) rememberDispatchChoice('scoped-ai-edit', input.executionConfig, result.launchNotice);
+        } catch (error) {
+          // The command already committed. A retry must replay it, even if route validation or preference storage failed.
+          throw new ServiceCallError('SERVICE_RESPONSE_COMMITTED', error instanceof Error ? error.message : '任务已经启动，请重试读取这次任务。');
+        }
         return result;
       });
     }),

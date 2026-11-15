@@ -1,3 +1,4 @@
+import { writingPlan } from './task-plan.js';
 import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { taskDeliverableStale } from './task-deliverable-target.js';
@@ -536,7 +537,7 @@ function buildWritingTask(host: WritingTaskOperationsHost, bookId: string, reque
         intentDraft.promoted({ taskIntentId, reviewRunId: null });
       } },
     }),
-  }));
+  }, (projection, blocks, bookTitle) => writingPlan({ projection: projection as WritingProjection, bookTitle, blocks, input, copyRules, materials: materials.map(material => ({ source: material.source, refusal: null })) })));
   // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
   if (intentDraft === null) {
     const taskIntentId = internalWritingCall(host, () => result.projection?.taskIntent?.taskIntentId ?? host.writingTasks.latestTaskIntentId(bookId));

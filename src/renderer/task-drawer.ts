@@ -517,6 +517,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   identity.append(back, heading);
   header.append(identity, modes, close);
   const body = el('div', 'task-drawer-body');
+  let invalidateLaunchPreview: (() => void) | null = null;
+  for (const event of ['input', 'change']) document.addEventListener(event, () => {
+    if (view === 'launch' && !root.hidden) invalidateLaunchPreview?.();
+  });
   // The open questions stand first in the body, and a repaint of the plan below them never removes them: a note being
   // written keeps its focus and its composition while the Run reads on (Issue #422, S76d).
   const questions = el('div', 'task-drawer-questions');
@@ -2827,6 +2831,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       body.replaceChildren(description, estimate);
       let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
       let commandId = crypto.randomUUID();
+      let previewVersion = 0;
+      invalidateLaunchPreview = () => {
+        previewVersion += 1;
+        usage.replaceChildren(el('p', 'task-launch-preview-stale', '选项已变化，请更新计划。'));
+      };
       const runOptions = el('details', 'task-launch-options');
       runOptions.append(el('summary', undefined, '本次运行选项'));
       const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text';
@@ -2872,12 +2881,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         const paintReferences = (): void => {
           materials.replaceChildren(evaluationMaterialsField(page, next.operation === 'launchInitialEvaluation' ? 'initial' : 'readersReport', selected, true, false, () => {
             next.input = { ...next.input, materialIds: [...selected] };
-            commandId = crypto.randomUUID(); paintReferences();
+            commandId = crypto.randomUUID(); invalidateLaunchPreview?.(); paintReferences();
           }));
         };
         paintReferences();
         references.append(similarMaterialsField(api, next.bookId, page.materials?.items ?? [], selected, id => {
-          selected.add(id); next.input = { ...next.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); paintReferences();
+          selected.add(id); next.input = { ...next.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidateLaunchPreview?.(); paintReferences();
         }));
         if (next.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
           const label = el('label', undefined, '书系参考');
@@ -2890,7 +2899,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           label.append(select); references.append(label);
         }
       }).catch(error => { if (ticket === current) references.append(el('p', undefined, options.errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
-      const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); } });
+      const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); invalidateLaunchPreview?.(); } });
       const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
       const applyOptions = (): boolean => {
         const latestInput = next.readInput?.();
@@ -2911,16 +2920,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         return true;
       };
       const readPreview = async (): Promise<void> => {
-        if (refreshPreview.disabled || !applyOptions() || !(await options.settle())) return;
+        const version = previewVersion;
+        if (refreshPreview.disabled || !applyOptions() || !(await options.settle()) || version !== previewVersion) return;
         refreshPreview.disabled = true;
         try {
           const launch = { operation: next.operation, input: { ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice } } as import('../shared/protocol.js').TaskLaunchPreviewInput['launch'];
           const preview = await api.previewTaskLaunch({ launch });
-          if (ticket !== current) return;
+          if (ticket !== current || version !== previewVersion) return;
           const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, step));
           usage.replaceChildren(el('p', undefined, `处理范围：${preview.scope}`), steps,
-            ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, preview.send), el('p', undefined, preview.usage));
-        } catch (error) { if (ticket === current) usage.textContent = options.errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
+            ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, `会发送：${preview.send}`), el('p', undefined, preview.usage),
+            ...preview.adaptations.map(line => el('p', undefined, line)));
+        } catch (error) { if (ticket === current && version === previewVersion) usage.textContent = options.errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
         finally { refreshPreview.disabled = false; }
       };
       estimate.addEventListener('toggle', () => { if (estimate.open) void readPreview(); });

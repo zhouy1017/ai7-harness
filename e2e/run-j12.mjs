@@ -2607,9 +2607,10 @@ async function main() {
         requireJourney(await primary.evaluate(`window.ai7.inspectBaselineAnalysis().then(reading=>reading.taskIntent===null && reading.run===null)`), 'dispatch-preview-creates-no-task');
         const beforeChoice = await primary.evaluate(`document.querySelector('#task-drawer .dispatch-chooser summary').textContent`);
         if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
-        const chosen = { label: await chooseDispatch(primary, waitFor, '#task-drawer .dispatch-chooser', 'dispatch-pointer',
-          width === 1008 ? { reset: true } : { model: 'j12-ordinary-fast' }), focused: true };
-        requireJourney(width===1008 || chosen.label.includes('j12-ordinary-fast@'), 'dispatch-chosen-model-and-level');
+        const picked = await chooseDispatch(primary, waitFor, '#task-drawer .dispatch-chooser', 'dispatch-pointer',
+          width === 1008 ? { model: 'next' } : { model: 'j12-ordinary-fast' });
+        requireJourney(picked.includes('@') && (width===1008 || picked.includes('j12-ordinary-fast@')), 'dispatch-chosen-model-and-level');
+        const chosen = { label: width===1008 ? await chooseDispatch(primary, waitFor, '#task-drawer .dispatch-chooser', 'dispatch-default-pointer', { reset: true }) : picked, focused: true };
         if (width === 1280) rememberedLabel = chosen.label;
         await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });
         await waitFor(primary, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'dispatch-settled', 180_000);

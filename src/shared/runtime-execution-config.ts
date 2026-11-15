@@ -47,6 +47,7 @@ export interface TaskLaunchPreviewProjection {
   readonly reference: ReadonlyArray<string>;
   readonly send: string;
   readonly usage: string;
+  readonly adaptations: ReadonlyArray<string>;
 }
 
 export function validReasoningEffort(value: unknown): value is string {

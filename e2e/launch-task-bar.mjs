@@ -1,7 +1,7 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 
 /** Start through the ordinary product bar. Opening its estimate never creates or authorizes a prepared task. */
-export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
+export async function launchTaskFromBar(renderer, waitFor, name, viewport, previewContains = []) {
   await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-launch-ready`);
   try {
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
@@ -28,7 +28,10 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
       if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-estimate')?.open===true`))) {
         await pointerClick(renderer, waitFor, '#task-drawer .task-launch-estimate > summary', `${name}-preview-${width}`);
       } else await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="preview-launch"]', `${name}-refresh-preview-${width}`);
-      await waitFor(renderer, `document.querySelector('#task-drawer .task-launch-estimate ol')?.children.length>0 && document.querySelector('#task-drawer .task-launch-estimate')?.textContent.includes('阅读单元')`, `${name}-preview-current-${width}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer .task-launch-estimate ol')?.children.length>0 && document.querySelector('#task-drawer .task-launch-estimate')?.textContent.includes('阅读范围')`, `${name}-preview-current-${width}`);
+      for (const text of previewContains) {
+        if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-estimate')?.textContent.includes(${JSON.stringify(text)})`))) throw new Error(`${name}-preview-missing-disclosure-${width}/${text}`);
+      }
     }
   } finally {
     if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');

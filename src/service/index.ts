@@ -2400,10 +2400,12 @@ async function run(): Promise<void> {
       }
       catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
     }
-    for (const launched of store.pendingLaunchedLedgerRuns()) {
-      try { driveLaunchedLedgerRun(analysisExecution, launched); }
-      catch { /* Admission records its refusal; the task's ordinary controls remain available. */ }
-    }
+    try {
+      for (const launched of store.pendingLaunchedLedgerRuns()) {
+        try { driveLaunchedLedgerRun(analysisExecution, launched); }
+        catch { /* Admission records its refusal; the task's ordinary controls remain available. */ }
+      }
+    } catch { /* An unreadable retained contract must not prevent the service and its task controls from opening. */ }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —
