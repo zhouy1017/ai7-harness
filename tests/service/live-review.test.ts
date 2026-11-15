@@ -601,8 +601,8 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     await arrived;
     const item = { materialKey: material.materialKey, materialDigest: audited(book.bookId, material.materialKey).digest, expectedDecisions: 1 };
     const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
-    expect(preview.groups).toEqual({ future: 1, currentVersion: 2, linesAffected: 1, running: 1, prepared: 0, memory: 0, completed: 1,
-      runningNamed: [`《L2 sample1 lineage》第 ${reading.ordinal} 次审阅 · 错别字与规范用语`], completedNamed: [completedLabel], decisionsKept: 1 });
+    expect(preview.groups).toEqual({ future: 1, currentVersion: 2, linesAffected: 1, running: 2, prepared: 0, memory: 0, completed: 1,
+      runningNamed: [`《L2 sample1 lineage》第 ${reading.ordinal} 次审阅 · 错别字与规范用语`, `《L2 sample1 lineage》第 ${reading.ordinal} 次审阅 · 全书审阅统合总结`], completedNamed: [completedLabel], decisionsKept: 1 });
     const before = historyRows();
     store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
     // The rebuild supersedes the version without the material; no Run may compose a block from the one that held it.
@@ -682,7 +682,7 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
     const item = { materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 1 };
     const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
-    expect(preview.groups).toMatchObject({ running: 1, prepared: 0, completed: 0 });
+    expect(preview.groups).toMatchObject({ running: 2, prepared: 0, completed: 0 });
     const before = historyRows();
     const sends = sent;
     store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
@@ -700,7 +700,7 @@ describe('学习回溯 over the 本社审阅偏好 consumer (Issue #912)', () =>
     expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.reviewRunId }).scope.reference.some((line) => line.includes(`本社审阅偏好 v${version.ordinal}`))).toBe(true);
     const item = { materialKey: material.materialKey, materialDigest: audited(book.bookId, material.materialKey).digest, expectedDecisions: 1 };
     const preview = store.previewLearningRemediation({ bookId: book.bookId, items: [item] });
-    expect(preview.groups).toMatchObject({ running: 0, prepared: 1, completed: 0, linesAffected: 1 });
+    expect(preview.groups).toMatchObject({ running: 0, prepared: 2, completed: 0, linesAffected: 1 });
     store.recordLearningRemediation({ bookId: book.bookId, items: [item], previewDigest: preview.previewDigest });
     const sentBefore = sent;
     expect(() => store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared))).toThrowError(/参考的本社审阅偏好 v1 中有 1 条学习材料已停止今后使用/u);

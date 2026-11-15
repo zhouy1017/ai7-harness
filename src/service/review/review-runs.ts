@@ -2382,7 +2382,9 @@ export class ReviewRunStore {
     const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
     const execution = frozen.components['execution-plan'] as Record<string, unknown>;
     const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;
-    const contractVersion = isRecord(envelope.contractIdentity) && envelope.contractIdentity.version === 2 ? 2 : 1;
+    const contractVersion = category.entry.synthesisKey === undefined
+      ? isRecord(envelope.contractIdentity) && envelope.contractIdentity.version === 2 ? 2 : 1
+      : this.#db.prepare('SELECT contract_version FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId)?.contract_version === 'ai7.editorial-review/1' ? 1 : 2;
     const preference = new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger).pinned(category.task.taskIntentId);
     const materialPromptDigest = clarificationPlanBaseDigest(execution, envelope);
     requireReview(materialPromptDigest !== null, 'REVIEW_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
@@ -2818,7 +2820,7 @@ export class ReviewRunStore {
       const unit = manifestUnits.find((candidate) => finding.blockPosition !== null && finding.blockPosition >= candidate.startPosition && finding.blockPosition <= candidate.endPosition);
       const chapterOrdinal = unit?.sectionOrdinal ?? 1;
       return { findingId: finding.findingId, categoryId: finding.categoryId, clauseId: finding.clauseRef ?? '', severity: finding.severity,
-        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: unit?.headingText ?? `第 ${chapterOrdinal} 章` };
+        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: unit?.headingText ?? (chapterOrdinal <= 0 ? '篇首' : `第 ${chapterOrdinal} 章`) };
     }), missingCategories, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), synopses } }, requestBytes);
     const record = canonicalRecord(input);
     const priorUsage = { inputTokens: 0, outputTokens: 0 };
@@ -2859,17 +2861,20 @@ export class ReviewRunStore {
     const summary = saved?.summary == null || input === null ? null : parseSynthesisSummary(JSON.stringify(saved.summary), input);
     const event = this.#events(snapshot.reviewRunId, category.categoryId).at(-1);
     const terminal = event !== undefined && TERMINAL_CATEGORY_EVENTS.has(event.state);
+    const runId = category.task === null ? null : this.#runRecordOf(category.task.taskIntentId);
+    const ledgerState = runId === null ? null : this.#categoryLedger(category, snapshot).currentRunState(runId);
+    const paused = ledgerState === 'paused' || ledgerState === 'resumable';
     const findings = new Map(this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).map((finding) => [finding.findingId, finding]));
-    return { synthesis: { state: saved?.budgetReached === true ? 'budget' : summary !== null ? 'completed' : terminal ? 'missing' : event?.state === 'dispatched' ? 'running' : 'pending',
+    return { synthesis: { state: saved?.budgetReached === true ? 'budget' : summary !== null ? 'completed' : terminal ? 'missing' : event?.state === 'dispatched' && !paused ? 'running' : 'pending',
       detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? '已形成全书审阅统合总结。' : terminal ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
-        : event?.state === 'dispatched' ? '正在统合各章发现。' : '各章审阅后将统合已有发现。',
+        : paused ? '统合已暂停；继续审阅后接着完成。' : event?.state === 'dispatched' ? '正在统合各章发现。' : '各章审阅后将统合已有发现。',
       summary, missingCategories: input?.missingCategories ?? [],
       omissionLabel: input === null || Object.values(input.omitted).every((count) => count === 0) ? null
         : `受单次阅读容量限制，另有 ${input.omitted.findings} 条发现、${input.omitted.clusters} 组问题与 ${input.omitted.synopses} 段概述未纳入统合。`,
       evidence: (input?.evidence ?? []).map((entry) => {
         const finding = findings.get(entry.findingId);
         return { ref: entry.ref, findingId: entry.findingId, chapterLabel: entry.chapterLabel, quote: entry.quote,
-          status: finding === undefined || finding.markStatus === 'removed' || finding.blockPosition === null ? 'absent' : finding.status,
+          status: finding === undefined || finding.blockPosition === null ? 'absent' : finding.ignoreReason !== null ? 'ignored' : finding.markStatus === 'removed' ? 'absent' : finding.status,
           blockId: finding?.blockPosition == null ? null : finding.blockId };
       }) } };
   }
@@ -4991,7 +4996,7 @@ export class ReviewRunStore {
         waitingIdle: waitsForIdleStart(view),
         state: view.state,
         canContinue: view.canContinue,
-        categories: view.categories.map((category) => {
+        categories: view.categories.filter(category => category.category.entry.synthesisKey === undefined).map((category) => {
           const dispatched = category.state === 'running' ? category.events.findLast((event) => event.runRecordId !== null)?.runRecordId ?? null : null;
           return {
             categoryId: category.category.categoryId,
@@ -5007,9 +5012,15 @@ export class ReviewRunStore {
       };
     };
     // A Run reached the manuscript in every category exactly when each of its categories has a
-    // `materialized` event; counted in SQL so neither list reads a Run it would drop.
+    // `materialized` event; a terminal optional summary counts as finished even when absent.
+    // Counted in SQL so neither list reads a Run it would drop.
     const materialized = `(SELECT count(DISTINCT e.category_id) FROM review_run_category_events e
-                            WHERE e.review_run_id = r.review_run_id AND e.state = 'materialized')`;
+                            WHERE e.review_run_id = r.review_run_id AND (e.state = 'materialized' OR
+                              e.category_id = 'run-synthesis' AND e.state IN ('failed', 'refused', 'interrupted') AND
+                              COALESCE(json_extract(e.canonical_json, '$.code'), '') <> '${REVIEW_RUN_CANCELLED}' AND
+                              COALESCE((SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = e.run_record_id ORDER BY s.sequence DESC LIMIT 1), '') NOT IN ('cancelled', 'cancelling') AND
+                              EXISTS (SELECT 1 FROM json_each(r.canonical_json, '$.categories') member
+                                WHERE json_extract(member.value, '$.entry.synthesisKey') IS NOT NULL)))`;
     const categories = `json_array_length(r.canonical_json, '$.categories')`;
     const lastEvent = `(SELECT max(e.recorded_at) FROM review_run_category_events e WHERE e.review_run_id = r.review_run_id)`;
     // Each Book's latest Run, approved and not yet on the manuscript in every category.

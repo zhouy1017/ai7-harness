@@ -18,8 +18,8 @@ export const RUN_SYNTHESIS_ENTRY: ReviewCategoryConfigurationEntry = {
 };
 
 /** A book-level member of the existing review driver; its only model turn is cross-unit reduction. */
-export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewCategoryConfigurationEntry['synthesisSource']): AnalysisKindDefinition {
-  const { contractIdentity: _identity, ...base } = reviewCategoryKindDefinition(reviewCategoryContractInput(RUN_SYNTHESIS_ENTRY));
+export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewCategoryConfigurationEntry['synthesisSource'], contractVersion: 1 | 2 = 2): AnalysisKindDefinition {
+  const { contractIdentity: _identity, ...base } = reviewCategoryKindDefinition(reviewCategoryContractInput(RUN_SYNTHESIS_ENTRY), contractVersion);
   const input = (): SynthesisInput => {
     const row = db.prepare('SELECT input_json, input_digest FROM review_run_synthesis WHERE synthesis_key = ?').get(key);
     if (row === undefined || typeof row.input_json !== 'string' || sha256Hex(row.input_json) !== row.input_digest) throw new Error('REVIEW_SYNTHESIS_INPUT_INVALID');

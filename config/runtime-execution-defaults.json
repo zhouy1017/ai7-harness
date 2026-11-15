@@ -185,13 +185,12 @@
       "modelRole": "Main Editorial Role",
       "outboundDataCategories": [
         "public-or-synthetic",
+        "book-metadata-and-synopsis",
         "frozen-material-reference-excerpt",
         "house-review-preference-excerpt",
         "unpublished-metadata",
         "unpublished-excerpts",
-        "unpublished-full-content",
-        "editor-task-instruction",
-        "house-review-guideline-clause"
+        "editor-task-instruction"
       ],
       "crossUnitSynthesisAllowed": true,
       "plusDeclaredContractRetryAdaptations": false,
@@ -961,6 +960,7 @@
       "modelRole": "Main Editorial Role",
       "outboundDataCategories": [
         "public-or-synthetic",
+        "book-metadata-and-synopsis",
         "frozen-material-reference-excerpt",
         "house-review-preference-excerpt"
       ],

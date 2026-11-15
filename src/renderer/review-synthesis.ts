@@ -9,9 +9,9 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
   root.dataset['synthesisState'] = value.state;
   const heading = document.createElement(jump === undefined ? 'h5' : 'summary');
   heading.textContent = `全书审阅统合总结${value.summary === null ? '' : ` · ${value.summary.recurringProblems.length} 组共性问题`}`;
-  if (jump !== undefined && value.summary !== null) {
+  if (jump !== undefined) {
     const preview = document.createElement('span'); preview.className = 'review-synthesis-preview';
-    preview.textContent = value.summary.overallAssessment; heading.append(preview);
+    preview.textContent = value.summary?.overallAssessment ?? value.detail; heading.append(preview);
   }
   root.append(heading);
   if (modelLabel) {

@@ -162,6 +162,7 @@ function isCustomAnalysisKind(kind: string): boolean {
 function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[] | undefined {
   // The dimension's manuscript units and its editor-authored per-unit question template.
   if (isCustomAnalysisKind(kind)) return ['public-or-synthetic', EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY];
+  if (kind === 'editorial-review/run-synthesis') return ['public-or-synthetic', 'book-metadata-and-synopsis'];
   if (kind === reviewCategoryKindId('cross-deliverable-consistency')) return ['public-or-synthetic', 'editorial-deliverable-excerpt'];
   return kind === WRITING_KIND ? WRITING_PAYLOAD_CATEGORIES : EVALUATION_PAYLOAD_CATEGORIES[kind];
 }
@@ -177,9 +178,10 @@ function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPoli
     const rule = liveKindRule(policy, definition.kind);
     const material = liveMaterialContract(definition);
     const baseDigest = material?.basePromptContractDigest ?? definition.promptContractDigest;
-    if (definition.structuredOnly !== true || rule === null || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
+    if (definition.structuredOnly !== true || rule === null || rule.crossUnitSynthesisAllowed !== true || rule.plusOneCrossUnitSynthesisTurn !== true ||
+      rule.clarificationQuestionAllowed === true || rule.plusDeclaredContractRetryAdaptations === true || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
       (material === null && definition.systemPrompt !== RUN_SYNTHESIS_PROMPT) || baseDigest !== RUN_SYNTHESIS_PROMPT_DIGEST) return null;
-    return { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, payloadCategories: ['public-or-synthetic'] };
+    return { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, payloadCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] };
   }
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.

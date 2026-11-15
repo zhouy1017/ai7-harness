@@ -108,7 +108,7 @@ function heldReviewResponses(count: number, select: (message: string) => number 
 function latestReviewExecution(opened: EditorialStore) {
   const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
   try {
-    const row = db.prepare('SELECT run_record_id FROM analysis_run_records ORDER BY rowid DESC LIMIT 1').get()!;
+    const row = db.prepare("SELECT r.run_record_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id=r.task_intent_id WHERE t.kind <> 'editorial-review/run-synthesis' ORDER BY r.rowid DESC LIMIT 1").get()!;
     const runRecordId = String(row.run_record_id);
     return { runRecordId, ledger: opened.executionLedgerForRun(runRecordId) };
   } finally { db.close(); }

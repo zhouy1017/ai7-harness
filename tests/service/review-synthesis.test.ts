@@ -112,6 +112,7 @@ it('keeps a failed synthesis optional and immediately permits a fresh ordinary r
     expect(completed.findings.length).toBeGreaterThan(0);
     expect(completed.synthesis?.state).toBe('missing');
     expect(completed.state).toBe('settled');
+    expect(session.store.inspectBookTasks(book.bookId, () => null).groups.find(group => group.key === 'recent')!.items.some(item => item.item.target.kind === 'review' && item.item.target.reviewRunId === completed.reviewRunId)).toBe(true);
     expect(session.capture.requests.some(request => request.stage === 'cross-unit-reduction')).toBe(true);
     expect(() => session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy)).not.toThrow();
   }, () => ({ kind: 'adapter-failure', code: 'CAPTURED_SYNTHESIS_FAILED', message: 'Captured synthesis failure', status: 400 }));
@@ -143,6 +144,7 @@ it.each(['pause', 'cancel'] as const)('preserves ordinary findings and launch bi
         expect(session.capture!.wireRequests.every(request => request.model === model)).toBe(true);
       } else {
         expect(workspace(session, book).run!.state).toBe('cancelled');
+        expect(session.store.inspectBookTasks(book.bookId, () => null).groups.find(group => group.key === 'recent')!.items.some(item => item.item.target.kind === 'review' && item.item.target.reviewRunId === run.reviewRunId)).toBe(true);
         expect(() => session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy)).not.toThrow();
       }
       expect(workspace(session, book, run.reviewRunId).run!.findings).toHaveLength(before.findings.length);
@@ -354,6 +356,7 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
   let archivedId!: string, archivedRunId!: string, archivedDigest!: string;
   try {
     const books = session.store.listBooks(null).items;
+    expect(books.map(book => book.title), JSON.stringify(await session.store.inspectDatabaseReplacements())).toContain('sample1 · 0.7.1 已归档审阅');
     const archived = books.find(book => book.title === 'sample1 · 0.7.1 已归档审阅')!;
     const paused = books.find(book => book.title === 'sample1 · 0.7.1 暂停审阅')!;
     archivedId = archived.bookId;
@@ -395,5 +398,44 @@ it('uses identical synthesis wording in the pre-start plan and the frozen launch
     expect(frozen.steps).toEqual(prepared.steps);
     expect(frozen.steps.find(step => step.id === 'category:run-synthesis')?.result).toBe(REVIEW_SYNTHESIS_PLAN_LINE);
     expect(session.capture.requests).toEqual([]);
+  });
+});
+
+it('keeps cited quotations after an editor handles or removes their findings and freezes each report copy (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const run = workspace(session, book).run!;
+    const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
+    const entries = run.synthesis!.evidence.filter(entry => entry.blockId !== null && run.findings.some(finding => finding.findingId === entry.findingId && finding.markId !== null));
+    const ignored = entries[0]!, removed = entries.find(entry => entry.findingId !== ignored.findingId)!;
+    expect(removed).toBeDefined();
+    session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, ignored.findingId, '编辑决定保留原写法。');
+    const mark = run.findings.find(finding => finding.findingId === removed.findingId)!;
+    const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: removed.blockId! });
+    session.store.updateEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+      markId: mark.markId!, action: 'remove', body: null, highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null });
+    const current = workspace(session, book).run!;
+    expect(current.synthesis!.evidence.find(entry => entry.ref === ignored.ref)).toMatchObject({ status: 'ignored', quote: ignored.quote });
+    expect(current.synthesis!.evidence.find(entry => entry.ref === removed.ref)).toMatchObject({ status: 'absent', quote: removed.quote });
+    expect(current.report!.record).toEqual(report.record);
+    expect(canonicalRecord(current.report!.record).digest).toBe(report.digest);
+  });
+});
+
+it('freezes inherited procedure instructions for synthesis and accepts the next selected version (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    const stock = session.store.procedureLibrary({ action: 'inspect' }).procedures.find(procedure => procedure.procedureId === 'ai7-procedure/review-typos-and-usage')!;
+    const pin = (procedure: typeof stock) => ({ procedureId: procedure.procedureId, version: procedure.version, digest: procedure.digest });
+    let chosen = session.store.procedureLibrary({ action: 'save', input: { procedureId: null, basedOn: pin(stock), title: '样书数字体例审阅',
+      editorInstruction: '对数字体例先核对全书用法。', stages: stock.document.stages } }).procedures.find(procedure => procedure.document.title === '样书数字体例审阅')!;
+    for (const text of ['对数字体例先核对全书用法。', '先解释全书脉络，再列待核对事项。']) {
+      if (chosen.document.editorInstruction !== text) chosen = session.store.procedureLibrary({ action: 'save', input: { procedureId: chosen.procedureId,
+        basedOn: pin(chosen), title: chosen.document.title, editorInstruction: text, stages: chosen.document.stages } }).procedures.find(procedure => procedure.procedureId === chosen.procedureId)!;
+      session.store.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin(chosen) });
+      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+      expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
+      const request = session.capture.wireRequests.findLast(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
+      expect(request.messages.find(message => message.role === 'system')!.content).toContain(text);
+    }
   });
 });

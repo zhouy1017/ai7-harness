@@ -656,6 +656,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
   let excludedPages = 1;
   let excludedOpen = false;
+  let synthesisDisclosure: { runId: string; open: boolean } | null = null;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
     if (first.bookId !== bookId) {
@@ -1072,10 +1073,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     heading.append(meta);
     section.append(heading);
-    if (run.synthesis !== undefined) section.append(reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
-      if (evidence.blockId !== null) void options.goToText({ manuscriptId: run.manuscript.manuscriptId,
-        branchId: run.manuscript.branchId, blockId: evidence.blockId, markId: null });
-    }));
+    if (run.synthesis !== undefined) {
+      const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
+        if (evidence.blockId !== null) void options.goToText({ manuscriptId: run.manuscript.manuscriptId,
+          branchId: run.manuscript.branchId, blockId: evidence.blockId, markId: null });
+      }) as HTMLDetailsElement;
+      summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
+      summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
+      section.append(summary);
+    }
     const leading = runHasResults(run);
     if (leading) section.append(renderResults(next, run));
     if (run.localCheck !== undefined) {

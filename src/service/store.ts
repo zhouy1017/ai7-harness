@@ -3712,7 +3712,7 @@ export class EditorialStore {
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
     const base = entry.synthesisKey === undefined
       ? this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)))
-      : runSynthesisKind(this.#authority, entry.synthesisKey, entry.synthesisSource);
+      : runSynthesisKind(this.#authority, entry.synthesisKey, entry.synthesisSource, contractVersion);
     const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition

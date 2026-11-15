@@ -28,3 +28,9 @@ it('retains a removed finding quotation without exposing a broken jump', () => {
   expect(node.textContent).toContain('已不在当前稿件中');
   expect(node.textContent).toContain(SAMPLE1_SYNTHESIS.evidence[0]!.quote);
 });
+
+it('shows the missing or budget reason before expanding the summary', () => {
+  const node = reviewSynthesisNode({ ...SAMPLE1_SYNTHESIS, state: 'budget', summary: null,
+    detail: '本次审阅已用完预算，逐条发现仍可处理。' }, undefined, vi.fn());
+  expect(node.querySelector('summary')?.textContent).toContain('已用完预算');
+});

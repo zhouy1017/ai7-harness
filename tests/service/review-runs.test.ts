@@ -2391,6 +2391,7 @@ async function openLayeredSelection(controls: Parameters<typeof capturedOrdinary
   const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
   store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
   const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const summary = sample1SynthesisAnswer(message); if (summary !== undefined) return summary;
     const baseline = parseUnitMessageHeader(message), review = parseReviewCategoryUnitMessageHeader(message), factual = parseFactualReviewUnitMessageHeader(message);
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal,
       unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;

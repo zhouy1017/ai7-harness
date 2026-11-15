@@ -2872,6 +2872,7 @@ async function main() {
     await pointerClick(renderer, waitFor, '[data-settings-route="help"], [data-settings-nav="help"]', 'review-synthesis-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-ordinary');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-synthesis-ordinary-ready');
     await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'review-synthesis-return');
     const synthesisEvidence = reviewed.run.synthesis.evidence.find(evidence => evidence.blockId !== null &&
       reviewed.run.synthesis.summary.recurringProblems.some(problem => problem.evidenceRefs.includes(evidence.ref)));
@@ -2896,6 +2897,7 @@ async function main() {
     await pointerClick(renderer, waitFor, '[data-settings-route="help"], [data-settings-nav="help"]', 'review-synthesis-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
     await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'review-synthesis-restore-review');
 
     at('book-findings-center');
