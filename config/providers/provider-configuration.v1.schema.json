@@ -219,6 +219,7 @@
           "$ref": "#/definitions/evidenceKey"
         },
         "maxOutputTokens": { "type": ["integer", "null"], "minimum": 1 },
+          "statelessReasoning": { "type": "boolean", "description": "Request stateless Responses with encrypted reasoning continuation." },
         "routeCapabilities": {
           "description": "Capabilities declared for every model on the route; a model's own declaration of the same capability replaces it.",
           "$ref": "#/definitions/capabilities"

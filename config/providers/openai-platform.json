@@ -40,6 +40,7 @@
       "sessionHeader": false,
       "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": 8192,
+      "statelessReasoning": true,
       "routeCapabilities": {
         "webSearchTool": {
           "value": "provider-tool",

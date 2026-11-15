@@ -1,4 +1,5 @@
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
+import { markModelLabels } from './editorial-mark-source.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
@@ -360,6 +361,11 @@ function roleLabel(role: string): string {
 
 function providerLabel(providerId: string): string {
   return PROVIDER_LABELS[providerId] ?? providerId;
+}
+
+/** Display-only destination derived from the same frozen route as the plan; never persisted. */
+export function planModelDestination(route: { kind: string; model: string; reasoningEffort?: string | null }): string {
+  return `${providerLabel(route.kind)} · ${markModelLabels({ route: route.kind, model: route.model, ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }) }).modelLabel}`;
 }
 
 function outboundLabel(category: string): string {
@@ -1032,7 +1038,7 @@ export function baselineAnalysisPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
       // It is evaluated before each request (MODEL-016), so the turn under way when it is reached still counts: nothing
@@ -1282,7 +1288,7 @@ export function initialEvaluationPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1440,7 +1446,7 @@ export function readersReportPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与评估记录发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与评估记录发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1729,7 +1735,7 @@ export function writingPlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与参考材料发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与参考材料发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1895,7 +1901,7 @@ export function evaluationRewritePlan(input: {
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -2583,7 +2589,7 @@ export function reviewRunPlan(input: {
         scopeSend: [facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始'
           : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取'
             : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}，以及本社审阅偏好的摘录`],
-        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录，发往为审阅配置的模型服务` : NOTHING_SENT],
+        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录，发往 ${planModelDestination(route)}` : NOTHING_SENT],
       }),
     },
     state: reviewState(facts),
@@ -2636,7 +2642,7 @@ export function reviewRunPlan(input: {
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往 ${planModelDestination(route)}` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
       usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,

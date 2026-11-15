@@ -304,6 +304,7 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
     dshAttribution: false,
     sessionHeader: false,
     maxOutputTokens: 8192,
+    statelessReasoning: true,
     reasoning: {
       control: 'openai-responses',
       efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],

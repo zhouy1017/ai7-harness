@@ -1,6 +1,6 @@
 # Decision Records
 
-Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 62 records, ADR 0001 through ADR 0062:
+Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`](../../docs/adr/). Selected root decisions and the R2 additions are indexed below; the directory contains the complete sequence:
 
 - [ADR 0001: Version Editorial Dimension configuration at task start](../../docs/adr/0001-versioned-editorial-dimension-configuration.md)
 - [ADR 0002: Separate Book, Series, Cross-project, and House-learning scopes](../../docs/adr/0002-book-series-cross-project-and-house-learning-scopes.md)
@@ -65,6 +65,10 @@ Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`
 - [ADR 0061: Route repository dispatch by the Commander's harness, revised 2026-09-04 with the Claude Code subagent launch mode; routing clauses superseded by ADR 0063](../../docs/adr/0061-route-repository-dispatch-by-commander-harness.md)
 - [ADR 0063: Allow cross-harness dispatch through CLI-launched Task Sessions](../../docs/adr/0063-allow-cross-harness-dispatch-through-cli-launched-task-sessions.md)
 - [ADR 0062: Adopt a local verification ladder with CI as the delivery gate](../../docs/adr/0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md)
+
+- [ADR 0102: Retire runtime policy locks and frozen fixture admission](../../docs/adr/0102-retire-runtime-policy-locks-and-frozen-fixture-admission.md)
+- [ADR 0103: Send role reasoning effort through protocol families](../../docs/adr/0103-send-role-reasoning-effort-through-protocol-families.md)
+- [ADR 0104: Launch tasks with an immutable execution snapshot](../../docs/adr/0104-launch-tasks-with-an-immutable-execution-snapshot.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

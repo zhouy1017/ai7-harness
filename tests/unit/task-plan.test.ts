@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import type { BaselineAnalysisProjection, LocalFixtureProfile, SelectedPolicyIdentity, TaskPlanProjection, TaskPlanStartProjection } from '../../src/shared/protocol.js';
 import {
+  planModelDestination,
   ACCOUNT_LIMIT_UNKNOWN,
   BUDGET_NOT_SET,
   LOCKED_BOUNDARY,
@@ -507,4 +508,12 @@ describe('the background line a plan with references carries (Issue #795 item 3)
     expect(evaluationMaterialPlan({ ...plan, kind: 'readers-report' }, [reading]).scope.reference.at(-1))
       .toBe('资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
   });
+});
+
+
+it('names the frozen model and sent effort in plan destinations without changing its source (#1472)', () => {
+  const route = Object.freeze({ kind: 'openai-platform', model: 'editor-custom-model', reasoningEffort: 'high' });
+  expect(planModelDestination(route)).toContain('editor-custom-model@high');
+  expect(planModelDestination({ ...route, reasoningEffort: 'off' })).not.toContain('@off');
+  expect(route.reasoningEffort).toBe('high');
 });

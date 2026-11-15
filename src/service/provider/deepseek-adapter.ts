@@ -98,6 +98,7 @@ export interface ProviderRouteProfile {
    * declaring `null` refuses to assemble rather than inventing a number.
    */
   readonly maxOutputTokens: number | null;
+  readonly statelessReasoning?: boolean;
   readonly reasoning?: { readonly control: string; readonly efforts: readonly string[]; readonly source: string; readonly readOn: string };
   /**
    * The header the credential travels in, as the vendor documents it (ADR 0073 §2): `authorization:

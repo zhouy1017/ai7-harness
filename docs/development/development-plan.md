@@ -8,19 +8,24 @@ The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-proc
 
 R2 starts from `dev@2026a9ee`. Under the Owner's [2026-11-14 decisions](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6870691052): the frozen fixture manifest retires with the runtime policy lock (SampleBook-based samples stay, no fixture fingerprints, not synthetic samples alone); the ADR that supersedes the lock clauses is written as accepted; recordings made unusable are listed at closure for the Owner to authorize re-recording.
 
-| Order | Slice | Outcome |
+| Slice | What the editor can newly do | PRs / integration commits |
 | --- | --- | --- |
-| first | [#1453](https://github.com/zhouy1017/ai7-harness/issues/1453) | 思考强度 declared, sent and settable per role on all three protocol families, with tool-call continuation; the runtime policy lock and the frozen fixture manifest retired; the non-policy safety boundaries kept |
-| first, parallel | [#1470](https://github.com/zhouy1017/ai7-harness/issues/1470) | In the 1008×681 overlay form the connector between words and card is visible |
-| after #1453 | [#1455](https://github.com/zhouy1017/ai7-harness/issues/1455) | A model and 思考强度 choice at each task entry, for that task only, started in one step |
-| after #1453 | [#1471](https://github.com/zhouy1017/ai7-harness/issues/1471) | The model says which occurrence it means, so repeated-word 修改建议 join the bulk applies |
+| #1470 | See the connector in the narrow overlay 批注栏; select a loading card and keep that selection when it arrives | #1473, #1480 / `a5b2ad9c`, `5b2b4b8f` |
+| #1453 | Choose models freely with the runtime policy lock and frozen fixture manifest retired; set 思考强度 per role and see the actually sent level on cards | #1474, #1478 / `f505cff4`, `bbcfed72` |
+| #1471 | Let the model identify an occurrence of a repeated word; pinned 修改建议 join 接受并应用全部 | #1477 / `a9fad5b7` |
+| #1475 | Repeatedly split and merge paragraphs on a slow disk without checkpointing inside the save making the editor read-only | #1485 / `410771ff` |
+| #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
+| #1476 | Use a 工序 carrying an editor instruction for 初评 and analysis | #1489 / `<#1489 commit>` (pending integration) |
+
+The candidate is package 0.7.1, protocol 203, schema 115 and Data Version 1. All outcomes above await final closure evidence and dev delivery; #1489's integration commit is intentionally pending.
 
 Remaining delivery order:
 
-1. Slice pull requests merge serially into `codex/integration-0.7.1`; every merged tip runs the full guest ladder split over the pool. Slices that touch the interface run their Journey stages at 1280×800 and at 1008×681.
-2. The closure candidate raises `package.json` 0.7.0 → 0.7.1 with its version-ledger row and passes two unbound hosted runs.
-3. Commander opens and merges the wave-to-`dev` PR, closes #1472 and its slices, refreshes the fixed human-test folder and gives the Owner the list of recordings to re-record.
-4. Owner human testing follows. `1.0.0`, release/tag and `main` require separate Owner authorization.
+1. Merge the final #1489 integration tip into the closure branch and run host checks, the full guest ladder and two unbound hosted runs at the final head.
+2. Open a draft closure PR into `codex/integration-0.7.1`; the Commander then integrates the wave into dev and refreshes the fixed human-test folder.
+3. R3 (#1433, #1434, #1147, #1152, #1074) follows as 0.7.2 Alpha. Owner re-record authorization and human acceptance remain pending.
+
+The hosted J-02 structure-burst failure was fixed by #1475 / PR #1485: automatic checkpointing ran inside commit after a structural edit appended about 48.5 MB in a roughly 46,000-block manuscript. It also reproduces on delivered 0.6.5 (hosted 43563912248), so it was not an R1 regression. Write amplification itself is deferred to R5.
 
 ## Delivered R1 → 0.7.0 Alpha (#1459)
 
