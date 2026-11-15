@@ -1,4 +1,5 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
+import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
@@ -163,7 +164,7 @@ async function withBook(fixtureIdentity: string, body: (session: Session, book: 
 }
 
 /** Dynamic retry stimuli are ordinary transport bytes, never mutations under an admitted fixture hash. */
-async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>): Promise<void> {
+async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>, synthesisAnswer = sample1SynthesisAnswer): Promise<void> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-contract-v2-controls');
   const responseEntries = new Map(fixture.entries);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
@@ -171,6 +172,8 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   const base = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
   const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const synthesis = sample1SynthesisAnswer(message) === undefined ? undefined : synthesisAnswer(message);
+    if (synthesis !== undefined) return synthesis;
     const header = parseReviewCategoryUnitMessageHeader(message);
     if (request.stage === 'units' && header?.categoryId === TYPOS) return resolveFixtureEntry(responseEntries, header.ordinal,
       base.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
@@ -234,6 +237,39 @@ function storeError(operation: () => unknown): StoreError | null {
 
 function storeCode(operation: () => unknown): string { return storeError(operation)?.code ?? 'no-error'; }
 function storeMessage(operation: () => unknown): string { return storeError(operation)?.message ?? ''; }
+
+it('sends one structured synthesis request in ordinary production, preserves findings, and replays without resending (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
+    const first = session.store.launchReviewRun(input, launchPolicy);
+    await driveLaunchedReviewRun(session.driver, first);
+    const run = workspace(session, book).run!;
+    expect(run.synthesis?.state).toBe('completed');
+    expect(run.findings.length).toBeGreaterThan(0);
+    const requests = session.capture!.wireRequests.filter((request) => request.messages.some((message) => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')));
+    expect(requests).toHaveLength(1);
+    const sent = requests[0]!.messages.findLast((message) => message.role === 'user')!.content;
+    const payload = JSON.parse(sent);
+    expect(payload.evidence.length).toBeGreaterThan(0);
+    expect(payload.findings.every((finding: { ref: string }) => /^f\d+$/u.test(finding.ref))).toBe(true);
+    for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.text.length > 160)) expect(sent).not.toContain(block.text);
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
+    expect(session.capture!.wireRequests).toHaveLength(session.capture!.requests.length);
+    expect(session.capture!.wireRequests.filter((request) => request.messages.some((message) => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))).toHaveLength(1);
+  });
+});
+
+it('keeps a failed synthesis optional and immediately permits a fresh ordinary review (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    const first = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
+    await driveLaunchedReviewRun(session.driver, first);
+    const completed = workspace(session, book).run!;
+    expect(completed.findings.length).toBeGreaterThan(0);
+    expect(completed.synthesis?.state).toBe('missing');
+    expect(completed.state).toBe('settled');
+    expect(() => session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy)).not.toThrow();
+  }, () => ({ kind: 'adapter-failure', message: 'Captured synthesis failure', status: 400 }));
+});
 
 function binding(session: Session, book: Book): { manuscriptId: string; branchId: string; windowStartBlockId: string } {
   return { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId };
