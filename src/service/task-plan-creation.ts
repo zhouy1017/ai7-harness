@@ -23,7 +23,11 @@ export interface TaskLaunchContext {
 }
 
 export function launchedTaskPlan(context: TaskLaunchContext): TaskPlanCreator {
-  if (context.preview !== undefined) return context.preview;
-  return (ledger, input) => ({ done: true, workId: null, completed: 1, total: 1,
-    projection: ledger.launchTask({ ...input, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits) });
+  return (ledger, input, describe) => {
+    // Cached kind ledgers own contracts, not this start's execution choice.
+    const bound = ledger.forkForLaunch(context.execution);
+    if (context.preview !== undefined) return context.preview(bound, input, describe);
+    return { done: true, workId: null, completed: 1, total: 1,
+      projection: bound.launchTask({ ...input, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits) };
+  };
 }
