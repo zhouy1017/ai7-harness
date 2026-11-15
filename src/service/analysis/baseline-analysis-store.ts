@@ -610,7 +610,7 @@ export class BaselineAnalysisStore {
     const current = this.definition;
     if (current.kind === BASELINE_ANALYSIS_KIND) {
       const base = current.clarificationBase ?? current;
-      for (const candidate of [current, base, withModelClarification(base)]) {
+      for (const candidate of [current, base, withModelClarification(base), ...(['retained-v1', 'retained-v2'] as const).flatMap((version) => { const old = baselineAnalysisKindDefinition(version); return [old, withModelClarification(old)]; })]) {
         if (candidate.promptContractDigest === promptContractDigest) return candidate;
       }
     }

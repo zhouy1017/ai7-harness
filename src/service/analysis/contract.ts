@@ -19,7 +19,7 @@ import type { ManifestBlockInput } from './coverage-manifest.js';
  * fixture key; changing one character of it changes every request digest, which is the intent.
  */
 export const BASELINE_UNIT_RESULT_SCHEMA = 'ai7.baseline-manuscript-analysis.unit-result/1' as const;
-export const BASELINE_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/2' as const;
+export const BASELINE_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/3' as const;
 export const BASELINE_PROMPT_CONTRACT_V1_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/1' as const;
 
 const ENTITY_KINDS: ReadonlyArray<AnalysisEntityKind> = ['person', 'place', 'organization', 'object', 'term', 'other'];
@@ -86,6 +86,13 @@ export type UnitResultParse =
 export function salvageSourceRanges(reader: ModelResultReader, value: unknown, blockIds: ReadonlySet<string>, section: string,
   maximum = MAX_ITEMS, blockLengths?: ReadonlyMap<string, number>): AnalysisSourceRangeProjection[] {
   return reader.array(value, section, maximum).flatMap<AnalysisSourceRangeProjection>((range, index) => {
+    const ordinal = typeof range === 'number' ? range : isRecord(range) ? range.blockOrdinal : undefined;
+    if (ordinal !== undefined) {
+      const blockId = Number.isSafeInteger(ordinal) && (ordinal as number) > 0 ? [...blockIds][(ordinal as number) - 1] : undefined;
+      if (blockId !== undefined) return [{ blockId, fromGrapheme: null, toGrapheme: null }];
+      reader.drop(section, index, 'range-out-of-unit');
+      return [];
+    }
     if (!hasKeys(range, ['blockId']) || typeof range.blockId !== 'string' || !BLOCK_ID_PATTERN.test(range.blockId) || !blockIds.has(range.blockId)) {
       reader.drop(section, index, 'range-out-of-unit');
       return [];
@@ -119,7 +126,7 @@ export function parseUnitResult(
   const parsed = reader.value;
   const blockIds = new Set(expected.blockIds);
   const prose = (value: unknown, limit: number, section: string, index: number, optional = false) => reader.text(value, limit, section, index, optional);
-  const ranges = (value: unknown, section: string) => salvageSourceRanges(reader, value, blockIds, section, MAX_ITEMS, expected.blockLengths);
+  const ranges = (value: Record<string, unknown>, section: string) => salvageSourceRanges(reader, value.blockOrdinals ?? (value.blockOrdinal === undefined ? value.sourceRanges : [value.blockOrdinal]), blockIds, section, MAX_ITEMS, expected.blockLengths);
   const strings = (value: unknown, section: string) => reader.array(value, section, MAX_ITEMS).flatMap((item, index) => {
     const text = prose(item, MAX_SHORT_TEXT, section, index);
     if (text === null) { reader.drop(section, index, 'text-invalid'); return []; }
@@ -138,7 +145,7 @@ export function parseUnitResult(
     if (name === null) return null;
     return { name, kind: reader.enum(value.kind, ENTITY_KINDS, ENTITY_ALIASES, 'other', 'entities', index),
       aliases: strings(value.aliases, `entities.${index}.aliases`), note: prose(value.note, MAX_LONG_TEXT, 'entities', index, true) || null,
-      sourceRanges: ranges(value.sourceRanges, `entities.${index}.sourceRanges`) };
+      sourceRanges: ranges(value, `entities.${index}.sourceRanges`) };
   });
   const events = entries<UnitEvent>('events', (value, index) => {
     const summary = prose(value.summary, MAX_LONG_TEXT, 'events', index);
@@ -146,7 +153,7 @@ export function parseUnitResult(
     if (!Number.isSafeInteger(value.ordinal) || (value.ordinal as number) < 1) reader.drop('events', index, 'ordinal-renumbered');
     return { ordinal: Number.isSafeInteger(value.ordinal) && (value.ordinal as number) > 0 ? value.ordinal as number : index + 1,
       summary, chronology: prose(value.chronology, MAX_SHORT_TEXT, 'events', index, true) || null,
-      participants: strings(value.participants, `events.${index}.participants`), sourceRanges: ranges(value.sourceRanges, `events.${index}.sourceRanges`) };
+      participants: strings(value.participants, `events.${index}.participants`), sourceRanges: ranges(value, `events.${index}.sourceRanges`) };
   });
   if (new Set(events.map((event) => event.ordinal)).size !== events.length || events.some((event, index) => event.ordinal !== index + 1)) {
     events.forEach((event, index) => { if (event.ordinal !== index + 1) reader.drop('events', index, 'ordinal-renumbered'); });
@@ -156,16 +163,16 @@ export function parseUnitResult(
     const subject = prose(value.subject, MAX_SHORT_TEXT, 'relationships', index);
     const object = prose(value.object, MAX_SHORT_TEXT, 'relationships', index);
     const relation = prose(value.relation, MAX_SHORT_TEXT, 'relationships', index);
-    return subject === null || object === null || relation === null ? null : { subject, object, relation, sourceRanges: ranges(value.sourceRanges, `relationships.${index}.sourceRanges`) };
+    return subject === null || object === null || relation === null ? null : { subject, object, relation, sourceRanges: ranges(value, `relationships.${index}.sourceRanges`) };
   });
   const settingClaims = entries<UnitSettingClaim>('settingClaims', (value, index) => {
     const subject = prose(value.subject, MAX_SHORT_TEXT, 'settingClaims', index);
     const claim = prose(value.claim, MAX_LONG_TEXT, 'settingClaims', index);
-    return subject === null || claim === null ? null : { subject, claim, sourceRanges: ranges(value.sourceRanges, `settingClaims.${index}.sourceRanges`) };
+    return subject === null || claim === null ? null : { subject, claim, sourceRanges: ranges(value, `settingClaims.${index}.sourceRanges`) };
   });
   const notes = (section: string) => entries<UnitNote>(section, (value, index) => {
     const description = prose(value.description, MAX_LONG_TEXT, section, index);
-    return description === null ? null : { description, sourceRanges: ranges(value.sourceRanges, `${section}.${index}.sourceRanges`) };
+    return description === null ? null : { description, sourceRanges: ranges(value, `${section}.${index}.sourceRanges`) };
   });
   const conflicts = notes('conflicts');
   const unresolved = notes('unresolved');
@@ -216,8 +223,8 @@ export const BASELINE_PROMPT_CONTRACT_V1_DIGEST = sha256Hex(canonicalJson(BASELI
  * schema already admits rather than an invented one. The unit message is /1's, header for header. Every field is
  * model-facing text or a fixed format; none is manuscript content.
  */
-export const BASELINE_PROMPT_CONTRACT = {
-  schema: BASELINE_PROMPT_CONTRACT_SCHEMA,
+export const BASELINE_PROMPT_CONTRACT_V2 = {
+  schema: 'ai7.baseline-manuscript-analysis.prompt-contract/2',
   contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
   responseSchema: BASELINE_UNIT_RESULT_SCHEMA,
   systemPrompt: [
@@ -242,12 +249,24 @@ export const BASELINE_PROMPT_CONTRACT = {
   blockLine: BASELINE_PROMPT_CONTRACT_V1.blockLine,
 } as const;
 
+export const BASELINE_PROMPT_CONTRACT_V2_DIGEST = sha256Hex(canonicalJson(BASELINE_PROMPT_CONTRACT_V2));
+
+/** Integer citations; historical prompt bytes and the stored result shape remain unchanged. */
+export const BASELINE_PROMPT_CONTRACT = {
+  ...BASELINE_PROMPT_CONTRACT_V2,
+  schema: BASELINE_PROMPT_CONTRACT_SCHEMA,
+  systemPrompt: BASELINE_PROMPT_CONTRACT_V2.systemPrompt.split('\n')
+    .filter((line) => !line.startsWith('每个 sourceRanges'))
+    .join('\n').replaceAll('sourceRanges', 'blockOrdinals') + '\n引用只填写 blockOrdinals: [1, 3]，整数为本消息内容块从 1 开始的序号（先重叠上下文，后本单元）。不要输出内容块标识或计算字素偏移。',
+  blockLine: '[{ordinal}] [{blockId}] ({kind}{level}) {text}',
+} as const;
+
 export const BASELINE_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(BASELINE_PROMPT_CONTRACT));
 
 const HEADER_PATTERN = /^分析单元 (\d+)\/(\d+) · 单元摘要 ([0-9a-f]{64})$/u;
 
-function blockLine(block: Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>): string {
-  return BASELINE_PROMPT_CONTRACT.blockLine
+function blockLine(block: Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>, ordinal: number, template: string): string {
+  return template.replace('{ordinal}', String(ordinal))
     .replace('{blockId}', block.blockId)
     .replace('{kind}', block.kind)
     .replace('{level}', block.level === null ? '' : ` h${block.level}`)
@@ -259,7 +278,9 @@ export function buildUnitMessage(
   unit: CoverageManifestUnitProjection,
   totalUnits: number,
   blocksById: ReadonlyMap<string, Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>>,
+  contract: { blockLine: string } = BASELINE_PROMPT_CONTRACT,
 ): string {
+  let ordinal = 0;
   const lines = [
     BASELINE_PROMPT_CONTRACT.unitMessageHeader
       .replace('{ordinal}', String(unit.ordinal))
@@ -268,10 +289,10 @@ export function buildUnitMessage(
   ];
   if (unit.overlapBlockIds.length > 0) {
     lines.push(BASELINE_PROMPT_CONTRACT.overlapHeader);
-    for (const blockId of unit.overlapBlockIds) lines.push(blockLine(requireBlock(blocksById, blockId)));
+    for (const blockId of unit.overlapBlockIds) lines.push(blockLine(requireBlock(blocksById, blockId), ++ordinal, contract.blockLine));
   }
   lines.push(BASELINE_PROMPT_CONTRACT.ownHeader);
-  for (const blockId of unit.blockIds) lines.push(blockLine(requireBlock(blocksById, blockId)));
+  for (const blockId of unit.blockIds) lines.push(blockLine(requireBlock(blocksById, blockId), ++ordinal, contract.blockLine));
   return lines.join('\n');
 }
 

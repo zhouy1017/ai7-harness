@@ -19,7 +19,7 @@ import {
 } from '../../src/service/analysis/custom-analysis-contract.js';
 import { CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR, CUSTOM_ANALYSIS_REDUCER_DIGEST, customAnalysisKindDefinition, customAnalysisPlan, reduceCustomAnalysis } from '../../src/service/analysis/custom-analysis-kind.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/contract.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
@@ -127,7 +127,7 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
 
   it('leaves every existing kind\'s frozen contract byte-identical', () => {
     // The digests J-04 pins for the baseline's current unit contract and sampling contract /2.
-    expect(BASELINE_PROMPT_CONTRACT_DIGEST).toBe('89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386');
+    expect(BASELINE_PROMPT_CONTRACT_V2_DIGEST).toBe('89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386');
     expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST).toBe('1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c');
     expect(baselineAnalysisKindDefinition().promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
   });

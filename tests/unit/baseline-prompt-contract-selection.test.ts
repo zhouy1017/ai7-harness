@@ -12,7 +12,7 @@ import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
 } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cross-unit-contract.js';
+import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST as BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cross-unit-contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
 import {
   BASELINE_SCHEMA_DIGEST,
@@ -107,7 +107,7 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     for (const key of ['kind', 'contractVersion', 'unitResultSchema', 'revisionSchema', 'successorRevisionSchema', 'reducerDigest', 'outOfScope'] as const) {
       expect(retained[key]).toEqual(current[key]);
     }
-    expect(retained.crossUnit).toEqual(current.crossUnit);
+    expect(retained.crossUnit).not.toEqual(current.crossUnit);
     // Each selection binds its sampling contract with it: the current baseline samples under /2, the retained /1 under
     // sampling /1 as the recorded Run did, and the factual kind stays on sampling /1.
     expect(current.assurance).toMatchObject({ prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2, promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
@@ -128,8 +128,8 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     }
   });
 
-  it('names no third contract', () => {
-    for (const unknown of ['v1', 'retained-v2', 'toString', '__proto__', 'hasOwnProperty']) {
+  it('refuses unknown contract names', () => {
+    for (const unknown of ['v1', 'unknown', 'toString', '__proto__', 'hasOwnProperty']) {
       expect(() => baselineAnalysisKindDefinition(unknown as BaselinePromptContractSelection)).toThrowError(/ANALYSIS_PROMPT_CONTRACT_UNKNOWN/u);
     }
   });

@@ -257,8 +257,8 @@ describe('model fixture loading', () => {
   it('(vi) sample1-baseline-transient-retry layers a first-attempt PROVIDER_ERROR 503 for unit 5 over shape (ii)', async () => {
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
     expect(transient.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-transient-retry', 'sample1-baseline-one-unit-failure', 'sample1-baseline-happy']);
-    const unit5 = '8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9';
-    const unit2 = '6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b';
+    const unit5 = '57b76db8086ad0e040450c7ac70668282cc7d5cfcd4c7c27ef6a8e5175884ffd';
+    const unit2 = 'e6b0ef17d9a35579308c3f75be5b1b7b6d5dc50759d45692af78997a0d7cf7ec';
     expect(resolveFixtureEntry(transient.entries, 5, unit5, 1)?.response).toMatchObject({ kind: 'adapter-failure', code: 'PROVIDER_ERROR', status: 503 });
     expect(resolveFixtureEntry(transient.entries, 5, unit5, 2)?.response).toMatchObject({ kind: 'unit-result', usage: { inputTokens: 1400, outputTokens: 180 } });
     expect(classifyModelFailure({ code: 'PROVIDER_ERROR', message: '', status: 503 }, codes).retrySafe).toBe(true);
@@ -306,7 +306,7 @@ describe('model fixture loading', () => {
     // The J-10 fixture: unit 4's first attempt only, over the happy fixture, which answers its second.
     const journey = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
     expect(journey.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-outcome-unknown', 'sample1-baseline-happy']);
-    const unit4 = '8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2';
+    const unit4 = '2124bcc317fa26aeb8506fe820aad0531c8fbaba12e822f865c85f03587a4ce1';
     expect(resolveFixtureEntry(journey.entries, 4, unit4, 1)?.response.kind).toBe('outcome-unknown');
     expect(resolveFixtureEntry(journey.entries, 4, unit4, 2)?.response.kind).toBe('unit-result');
     expect(journey.entries.size).toBe(happy.entries.size + 1);

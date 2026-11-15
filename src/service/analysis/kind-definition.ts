@@ -44,6 +44,8 @@ import {
   BASELINE_PROMPT_CONTRACT,
   BASELINE_PROMPT_CONTRACT_DIGEST,
   BASELINE_PROMPT_CONTRACT_V1,
+  BASELINE_PROMPT_CONTRACT_V2,
+  BASELINE_PROMPT_CONTRACT_V2_DIGEST,
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
   BASELINE_UNIT_RESULT_SCHEMA,
   buildUnitMessage,
@@ -55,6 +57,7 @@ import {
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST,
   BASELINE_CROSS_UNIT_RESULT_SCHEMA,
   CROSS_UNIT_FINDING_KINDS,
 } from './cross-unit-contract.js';
@@ -387,24 +390,23 @@ export const BASELINE_REDUCER_DESCRIPTOR = {
 } as const;
 
 export const BASELINE_REDUCER_DIGEST = sha256Hex(canonicalJson(BASELINE_REDUCER_DESCRIPTOR));
-function baselineSchemaDigest(promptContractDigest: string): string {
+function baselineSchemaDigest(promptContractDigest: string, crossDigest = BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST): string {
   return sha256Hex(canonicalJson({
     contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
     unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
     promptContractDigest,
     crossUnitResultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
-    crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+    crossUnitPromptContractDigest: crossDigest,
   }));
 }
 
 export const BASELINE_SCHEMA_DIGEST = baselineSchemaDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
 
 /**
- * Which frozen prompt contract a baseline ledger asks its units under (Issue #826): the current /2, or /1 retained for the
- * one historical replay that must ask what was asked then. A closed pair, not a version selector: no other contract exists
- * to name, and every launch but the one {@link baselinePromptContractForLaunch} admits asks under the current one.
+ * Which frozen prompt contract a baseline ledger asks its units under (Issue #826): the current /3, or /1 and /2 retained for the
+ * one historical replay that must ask what was asked then. Frozen versions preserve historical requests; every new launch but the one {@link baselinePromptContractForLaunch} admits asks under the current one.
  */
-export type BaselinePromptContractSelection = 'current' | 'retained-v1';
+export type BaselinePromptContractSelection = 'current' | 'retained-v1' | 'retained-v2';
 
 /**
  * Each selection binds the unit prompt contract and the assurance sampling one together: the current baseline asks its
@@ -413,6 +415,10 @@ export type BaselinePromptContractSelection = 'current' | 'retained-v1';
 const BASELINE_PROMPT_CONTRACTS = {
   current: {
     prompt: BASELINE_PROMPT_CONTRACT, digest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    sampling: { prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2, digest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST },
+  },
+  'retained-v2': {
+    prompt: BASELINE_PROMPT_CONTRACT_V2, digest: BASELINE_PROMPT_CONTRACT_V2_DIGEST,
     sampling: { prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2, digest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST },
   },
   'retained-v1': {
@@ -463,7 +469,7 @@ export function baselinePromptContractForLaunch(launch: {
       capture.model !== RETAINED_V1_RECORDED_MODEL) return false;
     switch (capture.subject) {
       case 'unit': return capture.promptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST;
-      case 'reduction': return capture.promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
+      case 'reduction': return capture.promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST;
       case 'sampling': return capture.promptContractDigest === ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
       case 'reflection': return capture.promptContractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
       default: return false;
@@ -499,6 +505,7 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
   const contract = Object.hasOwn(BASELINE_PROMPT_CONTRACTS, promptContract) ? BASELINE_PROMPT_CONTRACTS[promptContract] : null;
   if (contract === null) throw new Error('ANALYSIS_PROMPT_CONTRACT_UNKNOWN');
   const promptContractDigest = contract.digest;
+  const crossDigest = promptContract === 'current' ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST;
   return {
     kind: BASELINE_ANALYSIS_KIND,
     contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
@@ -514,12 +521,12 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
     unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
     revisionSchema: 'ai7.baseline-manuscript-analysis.result-set-revision/1',
     successorRevisionSchema: 'ai7.baseline-manuscript-analysis.result-set-revision/2',
-    schemaDigest: baselineSchemaDigest(promptContractDigest),
+    schemaDigest: baselineSchemaDigest(promptContractDigest, crossDigest),
     reducerDigest: BASELINE_REDUCER_DIGEST,
     reducerStages: BASELINE_REDUCER_STAGES,
     executionSteps: BASELINE_EXECUTION_STEPS,
     updateExecutionSteps: BASELINE_UPDATE_EXECUTION_STEPS,
-    crossUnit: { promptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, resultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA },
+    crossUnit: { promptContractDigest: crossDigest, resultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA },
     crossUnitAbsentReason: '',
     assurance: {
       prompt: contract.sampling.prompt,
@@ -552,10 +559,10 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
         (conflict) => conflict.kind,
       ),
     ],
-    buildUnitMessage,
+    buildUnitMessage: (unit, total, blocks) => buildUnitMessage(unit, total, blocks, contract.prompt),
     parseUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
-    parseUnitResult: (text, unit, blocks) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds],
+    parseUnitResult: (text, unit, blocks) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.overlapBlockIds, ...unit.blockIds],
       ...(blocks === undefined ? {} : { blockLengths: new Map([...unit.blockIds, ...unit.overlapBlockIds].map((id) => [id, graphemeCount(blocks.get(id)?.text ?? '')])) }) }),
     reduce: (input) => {
       const reduction = reduceBaselineAnalysis(
@@ -596,7 +603,7 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
       unresolved: record.unresolved as BaselineUnitResult['unresolved'],
       confidence: record.confidence as BaselineUnitResult['confidence'],
     }),
-    // The baseline contract cites blocks by identity, so a reused result's ranges are remapped.
+    // The stored baseline result cites blocks by identity, so a reused result's ranges are remapped.
     remapReusedResult: (result, predecessorUnit, newUnit) => remapReusedResult(result as BaselineUnitResult, predecessorUnit, newUnit),
     revisionComponents: (body) => ({
       conflicts: body.conflicts,

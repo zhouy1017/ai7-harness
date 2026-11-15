@@ -445,7 +445,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.reducerClosure.stages[3]).toEqual({ stage: 'cross-unit-reduction', state: 'closed', inputCount: SAMPLE1_UNITS - 1 });
       expect(revision.crossUnitReduction).toEqual({
         state: 'closed', reason: null,
-        requestDigest: 'f165b9f47a625feeb2d38ce95f0298dcaf90de2e8fa927c81463ee8f9b8ff996',
+        requestDigest: 'c064bb35d02cd45a632df7e7ffb931ca6f27fcb6b0de05c104124b716fab8b92',
         usage: { inputTokens: 2000, outputTokens: 300 }, findingCount: 2,
       });
       expect(revision.crossUnitFindings.map((finding) => finding.kind)).toEqual(['chronology-conflict', 'continuity-break']);

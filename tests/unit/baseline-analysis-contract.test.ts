@@ -5,6 +5,7 @@ import {
   BASELINE_PROMPT_CONTRACT_DIGEST,
   BASELINE_PROMPT_CONTRACT_SCHEMA,
   BASELINE_PROMPT_CONTRACT_V1,
+  BASELINE_PROMPT_CONTRACT_V2,
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
   BASELINE_PROMPT_CONTRACT_V1_SCHEMA,
   BASELINE_UNIT_RESULT_SCHEMA,
@@ -135,9 +136,9 @@ describe('prompt contract', () => {
   });
 
   it('makes /2 differ from /1 only in the system section, which states each note element as an object (#826)', () => {
-    expect(BASELINE_PROMPT_CONTRACT_SCHEMA).toBe('ai7.baseline-manuscript-analysis.prompt-contract/2');
+    expect(BASELINE_PROMPT_CONTRACT_V2.schema).toBe('ai7.baseline-manuscript-analysis.prompt-contract/2');
     expect(BASELINE_PROMPT_CONTRACT_DIGEST).not.toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
-    const { schema: _v2Schema, systemPrompt: v2Prompt, ...v2Rest } = BASELINE_PROMPT_CONTRACT;
+    const { schema: _v2Schema, systemPrompt: v2Prompt, ...v2Rest } = BASELINE_PROMPT_CONTRACT_V2;
     const { schema: _v1Schema, systemPrompt: v1Prompt, ...v1Rest } = BASELINE_PROMPT_CONTRACT_V1;
     // The same analysis contract, result schema, unit message headers and block line: one unit message serves both.
     expect(canonicalJson(v2Rest)).toBe(canonicalJson(v1Rest));
@@ -152,8 +153,8 @@ describe('prompt contract', () => {
   });
 
   it('keeps the frozen /2 note instructions while accepting historical bare strings (#1311)', () => {
-    const allowed = /应写 (\[\{.*?\}\])，/u.exec(BASELINE_PROMPT_CONTRACT.systemPrompt)?.[1];
-    const forbidden = /不得写 (\[".*?"\])。/u.exec(BASELINE_PROMPT_CONTRACT.systemPrompt)?.[1];
+    const allowed = /应写 (\[\{.*?\}\])，/u.exec(BASELINE_PROMPT_CONTRACT_V2.systemPrompt)?.[1];
+    const forbidden = /不得写 (\[".*?"\])。/u.exec(BASELINE_PROMPT_CONTRACT_V2.systemPrompt)?.[1];
     expect(allowed).toBe('[{"description": "说明", "sourceRanges": []}]');
     expect(forbidden).toBe('["说明"]');
     for (const key of ['conflicts', 'unresolved'] as const) {
@@ -168,10 +169,10 @@ describe('prompt contract', () => {
     const lines = message.split('\n');
     expect(lines[0]).toBe(`分析单元 2/5 · 单元摘要 ${'d'.repeat(64)}`);
     expect(lines[1]).toBe(BASELINE_PROMPT_CONTRACT.overlapHeader);
-    expect(lines[2]).toBe(`[${BLOCK_A}] (heading h1) 合成标题`);
+    expect(lines[2]).toBe(`[1] [${BLOCK_A}] (heading h1) 合成标题`);
     expect(lines[3]).toBe(BASELINE_PROMPT_CONTRACT.ownHeader);
-    expect(lines[4]).toBe(`[${BLOCK_B}] (paragraph) 合成段落一。`);
-    expect(lines[5]).toBe(`[${BLOCK_C}] (paragraph) 合成段落二。`);
+    expect(lines[4]).toBe(`[2] [${BLOCK_B}] (paragraph) 合成段落一。`);
+    expect(lines[5]).toBe(`[3] [${BLOCK_C}] (paragraph) 合成段落二。`);
     expect(parseUnitMessageHeader(message)).toEqual({ ordinal: 2, total: 5, unitDigest: 'd'.repeat(64) });
     expect(parseUnitMessageHeader('随意文本')).toBeNull();
     expect(parseUnitMessageHeader(`分析单元 6/5 · 单元摘要 ${'d'.repeat(64)}`)).toBeNull();
@@ -185,4 +186,14 @@ describe('prompt contract', () => {
     expect(unitRequestDigest('e'.repeat(64), 2, 'd'.repeat(64))).not.toBe(digest);
     expect(() => unitRequestDigest('short', 2, 'd'.repeat(64))).toThrowError(/ANALYSIS_REQUEST_DIGEST_INVALID/u);
   });
+});
+
+it('maps integer citations in message order and drops only invalid references', () => {
+  const parsed = parseUnitResult(JSON.stringify({ synopsis: '概述', entities: [{ name: '人物', blockOrdinals: [2, 99, 1, -1, 1.5] }],
+    events: [{ summary: '事件', sourceRanges: [{ blockOrdinal: 2 }] }], unresolved: [{ description: '事项', blockOrdinal: 1 }] }), expected);
+  expect(parsed).toMatchObject({ ok: true, result: { entities: [{ sourceRanges: [
+    { blockId: BLOCK_B, fromGrapheme: null, toGrapheme: null }, { blockId: BLOCK_A, fromGrapheme: null, toGrapheme: null },
+  ] }], events: [{ sourceRanges: [{ blockId: BLOCK_B }] }], unresolved: [{ sourceRanges: [{ blockId: BLOCK_A }] }] } });
+  expect(BASELINE_PROMPT_CONTRACT.systemPrompt).toContain('blockOrdinals: [1, 3]');
+  expect(BASELINE_PROMPT_CONTRACT.systemPrompt).not.toMatch(/blockId|fromGrapheme|toGrapheme/u);
 });

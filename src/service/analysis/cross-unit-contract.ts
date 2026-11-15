@@ -66,7 +66,7 @@ export type CrossUnitResultParse =
   | { ok: false; code: CrossUnitResultParseFailureCode; detail: string };
 
 /** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
-export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT = {
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1 = {
   schema: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA,
   contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
   responseSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
@@ -98,6 +98,15 @@ export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT = {
   chronologyPrefix: '（时序：',
   chronologySuffix: '）',
   blockIdSeparator: '、',
+} as const;
+
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST = sha256Hex(canonicalJson(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1));
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT = {
+  ...BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1,
+  schema: 'ai7.baseline-manuscript-analysis.cross-unit-prompt-contract/2',
+  instruction: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.instruction.split('\n')
+    .filter((line) => !line.startsWith('sides 至少') && !line.startsWith('每个 sourceRanges'))
+    .join('\n').replace('description、sides、confidence', 'description、rowRefs、confidence') + '\n引用只填写 rowRefs: ["r1", "r15"]，对应下列行索引，至少跨两个单元。不要抄写内容块标识或计算字素偏移。',
 } as const;
 
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(BASELINE_CROSS_UNIT_PROMPT_CONTRACT));
@@ -134,6 +143,7 @@ interface TopicRow {
   readonly unitOrdinal: number;
   readonly text: string;
   readonly blockIds: ReadonlyArray<string>;
+  readonly sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
 }
 
 /**
@@ -151,9 +161,11 @@ function topicSections(closed: ReadonlyArray<ClosedUnitResult>): Array<{ header:
       header: contract.entityHeader,
       rows: rows((result) => result.entities, (entity, unitOrdinal) => {
         const blockIds = rowBlockIds(entity.sourceRanges);
+        const sourceRanges = entity.sourceRanges;
         return {
           unitOrdinal,
           blockIds,
+          sourceRanges,
           text: fill(contract.entityLine, {
             name: entity.name,
             kind: entity.kind,
@@ -168,9 +180,11 @@ function topicSections(closed: ReadonlyArray<ClosedUnitResult>): Array<{ header:
       header: contract.eventHeader,
       rows: rows((result) => result.events, (event, unitOrdinal) => {
         const blockIds = rowBlockIds(event.sourceRanges);
+        const sourceRanges = event.sourceRanges;
         return {
           unitOrdinal,
           blockIds,
+          sourceRanges,
           text: fill(contract.eventLine, {
             summary: event.summary,
             chronology: event.chronology === null ? '' : `${contract.chronologyPrefix}${event.chronology}${contract.chronologySuffix}`,
@@ -184,9 +198,11 @@ function topicSections(closed: ReadonlyArray<ClosedUnitResult>): Array<{ header:
       header: contract.relationshipHeader,
       rows: rows((result) => result.relationships, (relationship, unitOrdinal) => {
         const blockIds = rowBlockIds(relationship.sourceRanges);
+        const sourceRanges = relationship.sourceRanges;
         return {
           unitOrdinal,
           blockIds,
+          sourceRanges,
           text: fill(contract.relationshipLine, {
             subject: relationship.subject,
             relation: relationship.relation,
@@ -201,9 +217,11 @@ function topicSections(closed: ReadonlyArray<ClosedUnitResult>): Array<{ header:
       header: contract.settingClaimHeader,
       rows: rows((result) => result.settingClaims, (claim, unitOrdinal) => {
         const blockIds = rowBlockIds(claim.sourceRanges);
+        const sourceRanges = claim.sourceRanges;
         return {
           unitOrdinal,
           blockIds,
+          sourceRanges,
           text: fill(contract.settingClaimLine, {
             subject: claim.subject,
             claim: claim.claim,
@@ -237,8 +255,9 @@ export function citedBlocksByUnit(closed: ReadonlyArray<ClosedUnitResult>): Map<
  * The exact user-role message for the cross-unit reduction: header, the frozen instruction text, the
  * four topic sections over the whole closed unit set, then each unit's cited block identities.
  */
-export function buildCrossUnitMessage(closed: ReadonlyArray<ClosedUnitResult>, totalUnits: number): string {
-  const contract = BASELINE_CROSS_UNIT_PROMPT_CONTRACT;
+export function buildCrossUnitMessage(closed: ReadonlyArray<ClosedUnitResult>, totalUnits: number, indexed = true): string {
+  const contract = indexed ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1;
+  let rowOrdinal = 0;
   const units = orderedClosed(closed);
   const lines = [
     fill(contract.messageHeader, { closed: String(units.length), total: String(totalUnits), unitSetDigest: unitSetDigest(units) }),
@@ -246,7 +265,7 @@ export function buildCrossUnitMessage(closed: ReadonlyArray<ClosedUnitResult>, t
   ];
   for (const section of topicSections(units)) {
     lines.push(section.header);
-    for (const row of section.rows) lines.push(row.text);
+    for (const row of section.rows) lines.push(indexed ? `[r${++rowOrdinal}] ${row.text}` : row.text);
   }
   lines.push(contract.citedBlocksHeader);
   for (const [unitOrdinal, blockIds] of citedBlocksByUnit(units)) {
@@ -353,7 +372,7 @@ export function crossUnitRequestDigest(promptContractDigest: string, setDigest: 
  */
 export function parseCrossUnitResult(
   text: string,
-  expected: { closedOrdinals: ReadonlyArray<number>; citedBlocksByUnit: ReadonlyMap<number, ReadonlyArray<string>>; blockLengths?: ReadonlyMap<string, number> },
+  expected: { closedOrdinals: ReadonlyArray<number>; citedBlocksByUnit: ReadonlyMap<number, ReadonlyArray<string>>; blockLengths?: ReadonlyMap<string, number>; rows?: ReadonlyArray<CrossUnitFindingSide> },
 ): CrossUnitResultParse {
   const reader = ModelResultReader.read(text, BASELINE_CROSS_UNIT_RESULT_SCHEMA);
   if (reader === null) return ModelResultReader.failure(text);
@@ -373,8 +392,16 @@ export function parseCrossUnitResult(
     const description = reader.text(candidate.description, MAX_DESCRIPTION_GRAPHEMES, 'findings', index);
     if (description === null) { reader.drop('findings', index, 'description-invalid'); continue; }
     const sides: CrossUnitFindingSide[] = [];
+    if (candidate.rowRefs !== undefined) {
+      for (const [refIndex, ref] of reader.array(candidate.rowRefs, `findings.${index}.rowRefs`, MAX_SIDES).entries()) {
+        const match = typeof ref === 'string' ? /^r([1-9][0-9]*)$/u.exec(ref) : null;
+        const row = match === null ? undefined : expected.rows?.[Number(match[1]) - 1];
+        if (row === undefined) reader.drop(`findings.${index}.rowRefs`, refIndex, 'row-out-of-set');
+        else sides.push({ unitOrdinal: row.unitOrdinal, sourceRanges: row.sourceRanges });
+      }
+    }
     const section = `findings.${index}.sides`;
-    for (const [sideIndex, side] of reader.array(candidate.sides, section, MAX_SIDES).entries()) {
+    for (const [sideIndex, side] of reader.array(candidate.sides ?? [], section, MAX_SIDES).entries()) {
       const ordinal = hasKeys(side, ['unitOrdinal']) ? modelNumber(side.unitOrdinal) : NaN;
       if (!hasKeys(side, ['unitOrdinal']) || !Number.isSafeInteger(ordinal) || !closed.has(ordinal)) {
         reader.drop(section, sideIndex, 'unit-out-of-set'); continue;
@@ -398,4 +425,9 @@ export function parseCrossUnitResult(
     return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
   }
   return reader.finish<BaselineCrossUnitResult>({ schema: BASELINE_CROSS_UNIT_RESULT_SCHEMA, findings, notes });
+}
+
+/** Same traversal as the indexed message. */
+export function crossUnitRows(closed: ReadonlyArray<ClosedUnitResult>): CrossUnitFindingSide[] {
+  return topicSections(closed).flatMap((section) => section.rows.map((row) => ({ unitOrdinal: row.unitOrdinal, sourceRanges: row.sourceRanges })));
 }

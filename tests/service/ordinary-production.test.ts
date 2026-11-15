@@ -432,7 +432,7 @@ it('restores only exact current baseline contract variants without changing the 
   expect(ledger.definitionForDigest(base.promptContractDigest).promptContractDigest).toBe(base.promptContractDigest);
   expect(ledger.definitionForDigest(wrapped.promptContractDigest).promptContractDigest).toBe(wrapped.promptContractDigest);
   expect(ledger.definitionForDigest('0'.repeat(64)).promptContractDigest).not.toBe('0'.repeat(64));
-  expect(ledger.definitionForDigest(BASELINE_PROMPT_CONTRACT_V1_DIGEST).promptContractDigest).not.toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+  expect(ledger.definitionForDigest(BASELINE_PROMPT_CONTRACT_V1_DIGEST).promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
   expect(ledger.definition).toBe(selected);
 });
 

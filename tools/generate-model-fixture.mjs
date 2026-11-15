@@ -72,7 +72,8 @@ const PROVIDER_LEDGER_FILE = 'ledger.jsonl';
 const PROVIDER_CACHE_DIRECTORY = 'entries';
 
 // --- Duplicated from src/service/analysis/{cross-unit,assurance-sampling,run-report}-contract.ts (Issue #808) ---------------
-export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
+const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '1cb1fb36d7cf54d0b887a01d85598b67fb4487e4f8446209861edc1c18018142';
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = '4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db';
 /**
  * The two admitted sampling contracts (Issue #826) and the SHA-256 of each nine-line instruction as a message carries it
@@ -338,7 +339,7 @@ async function loadSample1Owners() {
       stdin: { contents: [
         "export { parseDocx } from './src/service/docx.ts';",
         "export { deriveCoverageManifest } from './src/service/analysis/coverage-manifest.ts';",
-        "export { buildUnitMessage, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V1, BASELINE_PROMPT_CONTRACT_V1_DIGEST } from './src/service/analysis/contract.ts';",
+        "export { buildUnitMessage, BASELINE_PROMPT_CONTRACT_V2, BASELINE_PROMPT_CONTRACT_V2_DIGEST, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V1, BASELINE_PROMPT_CONTRACT_V1_DIGEST } from './src/service/analysis/contract.ts';",
         "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
@@ -427,6 +428,7 @@ export async function verifySample1Capture(request, selection, parsed) {
     // system prompt, plan, revision and sampling contract are all that contract's; another contract proves nothing.
     const contracts = [
       { selection: 'current', prompt: owners.BASELINE_PROMPT_CONTRACT, digest: owners.BASELINE_PROMPT_CONTRACT_DIGEST },
+      { selection: 'retained-v2', prompt: owners.BASELINE_PROMPT_CONTRACT_V2, digest: owners.BASELINE_PROMPT_CONTRACT_V2_DIGEST },
       { selection: 'retained-v1', prompt: owners.BASELINE_PROMPT_CONTRACT_V1, digest: owners.BASELINE_PROMPT_CONTRACT_V1_DIGEST },
     ];
     step = 'records';
@@ -981,12 +983,13 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   if (task !== null) return { ...task, unitMessage, ownBlockTexts: [], carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, contentDigest: null, identities: [] };
   const reduction = parseCrossUnitMessageHeader(unitMessage);
   if (reduction !== null) {
+    const stageContractDigest = promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
     const identities = [...parseCrossUnitCitedBlocks(unitMessage)].flatMap(([unit, blockIds]) =>
       blockIds.map((identity, index) => ({ placeholder: `{{unit:${unit}:block:${index + 1}}}`, identity })));
     return {
-      subject: 'reduction', stageContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
+      subject: 'reduction', stageContractDigest, unitMessage, header: null, ownBlockTexts: [],
       carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null, identities,
-      requestDigest: crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, reduction.unitSetDigest),
+      requestDigest: crossUnitRequestDigest(stageContractDigest, reduction.unitSetDigest),
     };
   }
   const sampling = parseAssuranceSamplingMessageHeader(unitMessage);

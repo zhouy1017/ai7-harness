@@ -1,3 +1,4 @@
+import { BASELINE_PROMPT_CONTRACT_V1_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST } from '../analysis/contract.js';
 import type { CallId, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { isRecord, canonicalJson } from '../analysis/canonical.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
@@ -13,6 +14,7 @@ import {
 import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST,
   crossUnitRequestDigest,
   parseCrossUnitCitedBlocks,
   parseCrossUnitMessageHeader,
@@ -421,6 +423,11 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     return Promise.resolve({ provider, id: model, name: 'AI7 确定性夹具', inputModalities: ['text'] });
   }
 
+  #crossContractDigest(): string {
+    return [BASELINE_PROMPT_CONTRACT_V1_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST].includes(this.#promptContractDigest)
+      ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
+  }
+
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.#served += 1;
     const failure = (code: string, message: string, status?: number): StreamChunk => ({
@@ -539,7 +546,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       const result = message.source?.kind === 'tool' ? toolResultOf(message) : null; return result === null ? [] : [result];
     });
     const expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
-      ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
+      ? crossUnitRequestDigest(this.#crossContractDigest(), crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
         : report !== null
@@ -570,7 +577,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     this.#servedByKey.set(pairKey, attempt);
     const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
-    const stageContractDigest = crossUnit !== null ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+    const stageContractDigest = crossUnit !== null ? this.#crossContractDigest() : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
     const compatible = exact === undefined && stage !== null && this.#sourceDigest !== null
       ? resolveReplayCompatibleFixtureEntry(this.#fixture, stage, fixtureReplayContentKey(this.#sourceDigest, this.#promptContractDigest, { stageContractDigest }), attempt)
       : undefined;

@@ -6,6 +6,7 @@ import {
   BASELINE_CROSS_UNIT_RESULT_SCHEMA,
   CROSS_UNIT_FINDING_KINDS,
   buildCrossUnitMessage,
+  crossUnitRows,
   citedBlocksByUnit,
   crossUnitRequestDigest,
   parseCrossUnitCitedBlocks,
@@ -85,10 +86,10 @@ describe('the Baseline Cross-Unit Reduction Contract v1 message', () => {
     expect(at(contract.relationshipHeader)).toBeGreaterThan(at(contract.eventHeader));
     expect(at(contract.settingClaimHeader)).toBeGreaterThan(at(contract.relationshipHeader));
     expect(at(contract.citedBlocksHeader)).toBeGreaterThan(at(contract.settingClaimHeader));
-    expect(lines).toContain(`- 合成人物甲（person；别名：阿甲）· 单元 1 · 内容块 ${BLOCK_A}`);
-    expect(lines).toContain(`- 合成事件（单元 3）。（时序：开端） · 单元 3 · 内容块 ${BLOCK_D}`);
-    expect(lines).toContain(`- 合成人物乙 —抵达→ 合成之城 · 单元 3 · 内容块 ${BLOCK_C}`);
-    expect(lines).toContain(`- 合成之城：位于北方 · 单元 1 · 内容块 ${BLOCK_B}`);
+    expect(lines).toContain(`[r1] - 合成人物甲（person；别名：阿甲）· 单元 1 · 内容块 ${BLOCK_A}`);
+    expect(lines).toContain(`[r4] - 合成事件（单元 3）。（时序：开端） · 单元 3 · 内容块 ${BLOCK_D}`);
+    expect(lines).toContain(`[r6] - 合成人物乙 —抵达→ 合成之城 · 单元 3 · 内容块 ${BLOCK_C}`);
+    expect(lines).toContain(`[r7] - 合成之城：位于北方 · 单元 1 · 内容块 ${BLOCK_B}`);
     // No placeholder survives interpolation, and the message carries no manuscript text of its own.
     expect(message).not.toMatch(/\{[a-zA-Z]+\}/u);
   });
@@ -207,4 +208,13 @@ describe('parseCrossUnitResult (Baseline Cross-Unit Reduction Contract v1)', () 
     expect(parsed.ok && parsed.result.salvaged).toHaveLength(2);
   });
 
+});
+
+it('resolves row references to the exact units and source ranges', () => {
+  const rows = crossUnitRows(CLOSED);
+  const parsed = parseCrossUnitResult(JSON.stringify({ findings: [{ kind: 'contradiction', description: '设定矛盾',
+    rowRefs: ['r7', 'r999', 'r8'], confidence: 'high' }], notes: [] }), { ...EXPECTED, rows });
+  expect(parsed).toMatchObject({ ok: true, result: { findings: [{ sides: [
+    { unitOrdinal: 1, sourceRanges: [range(BLOCK_B)] }, { unitOrdinal: 3, sourceRanges: [range(BLOCK_D)] },
+  ] }] } });
 });
