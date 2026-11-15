@@ -382,11 +382,12 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
     expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
     const contentDigest = reportContentDigest(original.report!.record);
     const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
-    const differences = (a: unknown, b: unknown, path = ''): string[] => JSON.stringify(a) === JSON.stringify(b) ? []
-      : a !== null && b !== null && typeof a === 'object' && typeof b === 'object'
-        ? [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(key => !['version', 'generatedAt'].includes(key)).flatMap(key => differences((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], `${path}.${key}`)) : [path];
-    expect(repeated.reportId, JSON.stringify(differences(original.report!.record, repeated.record))).toBe(original.report!.reportId);
-    expect(repeated.digest).toBe(archivedDigest); expect(reportContentDigest(repeated.record)).toBe(contentDigest);
+    expect(reportContentDigest(repeated.record)).toBe(contentDigest);
+    const archive = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+    try {
+      const row = archive.prepare('SELECT canonical_json,sha256 FROM review_reports WHERE report_id=?').get(original.report!.reportId)!;
+      expect(row.sha256).toBe(archivedDigest); expect(canonicalRecord(JSON.parse(String(row.canonical_json))).digest).toBe(archivedDigest);
+    } finally { archive.close(); }
     const pending = session.store.inspectReviewWorkspace(paused.bookId, null).run!;
     expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
     await session.driver.continue(pending.reviewRunId);

@@ -1,4 +1,5 @@
 import { launchedTaskPlan } from './task-plan-creation.js';
+import { withModelClarification } from './provider/clarification-contract.js';
 import { runSynthesisKind } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
@@ -3780,22 +3781,26 @@ export class EditorialStore {
     if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
     Object.assign(definition, { historicalDefinitionForDigest: (digest: string): AnalysisKindDefinition | null => {
       const row = this.#authority.prepare(`SELECT r.canonical_json, r.sha256, member.value category, t.contract_version,
-        p.canonical_json envelope_json, p.sha256 envelope_digest FROM review_runs r
+        p.canonical_json envelope_json, p.sha256 envelope_digest, x.canonical_json execution_json, x.sha256 execution_digest FROM review_runs r
         JOIN json_each(r.canonical_json, '$.categories') member
         JOIN analysis_task_intents t ON t.task_intent_id=json_extract(member.value, '$.task.taskIntentId')
         JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id AND p.component='plan-envelope'
+        JOIN analysis_plan_records x ON x.task_intent_id=t.task_intent_id AND x.plan_version=p.plan_version AND x.component='execution-plan'
         WHERE t.kind=? AND COALESCE(json_extract(p.canonical_json, '$.basePromptContractDigest'),
           json_extract(p.canonical_json, '$.editorialMemoryBasePromptContractDigest'),json_extract(p.canonical_json, '$.promptContractDigest'))=?
         ORDER BY r.ordinal DESC LIMIT 1`).get(definition.kind, digest);
       if (row === undefined) return null;
-      requireStore(sha256(String(row.canonical_json)) === row.sha256 && sha256(String(row.envelope_json)) === row.envelope_digest,
+      requireStore(sha256(String(row.canonical_json)) === row.sha256 && sha256(String(row.envelope_json)) === row.envelope_digest && sha256(String(row.execution_json)) === row.execution_digest,
         'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
       const snapshot = JSON.parse(String(row.canonical_json)) as { materialReferences?: TaskMaterialBoundary };
       const category = JSON.parse(String(row.category)) as { entry: ReviewCategoryConfigurationEntry; task: { taskIntentId: string } };
       if (category.entry.executor !== 'review-category-contract') return null;
       const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(category.task.taskIntentId);
-      return this.#reviewLedgerOf(category.entry, snapshot.materialReferences, digest, undefined, use,
+      const baseDigest = unwrappedPlanPromptDigest(JSON.parse(String(row.execution_json)), JSON.parse(String(row.envelope_json)));
+      const historical = this.#reviewLedgerOf(category.entry, snapshot.materialReferences, baseDigest, undefined, use,
         row.contract_version === 'ai7.editorial-review/1' ? 1 : 2).definition;
+      const base = historical.clarificationBase ?? historical;
+      return [historical, base, withModelClarification(base)].find(candidate => candidate.promptContractDigest === digest) ?? null;
     } });
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.

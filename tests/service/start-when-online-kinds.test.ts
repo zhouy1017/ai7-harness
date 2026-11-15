@@ -628,11 +628,11 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
       const moved = store.inspectReviewWorkspace(bookId, next.reviewRunId).run!;
       expect(moved).toMatchObject({ state: 'plan-moved', stateLabel: PLAN_MOVED_LABEL, canContinue: false });
       expect(moved.categories.map((category) => [category.state, category.stateLabel, category.detail]))
-        .toEqual([['refused', PLAN_MOVED_LABEL, `需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划已经变化，这次授权不再对应当前的情况。`]]);
+        .toEqual([['refused', PLAN_MOVED_LABEL, `需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划、「全书审阅统合总结」的计划已经变化，这次授权不再对应当前的情况。`]]);
       expect(selectedReviewEvents(next.reviewRunId)).toEqual([[TYPOS, 'refused', 'REVIEW_RUN_PLAN_MOVED']]);
       const plan = await planOf(store, bookId, 'review-run', next.reviewRunId, 'online');
       expect(plan.state).toEqual({ key: 'plan-moved', label: PLAN_MOVED_LABEL });
-      expect(plan.planMovedReason).toBe(`需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划已经变化，这次授权不再对应当前的情况。`);
+      expect(plan.planMovedReason).toBe(`需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划、「全书审阅统合总结」的计划已经变化，这次授权不再对应当前的情况。`);
       expect(attentionItem(store, `review:${next.reviewRunId}`)).toMatchObject({ group: 'decisions', state: 'analysis-plan-moved', blocked: true, nextStep: 'view-review' });
       expect(await code(() => driver.drive(next.reviewRunId))).toBe('REVIEW_RUN_STOPPED');
       // A new 审阅 is the way on.

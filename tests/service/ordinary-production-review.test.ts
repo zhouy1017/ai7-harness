@@ -276,7 +276,7 @@ it.each(['style-and-format', 'plot-consistency'])('runs one bounded %s synthesis
 
 it('keeps unit cards and a disclosed synthesis gap when the selected rule does not grant the extra turn', async () => {
   const result = await productionReview(['style-and-format'], () => 'valid', (policy) => ({ ...policy,
-    providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules?.map((rule) => ({ ...rule, plusOneCrossUnitSynthesisTurn: false })) } }));
+    providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules?.map((rule) => rule.taskKinds.includes('editorial-review/style-and-format') ? { ...rule, plusOneCrossUnitSynthesisTurn: false } : rule) } }));
   expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(0);
   const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('style-and-format')!));
   const settled = result.store.inspectReviewCategory(result.bookId, definition);

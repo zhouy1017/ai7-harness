@@ -1157,7 +1157,10 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(production.live).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', credentialReference: reference });
     // v13 names the editor's unpublished words in every admitted rule (#853 revision 5), which is what the gate admits them by.
     for (const rule of production.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' && rule.ruleId !== 'ordinary-production-learning-curation')) {
-      expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
+      if (rule.taskKinds.includes('editorial-review/run-synthesis')) {
+        expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'book-metadata-and-synopsis']));
+        expect(rule.outboundDataCategories).not.toContain('unpublished-full-content');
+      } else expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
     }
     const bookId = await sample1Book(store, 'L2 官方路线');
     const prepared = prepare(store, bookId, production.policy);
