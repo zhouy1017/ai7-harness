@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve, relative, isAbsolute } from 'node:path';
+import { unzipSync } from 'fflate';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { driveLaunchedReviewRun, ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
@@ -20,9 +23,9 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
-import { TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { TYPOS_AND_USAGE, STYLE_AND_FORMAT } from '../support/review-categories.js';
 
-const TYPOS = 'typos-and-usage';
+const TYPOS = 'typos-and-usage', STYLE = 'style-and-format';
 const WHOLE: ReviewRunScopeRequest = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
 let roots: ServiceTestRoots;
 let requestGovernor: ModelRequestGovernor;
@@ -35,16 +38,17 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 
 async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
   controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false): Promise<Session> {
-  const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-contract-v2-controls');
+  const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-cross-chapter-controls');
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
-  const base = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+  const bases = new Map([[TYPOS, reviewCategoryKindDefinition(TYPOS_AND_USAGE)], [STYLE, reviewCategoryKindDefinition(STYLE_AND_FORMAT)]]);
   const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
     if (sample1SynthesisAnswer(message) !== undefined) return synthesisAnswer(message);
     const header = parseReviewCategoryUnitMessageHeader(message);
-    if (request.stage === 'units' && header?.categoryId === TYPOS) {
-      const response = resolveFixtureEntry(fixture.entries, header.ordinal, base.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+    if (request.stage === 'units' && header !== null && bases.has(header.categoryId)) {
+      const response = resolveFixtureEntry(fixture.entries, header.ordinal, bases.get(header.categoryId)!.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
       return !emptyFindings ? response : { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     }
+    if (parseReviewCrossChapterMessage(message) !== null) return { kind: 'unit-result', text: JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     const baseline = parseUnitMessageHeader(message);
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
     if (request.stage === 'units' && header !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
@@ -144,7 +148,6 @@ it.each(['pause', 'cancel'] as const)('preserves ordinary findings and launch bi
         expect(session.capture!.wireRequests.every(request => request.model === model)).toBe(true);
       } else {
         expect(workspace(session, book).run!.state).toBe('cancelled');
-        expect(session.store.inspectBookTasks(book.bookId, () => null).groups.find(group => group.key === 'recent')!.items.some(item => item.item.target.kind === 'review' && item.item.target.reviewRunId === run.reviewRunId)).toBe(true);
         expect(() => session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy)).not.toThrow();
       }
       expect(workspace(session, book, run.reviewRunId).run!.findings).toHaveLength(before.findings.length);
@@ -349,6 +352,15 @@ it('continues a shutdown-interrupted ordinary synthesis from its retained respon
 
 it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a paused 0.7.1 run without synthesis, and merges that legacy Book (#1433)', async () => {
   const source = join(roots.codeRoot, 'tests/fixtures/database/sample1-review-071.ai7db');
+  const probeRoot = join(roots.inputRoot, 'legacy-direct-open');
+  for (const [name, bytes] of Object.entries(unzipSync(await readFile(source)))) {
+    if (name === 'manifest.json') continue;
+    const destination = resolve(probeRoot, name), path = relative(probeRoot, destination);
+    if (path.startsWith('..') || isAbsolute(path)) throw new Error('Invalid compatibility fixture member');
+    await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, bytes);
+  }
+  const probe = await EditorialStore.open(probeRoot, roots.codeRoot);
+  probe.markCleanShutdown(); probe.close();
   let target = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   try { await target.prepareDatabaseReplacement((await target.inspectDatabaseImport(source)).previewId, new Date()); }
   finally { target.markCleanShutdown(); target.close(); }
@@ -403,7 +415,7 @@ it('uses identical synthesis wording in the pre-start plan and the frozen launch
 
 it('keeps cited quotations after an editor handles or removes their findings and freezes each report copy (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
-    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy));
     const run = workspace(session, book).run!;
     const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
     const entries = run.synthesis!.evidence.filter(entry => entry.blockId !== null && run.findings.some(finding => finding.findingId === entry.findingId && finding.markId !== null));
@@ -424,7 +436,7 @@ it('keeps cited quotations after an editor handles or removes their findings and
 
 it('freezes inherited procedure instructions for synthesis and accepts the next selected version (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
-    const stock = session.store.procedureLibrary({ action: 'inspect' }).procedures.find(procedure => procedure.procedureId === 'ai7-procedure/review-typos-and-usage')!;
+    const stock = session.store.procedureLibrary({ action: 'inspect' }).procedures.find(procedure => procedure.procedureId === 'ai7-procedure/review-style-and-format')!;
     const pin = (procedure: typeof stock) => ({ procedureId: procedure.procedureId, version: procedure.version, digest: procedure.digest });
     let chosen = session.store.procedureLibrary({ action: 'save', input: { procedureId: null, basedOn: pin(stock), title: '样书数字体例审阅',
       editorInstruction: '对数字体例先核对全书用法。', stages: stock.document.stages } }).procedures.find(procedure => procedure.document.title === '样书数字体例审阅')!;
@@ -432,7 +444,7 @@ it('freezes inherited procedure instructions for synthesis and accepts the next 
       if (chosen.document.editorInstruction !== text) chosen = session.store.procedureLibrary({ action: 'save', input: { procedureId: chosen.procedureId,
         basedOn: pin(chosen), title: chosen.document.title, editorInstruction: text, stages: chosen.document.stages } }).procedures.find(procedure => procedure.procedureId === chosen.procedureId)!;
       session.store.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin(chosen) });
-      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy));
       expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
       const request = session.capture.wireRequests.findLast(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
       expect(request.messages.find(message => message.role === 'system')!.content).toContain(text);

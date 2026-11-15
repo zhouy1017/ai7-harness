@@ -2865,7 +2865,7 @@ async function main() {
 
     // #1433: the compact book summary leaves the first actionable finding visible and its evidence opens the passage.
     requireJourney(reviewed.run.synthesis?.state === 'completed' && reviewed.run.synthesis.summary.recurringProblems.length > 0,
-      'review-synthesis-produced', { state: reviewed.run.synthesis?.state });
+      'review-synthesis-produced', { synthesis: reviewed.run.synthesis });
     if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
       await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');
