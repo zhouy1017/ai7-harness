@@ -15,7 +15,7 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
         if(bounds.left<0||bounds.top<0||bounds.right>innerWidth||bounds.bottom>innerHeight||!chooser)return false;
         chooser.querySelector('summary').focus();
         const focused=document.activeElement===chooser.querySelector('summary');
-        if(drawer.dataset.taskLaunchKind==='custom-analysis') {
+        if(drawer.dataset.taskLaunchKind!=='baseline-analysis') {
           drawer.querySelector('.task-launch-options').open=true;
           const retry=drawer.querySelector('[data-task-launch-option="retry"]'),focus=retry.nextElementSibling?.matches('.ui-select-trigger')?retry.nextElementSibling:retry;
           focus.scrollIntoView({block:'center',behavior:'instant'});focus.focus({preventScroll:true});
@@ -25,6 +25,16 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
         return focused&&!button.disabled;
       })()`);
       if (reachable !== true) throw new Error(`task-launch-bar-unreachable-${width}x${height}`);
+      if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-options').open`))) await pointerClick(renderer,waitFor,'#task-drawer .task-launch-options > summary',`${name}-retry-options-${width}`);
+      const retry='#task-drawer [data-task-launch-option="retry"]';
+      const original=await renderer.evaluate(`document.querySelector(${JSON.stringify(retry)}).value`);
+      for(const value of [original==='never'?'auto':'never',original]) {
+        const index=await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(retry)}).options).findIndex(option=>option.value===${JSON.stringify(value)})`);
+        await pointerClick(renderer,waitFor,`${retry} + .ui-select-trigger`,`${name}-retry-open-${width}`);
+        await pointerClick(renderer,waitFor,`${retry} ~ .ui-select-popover .ui-select-option[data-index="${index}"]`,`${name}-retry-${value}-${width}`);
+        await waitFor(renderer,`document.querySelector(${JSON.stringify(retry)}).value===${JSON.stringify(value)}`,`${name}-retry-current-${width}`);
+      }
+
       if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-estimate')?.open===true`))) {
         await pointerClick(renderer, waitFor, '#task-drawer .task-launch-estimate > summary', `${name}-preview-${width}`);
       } else await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="preview-launch"]', `${name}-refresh-preview-${width}`);

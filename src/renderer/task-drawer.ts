@@ -2846,7 +2846,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       usage.textContent = '计划预览按当前稿件和本次选项计算，不记录任务；开始时固定当前稿件。';
       runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
       const baselineOptions = next.operation === 'launchBaselineAnalysis';
-      const retryOptions = baselineOptions || next.operation === 'launchCustomAnalysis';
       const retry = el('select'); retry.dataset['taskLaunchOption'] = 'retry'; retry.setAttribute('aria-label', '遇到可重试的失败');
       for (const [value, label] of [['auto', '自动重试'], ['ask-first', '先问我'], ['never', '不重试']]) {
         if (value === 'ask-first' && !baselineOptions) continue;
@@ -2855,10 +2854,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       retry.value = next.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : next.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
       const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
       sampling.checked = !next.input.planEdits?.removedSteps.includes('assurance-sampling');
-      if (retryOptions) {
-        const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
-        runOptions.append(retryLabel);
-      }
+      const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
+      runOptions.append(retryLabel);
       if (baselineOptions) {
         const samplingLabel = el('label', undefined, '完成后核对与抽检'); samplingLabel.prepend(sampling);
         runOptions.append(samplingLabel);
@@ -2912,7 +2909,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (tokens === null && budget.value.trim() !== '') { problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return false; }
         const planEdits: PlanEditsProjection = {
           removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : next.input.planEdits?.removedSteps ?? [],
-          disallowedAdaptations: retryOptions ? retry.value === 'never' ? ['safe-retry'] : [] : next.input.planEdits?.disallowedAdaptations ?? [],
+          disallowedAdaptations: retry.value === 'never' ? ['safe-retry'] : [],
           ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
           ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
         };

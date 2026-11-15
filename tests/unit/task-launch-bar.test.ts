@@ -45,6 +45,9 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   expect(miniDocument.querySelector('.dispatch-chooser summary')?.textContent).toContain(channel.models[0]!.modelLabel);
   miniDocument.querySelector('[data-task-drawer-control="preview-launch"]')!.click();
   await vi.waitFor(() => expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).toContain('勾选的资料'));
+  const retry=miniDocument.querySelector('[data-task-launch-option="retry"]')!;
+  expect(Array.from(retry.querySelectorAll('option'),option=>option.value)).toEqual(operation==='launchBaselineAnalysis'?['auto','ask-first','never']:['auto','never']);
+  retry.value='never';
   miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='12345';
   miniDocument.body.dispatchEvent({type:'input'});
   expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
@@ -52,6 +55,6 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   miniDocument.querySelector('[data-task-drawer-control="launch"]')!.click();
   await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
   await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith(notice, 'success'));
-  expect(launch.mock.calls[0]![0]).toMatchObject({ rememberedChoice: true, executionConfig: remembered });
+  expect(launch.mock.calls[0]![0]).toMatchObject({ rememberedChoice: true, executionConfig: remembered, planEdits: { disallowedAdaptations: ['safe-retry'] } });
   expect(JSON.stringify({ values, roles: settings.roles })).toBe(before);
 });
