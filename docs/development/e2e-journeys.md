@@ -2,7 +2,7 @@
 
 ## #1490 settled pointer targets
 
-The shared real-pointer helper waits for the visible, topmost target's rectangle to match across consecutive animation frames before pressing. This keeps J-04's `open-plan-revision` from aiming at a moving attention button while the drawer-close body padding transition is still running. The real press/release, viewport and topmost checks, post-press hit check, read-only plan assertions, both viewports and existing timeouts remain; product motion and Gate selection are unchanged.
+The shared real-pointer helper waits for the visible, topmost target's rectangle to match across consecutive animation frames before pressing. This keeps J-04's `open-plan-revision` from aiming at a moving attention button while the drawer-close body padding transition is still running. J-11 awaits the frame predicate before converting its result to a boolean, as the other helper consumers do. The real press/release, viewport and topmost checks, post-press hit check, read-only plan assertions, both viewports and existing timeouts remain; product motion and Gate selection are unchanged.
 
 ## #1455 PR B synchronized delta
 

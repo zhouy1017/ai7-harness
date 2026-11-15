@@ -1,4 +1,5 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -43,4 +44,17 @@ it('still refuses a target that moves after the press', async () => {
   const target = scene({ moveOnPress: true });
   await expect(pointerClick(target.renderer, target.waitFor, 'button', 'attention-item')).rejects.toThrow('attention-item-target-moved-after-press');
   expect(target.events.map(event => event.type)).toEqual(['mousePressed']);
+});
+
+it('makes the J-11 caller await a false asynchronous actionability predicate', async () => {
+  const source = readFileSync(new URL('../../e2e/run-j11.mjs', import.meta.url), 'utf8').match(/async function waitFor\(renderer,[\s\S]*?\n\}/u)?.[0];
+  if (!source) throw new Error('J-11 wait seam missing');
+  const wait = Function('journeyCheckFailure', `return (${source})`)((_journey: string, name: string) => new Error(name)) as (renderer: Renderer, expression: string, name: string, timeout: number) => Promise<void>;
+  vi.useFakeTimers();
+  try {
+    const target = scene();
+    const outcome = wait(target.renderer, 'Promise.resolve(false)', 'not-actionable', 1).then(() => true, () => false);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(await outcome).toBe(false);
+  } finally { vi.useRealTimers(); }
 });
