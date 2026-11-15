@@ -2710,9 +2710,15 @@ async function main() {
         requireJourney((await readBaseline(renderer)).planEnvelope.digest===current.planEnvelope.digest,'legacy-plan-discard-unwritten');
         at('j14-plan-edit-keyboard');
         await renderer.evaluate(`document.querySelector('#task-drawer [data-task-drawer-control="revise"]').focus()`); await pressEnter(renderer);
-        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling'`,'legacy-plan-keyboard-focused');
-        await pressEnter(renderer); await pressTab(renderer); await pressTab(renderer); await pressEnter(renderer);
-        await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 2 处'`,'legacy-plan-keyboard-edited');
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-focused');
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-restored-focus');
+        await pressTab(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-budget');
+        await pressTab(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-retry');
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 2 处'`,'legacy-plan-keyboard-edited');
         at('plan-edit-update');
         await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="update-plan"]','legacy-plan-save');
         await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion===${JSON.stringify(String(current.planVersion.ordinal+1))}`,'legacy-plan-saved');
