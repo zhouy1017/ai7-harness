@@ -112,6 +112,97 @@ function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, execution
   }
 }
 
+type LaunchBook = Awaited<ReturnType<typeof book>>;
+type LaunchedTask = ReturnType<ReturnType<typeof command>>;
+
+function typeBeforeLaunch(target: LaunchBook) {
+  const shown = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
+  const paragraph = shown.blocks.find(block => block.kind === 'paragraph')!;
+  store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: target.manuscriptId, branchId: target.branchId,
+    baseRevisionId: shown.revisionId, blockId: paragraph.blockId, windowStartBlockId: shown.blocks[0]!.blockId,
+    baseBlockDigest: paragraph.digest, expectedJournalSequence: shown.journalSequence,
+    fromGrapheme: 0, toGrapheme: 0, insertText: '。' });
+  return store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
+}
+
+function expectTaskAttribution(kind: Kind, target: LaunchBook, launched: LaunchedTask, effort: string): void {
+  const task = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
+    .find(entry => entry.item.technical.some(line => line.key === 'run-record' && line.value.includes(launched.runRecordId)));
+  expect(task?.item.modelLabel).toContain(`@${effort}`);
+  if (kind === 'writing') expect(store.inspectWritingTask(target.bookId).task?.modelLabel).toBe(task?.item.modelLabel);
+  else if (kind === 'initial-evaluation') expect(store.inspectEvaluation(target.bookId, null).initial.task?.modelLabel).toBe(task?.item.modelLabel);
+  else if (kind === 'readers-report') expect(store.inspectEvaluation(target.bookId, null).readersReport.task?.modelLabel).toBe(task?.item.modelLabel);
+  else if (kind === 'evaluation-rewrite') expect(store.inspectEvaluation(target.bookId, target.recordId).rewrite.task?.modelLabel).toBe(task?.item.modelLabel);
+  if (kind === 'custom-analysis') expect(task?.item.object).toMatchObject({ kind: 'analysis', customTitle: CUSTOM_DIMENSION_TITLE });
+}
+
+function expectLaunchAuthorityOnly(kind: Kind, launches: ReadonlyArray<LaunchedTask>): void {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    expect(db.prepare('SELECT count(*) n FROM task_launch_snapshots WHERE task_kind = ?').get(kind)?.n).toBe(launches.length);
+    for (const launched of launches) {
+      // Units, reductions and sampling share this one Run; no later step is reserved as another authorized Run.
+      expect(db.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(1);
+      expect(db.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(1);
+      const authority = db.prepare(`SELECT a.canonical_json FROM analysis_run_records r JOIN analysis_run_authorizations a USING(authorization_id) WHERE r.run_record_id = ?`).get(launched.runRecordId);
+      expect(JSON.parse(String(authority?.canonical_json)).launchSnapshotId).toEqual(expect.any(String));
+      expect(db.prepare('SELECT count(*) n FROM analysis_plan_revisions WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(0);
+      expect(launched.ledger.currentRunState(launched.runRecordId)).toBe('authorized');
+    }
+  } finally { db.close(); }
+}
+
+async function baselineAnswers(): Promise<CapturedOrdinaryAnswer> {
+  const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-happy');
+  const reflectionFixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-transient-retry');
+  const reflection = Array.from(reflectionFixture.entries.values()).find(entry =>
+    entry.response?.kind === 'unit-result' && entry.response.text.includes('ai7.analysis.run-report-reflection-result/1'))?.response;
+  expect(reflection).toBeDefined();
+  return (request, message) => {
+    // The ordinary clarification wrapper has its own physical digest; reuse the existing baseline response schedule
+    // under the frozen unit identity, as the real-store composite transport tests do.
+    const unit = parseUnitMessageHeader(message);
+    return request.stage === 'run-report-reflection' ? reflection : request.stage === 'units' && unit !== null
+      ? resolveFixtureEntry(fixture.entries, unit.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.unitDigest), request.attemptIndex)?.response
+      : capturedMapAnswer(fixture.entries)(request, message);
+  };
+}
+
+function expectBaselineAttribution(target: LaunchBook, committed: LaunchedTask, modelLabel: string | undefined): void {
+  const attributionDb = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    expect(launchedRevisionModelLabels(attributionDb, store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId)).toEqual({ modelLabel });
+    expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
+    expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
+    const admittedRuns = attributionDb.prepare(`SELECT DISTINCT run_record_id FROM analysis_run_states
+      WHERE json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'
+      AND json_extract(canonical_json, '$.requestAdmission.data.event.request.requestId') IN (${capture!.requests.map(() => '?').join(',')})`)
+      .all(...capture!.requests.map(request => request.requestId));
+    expect(admittedRuns).toEqual([{ run_record_id: committed.runRecordId }]);
+  }
+  finally { attributionDb.close(); }
+  const row = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
+    .find(entry => entry.item.modelLabel === modelLabel);
+  expect(row).toBeDefined();
+}
+
+function expectVanishedSelectionRefused(target: LaunchBook): void {
+  const blocks = store.baselineAnalysisLedger.readWorkingBlocks(target.branchId);
+  const first = blocks.find((block, index) => block.kind === 'paragraph' && blocks[index + 1]?.kind === 'paragraph')!;
+  const gone = blocks.find(block => block.position === first.position + 1)!;
+  const window = store.getManuscriptWindowAt(target.manuscriptId, target.branchId, { kind: 'block', blockId: first.blockId });
+  store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: target.manuscriptId, branchId: target.branchId,
+    baseRevisionId: window.revisionId, blockId: first.blockId, windowStartBlockId: window.blocks[0]!.blockId,
+    baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: first.graphemes, toGrapheme: first.graphemes,
+    insertText: '', structure: { kind: 'merge', mergedBlockId: gone.blockId, mergedBlockDigest: gone.digest } });
+  expect(store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).some(block => block.blockId === gone.blockId)).toBe(false);
+  const moved = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
+  expect(() => store.launchBaselineAnalysis({ bookId: target.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
+    update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: gone.blockId, toBlockId: gone.blockId } } }, policy))
+    .toThrowError(expect.objectContaining({ code: 'ANALYSIS_SELECTED_RANGE_INVALID', message: expect.stringContaining('请重新选择') }));
+  expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest).toBe(moved.workingDigest);
+}
+
 describe.each(KINDS)('%s one-step launch', (kind) => {
   it('queues an offline launch in the same snapshot and preserves cancellation and replay without a send', async () => {
     const target = await book(kind); ordinary();
@@ -144,13 +235,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     const alternative = store.getModelServiceRouteConnection('deepseek-open-platform')
       ?? store.saveModelServiceConnection('另一渠道', null, 'needs-attention', 'deepseek-open-platform');
     store.saveModelServiceConnection(alternative.connectionName, alternative.credentialReference, 'ready', 'deepseek-open-platform');
-    const shown = store.getManuscriptWindow(a.manuscriptId, a.branchId, null);
-    const paragraph = shown.blocks.find(block => block.kind === 'paragraph')!;
-    store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: a.manuscriptId, branchId: a.branchId,
-      baseRevisionId: shown.revisionId, blockId: paragraph.blockId, windowStartBlockId: shown.blocks[0]!.blockId,
-      baseBlockDigest: paragraph.digest, expectedJournalSequence: shown.journalSequence,
-      fromGrapheme: 0, toGrapheme: 0, insertText: '。' });
-    const current = store.getManuscriptWindow(a.manuscriptId, a.branchId, null);
+    const current = typeBeforeLaunch(a);
     const clientCommandId = randomUUID();
     const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId, false,
       { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } }, 'idle');
@@ -166,34 +251,13 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
     expect(second.ledger.inspect(b.bookId).providerResolutionPlan?.remoteBinding?.credentialReference).toBe(alternative.credentialReference);
     expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
-    for (const [target, launched, effort] of [[a, first, 'high'], [b, second, 'low']] as const) {
-      const task = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
-        .find(entry => entry.item.technical.some(line => line.key === 'run-record' && line.value.includes(launched.runRecordId)));
-      expect(task?.item.modelLabel).toContain(`@${effort}`);
-      if (kind === 'writing') expect(store.inspectWritingTask(target.bookId).task?.modelLabel).toBe(task?.item.modelLabel);
-      else if (kind === 'initial-evaluation') expect(store.inspectEvaluation(target.bookId, null).initial.task?.modelLabel).toBe(task?.item.modelLabel);
-      else if (kind === 'readers-report') expect(store.inspectEvaluation(target.bookId, null).readersReport.task?.modelLabel).toBe(task?.item.modelLabel);
-      else if (kind === 'evaluation-rewrite') expect(store.inspectEvaluation(target.bookId, target.recordId).rewrite.task?.modelLabel).toBe(task?.item.modelLabel);
-      if (kind === 'custom-analysis') expect(task?.item.object).toMatchObject({ kind: 'analysis', customTitle: CUSTOM_DIMENSION_TITLE });
-    }
+    for (const [target, launched, effort] of [[a, first, 'high'], [b, second, 'low']] as const) expectTaskAttribution(kind, target, launched, effort);
     store.selectMainRoleModel('opencode-go', defaults.model, 'off');
     expect(firstCommand()).toMatchObject({ repeated: true, runRecordId: first.runRecordId, taskIntentId: first.taskIntentId });
     expect(() => command(kind, a, { modelId: defaults.model, reasoningEffort: 'low' }, clientCommandId)()).toThrowError(expect.objectContaining({
       code: 'TASK_LAUNCH_COMMAND_CHANGED', message: expect.stringContaining('请重新发起'),
     }));
-    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      expect(db.prepare('SELECT count(*) n FROM task_launch_snapshots WHERE task_kind = ?').get(kind)?.n).toBe(2);
-      for (const launched of [first, second]) {
-        // Units, reductions and sampling share this one Run; no later step is reserved as another authorized Run.
-        expect(db.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(1);
-        expect(db.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(1);
-        const authority = db.prepare(`SELECT a.canonical_json FROM analysis_run_records r JOIN analysis_run_authorizations a USING(authorization_id) WHERE r.run_record_id = ?`).get(launched.runRecordId);
-        expect(JSON.parse(String(authority?.canonical_json)).launchSnapshotId).toEqual(expect.any(String));
-        expect(db.prepare('SELECT count(*) n FROM analysis_plan_revisions WHERE task_intent_id = ?').get(launched.taskIntentId)?.n).toBe(0);
-        expect(launched.ledger.currentRunState(launched.runRecordId)).toBe('authorized');
-      }
-    } finally { db.close(); }
+    expectLaunchAuthorityOnly(kind, [first, second]);
     await restart();
     store.reconcileStoppedBaselineAnalysisRuns(); store.reconcileStoppedInitialEvaluationRuns();
     store.reconcileStoppedWritingRuns(); store.reconcileStoppedReadersReportRuns(); store.reconcileStoppedEvaluationRewriteRuns();
@@ -220,19 +284,7 @@ it('reconnects a committed baseline launch after restart once and retains actual
   const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
   store.selectMainRoleModel('opencode-go', defaults.model, 'off');
   const changedDefaults = store.getConfiguredModelRoleBinding('main-editorial');
-  const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-happy');
-  const reflectionFixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-baseline-transient-retry');
-  const reflection = Array.from(reflectionFixture.entries.values()).find(entry =>
-    entry.response?.kind === 'unit-result' && entry.response.text.includes('ai7.analysis.run-report-reflection-result/1'))?.response;
-  expect(reflection).toBeDefined();
-  await restart((request, message) => {
-    // The ordinary clarification wrapper has its own physical digest; reuse the existing baseline response schedule
-    // under the frozen unit identity, as the real-store composite transport tests do.
-    const unit = parseUnitMessageHeader(message);
-    return request.stage === 'run-report-reflection' ? reflection : request.stage === 'units' && unit !== null
-      ? resolveFixtureEntry(fixture.entries, unit.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.unitDigest), request.attemptIndex)?.response
-      : capturedMapAnswer(fixture.entries)(request, message);
-  });
+  await restart(await baselineAnswers());
   store.reconcileStoppedBaselineAnalysisRuns();
   const replay = launch();
   expect(replay).toMatchObject({ repeated: true, runRecordId: committed.runRecordId });
@@ -246,18 +298,7 @@ it('reconnects a committed baseline launch after restart once and retains actual
   await capture!.owner.whenIdle();
   const report = store.inspectBaselineAnalysis(target.bookId).taskOutcome!.report!;
   expect(report.modelLabel).toBe('account-future-model@high');
-  const attributionDb = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-  try {
-    expect(launchedRevisionModelLabels(attributionDb, store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId)).toEqual({ modelLabel: report.modelLabel });
-    expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
-    expect(attributionDb.prepare('SELECT count(*) n FROM analysis_run_authorizations WHERE task_intent_id = ?').get(committed.taskIntentId)?.n).toBe(1);
-    const admittedRuns = attributionDb.prepare(`SELECT DISTINCT run_record_id FROM analysis_run_states
-      WHERE json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'
-      AND json_extract(canonical_json, '$.requestAdmission.data.event.request.requestId') IN (${capture!.requests.map(() => '?').join(',')})`)
-      .all(...capture!.requests.map(request => request.requestId));
-    expect(admittedRuns).toEqual([{ run_record_id: committed.runRecordId }]);
-  }
-  finally { attributionDb.close(); }
+  expectBaselineAttribution(target, committed, report.modelLabel);
   expect(capture!.requests.some(request => request.stage === 'cross-unit-reduction')).toBe(true);
   expect(capture!.wireRequests.length).toBeGreaterThan(0);
   expect(capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
@@ -265,23 +306,7 @@ it('reconnects a committed baseline launch after restart once and retains actual
   driveLaunchedLedgerRun(capture!.owner, launch()); await capture!.owner.whenIdle();
   expect(capture!.wireRequests).toHaveLength(sent);
   expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual(changedDefaults);
-  const row = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
-    .find(entry => entry.item.modelLabel === report.modelLabel);
-  expect(row).toBeDefined();
-  const blocks = store.baselineAnalysisLedger.readWorkingBlocks(target.branchId);
-  const first = blocks.find((block, index) => block.kind === 'paragraph' && blocks[index + 1]?.kind === 'paragraph')!;
-  const gone = blocks.find(block => block.position === first.position + 1)!;
-  const window = store.getManuscriptWindowAt(target.manuscriptId, target.branchId, { kind: 'block', blockId: first.blockId });
-  store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: target.manuscriptId, branchId: target.branchId,
-    baseRevisionId: window.revisionId, blockId: first.blockId, windowStartBlockId: window.blocks[0]!.blockId,
-    baseBlockDigest: first.digest, expectedJournalSequence: window.journalSequence, fromGrapheme: first.graphemes, toGrapheme: first.graphemes,
-    insertText: '', structure: { kind: 'merge', mergedBlockId: gone.blockId, mergedBlockDigest: gone.digest } });
-  expect(store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).some(block => block.blockId === gone.blockId)).toBe(false);
-  const moved = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
-  expect(() => store.launchBaselineAnalysis({ bookId: target.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
-    update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: gone.blockId, toBlockId: gone.blockId } } }, policy))
-    .toThrowError(expect.objectContaining({ code: 'ANALYSIS_SELECTED_RANGE_INVALID', message: expect.stringContaining('请重新选择') }));
-  expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest).toBe(moved.workingDigest);
+  expectVanishedSelectionRefused(target);
   expect(capture!.wireRequests).toHaveLength(sent);
 });
 
