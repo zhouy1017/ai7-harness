@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { buildSynthesisInput, parseSynthesisSummary, type SynthesisFinding } from '../../src/service/review/run-synthesis-contract.js';
+import { runSynthesisKind } from '../../src/service/review/run-synthesis-kind.js';
+import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 
 // Reuse authored findings from the admitted Public SampleBook; never manufacture manuscript prose.
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/model/sample1-review-authored.json', import.meta.url), 'utf8'));
@@ -16,6 +20,21 @@ const findings: SynthesisFinding[] = fixture.entries.filter((entry: { unitOrdina
   });
 
 describe('whole-book synthesis contract', () => {
+  it('admits the ordinary structured composition and refuses manuscript unit turns or tools', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      const binding = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0]!, credentialReference: '11111111-1111-4111-8111-111111111111' };
+      const policy = resolveSourceCheckoutLaunchPolicySync(process.cwd(), 'ordinary-production', binding);
+      const definition = runSynthesisKind(db, 'unit-test');
+      expect(liveKindAdmission(policy, definition, binding)).not.toBeNull();
+      expect(liveKindAdmission(policy, { ...definition, structuredOnly: false }, binding)).toBeNull();
+      const parent = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes('editorial-review/typos-and-usage'))!;
+      const tools = { ...policy, providerProcessing: { ...policy.providerProcessing,
+        admittedRules: policy.providerProcessing.admittedRules.map((rule) => rule.taskKinds.includes(definition.kind)
+          ? { ...rule, localTools: parent.localTools ?? null } : rule) } };
+      expect(liveKindAdmission(tools, definition, binding)).toBeNull();
+    } finally { db.close(); }
+  });
   it('keeps a readable assessment and valid cited items when other model fields are malformed', () => {
     const input = buildSynthesisInput({ findings, missingCategories: [], baseline: null });
     const summary = parseSynthesisSummary(JSON.stringify({ overallAssessment: '先统一数字体例，再逐条核对表达。',

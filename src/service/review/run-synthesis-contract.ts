@@ -41,7 +41,7 @@ export function synthesisMessage(input: SynthesisInput): string {
   return canonicalJson({ ...input,
     clusters: input.clusters.map((cluster) => ({ ...cluster, findingRefs: cluster.findingRefs.map((ref) => refs.get(ref)!) })),
     findings: input.findings.map((finding) => ({ ...finding, ref: refs.get(finding.ref)! })),
-    evidence: input.evidence.map(({ findingId, ...evidence }) => ({ ...evidence, findingRef: refs.get(findingId)! })),
+    evidence: input.evidence.map(({ findingId, chapterLabel: _label, ...evidence }) => ({ ...evidence, findingRef: refs.get(findingId)! })),
     baseline: input.baseline === null ? null : { synopses: input.baseline.synopses },
   });
 }

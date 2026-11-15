@@ -3101,7 +3101,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .dispatch-chooser-panel select { max-width: 100%; min-width: 0; }
 
 .evaluation-report-model, .evaluation-task-model, .evaluation-initial-task, .readers-report-task, .writing-task-line, .writing-drafted-model { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-.review-synthesis { margin: .35rem 0; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: .35rem; }
+.review-synthesis { margin: .35rem 0; padding: .4rem .6rem; border: 1px solid var(--boundary); border-radius: .35rem; }
+.review-synthesis-preview { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: normal; }
 .review-synthesis summary { cursor: pointer; font-weight: 600; }
 .review-synthesis p { white-space: pre-wrap; overflow-wrap: anywhere; margin: .45rem 0; }
 .review-synthesis button { text-align: left; white-space: normal; }

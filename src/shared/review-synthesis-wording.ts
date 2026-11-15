@@ -13,6 +13,6 @@ export function reviewSynthesisLines(value: ReviewSynthesisProjection): string[]
     ...summary.recurringProblems.map((problem) => `${problem.title}：${problem.explanation}${problem.priority ? `；${problem.priority}` : ''}\n${citation(problem.evidenceRefs)}`),
     ...summary.contextualExplanations.map((item) => `结合全书可解释的情况：${item.explanation}\n${citation(item.evidenceRefs)}`),
     ...summary.priorities.map((priority, index) => `建议先处理 ${index + 1}：${priority}`),
-  ]), ...(value.missingCategories.length === 0 ? [] : [`本次统合缺少：${value.missingCategories.join('、')}。`]),
+  ]), ...(value.missingCategories.length === 0 ? [] : [`以下类别未完整完成：${value.missingCategories.join('、')}。`]),
   ...(value.omissionLabel === null ? [] : [value.omissionLabel])];
 }

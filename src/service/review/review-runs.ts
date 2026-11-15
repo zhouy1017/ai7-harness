@@ -1,6 +1,8 @@
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
 import { RUN_SYNTHESIS_CATEGORY, RUN_SYNTHESIS_ENTRY } from './run-synthesis-kind.js';
 import { buildSynthesisInput, parseSynthesisSummary, type SynthesisInput } from './run-synthesis-contract.js';
+import { modelProfileFor } from '../provider/model-profile.js';
+import type { RemoteExecutionRoute } from '../provider/egress-gate.js';
 import { markModelLabels, recordedMarkModel } from '../editorial-mark-source.js';
 import { researchModelChannelLabel } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
@@ -8,7 +10,7 @@ import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/
 import { reviewProcedureId } from '../procedures/preinstalled.js';
 import { compositeReviewRun, type CompositeReviewRun } from '../procedures/composite-run.js';
 import { procedureContent } from '../procedures/execution.js';
-import { compositeMembers, readProcedurePlanView } from '../procedures/composite.js';
+import { compositeMembers, readProcedurePlanView, resolveProcedureForKind } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV3, freezeLocalPlanV4, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
@@ -1538,10 +1540,13 @@ export class ReviewRunStore {
     if ((scope.kind === 'whole' || scope.kind === 'chapters') && planned.some((category) => category.entry.executor !== 'baseline-leads')) {
       const source = planned.find((category) => category.entry.executor !== 'baseline-leads')!;
       const sourceKind = this.#ledgers.ledgerOf(source.entry).definition.kind;
+      const sourceProcedure = selectedProcedureForBook(this.#db, bookId, sourceKind);
+      const synthesisEntry = { ...RUN_SYNTHESIS_ENTRY, synthesisKey: randomUUID(), synthesisSource: { categoryId: source.entry.categoryId,
+        kind: sourceKind, procedure: sourceProcedure,
+        ...(sourceProcedure === null ? {} : { document: resolveProcedureForKind(this.#db, sourceProcedure, sourceKind).document }) } };
+      const hasSynthesis = this.#ledgers.ledgerOf(synthesisEntry).inspect(bookId).resultSetRevision !== null;
       planned.push({ position: planned.length + (local === null ? 1 : 2),
-        entry: { ...RUN_SYNTHESIS_ENTRY, synthesisKey: randomUUID(), synthesisSource: { categoryId: source.entry.categoryId,
-          kind: sourceKind, procedure: selectedProcedureForBook(this.#db, bookId, sourceKind) } },
-        plan: { kind: 'task', mode: 'review-first', selectedRange: null } });
+        entry: synthesisEntry, plan: { kind: 'task', mode: hasSynthesis ? 'review-again' : 'review-first', selectedRange: null } });
     }
     // 本社审阅偏好 (Issue #911): each model-backed category reads its own lines when its rule names the outbound category.
     const offeredPreferences = planned.filter((category) => category.entry.executor === 'review-category-contract').map((category) => {
@@ -1849,7 +1854,10 @@ export class ReviewRunStore {
       typeof entry.categoryId === 'string' && typeof entry.planEnvelopeDigest === 'string' && DIGEST_PATTERN.test(entry.planEnvelopeDigest)),
     'REVIEW_AUTHORIZATION_INVALID', '授权的计划摘要无效。');
     const approved = new Map(planDigests.map((entry) => [entry.categoryId, entry.planEnvelopeDigest] as const));
-    requireReview(approved.size === planDigests.length && approved.size === tasks.length + (local === null ? 0 : 1) &&
+    const synthesis = tasks.find((category) => category.entry.synthesisKey !== undefined);
+    const implicitSynthesis = synthesis !== undefined && !approved.has(synthesis.categoryId);
+    if (implicitSynthesis) approved.set(synthesis.categoryId, synthesis.task!.planEnvelopeDigest);
+    requireReview(approved.size === planDigests.length + (implicitSynthesis ? 1 : 0) && approved.size === tasks.length + (local === null ? 0 : 1) &&
       tasks.every((category) => approved.get(category.categoryId) === category.task!.planEnvelopeDigest) && (local === null || approved.get(LOCAL_CHECK_CATEGORY) === local.digest),
     'REVIEW_AUTHORIZATION_STALE', '授权所依据的计划与这次审阅准备的计划不一致；请重新查看计划。');
     if (existing !== null) return;
@@ -2237,13 +2245,13 @@ export class ReviewRunStore {
       authorized: view.authorization !== null,
       state: view.state,
       canContinue: view.canContinue,
-      categories: view.categories.map((category) => ({ entry: category.category.entry, state: category.state, stateLabel: category.stateLabel })),
+      categories: view.categories.filter((category) => category.category.entry.synthesisKey === undefined).map((category) => ({ entry: category.category.entry, state: category.state, stateLabel: category.stateLabel })),
     }, this.#configuration());
   }
 
   /** The configuration entries a Run snapshotted, in its order: what a Captured Procedure's ceiling is held to (ADR 0087 §3). */
   snapshotEntries(reviewRunId: string): ReadonlyArray<ReviewCategoryConfigurationEntry> {
-    return this.#run(reviewRunId).categories.map((category) => category.entry);
+    return this.#run(reviewRunId).categories.filter((category) => category.entry.synthesisKey === undefined).map((category) => category.entry);
   }
 
   /** A Run's ordinal, for naming it: 第 N 次. */
@@ -2761,7 +2769,7 @@ export class ReviewRunStore {
     const findings = views.filter((finding) => modelIds.has(finding.categoryId));
     const manifestUnits = modelCategories.flatMap((entry) => {
       const frozen = this.#categoryLedger(entry, snapshot).frozenPlan(entry.task!.taskIntentId, entry.task!.planEnvelopeDigest);
-      const manifest = frozen.components['coverage-manifest'] as { units?: Array<{ ordinal: number; startPosition: number; endPosition: number }> };
+      const manifest = frozen.components['coverage-manifest'] as { units?: Array<{ ordinal: number; sectionOrdinal: number; headingText: string | null; startPosition: number; endPosition: number }> };
       return (manifest?.units ?? []).filter((unit) => snapshot.scope.selectedRange === null ||
         unit.endPosition >= snapshot.scope.selectedRange.startPosition && unit.startPosition <= snapshot.scope.selectedRange.endPosition);
     });
@@ -2780,12 +2788,20 @@ export class ReviewRunStore {
         return typeof unit.synopsis === 'string' ? [{ unitOrdinal: integer(row.unit_ordinal), synopsis: unit.synopsis }] : [];
       });
     const missingCategories = modelCategories.filter((entry) => !this.#events(snapshot.reviewRunId, entry.categoryId).some((event) => event.state === 'materialized')).map((entry) => entry.entry.label);
+    const synthesisLedger = this.#categoryLedger(category, snapshot);
+    const synthesisPlan = synthesisLedger.frozenPlan(category.task!.taskIntentId, category.task!.planEnvelopeDigest);
+    const route = (synthesisPlan.components['provider-resolution-plan'] as { executionRoute: { kind: string; model?: string } }).executionRoute;
+    const contextTokens = route.model === undefined ? null : modelProfileFor(route.kind as RemoteExecutionRoute, route.model)?.context.tokens ?? null;
+    const envelope = synthesisPlan.components['plan-envelope'] as { promptContractDigest: string };
+    const overheadBytes = Buffer.byteLength(synthesisLedger.definitionForDigest(envelope.promptContractDigest).systemPrompt, 'utf8') + 4096;
+    // UTF-8 bytes conservatively bound token count. Leave room for the frozen wrappers and answer.
+    const requestBytes = contextTokens === null ? 96 * 1024 : Math.max(1024, contextTokens - overheadBytes);
     const input = buildSynthesisInput({ findings: findings.map((finding) => {
       const unit = manifestUnits.find((candidate) => finding.blockPosition !== null && finding.blockPosition >= candidate.startPosition && finding.blockPosition <= candidate.endPosition);
-      const chapterOrdinal = unit?.ordinal ?? 1;
+      const chapterOrdinal = unit?.sectionOrdinal ?? 1;
       return { findingId: finding.findingId, categoryId: finding.categoryId, clauseId: finding.clauseRef ?? '', severity: finding.severity,
-        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: `第 ${chapterOrdinal} 个阅读范围` };
-    }), missingCategories, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), synopses } });
+        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: unit?.headingText ?? `第 ${chapterOrdinal} 章` };
+    }), missingCategories, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), synopses } }, requestBytes);
     const record = canonicalRecord(input);
     const priorUsage = { inputTokens: 0, outputTokens: 0 };
     for (const member of modelCategories) {
@@ -2835,7 +2851,7 @@ export class ReviewRunStore {
       evidence: (input?.evidence ?? []).map((entry) => {
         const finding = findings.get(entry.findingId);
         return { ref: entry.ref, findingId: entry.findingId, chapterLabel: entry.chapterLabel, quote: entry.quote,
-          status: finding === undefined || finding.markStatus === 'removed' ? 'absent' : finding.status,
+          status: finding === undefined || finding.markStatus === 'removed' || finding.blockPosition === null ? 'absent' : finding.status,
           blockId: finding?.blockPosition == null ? null : finding.blockId };
       }) } };
   }
@@ -3162,6 +3178,7 @@ export class ReviewRunStore {
       return;
     }
     const events = this.#events(reviewRunId, categoryId);
+    if (category.entry.synthesisKey !== undefined && events.some((event) => event.state === 'materialized')) return;
     const terminal = this.#terminalFactualRevision(snapshot, category);
     const last = events.at(-1);
     const retention = terminal !== null && last?.state === terminal.state && last.runRecordId === terminal.runRecordId &&
@@ -3181,7 +3198,7 @@ export class ReviewRunStore {
       const body = recordOf(text(row.canonical_json), text(row.sha256));
       const saved = canonicalRecord({ summary: body.runSynthesis ?? null });
       transact(this.#db, () => {
-        this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ?').run(saved.json, saved.digest, reviewRunId);
+        this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ? AND summary_json IS NULL').run(saved.json, saved.digest, reviewRunId);
         this.#recordEvent(reviewRunId, categoryId, 'materialized', body.runSynthesis == null ? '统合总结暂缺，逐条发现仍可处理。' : '已形成全书审阅统合总结。',
           { runRecordId: settled.runRecordId, resultSetRevisionId: revision.revisionId, extra: { findingCount: 0 } });
       });
@@ -3698,7 +3715,7 @@ export class ReviewRunStore {
         manuscriptExtent: head === null ? undefined : { chapterCount: chapters.length, characterCount: Number((this.#db
           .prepare("SELECT coalesce(sum(length(text)), 0) characters FROM working_blocks WHERE branch_id = ? AND kind = 'paragraph'")
           .get(head.branchId) as SqlRow).characters) },
-        categories: categories.map((categoryView) => {
+        categories: categories.filter((categoryView) => categoryView.category.entry.synthesisKey === undefined).map((categoryView) => {
           const { category } = categoryView;
           const output = categoryView.materialized ?? categoryView.retained;
           const stateLabel = categoryView.stateLabel;
@@ -4865,7 +4882,7 @@ export class ReviewRunStore {
     const { state, canContinue } = reviewRunState({
       authorized: authorization !== null,
       driving,
-      categories: categories.map((view) => ({ pending: view.pending, materialized: view.materialized !== null || view.category.entry.synthesisKey !== undefined && !view.pending,
+      categories: categories.filter((view) => view.category.entry.synthesisKey === undefined || view.pending).map((view) => ({ pending: view.pending, materialized: view.materialized !== null,
         retained: typeof view.retained?.record.findingCount === 'number' && view.retained.record.findingCount > 0 })),
       stop,
       waiting,
@@ -5122,7 +5139,7 @@ export class ReviewRunStore {
       label: `第 ${view.snapshot.ordinal} 次`,
       createdAt: view.snapshot.createdAt,
       scopeLabel: view.snapshot.scope.label,
-      categoryLabels: view.snapshot.categories.map((category) => category.entry.label),
+      categoryLabels: view.snapshot.categories.filter((category) => category.entry.synthesisKey === undefined).map((category) => category.entry.label),
       state: view.state,
       stateLabel: runViewStateLabel(view),
       findingCounts: reviewFindingCounts(view.findings),
@@ -5145,7 +5162,7 @@ export class ReviewRunStore {
     const reports = this.#reports(snapshot.reviewRunId);
     const labels = new Map(snapshot.categories.map((category) => [category.categoryId, category.entry.label] as const));
     const findingsOf = (categoryId: string): number => view.findings.filter((finding) => finding.categoryId === categoryId).length;
-    const categories = view.categories.map((categoryView): ReviewRunCategoryProjection => {
+    const categories = view.categories.filter((categoryView) => categoryView.category.entry.synthesisKey === undefined).map((categoryView): ReviewRunCategoryProjection => {
       const { category } = categoryView;
       // The ledger's own projection of this category's Task carries its Measured Run Progress while the
       // owner executes it; an older Run's Task is no longer its category's latest, and reads none.

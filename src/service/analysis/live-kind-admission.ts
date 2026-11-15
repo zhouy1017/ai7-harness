@@ -52,6 +52,7 @@ export interface LiveKindBinding {
 
 /** The parts of an analysis kind definition admission reads. */
 export interface LiveKindDefinition {
+  readonly structuredOnly?: boolean;
   readonly procedureBinding?: AnalysisKindDefinition['procedureBinding'];
   readonly reviewCrossChapter?: AnalysisKindDefinition['reviewCrossChapter'];
   readonly kind: string;
@@ -174,7 +175,7 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
 function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
   if (definition.kind === 'editorial-review/run-synthesis') {
     const rule = liveKindRule(policy, definition.kind);
-    if (rule === null || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
+    if (definition.structuredOnly !== true || rule === null || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
       definition.systemPrompt !== RUN_SYNTHESIS_PROMPT || definition.promptContractDigest !== RUN_SYNTHESIS_PROMPT_DIGEST) return null;
     return { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, payloadCategories: ['public-or-synthetic'] };
   }

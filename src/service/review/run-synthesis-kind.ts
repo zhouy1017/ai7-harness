@@ -35,7 +35,7 @@ export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewC
     promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, livePromptContractDigest: () => RUN_SYNTHESIS_PROMPT_DIGEST,
     schemaDigest: digest, reducerDigest: digest,
     executionSteps: [REVIEW_SYNTHESIS_PLAN_LINE],
-    updateExecutionSteps: [], assurance: null, assuranceAbsentReason: '统合总结保留原发现，由编辑判断。',
+    updateModes: ['review-again'], updateExecutionSteps: [REVIEW_SYNTHESIS_PLAN_LINE], assurance: null, assuranceAbsentReason: '统合总结保留原发现，由编辑判断。',
     crossUnit: { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, resultSchema: RUN_SYNTHESIS_SCHEMA,
       step: { label: '全书审阅统合总结', minimumClosedUnits: 0, notEnoughReason: '', requiredForCompletion: true,
         buildMessage: message, requestDigest: () => sha256Hex(message()),
@@ -51,6 +51,6 @@ export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewC
     revisionComponents: (body) => ({ ...base.revisionComponents(body), runSynthesis: isRecord(body.runSynthesis) ? body.runSynthesis : null }),
   };
   if (source?.procedure == null) return definition;
-  const member = resolveProcedureForKind(db, source.procedure, source.kind);
-  return withProcedureDefinition(definition, member.document, source.procedure);
+  const document = source.document ?? resolveProcedureForKind(db, source.procedure, source.kind).document;
+  return withProcedureDefinition(definition, document, source.procedure);
 }

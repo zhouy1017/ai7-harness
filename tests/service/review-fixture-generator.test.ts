@@ -549,6 +549,20 @@ async function pass(): Promise<boolean> {
   for (const withBaseline of [false, true]) for (let mask = 1; mask < 16; mask += 1) await withBook(async (context) => {
     if (withBaseline) await baseline(context);
     const categoryIds = categories.filter((_category, index) => (mask & (1 << index)) !== 0);
+    note(await runReviewSynthesis(context, categoryIds, `synthesis-${withBaseline}-${mask}`));
+  });
+  const controls = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-review-contract-v2-controls');
+  for (const variant of ['plain', 'baseline', 'j04']) await withBook(async (context) => {
+    if (variant === 'j04') appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+    if (variant !== 'plain') await baseline(context);
+    if (variant === 'j04') appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    note(await runReviewSynthesis(context, ['typos-and-usage', 'style-and-format', 'plot-consistency'], `synthesis-controls-${variant}`));
+  }, controls);
+  return allClosed;
+}
+
+
+async function runReviewSynthesis(context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string }, categoryIds: string[], label: string): Promise<boolean> {
     let work = context.store.createReviewRunPreparationWork(context.bookId, categoryIds,
       { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy);
     while (!work.done) work = context.store.advanceReviewRunPreparationWork(work.workId!);
@@ -560,14 +574,12 @@ async function pass(): Promise<boolean> {
     const db = new DatabaseSync(join(context.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
       const row = db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(run.reviewRunId);
-      if (typeof row?.input_json !== 'string') return;
+      if (typeof row?.input_json !== 'string') return true;
       const message = synthesisMessage(JSON.parse(row.input_json) as SynthesisInput);
       const response = sample1SynthesisAnswer(message)!;
-      add({ unitOrdinal: 0, requestDigest: sha256Hex(message), attempt: null, contentDigest: null, response }, 90, `synthesis-${withBaseline}-${mask}`);
-      note(context.store.inspectReviewWorkspace(context.bookId, run.reviewRunId).run?.synthesis?.state === 'completed');
+      add({ unitOrdinal: 0, requestDigest: sha256Hex(message), attempt: null, contentDigest: null, response }, 90, label);
+      return context.store.inspectReviewWorkspace(context.bookId, run.reviewRunId).run?.synthesis?.state === 'completed';
     } finally { db.close(); }
-  });
-  return allClosed;
 }
 
 it('generates the authored review fixture without unreachable committed entries', async () => {
