@@ -816,7 +816,15 @@ export class BaselineAnalysisStore {
   }
 
   /** The launch's binding as its sentences read it: under ordinary-production without a route, 模型服务需设置. */
-  #liveReading(): LiveReading {
+  #liveReading(providerPlan: BaselineAnalysisProjection['providerResolutionPlan'] = null): LiveReading {
+    // Inspection of a saved task describes its own route, even on a cached kind ledger.
+    const route = providerPlan?.executionRoute;
+    const allowed = providerPlan?.remoteBinding.providerProcessing.operationalScope === 'ordinary-production'
+      ? ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find(binding => binding.route === route?.kind) : undefined;
+    if (allowed !== undefined && route !== undefined && 'model' in route) return {
+      ...allowed, model: route.model, credentialReference: providerPlan!.remoteBinding.credentialReference,
+      scope: 'ordinary-production', runBudgetCeiling: 'unset',
+    };
     return this.#launch.operationalScope === 'ordinary-production' && this.#launch.live === null ? MODEL_SERVICE_SETUP_REQUIRED : this.#launch.live;
   }
 
@@ -1046,7 +1054,7 @@ export class BaselineAnalysisStore {
         canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null && planDerives,
         canReconfirmPlan,
       },
-      namedNonEffects: namedNonEffects(this.#liveReading(), manifest.units.length),
+      namedNonEffects: namedNonEffects(this.#liveReading(providerPlan), manifest.units.length),
     });
   }
 
