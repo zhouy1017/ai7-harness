@@ -982,7 +982,6 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #418 (S72): the plan the preparation froze, in the Task Drawer beside ②A.
     'analysis-plan-drawer',
     // Issue #420 (S74a): the drawer's authorization bar before the start and, the Run settled, after it.
-    'analysis-bar-ready',
     'authorize-dispatch',
     'result-set-revision',
     'analysis-bar-started',
@@ -1019,6 +1018,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-drift',
     // Issue #418 (S72 D8): the drift in the drawer's words; then #288's range, the one version 2 froze.
     'plan-revision-drawer-diff',
+    'second-book-plan-revision',
+    'open-plan-revision',
+    'launch-options-wide',
+    'launch-options-gate',
     // Issue #420 (S74a A4): a changed plan's bar offers 重新确认计划 and 查看计划修订, and no start.
     'plan-revision-bar',
     'plan-revision-stale-authorize',
@@ -1339,12 +1342,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'second-book-launch',
     'second-book-import',
     'second-book-completed-run',
-    'second-book-plan-revision',
     'attention-groups',
     'attention-count',
     'attention-writes-nothing',
     'open-blocked-run',
-    'open-plan-revision',
     'open-completion',
     'j14-attention-keyboard',
     'j14-attention-zoom-200-reflow',

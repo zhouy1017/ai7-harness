@@ -1,3 +1,5 @@
+import { pointerClick } from './dispatch-chooser.mjs';
+
 /** Start through the ordinary product bar. Opening its estimate never creates or authorizes a prepared task. */
 export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
   await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-launch-ready`);
@@ -13,7 +15,6 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
         if(bounds.left<0||bounds.top<0||bounds.right>innerWidth||bounds.bottom>innerHeight||!chooser)return false;
         chooser.querySelector('summary').focus();
         const focused=document.activeElement===chooser.querySelector('summary');
-        const estimate=drawer.querySelector('.task-launch-estimate');estimate.open=true;
         if(drawer.dataset.taskLaunchKind==='custom-analysis') {
           drawer.querySelector('.task-launch-options').open=true;
           const retry=drawer.querySelector('[data-task-launch-option="retry"]'),focus=retry.nextElementSibling?.matches('.ui-select-trigger')?retry.nextElementSibling:retry;
@@ -24,6 +25,10 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
         return focused&&!button.disabled;
       })()`);
       if (reachable !== true) throw new Error(`task-launch-bar-unreachable-${width}x${height}`);
+      if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-estimate')?.open===true`))) {
+        await pointerClick(renderer, waitFor, '#task-drawer .task-launch-estimate > summary', `${name}-preview-${width}`);
+      } else await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="preview-launch"]', `${name}-refresh-preview-${width}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer .task-launch-estimate ol')?.children.length>0 && document.querySelector('#task-drawer .task-launch-estimate')?.textContent.includes('阅读单元')`, `${name}-preview-current-${width}`);
     }
   } finally {
     if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');

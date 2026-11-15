@@ -2931,6 +2931,30 @@ it('cancels an offline ordinary review before any category starts and immediatel
   } finally { await close(session); }
 });
 
+it('continues an ordinary launched review after its running ledger view is evicted from the bounded cache (#1455)', async () => {
+  const session = await openLayeredSelection();
+  const gated = new GatedOwner(session.owner, 2), driver = new ReviewRunDriver(session.store.reviewRunDriveSteps, gated);
+  try {
+    const book = await importBook(session);
+    const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } }, launchPolicy).projection.run!;
+    const driving = driver.drive(run.reviewRunId); await gated.reached;
+    for (let index = 0; index < 33; index += 1) {
+      const other = await importBook(session);
+      const launched = session.store.launchReviewRun({ bookId: other.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
+      session.store.inspectReviewWorkspace(other.bookId, launched.projection.run!.reviewRunId);
+    }
+    const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+    session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    gated.release(); await driving;
+    const settled = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!;
+    expect(settled.state).toBe('settled'); expect(settled.modelLabel).toBe('account-future-model@high');
+    expect(settled.categories.every(category=>category.state==='settled')).toBe(true);
+    expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+    expect(session.capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+  } finally { gated.release(); await close(session); }
+});
+
 it('replays a committed launch after restart and drives it once without a second send (#1455)', async () => {
   let book!: Book;
   const clientCommandId = randomUUID();

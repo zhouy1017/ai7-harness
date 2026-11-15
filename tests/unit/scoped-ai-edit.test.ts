@@ -137,6 +137,19 @@ it('pins a new command after a coded refusal while retaining the instruction', a
   expect(startScopedAiEdit.mock.calls[1]![0].clientCommandId).not.toBe(startScopedAiEdit.mock.calls[0]![0].clientCommandId);
 });
 
+it('sends the remembered scoped-edit choice and keeps its unavailable-model notice visible', async () => {
+  const notice = '上次选择的模型已不可用，本次已使用角色默认模型。';
+  const remembered = { modelConnectionId: 'previous-connection', modelId: 'previous-model', reasoningEffort: 'high' };
+  const startScopedAiEdit = vi.fn(async (_input: StartScopedAiEditInput) => ({ ...projection('unchanged'), launchNotice: notice }));
+  const { value, statuses } = host({ startScopedAiEdit });
+  value.preferences = async () => ({ ...preferenceDefaults(), 'model.dispatchChoices': { 'scoped-ai-edit': remembered } });
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: null, mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.value = '保留原意';
+  miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!.dispatchEvent({ type: 'submit' }); await settled;
+  expect(startScopedAiEdit.mock.calls[0]![0]).toMatchObject({ rememberedChoice: true, executionConfig: remembered });
+  expect(statuses.at(-1)?.[0]).toContain(notice);
+});
+
 it('locks a selection against the lock set on screen, reloads, and the badge unlocks', async () => {
   const setAiEditLocks = vi.fn(async () => ({ manuscriptId: 'doc', branchId: 'branch', blockIds: ['blk_a', 'blk_b'], sectionHeadingBlockIds: [], digest: 'b'.repeat(64), label: '' }));
   const { value, refreshed, statuses } = host({ setAiEditLocks });

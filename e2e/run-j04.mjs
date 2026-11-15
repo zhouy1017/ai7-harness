@@ -1,4 +1,4 @@
-import { chooseDispatch } from './dispatch-chooser.mjs';
+import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
@@ -2417,17 +2417,38 @@ async function main() {
         card.querySelectorAll('[data-analysis-unit-adaptations]').length===1 && card.textContent.includes('计划版本 1') && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'safe-retry-overview-surface');
 
-    // Ordinary launches pin the selected range once. Prepared-plan revision, reconfirmation and editing ceremony is
-    // retired here; its retained quick/procedure and queued owners keep real-store coverage.
+    // Ordinary starts choose sampling/retry in the first plan; retained prepared-plan controls are exercised below.
     at('reanalyze-range-prepare');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card #analysis-range-8');if(!(radio instanceof HTMLInputElement)||radio.disabled)return false;radio.click();return radio.checked;})()`, 'current-range-selection');
-    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'current-range-launch');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'current-range-open', false);
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        at(width===1280?'launch-options-wide':'launch-options-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-options').open`))) await pointerClick(renderer,waitFor,'#task-drawer .task-launch-options > summary','launch-options-open');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-without-sampling');
+        const retry='#task-drawer [data-task-launch-option="retry"]';
+        const chooseRetry=async value=>{
+          const index=await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(retry)}).options).findIndex(option=>option.value===${JSON.stringify(value)})`);
+          await pointerClick(renderer,waitFor,`${retry} + .ui-select-trigger`,'launch-retry-open');
+          await pointerClick(renderer,waitFor,`${retry} ~ .ui-select-popover [data-index="${index}"]`,'launch-retry-option');
+        };
+        await chooseRetry('never');
+        requireJourney(await renderer.evaluate(`!document.querySelector('#task-drawer [data-task-launch-option="sampling"]').checked && document.querySelector('#task-drawer [data-task-launch-option="retry"]').value==='never'`),'launch-options-selected');
+        if(width===1280){await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-restore-sampling');await chooseRetry('auto');}
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    at('plan-revision-dispatch'); // This start freezes options in version 1; no ordinary prepared-plan revision exists.
+    await launchTaskFromBar(renderer,waitFor,'current-range-launch');
     const settledDrift = await settleLaunchedRun(renderer, 'current-range');
     const revision6 = settledDrift.resultSetRevision;
     requireJourney(revision6.ordinal===6 && revision6.update.mode==='reanalyze-range', 'current-range-result');
+    requireJourney(settledDrift.planVersion.edits.removedSteps.includes('assurance-sampling') && settledDrift.planVersion.edits.disallowedAdaptations.includes('safe-retry'),'launch-options-frozen');
     const nextSequence = settledDrift.updateControls.working.journalSequence + 1;
     await saveEditorSuffix(renderer, '，J-04 计划版本形成后的确认编辑', nextSequence, cancellation);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'current-range-edited');
+    at('plan-revision-edit-unchanged');
+    requireJourney((await readBaseline(renderer)).planEnvelope.digest===settledDrift.planEnvelope.digest,'launch-plan-unchanged-after-edit');
     at('sync-current-prepare');
     at('connectivity-offline-bar');
     await writeFile(connectivityPath, 'offline');
@@ -2446,6 +2467,15 @@ async function main() {
     const waitingAnalysis = await readBaseline(renderer);
     requireJourney(waitingDrawer.bar.status==='等待网络' && waitingAnalysis.run.state==='awaiting-connectivity' && waitingAnalysis.run.attempt===null && waitingAnalysis.taskOutcome===null,
       'offline-launch-no-send',waitingDrawer.bar);
+    requireJourney(waitingDrawer.pill==='等待网络' && waitingDrawer.bar.state==='started' && waitingDrawer.bar.statement===null &&
+      waitingDrawer.bar.note==='已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
+      barActions(waitingDrawer)==='cancel-wait:取消:enabled|run-link:查看运行:enabled','offline-launch-waiting-bar',waitingDrawer.bar);
+    requireJourney(waitingAnalysis.authorization.origin==='standard-direct' && waitingAnalysis.authorization.authority==='standard-direct-dispatch' &&
+      waitingAnalysis.run.progress===null && waitingAnalysis.run.stateLabel==='等待网络 · 未启动' &&
+      sameValue(waitingAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity']),'offline-launch-waiting-record');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待网络 · 未启动'`,'offline-launch-waiting-card');
+    const offlineAttention=await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(offlineAttention.groups.flatMap(group=>group.items).some(item=>item.target.kind==='analysis'&&item.target.taskIntentId===offlineIntent&&item.group==='active'&&item.state==='analysis-waiting-network'),'offline-launch-waiting-attention');
     at('connectivity-cancel');
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
@@ -2455,7 +2485,10 @@ async function main() {
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]','offline-launch-cancel');
     const cancelledDrawer = await drawerShowing(renderer,offlineIntent,'cancelled','offline-launch-cancelled');
-    requireJourney(cancelledDrawer.bar.status==='已取消 · 未发送任何内容','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)==='run-link:查看运行:enabled','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    const cancelledAnalysis=await readBaseline(renderer);
+    requireJourney(cancelledAnalysis.run.state==='cancelled'&&cancelledAnalysis.run.stateLabel==='已取消 · 未启动'&&cancelledAnalysis.run.attempt===null&&cancelledAnalysis.taskOutcome===null&&
+      sameValue(cancelledAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity','cancelled']),'offline-launch-cancelled-record');
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','offline-launch-close');
     at('connectivity-wait-again');
     await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'current-sync-launch');
@@ -2465,6 +2498,8 @@ async function main() {
     const onlineSettled = await settleLaunchedRun(renderer, 'current-sync');
     const againIntent = onlineSettled.taskIntent.taskIntentId;
     requireJourney(onlineSettled.resultSetRevision.ordinal===7 && onlineSettled.resultSetRevision.update.mode==='sync-current', 'current-sync-result');
+    requireJourney(sameValue(onlineSettled.run.transitions.slice(0,4).map(transition=>transition.state),['authorized','awaiting-connectivity','admitted','executing']) &&
+      onlineSettled.run.attempt!==null && onlineSettled.taskOutcome.resultSetRevisionId===onlineSettled.resultSetRevision.revisionId,'offline-launch-reconnected-record');
 
     at('quick-start-set-rule');
     cancellation.throwIfRequested();
@@ -2569,6 +2604,107 @@ async function main() {
     // 停用 keeps the rule and its version on record; quick start no longer uses it.
     requireJourney(offCard?.pill === '已停用' && offCard.deactivate === null && rulesAfterOff?.rules?.length === 1 &&
       rulesAfterOff.rules[0].state === 'deactivated' && rulesAfterOff.rules[0].ruleVersionId === rule.ruleVersionId, 'rules-off', { offCard, rules: rulesAfterOff?.rules });
+
+    // A rule-stopped quick start still produces a prepared task. Its editor keeps the pre-existing revision controls.
+    // Use a separate admitted sample1 Book so the ordinary launch history above stays independent.
+    const legacyBook = await importSample1(renderer, cancellation, true);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'legacy-plan-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'legacy-plan-library-ready');
+    await reviewAction(renderer, `button[data-book-id="${legacyBook.bookId}"]`, 'legacy-plan-book');
+    await openAnalysisDestination(renderer, 'legacy-plan-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')?.disabled===false`, 'legacy-plan-first-ready');
+    await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="start"]','legacy-plan-first');
+    await launchTaskFromBar(renderer,waitFor,'legacy-plan-first'); await settleLaunchedRun(renderer,'legacy-plan-first');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-first-close');
+    await assertRenderer(renderer, `(() => {document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]').click();document.querySelector('.baseline-analysis-card #analysis-range-3').click();return true;})()`, 'legacy-plan-range');
+    await startUpdate(renderer,'reanalyze-range','重新分析所选范围','legacy-plan-range-run'); await settleLaunchedRun(renderer,'legacy-plan-range-run');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="mode-full"]','legacy-plan-rule-full');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="default-rule"]')?.disabled===false`,'legacy-plan-rule-ready');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="default-rule"]','legacy-plan-rule');
+    const legacyRule = (await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules()`)).rules.find(rule=>rule.bookId===legacyBook.bookId&&rule.pattern==='reanalyze-range');
+    requireJourney(legacyRule?.state==='active','legacy-plan-rule-record');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-rule-close');
+    await assertRenderer(renderer, `(() => {document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]').click();document.querySelector('.baseline-analysis-card #analysis-range-3').click();return true;})()`, 'legacy-plan-quick-range');
+    await writeFile(connectivityPath,'offline');
+    await quickStart(renderer,'reanalyze-range','重新分析所选范围',legacyRule.name,'legacy-plan-quick-offline');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='offline'`,'legacy-plan-prepared');
+    await writeFile(connectivityPath,'online');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-online');
+    const legacyTask = (await readBaseline(renderer)).taskIntent.taskIntentId;
+    const prepareLegacyRange = async unit => {
+      const expected=await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({unitOrdinal:unit})})`);
+      if(await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`)) await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-close');
+      await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-tab="history"]','legacy-plan-history');
+      await pointerClick(renderer,waitFor,`.baseline-analysis-card #analysis-range-${unit}`,'legacy-plan-select-range');
+      await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-action="reanalyze-range"]','legacy-plan-read-range');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(legacyTask)} && ['ready','changed'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanStart) && window.ai7.inspectBaselineAnalysis().then(plan=>JSON.stringify(plan.planRevision?.proposed?.selectedRange??plan.update?.selectedRange)===${JSON.stringify(JSON.stringify(expected.selectedRange))})`,'legacy-plan-updated');
+    };
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        at('plan-revision-prepare');
+        await prepareLegacyRange(3);
+        if((await readBaseline(renderer)).planRevision!==null){await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="reconfirm-plan"]','legacy-plan-initial-reconfirm');await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-initial-current');}
+        const before=await readBaseline(renderer), digest=before.planEnvelope.digest;
+        at('plan-revision-drift'); await prepareLegacyRange(8);
+        const changed=await readBaseline(renderer);
+        requireJourney(changed.taskIntent.taskIntentId===legacyTask && changed.authorization===null && changed.run===null && changed.planRevision?.changedFields.includes('selectedRange'),'legacy-plan-material-drift');
+        at('second-book-plan-revision');
+        const attention=await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+        const decision=attention.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis-plan'&&item.target.taskIntentId===legacyTask);
+        requireJourney(decision?.group==='decisions'&&decision.state==='analysis-plan-revision'&&decision.nextStep==='reconfirm-plan','legacy-plan-attention-decision');
+        at('open-plan-revision');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-attention-close');
+        await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'legacy-plan-attention-open');
+        await pointerClick(renderer,waitFor,`[data-attention-open="${decision.itemId}"]`,'legacy-plan-attention-item');
+        await waitFor(renderer,`document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(legacyTask)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='changed'`,'legacy-plan-attention-target');
+        const stillPending=await renderer.evaluate(`window.ai7.taskOverviewCall(${JSON.stringify({operation:'inspectBaselineAnalysis',bookId:legacyBook.bookId,input:{revisionId:null}})})`);
+        requireJourney(stillPending.taskIntent.taskIntentId===legacyTask&&stillPending.planRevision?.state==='pending','legacy-plan-attention-open-read-only');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-attention-return');
+        await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('library')),'legacy-plan-return-library');
+        await waitFor(renderer,`document.querySelector('[data-screen="landing"]')`,'legacy-plan-return-library-ready');
+        await reviewAction(renderer,`button[data-book-id="${legacyBook.bookId}"]`,'legacy-plan-return-book');
+        await openAnalysisDestination(renderer,'legacy-plan-return-analysis');
+        await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-task-plan-open="baseline-analysis"]','legacy-plan-return-drawer');
+        at('plan-revision-drawer-diff');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-plan-revision"]','legacy-plan-diff-open');
+        await waitFor(renderer, `!document.querySelector('#task-drawer .task-plan-drift-table')?.hidden`,'legacy-plan-diff-visible');
+        at('plan-revision-bar');
+        requireJourney(await renderer.evaluate(`!document.querySelector('#task-drawer [data-task-drawer-control="start"]') && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`),'legacy-plan-reconfirm-gate');
+        at('plan-revision-stale-authorize');
+        // The legacy drawer still owns authorization; a stale digest cannot start that retained task.
+        const refused=await renderer.evaluate(`window.ai7.authorizeBaselineAnalysis(${JSON.stringify({taskIntentId:legacyTask,planEnvelopeDigest:digest})}).then(()=>null,error=>error.code)`);
+        requireJourney(refused==='ANALYSIS_PLAN_REVISION_REQUIRED' && (await readBaseline(renderer)).run===null,'legacy-plan-stale-refused');
+        at('plan-revision-revert'); await prepareLegacyRange(3);
+        requireJourney((await readBaseline(renderer)).planEnvelope.digest===digest && (await readBaseline(renderer)).planRevision===null,'legacy-plan-reverted');
+        at('plan-revision-reconfirm'); await prepareLegacyRange(8);
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="reconfirm-plan"]','legacy-plan-reconfirm');
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-current');
+        at('plan-revision-drawer-range');
+        const current=await readBaseline(renderer), range=current.update.selectedRange;
+        requireJourney(current.taskIntent.taskIntentId===legacyTask && current.planVersion.ordinal>before.planVersion.ordinal && (await readDrawer(renderer)).fields['要处理'].includes(`第 ${range.startPosition}–${range.endPosition} 段`),'legacy-plan-range-shown');
+        at('plan-edit-open'); await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="revise"]','legacy-plan-revise');
+        at('plan-edit-remove');
+        for(const item of ['assurance-sampling','safe-retry'])await pointerClick(renderer,waitFor,`#task-drawer [data-task-plan-item="${item}"] [data-task-plan-edit="remove"]`,'legacy-plan-remove');
+        requireJourney((await readDrawer(renderer)).bar.note==='你改了 2 处','legacy-plan-unsaved-edits');
+        at('plan-edit-discard'); await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="discard-edits"]','legacy-plan-discard');
+        requireJourney((await readBaseline(renderer)).planEnvelope.digest===current.planEnvelope.digest,'legacy-plan-discard-unwritten');
+        at('j14-plan-edit-keyboard');
+        await renderer.evaluate(`document.querySelector('#task-drawer [data-task-drawer-control="revise"]').focus()`); await pressEnter(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling'`,'legacy-plan-keyboard-focused');
+        await pressEnter(renderer); await pressTab(renderer); await pressTab(renderer); await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 2 处'`,'legacy-plan-keyboard-edited');
+        at('plan-edit-update'); await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="update-plan"]','legacy-plan-save');
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion===${JSON.stringify(String(current.planVersion.ordinal+1))}`,'legacy-plan-saved');
+        const saved=await readBaseline(renderer);
+        requireJourney(saved.planVersion.edits.removedSteps.includes('assurance-sampling') && saved.planVersion.edits.disallowedAdaptations.includes('safe-retry') && saved.authorization===null && saved.run===null,'legacy-plan-first-authority-unchanged');
+        // Restore the same two options before the other viewport repeats this retained workflow.
+        for(const item of ['assurance-sampling','safe-retry'])await pointerClick(renderer,waitFor,`#task-drawer [data-task-plan-item="${item}"] [data-task-plan-edit="restore"]`,'legacy-plan-restore');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="update-plan"]','legacy-plan-save-restored');
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion===${JSON.stringify(String(saved.planVersion.ordinal+1))}`,'legacy-plan-restored');
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    // The prepared task is deliberately left unstarted: unlike an ordinary launch, this legacy product path still has one.
 
     // ---- 审阅 (Issue #417, plan slice S69; editor-surfaces §4; V2-UX-REV-001 to REV-013, MARK-010) ----
     at('review-relaunch');

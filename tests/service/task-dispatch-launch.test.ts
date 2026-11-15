@@ -100,11 +100,16 @@ async function previousConnectionId(currentIds: ReadonlyArray<string>): Promise<
 function launchRequest(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' | 'when-online' = 'now'): import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'] {
   const common = { clientCommandId, executionConfig, rememberedChoice, startWhen, ...(planEdits === undefined ? {} : { planEdits }) };
   switch (kind) {
-    case 'baseline-analysis': return { operation: 'launchBaselineAnalysis', input: { ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } };
+    case 'baseline-analysis': {
+      const again = store.inspectBaselineAnalysis(target.bookId).resultSetRevision !== null;
+      return { operation: 'launchBaselineAnalysis', input: { ...common, goal: again ? BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'] : BASELINE_ANALYSIS_TASK_GOAL,
+        update: again ? { mode: 'reanalyze-book', selectedRange: null } : null } };
+    }
     case 'custom-analysis': {
       dimensionId ??= store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE }).dimensions[0]!.dimensionId;
       const selectedDimension = dimensionId;
-      return { operation: 'launchCustomAnalysis', input: { ...common, dimensionId: selectedDimension, update: null } };
+      const again = store.inspectCustomAnalysisDimensions(target.bookId).dimensions.find(dimension=>dimension.dimensionId===selectedDimension)?.book?.latest != null;
+      return { operation: 'launchCustomAnalysis', input: { ...common, dimensionId: selectedDimension, update: again ? { mode: 'reanalyze-book', selectedRange: null } : null } };
     }
     case 'writing': return { operation: 'launchWritingTask', input: { ...common, ...WRITING_REQUEST } };
     case 'initial-evaluation': return { operation: 'launchInitialEvaluation', input: common };
@@ -285,6 +290,27 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
+  it('drives concurrent choices to completion and keeps an earlier revision labelled after a later model runs', async () => {
+    const a = await book(kind), b = await book(kind), answer = await lifecycleAnswers(kind);
+    let definition!: LaunchedTask['ledger']['definition'];
+    ordinary(request=>answer(request, definition));
+    const first = command(kind, a, { modelId: 'account-future-a', reasoningEffort: 'high' })(); definition = first.ledger.definition;
+    const other = command(kind, b, { modelId: 'account-future-b', reasoningEffort: 'low' })();
+    const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
+    store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    driveLaunchedLedgerRun(capture!.owner, first); driveLaunchedLedgerRun(capture!.owner, other);
+    await capture!.owner.whenIdle();
+    expectProducedAttribution(kind, a, first, 'account-future-a@high'); expectProducedAttribution(kind, b, other, 'account-future-b@low');
+    const previousRevision = first.ledger.inspect(a.bookId).resultSetRevision!.revisionId;
+    if (kind === 'evaluation-rewrite') store.decideEvaluationRewrite(a.bookId, previousRevision, 'discard');
+    const later = command(kind, a, { modelId: 'account-future-b', reasoningEffort: 'low' })(); definition = later.ledger.definition;
+    driveLaunchedLedgerRun(capture!.owner, later); await capture!.owner.whenIdle();
+    expectProducedAttribution(kind, a, later, 'account-future-b@low');
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try { expect(launchedRevisionModelLabels(db, previousRevision)).toEqual({ modelLabel: 'account-future-a@high' }); } finally { db.close(); }
+    expect(capture!.wireRequests.some(request=>request.model==='account-future-a' && request.reasoning_effort==='high')).toBe(true);
+    expect(capture!.wireRequests.some(request=>request.model==='account-future-b' && request.reasoning_effort==='low')).toBe(true);
+  });
   it('previews current manuscript and options without writing a task or checkpoint', async () => {
     const target = await book(kind); ordinary(); typeBeforeLaunch(target);
     const launch = launchRequest(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false,
@@ -311,6 +337,33 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(store.executionLedgerForRun(first.runRecordId).currentRunState(first.runRecordId)).toBe('cancelled');
     expect(second.ledger.currentRunState(second.runRecordId)).toBe('awaiting-connectivity');
     expect(capture!.requests).toHaveLength(0);
+  });
+
+  it('restores a launch queued behind two active tasks after restart without replay', async () => {
+    const firstBook = await book(kind), secondBook = await book(kind), queuedBook = await book(kind), answer = await lifecycleAnswers(kind);
+    let definition!: LaunchedTask['ledger']['definition'], ready!: () => void, release!: () => void, held = 0;
+    const reached = new Promise<void>(resolve=>{ ready=resolve; }), gate = new Promise<void>(resolve=>{ release=resolve; });
+    const schedule: CapturedOrdinaryAnswer = request=>answer(request, definition);
+    ordinary(schedule, { capacity: 2, unitHold: async () => { held += 1; if (held===2) ready(); await gate; } });
+    try {
+      for (const target of [firstBook, secondBook]) {
+        const launched = command(kind, target, { reasoningEffort: 'low' }, randomUUID(), false,
+          { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } })();
+        definition = launched.ledger.definition; driveLaunchedLedgerRun(capture!.owner, launched);
+      }
+      await reached;
+      const queued = command(kind, queuedBook, { modelId: 'account-future-model', reasoningEffort: 'high' })();
+      driveLaunchedLedgerRun(capture!.owner, queued);
+      expect(capture!.owner.queuePosition(queued.runRecordId)).not.toBeNull();
+      const stopping = capture!.owner.dispose(); release(); await stopping;
+      await restart(schedule); reconcileAll();
+      for (const pending of store.pendingLaunchedLedgerRuns()) driveLaunchedLedgerRun(capture!.owner, pending);
+      await capture!.owner.whenIdle();
+      expect(store.executionLedgerForRun(queued.runRecordId).currentRunState(queued.runRecordId)).toMatch(/^completed/u);
+      expectProducedAttribution(kind, queuedBook, queued, 'account-future-model@high');
+      expect(capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+    } finally { release(); }
   });
 
   it.each(['now', 'idle', 'when-online'] as const)('restores an unadmitted %s launch after restart without a replay', async timing => {
@@ -372,12 +425,20 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
         test.release(); await capture!.owner.whenIdle();
         expect(controlled.ledger.currentRunState(controlled.runRecordId!)).toBe(action === 'cancel' ? 'cancelled' : 'paused');
         if (action === 'pause') {
+          const alternative = store.getModelServiceRouteConnection('deepseek-open-platform')!;
+          store.saveModelServiceConnection(alternative.connectionName, alternative.credentialReference, 'ready', 'deepseek-open-platform');
+          store.selectMainRoleModel('deepseek-open-platform', alternative.binding.modelId, 'off');
           const sent = capture!.wireRequests.length;
           driveLaunchedLedgerRun(capture!.owner, test.launched); await capture!.owner.whenIdle();
           expect(capture!.wireRequests).toHaveLength(sent);
           const resumed = controlLaunched(kind, test.target, test.launched, 'resume');
           capture!.owner.resumeOrQueue(resumed.runRecordId!, resumed.ledger); await capture!.owner.whenIdle();
           expect(controlled.ledger.currentRunState(controlled.runRecordId!)).toMatch(/^completed/u);
+        } else {
+          const relaunched = command(kind, test.target, { modelId: 'account-future-model', reasoningEffort: 'high' })();
+          driveLaunchedLedgerRun(capture!.owner, relaunched); await capture!.owner.whenIdle();
+          expect(relaunched.ledger.currentRunState(relaunched.runRecordId)).toMatch(/^completed/u);
+          expectProducedAttribution(kind, test.target, relaunched, 'account-future-model@high');
         }
       }
       expect(capture!.owner.busy).toBe(false);
@@ -456,6 +517,30 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(fallback.ledger.loadExecutionPlan(fallback.runRecordId).productionBinding).toMatchObject({ model: defaults.model });
     expect(capture!.requests).toHaveLength(0);
   });
+});
+
+it('drives two different kinds on the same Book without crossing their launched bindings', async () => {
+  const target = await book('baseline-analysis');
+  const baseline = await lifecycleAnswers('baseline-analysis'), writing = await lifecycleAnswers('writing');
+  const jobs: Array<{ launched: LaunchedTask; answer: Awaited<ReturnType<typeof lifecycleAnswers>> }> = [];
+  ordinary((request) => {
+    const selected = request.stage === 'run-report-reflection' ? jobs[0] : jobs.find(({ launched }) => {
+      const definition = launched.ledger.definition;
+      return [definition.promptContractDigest, definition.clarificationBase?.promptContractDigest,
+        definition.crossUnit?.promptContractDigest, definition.assurance?.promptContractDigest].includes(request.contractDigest);
+    });
+    if (selected === undefined) throw new Error('cross-kind-response-contract-unmatched');
+    return selected.answer(request, selected.launched.ledger.definition);
+  });
+  const first = command('baseline-analysis', target, { modelId: 'account-baseline', reasoningEffort: 'high' })();
+  const second = command('writing', target, { modelId: 'account-writing', reasoningEffort: 'low' })();
+  jobs.push({ launched: first, answer: baseline }, { launched: second, answer: writing });
+  driveLaunchedLedgerRun(capture!.owner, first); driveLaunchedLedgerRun(capture!.owner, second); await capture!.owner.whenIdle();
+  expectProducedAttribution('baseline-analysis', target, first, 'account-baseline@high');
+  expectProducedAttribution('writing', target, second, 'account-writing@low');
+  expectTaskAttribution('baseline-analysis', target, first, 'high'); expectTaskAttribution('writing', target, second, 'low');
+  expect(capture!.wireRequests.some(request=>request.model==='account-baseline' && request.reasoning_effort==='high')).toBe(true);
+  expect(capture!.wireRequests.some(request=>request.model==='account-writing' && request.reasoning_effort==='low')).toBe(true);
 });
 
 it('reconnects a committed baseline launch after restart once and retains actual request, report and task attribution', async () => {

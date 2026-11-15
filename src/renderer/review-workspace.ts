@@ -2832,10 +2832,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const newChooser = state.chooser === undefined;
     const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
     if (newChooser) { state.choicePending = true; void (async () => {
-      const [settings, preferences] = await Promise.all([api.getModelServiceSettings(), window.ai7.getPreferences()]);
+      const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), window.ai7.getPreferences()]);
       if (!state.dismissed) {
-        if (state.executionConfig === undefined) { state.executionConfig = preferences.values['model.dispatchChoices']['review-run'] ?? {}; state.rememberedChoice = Object.keys(state.executionConfig).length > 0; }
-        chooser.render(settings, preferences.values['model.favourites'], state.executionConfig);
+        if (state.executionConfig === undefined) { state.executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices']['review-run'] ?? {} : {}; state.rememberedChoice = Object.keys(state.executionConfig).length > 0; }
+        if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, state.executionConfig);
+        else chooser.unavailable();
       }
     })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate(); } }); }
     const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
@@ -3038,7 +3039,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const result = await api.launchReviewRun({ ...taskInput, clientCommandId: state.clientCommandId,
         ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }), rememberedChoice: state.rememberedChoice ?? false });
       state.launchPending = false;
-      if (result.launchNotice !== undefined) options.setStatus(result.launchNotice, 'success');
       if (result.run !== null) options.recorded?.(result.run.reviewRunId);
       if (result.run === null) throw new Error(REVIEW_STATUS_LINES.launchFailed);
       query.reviewRunId = result.run.reviewRunId;
@@ -3054,7 +3054,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       clearFactual(true);
       stableKey = '';
       if (host.isConnected) show(result);
-      options.setStatus(REVIEW_STATUS_LINES.started, 'success');
+      options.setStatus(result.launchNotice ?? REVIEW_STATUS_LINES.started, 'success');
 
     } catch (error) {
       state.launchPending = false;

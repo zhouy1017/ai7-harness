@@ -766,7 +766,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     quick: DefaultExecutionRuleReference | null = null,
     preview = false,
   ): Promise<void> {
-    if (quick === null && !input.reconfirm) {
+    // An existing prepared task belongs to redo, a rule-stopped quick start or draft promotion. Its plan editor stays live.
+    const legacyPrepared = host.querySelector('.baseline-analysis-card')?.getAttribute('data-analysis-state') === 'prepared';
+    if (quick === null && !input.reconfirm && !legacyPrepared) {
       taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析',
         input: { goal: input.goal as Parameters<typeof window.ai7.launchBaselineAnalysis>[0]['goal'], update: input.update } }, () => controls.start);
       return;

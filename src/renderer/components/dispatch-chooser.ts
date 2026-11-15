@@ -91,6 +91,10 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
         models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
         paint(defaultChoice.reasoningEffort);
       } else paint(selected.reasoningEffort);
+      // A review choice redraws its sheet and reattaches this chooser. Re-enter the native top layer after that move.
+      if (topLayer) queueMicrotask(() => {
+        if (element.isConnected && element.open) { if (!panel.matches(':popover-open')) panel.showPopover(); placePanel(); }
+      });
     },
   };
 }

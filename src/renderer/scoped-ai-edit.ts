@@ -212,11 +212,12 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
   let sentInput: StartScopedAiEditInput | undefined;
   const resetCommand = (): void => { clientCommandId = crypto.randomUUID(); sentInput = undefined; };
   const chooser = createDispatchChooser({ role: 'fast-interaction', changed(config) { executionConfig = config; rememberedChoice = false; resetCommand(); } });
-  const choiceReady = Promise.all([host.api.getModelServiceSettings(), host.preferences()]).then(([settings, preferences]) => {
+  const choiceReady = Promise.allSettled([host.api.getModelServiceSettings(), host.preferences()]).then(([settings, preferences]) => {
     if (closed) return;
-    executionConfig = preferences['model.dispatchChoices']['scoped-ai-edit'] ?? {};
+    executionConfig = preferences.status === 'fulfilled' ? preferences.value['model.dispatchChoices']['scoped-ai-edit'] ?? {} : {};
     rememberedChoice = Object.keys(executionConfig).length > 0;
-    chooser.render(settings, preferences['model.favourites'], executionConfig);
+    if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value['model.favourites'] : {}, executionConfig);
+    else chooser.unavailable();
   }).catch(() => chooser.unavailable());
   actions.append(chooser.element, submit, cancel);
   form.append(actions);

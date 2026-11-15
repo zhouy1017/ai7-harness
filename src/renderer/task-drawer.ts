@@ -2955,11 +2955,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       })(); });
       bar.hidden = false; bar.replaceChildren(chooser.element, start, problem);
       options.onOpen(); title.focus();
-      void Promise.all([api.getModelServiceSettings(), api.getPreferences(), readReferences]).then(([settings, preferences]) => {
+      void Promise.allSettled([api.getModelServiceSettings(), api.getPreferences(), readReferences]).then(([settings, preferences]) => {
         if (ticket !== current) return;
-        executionConfig = preferences.values['model.dispatchChoices'][kinds[next.operation]] ?? {};
+        executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices'][kinds[next.operation]] ?? {} : {};
         rememberedChoice = Object.keys(executionConfig).length > 0;
-        chooser.render(settings, preferences.values['model.favourites'], executionConfig);
+        if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, executionConfig);
+        else chooser.unavailable();
       }).catch(() => { if (ticket === current) chooser.unavailable(); }).finally(() => { if (ticket === current) start.disabled = interrupted; });
       if (interrupted) disableAll();
     },

@@ -1047,7 +1047,7 @@ export class BaselineAnalysisExecutionOwner {
     /** The 后台分析登记 dispatcher's start takes the background place (Issue #864); its plan's origin is checked again at admission. */
     origin: 'foreground' | 'background' = 'foreground',
   ): 'admitted' | 'queued' {
-    // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
+    // AI7 is closing: the start stays `authorized`; startup restores a committed launch or blocks a legacy start with why.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';

@@ -2364,8 +2364,8 @@ async function run(): Promise<void> {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
       }
     }
-    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
-    // itself after a restart (ADR 0034), and the editor starts them again when they choose. A Run the editor had answered before
+    // Legacy starts the governor had not admitted were blocked with why by reconciliation (ADR 0034). Committed one-step
+    // launches retain the recorded start decision and restore their admission queue below (ADR 0104). A Run answered before
     // AI7 closed, and that was not yet taken on, is left 可续行 with its answer the same way (Issue #767).
     // Every ledger kind now keeps its continuation checkpoint; reconciliation leaves it for an explicit 续行.
     store.reconcileStoppedInitialEvaluationRuns();
