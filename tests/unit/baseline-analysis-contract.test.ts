@@ -198,7 +198,7 @@ it('maps integer citations in message order and drops only invalid references', 
   expect(BASELINE_PROMPT_CONTRACT.systemPrompt).not.toMatch(/blockId|fromGrapheme|toGrapheme/u);
 });
 
-it.each([3, '3', ['3'], [3, 3, '3']])('recovers and deduplicates ordinal references: %j', (blockOrdinals) => {
+it.each([3, '3', ['3'], [3, 3, '3']].map((blockOrdinals) => ({ blockOrdinals })))('recovers and deduplicates ordinal references: %j', ({ blockOrdinals }) => {
   const parsed = parseUnitResult(JSON.stringify({ synopsis: '概述', entities: [{ name: '人物', blockOrdinals }] }), { unitOrdinal: 1, blockIds: [BLOCK_A, BLOCK_B, BLOCK_C] });
   expect(parsed).toMatchObject({ ok: true, result: { entities: [{ sourceRanges: [{ blockId: BLOCK_C, fromGrapheme: null, toGrapheme: null }] }] } });
 });
