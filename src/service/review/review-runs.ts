@@ -2286,6 +2286,8 @@ export class ReviewRunStore {
       if (runId === null) continue;
       const state = task.ledger.currentRunState(runId);
       if (state === 'paused' || state === 'awaiting-clarification') return null;
+      // Some category owners end on shutdown. Keep that result closed and drive only later categories;
+      // an interruption without the driver's shutdown receipt still needs the editor's explicit continuation.
       if (state === 'interrupted' && this.#events(reviewRunId, task.categoryId).at(-1)?.record.stopReason !== 'shutdown') return null;
       if (state === 'resumable') {
         if (!task.ledger.wasInterruptedByRestart(runId)) return null;
