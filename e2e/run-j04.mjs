@@ -3801,8 +3801,12 @@ async function main() {
       leafReviewed.categories[0].excludedCount === 0, 'stock-leaf-validated-findings');
     const leafUsage = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book'})`);
     const leafRuns = leafUsage.rows.find((row) => row.key === leafBook.bookId).runs;
-    requireJourney(leafRuns.length === 1 && leafRuns[0].taskIntentId === leafPrepared.categories[0].taskIntentId, 'stock-leaf-one-business-run');
-    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafRuns[0].runRecordId)}})`);
+    const leafSourceRun = leafRuns.find(run => run.taskIntentId === leafPrepared.categories[0].taskIntentId);
+    requireJourney(leafRuns.length === 2 && leafSourceRun !== undefined &&
+      leafRuns.filter(run => run.taskKind === 'editorial-review/run-synthesis').length === 1 &&
+      leafRuns.every(run => run.reviewRunId === leafPrepared.reviewRunId) && leafReviewed.synthesis?.state === 'completed',
+    'stock-leaf-category-and-final-summary', leafRuns);
+    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafSourceRun.runRecordId)}})`);
     const leafReport = leafDetail.detail.report;
     requireJourney(leafReport.units.submitted === SAMPLE1_UNITS && leafReport.units.gaps === 0 && leafReport.units.retried === 0 &&
       leafReport.usagePerStage.units.requests === SAMPLE1_UNITS + 1 && leafReport.usagePerStage['assurance-sampling'].requests === 2 &&
