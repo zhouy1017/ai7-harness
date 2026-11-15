@@ -445,7 +445,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.reducerClosure.stages[3]).toEqual({ stage: 'cross-unit-reduction', state: 'closed', inputCount: SAMPLE1_UNITS - 1 });
       expect(revision.crossUnitReduction).toEqual({
         state: 'closed', reason: null,
-        requestDigest: 'c064bb35d02cd45a632df7e7ffb931ca6f27fcb6b0de05c104124b716fab8b92',
+        requestDigest: '766ff9279a099e13d59a3d30262a71bf054995d5712df506c76f87b8e32c7cb1',
         usage: { inputTokens: 2000, outputTokens: 300 }, findingCount: 2,
       });
       expect(revision.crossUnitFindings.map((finding) => finding.kind)).toEqual(['chronology-conflict', 'continuity-break']);
@@ -1750,9 +1750,9 @@ it('closes all eight units and records only the one out-of-unit reference in tec
   const entries = new Map(happy.entries);
   const target = [...entries.values()].find((entry) => entry.unitOrdinal === 1 && entry.response.kind === 'unit-result');
   if (target?.response.kind !== 'unit-result') throw new Error('Expected baseline response');
-  const body = JSON.parse(target.response.text) as { entities: Array<{ sourceRanges: unknown[] }> };
-  const rangeCount = body.entities[0]!.sourceRanges.length;
-  body.entities[0]!.sourceRanges.push({ blockId: `blk_${'f'.repeat(24)}`, fromGrapheme: null, toGrapheme: null });
+  const body = JSON.parse(target.response.text) as { entities: Array<{ blockOrdinals: number[] }> };
+  const rangeCount = body.entities[0]!.blockOrdinals.length;
+  body.entities[0]!.blockOrdinals.push(99999);
   entries.set(fixtureEntryKey(target.unitOrdinal, target.requestDigest, target.attempt ?? undefined), { ...target, response: { ...target.response, text: JSON.stringify(body) } });
   const controlled = { ...happy, entries };
   const store = await openWithRoute(roots.dataRoot, controlled);
