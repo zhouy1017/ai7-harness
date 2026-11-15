@@ -2925,6 +2925,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     sheetUpdate = updateSheet;
     sheetContent(sheet, bar, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== actions), actions, form);
+    queueMicrotask(chooser.refreshPanel);
     updateSheet();
     void refreshHouse?.();
   }

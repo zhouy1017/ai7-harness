@@ -24,9 +24,15 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     panel.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8))}px`;
     panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, window.innerHeight - bounds.height - 8))}px`;
   };
-  element.addEventListener('toggle', () => {
-    if (!topLayer) return;
-    if (element.open) { panel.showPopover(); placePanel(); } else panel.hidePopover();
+  const refreshPanel = (): void => {
+    if (topLayer && element.isConnected && element.open) {
+      if (!panel.matches(':popover-open')) panel.showPopover();
+      placePanel();
+    }
+  };
+  element.addEventListener('toggle', event => {
+    if (!topLayer || event.target !== element) return;
+    if (element.open) refreshPanel(); else panel.hidePopover();
   });
   let settings: ModelServiceSettingsProjection | null = null;
   let choices: Array<{ config: RuntimeExecutionConfig; label: string; levels: readonly string[] }> = [];
@@ -62,6 +68,8 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
   element.addEventListener('keydown', event => { if (event.key === 'Escape') { element.open = false; summary.focus(); } });
   return {
     element,
+    /** Moving a chooser into a rebuilt sheet dismisses its native popover while retaining the details state. */
+    refreshPanel,
     unavailable(): void { summary.textContent = '模型 使用角色默认 ▾'; panel.hidden = true; },
     render(next: ModelServiceSettingsProjection, favourites: ModelFavourites = {}, selection: RuntimeExecutionConfig = {}): void {
       panel.hidden = false;
@@ -92,9 +100,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
         paint(defaultChoice.reasoningEffort);
       } else paint(selected.reasoningEffort);
       // A review choice redraws its sheet and reattaches this chooser. Re-enter the native top layer after that move.
-      if (topLayer) queueMicrotask(() => {
-        if (element.isConnected && element.open) { if (!panel.matches(':popover-open')) panel.showPopover(); placePanel(); }
-      });
+      if (topLayer) queueMicrotask(refreshPanel);
     },
   };
 }
