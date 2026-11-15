@@ -91,7 +91,7 @@ const VALIDATION: DevelopmentValidationIntent = { family: 'baseline-analysis', c
  * The V4.1 developer-live composition: zero tools, no Session log; model identity changes its digest, and so does the baseline
  * prompt contract (/2 since Issue #826) — the digest the #826 developer-live checkpoint recorded.
  */
-const DEV_LIVE_COMPOSITION_DIGEST = 'f4971b9178724fba7ca95434996fb424d58ae24d20d21cbb2127d681c2346ca0';
+const DEV_LIVE_COMPOSITION_DIGEST = 'f6073bb92d23e6507005bdc72153da48cedd89d461f47a860a557af7b94041cd';
 /** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
 const POLICY_DEFAULT_CEILING: Ceiling = {
   kind: 'tokens-per-frozen-unit',
