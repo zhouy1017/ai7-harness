@@ -2793,19 +2793,30 @@ describe('one-step review launch (#1455)', () => {
 });
 
 
-describe('launched review lifecycle regressions (#1455)', () => {
+async function openLaunchedLifecycle(scope: 'development-ci' | 'ordinary-production', wrap?: (owner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
+  if (scope === 'development-ci') return open('sample1-review-cross-chapter-authored', wrap);
+  const session = await openLayeredSelection();
+  return wrap === undefined ? session : { ...session, driver: new ReviewRunDriver(session.store.reviewRunDriveSteps, wrap(session.owner)) };
+}
+
+describe.each(['development-ci', 'ordinary-production'] as const)('%s launched review lifecycle regressions (#1455)', scope => {
   it.each(['cancel', 'pause'] as const)('keeps undispatched categories free when the first category is %s', async (action) => {
     let gated: GatedOwner | null = null;
-    const session = await open('sample1-review-cross-chapter-authored', inner => (gated = new GatedOwner(inner, 2)));
+    const session = await openLaunchedLifecycle(scope, inner => (gated = new GatedOwner(inner, 2)));
     try {
       const book = await importBook(session);
-      const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!;
+      const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE };
+      const run = session.store.launchReviewRun(input, launchPolicy).projection.run!;
       const loop = session.driver.drive(run.reviewRunId);
       await gated!.reached;
       const stopped = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId, action });
       if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
       else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
       gated!.release(); await loop;
+      const beforeReplay = eventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
+      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
+      expect(eventTrail(run.reviewRunId)).toEqual(beforeReplay);
+      if (session.capture !== undefined) expect(session.capture.wireRequests).toHaveLength(sent!);
       expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(STYLE_AND_FORMAT)).run).toBeNull();
       if (action === 'cancel') {
         expect(workspace(session, book, run.reviewRunId).run!.categories[1]!.state).toBe('refused');
@@ -2821,25 +2832,28 @@ describe('launched review lifecycle regressions (#1455)', () => {
 
   it('cancels a launched run after restart and immediately launches an undispatched category again', async () => {
     let book!: Book, reviewRunId!: string;
-    await withSession('sample1-review-cross-chapter-authored', async first => {
+    const first = await openLaunchedLifecycle(scope);
+    try {
       book = await importBook(first);
       reviewRunId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
       const steps = first.store.reviewRunDriveSteps, handoff = steps.start(reviewRunId, TYPOS)!;
       handoff.ledger.recordRunState(handoff.runRecordId, 'admitted', { detail: '测试中断前已进入调度。' });
       handoff.ledger.recordRunState(handoff.runRecordId, 'executing', { detail: '测试中断前正在运行。' });
       steps.recordDispatch(reviewRunId, TYPOS, handoff.runRecordId);
-    });
-    await withSession('sample1-review-cross-chapter-authored', async second => {
+    } finally { await close(first); }
+    const second = await openLaunchedLifecycle(scope);
+    try {
       const cancelled = second.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'cancel' });
       if (cancelled.runRecordId !== null) second.owner.cancelRun(cancelled.runRecordId, cancelled.ledger);
       expect(workspace(second, book, reviewRunId).run!.categories[1]!.state).toBe('refused');
       const next = second.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy).projection.run!;
       await second.driver.drive(next.reviewRunId);
       expect(workspace(second, book, next.reviewRunId).run!.state).toBe('settled');
-    });
+    } finally { await close(second); }
   });
+});
 
-  it('transmits a non-default channel and model with effort and stamps its card, report and task row', async () => {
+it('transmits a non-default channel and model with effort and stamps its card, report and task row', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const chosen = session.store.getModelServiceRouteConnection('opencode-go')!;
       const defaultConnection = session.store.getModelServiceRouteConnection('deepseek-open-platform')!;
@@ -2861,7 +2875,6 @@ describe('launched review lifecycle regressions (#1455)', () => {
       expect(session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items).find(entry => entry.item.target.kind === 'review' && entry.item.target.reviewRunId === run.reviewRunId)!.item.modelLabel).toBe('account-future-model@high');
       expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
     });
-  });
 });
 
 

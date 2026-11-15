@@ -1,5 +1,7 @@
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
+import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
+  EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, type EvidenceAssuranceLevel } from '../shared/protocol/factual-verification.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -333,6 +335,7 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  evidenceAssuranceLevel?: EvidenceAssuranceLevel;
   estimate?: string;
   launchInput?: string;
   executionConfig?: RuntimeExecutionConfig;
@@ -1117,6 +1120,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (run.state === 'prepared') {
       section.append(renderPlan(run));
     } else {
+      // Keeps the prepared card's plan-reading route after Start became one step; the same drawer hides technical detail in ordinary mode.
       const viewPlan = actionButton('view-plan', 'quiet', () => options.openPlan(run.reviewRunId), '查看计划');
       viewPlan.dataset['taskPlanOpen'] = 'review-run';
       section.append(viewPlan, renderProgress(run));
@@ -2690,6 +2694,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       sheet.addEventListener('close', () => editor.destroy(), { once: true });
     }
 
+    const assurance = el('fieldset', 'review-evidence-assurance');
+    assurance.append(el('legend', undefined, '证据保证级别'));
+    const assuranceSelect = el('select'); assuranceSelect.dataset['reviewField'] = 'evidenceAssuranceLevel';
+    assuranceSelect.setAttribute('aria-label', '证据保证级别');
+    for (const level of EVIDENCE_ASSURANCE_LEVELS) {
+      const option = el('option', undefined, EVIDENCE_ASSURANCE_LEVEL_LABELS[level]); option.value = level; assuranceSelect.append(option);
+    }
+    assuranceSelect.value = state.evidenceAssuranceLevel ?? EVIDENCE_ASSURANCE_DEFAULT_LEVEL;
+    const assuranceNote = el('p', 'field-note');
+    assuranceSelect.addEventListener('change', () => {
+      const chosen = EVIDENCE_ASSURANCE_LEVELS.find(level => level === assuranceSelect.value);
+      if (chosen !== undefined) state.evidenceAssuranceLevel = chosen;
+      updateSheet();
+    });
+    assurance.append(assuranceSelect, assuranceNote);
     const scopes = el('fieldset', 'review-scope-options');
     scopes.append(el('legend', undefined, REVIEW_SCOPE_LEGEND));
     const scopeInputs = new Map<ReviewScopeKind, HTMLInputElement>();
@@ -2818,7 +2837,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
-    form.append(categories, localOptions, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
+    form.append(categories, localOptions, assurance, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
     for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; estimateNotice.textContent = ''; estimateNotice.hidden = true; });
 
@@ -2830,6 +2849,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
       const effective = effectiveCategories(workspace, state);
+      assurance.hidden = !effective.includes('factual-review');
+      assuranceSelect.disabled = preparing;
+      assuranceNote.textContent = EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES[state.evidenceAssuranceLevel ?? EVIDENCE_ASSURANCE_DEFAULT_LEVEL];
       const blocked = sheetPreparationReason(workspace, state);
       procedureField.dataset['procedureLoading'] = String(loading);
       for (const { input, label, reason, calls, entry } of categoryInputs.values()) {
@@ -2892,6 +2914,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       start.disabled = prepare.disabled || state.launchPending === true;
+      start.textContent = workspace.connectivity === 'offline' && !localOnly(state) ? '联网后开始任务' : '开始审阅';
       close.disabled = state.launchPending === true;
 
     }
@@ -3000,12 +3023,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       options.setStatus(REVIEW_STATUS_LINES.launching, 'busy');
       state.launchPending = true;
-      const launchInput = JSON.stringify({ preparationInput, executionConfig: state.executionConfig ?? {} });
+      const taskInput = { ...preparationInput,
+        ...(categoryIds.includes('factual-review') ? { evidenceAssuranceLevel: state.evidenceAssuranceLevel ?? EVIDENCE_ASSURANCE_DEFAULT_LEVEL } : {}),
+        ...(projection.connectivity === 'offline' && !localOnly(state) ? { startWhen: 'when-online' as const } : {}) };
+      const launchInput = JSON.stringify({ taskInput, executionConfig: state.executionConfig ?? {} });
       if (state.launchInput !== launchInput) delete state.clientCommandId;
       state.launchInput = launchInput;
       state.clientCommandId ??= crypto.randomUUID();
       sheetUpdate();
-      const result = await api.launchReviewRun({ ...preparationInput, clientCommandId: state.clientCommandId,
+      const result = await api.launchReviewRun({ ...taskInput, clientCommandId: state.clientCommandId,
         ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }) });
       state.launchPending = false;
       if (result.run !== null) options.recorded?.(result.run.reviewRunId);

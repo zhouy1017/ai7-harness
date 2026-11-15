@@ -1,3 +1,4 @@
+import { EVIDENCE_ASSURANCE_LEVELS } from '../shared/protocol/factual-verification.js';
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validReasoningEffort, validRuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
@@ -1803,9 +1804,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchReviewRun':
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig'] : [])], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId', ...(value.op === 'launchReviewRun' ? ['clientCommandId', 'executionConfig', 'evidenceAssuranceLevel', 'startWhen'] : [])], tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
       if (value.op === 'launchReviewRun' && (!validUuid(input.clientCommandId) || (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)))) throw new ProtocolError(tentativeId);
+      if (value.op === 'launchReviewRun' && ((input.startWhen !== undefined && input.startWhen !== 'now' && input.startWhen !== 'when-online') ||
+          (input.evidenceAssuranceLevel !== undefined && (!EVIDENCE_ASSURANCE_LEVELS.some(level => level === input.evidenceAssuranceLevel) ||
+            !Array.isArray(input.categoryIds) || !input.categoryIds.includes('factual-review'))))) throw new ProtocolError(tentativeId);
       // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
       const composite = input.procedureDefinition != null;
       if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);

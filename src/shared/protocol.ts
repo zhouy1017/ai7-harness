@@ -6397,7 +6397,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
-  launchReviewRun: { input: PrepareReviewRunInput & { clientCommandId: string; executionConfig?: RuntimeExecutionConfig }; output: ReviewWorkspaceProjection };
+  launchReviewRun: { input: PrepareReviewRunInput & { clientCommandId: string; executionConfig?: RuntimeExecutionConfig;
+    evidenceAssuranceLevel?: EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' }; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
   continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
