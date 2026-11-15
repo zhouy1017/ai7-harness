@@ -1,5 +1,6 @@
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
+import { TaskLaunchPreview } from './task-plan-creation.js';
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
@@ -4077,7 +4078,15 @@ export class EditorialStore {
   #launchLedgerTask(kind: Exclude<import('./task-launch-snapshots.js').LaunchTaskKind, 'review-run' | 'scoped-ai-edit'>,
     input: import('../shared/protocol.js').LedgerTaskExecutionLaunchInput & { bookId: string }, launchPolicy: LaunchPolicyProjection,
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
-    startWhen: 'now' | 'when-online' = 'now') {
+    startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
+    if (preview !== undefined) {
+      const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
+      const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
+        ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
+      create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
+        ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
+      throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
+    }
     const { clientCommandId, ...request } = input;
     let execution: import('./analysis/baseline-analysis-store.js').LaunchBinding | null = null;
     try {
@@ -4103,43 +4112,66 @@ export class EditorialStore {
     }
   }
 
-  launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
-    return this.#launchLedgerTask('baseline-analysis', input, policy, (context, launchPolicy) => this.#baselineAnalysis.launchTask({
-      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits), startWhen);
+  launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
+    return this.#launchLedgerTask('baseline-analysis', input, policy, (context, launchPolicy) => {
+      const ledger = this.#baselineAnalysis.forkForLaunch(context.execution);
+      const task = {
+      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now' } as const;
+      if (context.preview !== undefined) return context.preview(ledger, task);
+      return ledger.launchTask(task, context.snapshotId, context.execution, false, context.planEdits);
+    }, startWhen, preview);
   }
 
-  launchCustomAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchCustomAnalysis']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
+  launchCustomAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchCustomAnalysis']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('custom-analysis', input, policy, (context, launchPolicy) => customAnalysisOperations.launchCustomAnalysisTask(
-      { ...this.#customAnalysisHost, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input, launchPolicy, context), startWhen);
+      { ...this.#customAnalysisHost, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input, launchPolicy, context), startWhen, preview);
   }
 
-  launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
+  launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen);
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen, preview);
   }
 
-  launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
+  launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('initial-evaluation', input, policy, (context, launchPolicy) => initialEvaluationOperations.launchInitialEvaluationTask(
-      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen);
+      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen, preview);
   }
 
-  launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
+  launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('readers-report', input, policy, (context, launchPolicy) => {
       const evaluation = this.#launchInitialHost(context.execution);
       return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
         input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
-    }, startWhen);
+    }, startWhen, preview);
   }
 
-  launchEvaluationRewrite(input: import('../shared/protocol.js').ServiceOperationMap['launchEvaluationRewrite']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
+  launchEvaluationRewrite(input: import('../shared/protocol.js').ServiceOperationMap['launchEvaluationRewrite']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now', preview?: import('./task-plan-creation.js').TaskLaunchContext['preview']) {
     return this.#launchLedgerTask('evaluation-rewrite', input, policy, (context, launchPolicy) => {
       const evaluation = this.#launchInitialHost(context.execution);
       return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
         input.bookId, input.recordId, launchPolicy, null, context);
-    }, startWhen);
+    }, startWhen, preview);
+  }
+
+  previewTaskLaunch(input: import('../shared/protocol.js').TaskLaunchPreviewInput, policy: LaunchPolicyProjection): import('../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
+    const preview: NonNullable<import('./task-plan-creation.js').TaskLaunchContext['preview']> = (ledger, task) => {
+      throw new TaskLaunchPreview(ledger.previewLaunch(task, input.launch.input.planEdits));
+    };
+    const launch = input.launch;
+    try {
+      switch (launch.operation) {
+        case 'launchBaselineAnalysis': this.launchBaselineAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
+        case 'launchCustomAnalysis': this.launchCustomAnalysis({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
+        case 'launchWritingTask': this.launchWritingTask({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
+        case 'launchInitialEvaluation': this.launchInitialEvaluation({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
+        case 'launchReadersReport': this.launchReadersReport({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
+        case 'launchEvaluationRewrite': this.launchEvaluationRewrite({ ...launch.input, bookId: input.bookId }, policy, 'now', preview); break;
+      }
+    } catch (result) { if (result instanceof TaskLaunchPreview) return result.projection; throw result; }
+    throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
   }
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
@@ -4746,8 +4778,26 @@ export class EditorialStore {
     if (kind === INITIAL_EVALUATION_KIND) return this.#initialLedgerForTask(asString(row.task_intent_id));
     const mapped = kind === READERS_REPORT_KIND ? 'readers-report' : kind === EVALUATION_REWRITE_KIND ? 'evaluation-rewrite'
       : kind === WRITING_KIND ? 'writing' : null;
-    if (mapped !== null) return this.#currentLedgerOf(mapped, asString(row.book_id), asString(row.task_intent_id));
+    if (mapped !== null) {
+      const taskIntentId = asString(row.task_intent_id);
+      const found = mapped === 'readers-report' ? readersReportOperations.readersReportTaskOf(this.#readersReportHost, taskIntentId)
+        : mapped === 'evaluation-rewrite' ? evaluationRewriteOperations.evaluationRewriteTaskOf(this.#evaluationRewriteHost, taskIntentId)
+          : writingTaskOperations.internalWritingTaskOf(this.#writingTaskOperationsHost, taskIntentId);
+      requireStore(found !== null, 'ANALYSIS_RUN_INVALID', '运行的任务记录不存在。');
+      return found.ledger;
+    }
     return this.#reviewCall(() => this.#reviewRuns.ledgerForRun(runRecordId));
+  }
+
+  /** Restore the existing admission queue, using each committed launch's own contract, without a renderer replay. */
+  pendingLaunchedLedgerRuns(): Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> {
+    return this.#authority.prepare(`SELECT r.run_record_id FROM task_launch_snapshots l
+      JOIN analysis_run_records r ON r.run_record_id = l.run_id
+      WHERE (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) = 'authorized'
+      ORDER BY r.recorded_at, r.rowid`).all().map(row => {
+        const runRecordId = String(row.run_record_id);
+        return { runRecordId, ledger: this.executionLedgerForRun(runRecordId) };
+      });
   }
 
   /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */

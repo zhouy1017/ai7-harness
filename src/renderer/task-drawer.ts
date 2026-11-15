@@ -4,7 +4,7 @@ import type { RuntimeExecutionConfig, LedgerTaskLaunchOperation, TaskExecutionLa
 import type { ServiceOperationMap } from '../shared/protocol.js';
 import type { PlanEditsProjection } from '../shared/protocol/analysis-plan.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
-import { reviewPlanReferenceField } from './task-material-selection.js';
+import { reviewPlanReferenceField, similarMaterialsField } from './task-material-selection.js';
 import { evaluationPlanReferenceField, evaluationMaterialsField } from './evaluation.js';
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -193,6 +193,7 @@ export type TaskLaunchOperation = LedgerTaskLaunchOperation;
 export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; operation: K; title: string;
   /** Surface behavior after the launch commits; never sent to the service. */
   onStarted?: () => void;
+  readInput?: () => Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'>;
   input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
 
 export interface TaskDrawerSurface {
@@ -235,6 +236,7 @@ type DrawerApi = Pick<
   | TaskLaunchOperation
   | 'getModelServiceSettings'
   | 'inspectEvaluation'
+  | 'previewTaskLaunch'
   | 'prepareInitialEvaluation'
   | 'prepareReadersReport'
   | 'inspectReviewWorkspace'
@@ -2819,8 +2821,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const kinds = LEDGER_TASK_LAUNCH_KINDS;
       root.dataset['taskLaunchKind'] = kinds[next.operation];
       const description = el('p', undefined, '开始时使用当前稿件，并固定本次任务的模型与思考强度。');
-      const estimate = el('details', 'task-launch-estimate'), usage = el('p');
-      estimate.append(el('summary', undefined, '本次用量说明'), usage);
+      const estimate = el('details', 'task-launch-estimate'), usage = el('div');
+      const refreshPreview = control('更新计划', '', 'preview-launch');
+      estimate.append(el('summary', undefined, '先看计划'), usage, refreshPreview);
       body.replaceChildren(description, estimate);
       let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
       let commandId = crypto.randomUUID();
@@ -2831,12 +2834,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       budget.dataset['taskLaunchOption'] = 'budget';
       budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
       const budgetLabel = el('label', undefined, '本次预算上限 · 词元（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
-      const describeUsage = (): void => {
-        const limit = budget.value.trim() === '' ? '未设置词元预算上限。' : parseBudgetCeiling(budget.value) === null
-          ? '预算上限需要填写有效的词元数量。' : `词元预算上限为 ${budget.value.trim()}。`;
-        usage.textContent = `本次运行「${next.title}」。${limit}实际用量随稿件与回答变化，完成后可在运行记录查看；结果不会直接替换稿件。`;
-      };
-      describeUsage(); budget.addEventListener('input', describeUsage);
+      usage.textContent = '计划预览按当前稿件和本次选项计算，不记录任务；开始时固定当前稿件。';
       runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
       const baselineOptions = next.operation === 'launchBaselineAnalysis';
       const retryOptions = baselineOptions || next.operation === 'launchCustomAnalysis';
@@ -2878,6 +2876,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           }));
         };
         paintReferences();
+        references.append(similarMaterialsField(api, next.bookId, page.materials?.items ?? [], selected, id => {
+          selected.add(id); next.input = { ...next.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); paintReferences();
+        }));
         if (next.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
           const label = el('label', undefined, '书系参考');
           const select = el('select'); select.setAttribute('aria-label', '本次任务的书系参考');
@@ -2888,9 +2889,42 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           select.addEventListener('change', () => { next.input = { ...next.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
           label.append(select); references.append(label);
         }
-      });
+      }).catch(error => { if (ticket === current) references.append(el('p', undefined, options.errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
       const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); } });
       const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
+      const applyOptions = (): boolean => {
+        const latestInput = next.readInput?.();
+        if (latestInput !== undefined) {
+          const { planEdits: _edits, startWhen: _when, ...previous } = next.input;
+          if (JSON.stringify(latestInput) !== JSON.stringify(previous)) commandId = crypto.randomUUID();
+          next.input = { ...next.input, ...latestInput };
+        }
+        const tokens = budget.value.trim() === '' ? null : parseBudgetCeiling(budget.value);
+        if (tokens === null && budget.value.trim() !== '') { problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return false; }
+        const planEdits: PlanEditsProjection = {
+          removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : next.input.planEdits?.removedSteps ?? [],
+          disallowedAdaptations: retryOptions ? retry.value === 'never' ? ['safe-retry'] : [] : next.input.planEdits?.disallowedAdaptations ?? [],
+          ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
+          ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
+        };
+        next.input = { ...next.input, planEdits, startWhen: timing.value === 'idle' ? 'idle' : timing.value === 'when-online' ? 'when-online' : 'now' };
+        return true;
+      };
+      const readPreview = async (): Promise<void> => {
+        if (refreshPreview.disabled || !applyOptions() || !(await options.settle())) return;
+        refreshPreview.disabled = true;
+        try {
+          const launch = { operation: next.operation, input: { ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice } } as import('../shared/protocol.js').TaskLaunchPreviewInput['launch'];
+          const preview = await api.previewTaskLaunch({ launch });
+          if (ticket !== current) return;
+          const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, step));
+          usage.replaceChildren(el('p', undefined, `处理范围：${preview.scope}`), steps,
+            ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, preview.send), el('p', undefined, preview.usage));
+        } catch (error) { if (ticket === current) usage.textContent = options.errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
+        finally { refreshPreview.disabled = false; }
+      };
+      estimate.addEventListener('toggle', () => { if (estimate.open) void readPreview(); });
+      refreshPreview.addEventListener('click', () => { void readPreview(); });
       const start = control('开始任务', 'primary', 'launch'); start.disabled = true;
       start.addEventListener('click', () => { void (async () => {
         if (start.disabled) return;
@@ -2901,15 +2935,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         for (const { control } of controls) control.disabled = true;
         const restore = (): void => { for (const { control, disabled } of controls) control.disabled = disabled; };
         try {
-          const tokens = budget.value.trim() === '' ? null : parseBudgetCeiling(budget.value);
-          if (tokens === null && budget.value.trim() !== '') { restore(); start.disabled = false; problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return; }
-          const planEdits: PlanEditsProjection = {
-            removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : next.input.planEdits?.removedSteps ?? [],
-            disallowedAdaptations: retryOptions ? retry.value === 'never' ? ['safe-retry'] : [] : next.input.planEdits?.disallowedAdaptations ?? [],
-            ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
-            ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
-          };
-          next.input = { ...next.input, planEdits, startWhen: timing.value === 'idle' ? 'idle' : timing.value === 'when-online' ? 'when-online' : 'now' };
+          if (!applyOptions()) { restore(); start.disabled = false; return; }
           if (!(await options.settle())) { restore(); start.disabled = false; return; }
           let result: TaskExecutionLaunchResult;
           switch (next.operation) {

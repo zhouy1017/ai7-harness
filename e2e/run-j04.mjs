@@ -1,3 +1,4 @@
+import { chooseDispatch } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
@@ -3630,22 +3631,10 @@ async function main() {
         await openReviewDestination(renderer, 'dispatch-choice-review');
         await reviewAction(renderer, '[data-review-action="new-review"]', 'dispatch-choice-new');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet .dispatch-chooser select')?.options.length>1`, 'dispatch-choice-sheet');
-        const chosenLabel = await renderer.evaluate(`(() => {
-          const sheet=document.querySelector('dialog.review-sheet');
+        await renderer.evaluate(`(() => {const sheet=document.querySelector('dialog.review-sheet');
           for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='typos-and-usage')&&!box.disabled)box.click();
-          sheet.querySelector('input[name="review-scope"][value="whole"]').click();
-          const chooser=sheet.querySelector('.dispatch-chooser');chooser.open=true;
-          const models=chooser.querySelector('select[aria-label="本次任务的模型"]');
-          const other=Array.from(models.options).findIndex((option,index)=>index!==models.selectedIndex);
-          if(other<0)return null;
-          models.selectedIndex=other;models.dispatchEvent(new Event('change',{bubbles:true}));
-          const effort=chooser.querySelector('select[aria-label="本次任务的思考强度"]');
-          const value=Array.from(effort.options).find(option=>option.value!=='off')?.value;
-          if(!value)return null;
-          effort.value=value;effort.dispatchEvent(new Event('change',{bubbles:true}));
-          const label=chooser.querySelector('summary').textContent.replace(/^模型 /u,'').replace(/ ▾$/u,'');
-          chooser.open=false;return label;
-        })()`);
+          sheet.querySelector('input[name="review-scope"][value="whole"]').click();})()`);
+        const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer')).replace(/^模型 /u,'').replace(/ ▾$/u,'');
         requireJourney(typeof chosenLabel==='string' && chosenLabel.includes('@'), 'dispatch-choice-model-and-effort');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'dispatch-choice-selected-ready');
         await assertRenderer(renderer, `(() => {const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'), bounds=button.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth&&bounds.top>=0&&bounds.bottom<=innerHeight;})()`, 'dispatch-choice-start-visible');

@@ -40,6 +40,10 @@ describe('one-step drawer launch frames (#1455)', () => {
     const input = { bookId, ...task, clientCommandId: randomUUID(), executionConfig: { modelConnectionId: 'instance-reference', modelId: 'account/model', reasoningEffort: 'high' }, rememberedChoice: true };
     const frame = { id: randomUUID(), op, input };
     expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    const { bookId: _book, ...previewRequest } = input;
+    const preview = { id: randomUUID(), op: 'previewTaskLaunch', input: { bookId, launch: { operation: op, input: previewRequest } } };
+    expect(decodeRequest(encoder.encode(JSON.stringify(preview)))).toEqual(preview);
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...preview, input: { ...preview.input, launch: { ...preview.input.launch, input: { ...previewRequest, bookId } } } })))).toThrow(ProtocolError);
     const options = { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } };
     expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, planEdits: options, startWhen: 'idle' } })))).toMatchObject({ input: { planEdits: options, startWhen: 'idle' } });
     expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, startWhen: 'when-online' } })))).toMatchObject({ input: { startWhen: 'when-online' } });

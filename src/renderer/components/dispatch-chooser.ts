@@ -9,12 +9,25 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
   const element = document.createElement('details'); element.className = 'dispatch-chooser';
   const summary = document.createElement('summary'); summary.textContent = '模型 加载中 ▾';
   const panel = document.createElement('div'); panel.className = 'dispatch-chooser-panel';
+  // The native top layer escapes scrolling start bars and composers without widening their overflow.
+  const topLayer = typeof panel.showPopover === 'function';
+  if (topLayer) panel.setAttribute('popover', 'manual');
   const modelLabel = document.createElement('label'); modelLabel.textContent = '模型';
   const models = document.createElement('select'); models.setAttribute('aria-label', '本次任务的模型');
   const effortLabel = document.createElement('label'); effortLabel.textContent = '思考强度';
   const efforts = document.createElement('select'); efforts.setAttribute('aria-label', '本次任务的思考强度');
   const reset = document.createElement('button'); reset.type = 'button'; reset.textContent = '恢复默认';
   modelLabel.append(models); effortLabel.append(efforts); panel.append(modelLabel, effortLabel, reset); element.append(summary, panel);
+  const placePanel = (): void => {
+    if (!topLayer || !element.open) return;
+    const anchor = summary.getBoundingClientRect(), bounds = panel.getBoundingClientRect();
+    panel.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8))}px`;
+    panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, window.innerHeight - bounds.height - 8))}px`;
+  };
+  element.addEventListener('toggle', () => {
+    if (!topLayer) return;
+    if (element.open) { panel.showPopover(); placePanel(); } else panel.hidePopover();
+  });
   let settings: ModelServiceSettingsProjection | null = null;
   let choices: Array<{ config: RuntimeExecutionConfig; label: string; levels: readonly string[] }> = [];
   let defaultChoice: RuntimeExecutionConfig = {};
@@ -33,6 +46,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     efforts.value = effort ?? 'off'; effortLabel.hidden = choice.levels.length === 0;
     const sent = effortLabel.hidden || efforts.value === 'off' ? '' : `@${efforts.value}`;
     summary.textContent = `模型 ${choice.label}${sent} ▾`;
+    placePanel();
   };
   const notify = (): void => {
     const choice = choices[models.selectedIndex];

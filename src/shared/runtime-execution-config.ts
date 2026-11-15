@@ -40,6 +40,15 @@ export interface TaskExecutionLaunchResult {
   readonly waitingForNetwork?: boolean;
 }
 
+export interface TaskLaunchPreviewProjection {
+  readonly steps: ReadonlyArray<string>;
+  readonly scope: string;
+  readonly units: number;
+  readonly reference: ReadonlyArray<string>;
+  readonly send: string;
+  readonly usage: string;
+}
+
 export function validReasoningEffort(value: unknown): value is string {
   return typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}$/u.test(value);
 }

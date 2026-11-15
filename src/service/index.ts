@@ -466,6 +466,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
+    case 'previewTaskLaunch':
+      return { id: request.id, ok: true, op: request.op, result: store.previewTaskLaunch(request.input, launchPolicy) };
     case 'launchBaselineAnalysis':
     case 'launchCustomAnalysis':
     case 'launchWritingTask':
@@ -479,7 +481,11 @@ async function dispatch(
         : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy, startWhen)
         : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy, startWhen)
         : store.launchEvaluationRewrite(request.input, launchPolicy, startWhen);
-      driveLaunchedLedgerRun(analysisExecution, { ...result, ledger });
+      try { driveLaunchedLedgerRun(analysisExecution, { ...result, ledger }); }
+      catch (error) {
+        const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+        throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+      }
       if (ledger.currentRunState(result.runRecordId) === 'awaiting-connectivity') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result };
     }
@@ -2394,6 +2400,10 @@ async function run(): Promise<void> {
       }
       catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
     }
+    for (const launched of store.pendingLaunchedLedgerRuns()) {
+      try { driveLaunchedLedgerRun(analysisExecution, launched); }
+      catch { /* Admission records its refusal; the task's ordinary controls remain available. */ }
+    }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —
@@ -2578,7 +2588,7 @@ async function run(): Promise<void> {
             foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
           throw new Error('E2E interruption before foreground boundary response.');
         }
-        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) serving.background.nudge();
+        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare') || request.op.startsWith('launch'))) serving.background.nudge();
         return response;
       },
       afterResponse: (request, response) => {

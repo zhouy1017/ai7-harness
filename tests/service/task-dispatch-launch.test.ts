@@ -97,20 +97,34 @@ async function previousConnectionId(currentIds: ReadonlyArray<string>): Promise<
   } finally { previous.markCleanShutdown(); previous.close(); await previousRoots.dispose(); }
 }
 
-function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' | 'when-online' = 'now', serviceStartWhen: 'now' | 'when-online' = 'now') {
-  const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice, startWhen, ...(planEdits === undefined ? {} : { planEdits }) };
+function launchRequest(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' | 'when-online' = 'now'): import('../../src/shared/protocol.js').TaskLaunchPreviewInput['launch'] {
+  const common = { clientCommandId, executionConfig, rememberedChoice, startWhen, ...(planEdits === undefined ? {} : { planEdits }) };
   switch (kind) {
-    case 'baseline-analysis': return () => store.launchBaselineAnalysis({ ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy, serviceStartWhen);
+    case 'baseline-analysis': return { operation: 'launchBaselineAnalysis', input: { ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } };
     case 'custom-analysis': {
       dimensionId ??= store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE }).dimensions[0]!.dimensionId;
       const selectedDimension = dimensionId;
-      return () => store.launchCustomAnalysis({ ...common, dimensionId: selectedDimension, update: null }, policy, serviceStartWhen);
+      return { operation: 'launchCustomAnalysis', input: { ...common, dimensionId: selectedDimension, update: null } };
     }
-    case 'writing': return () => store.launchWritingTask({ ...common, ...WRITING_REQUEST }, policy, serviceStartWhen);
-    case 'initial-evaluation': return () => store.launchInitialEvaluation(common, policy, serviceStartWhen);
-    case 'readers-report': return () => store.launchReadersReport({ ...common, template: 'author' }, policy, serviceStartWhen);
-    case 'evaluation-rewrite': return () => store.launchEvaluationRewrite({ ...common, recordId: target.recordId }, policy, serviceStartWhen);
+    case 'writing': return { operation: 'launchWritingTask', input: { ...common, ...WRITING_REQUEST } };
+    case 'initial-evaluation': return { operation: 'launchInitialEvaluation', input: common };
+    case 'readers-report': return { operation: 'launchReadersReport', input: { ...common, template: 'author' } };
+    case 'evaluation-rewrite': return { operation: 'launchEvaluationRewrite', input: { ...common, recordId: target.recordId } };
   }
+}
+
+function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' | 'when-online' = 'now', serviceStartWhen: 'now' | 'when-online' = 'now') {
+  const launch = launchRequest(kind, target, executionConfig, clientCommandId, rememberedChoice, planEdits, startWhen);
+  return () => {
+    switch (launch.operation) {
+      case 'launchBaselineAnalysis': return store.launchBaselineAnalysis({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+      case 'launchCustomAnalysis': return store.launchCustomAnalysis({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+      case 'launchWritingTask': return store.launchWritingTask({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+      case 'launchInitialEvaluation': return store.launchInitialEvaluation({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+      case 'launchReadersReport': return store.launchReadersReport({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+      case 'launchEvaluationRewrite': return store.launchEvaluationRewrite({ ...launch.input, bookId: target.bookId }, policy, serviceStartWhen);
+    }
+  };
 }
 
 type LaunchBook = Awaited<ReturnType<typeof book>>;
@@ -179,6 +193,15 @@ function expectTaskAttribution(kind: Kind, target: LaunchBook, launched: Launche
   if (kind === 'custom-analysis') expect(task?.item.object).toMatchObject({ kind: 'analysis', customTitle: CUSTOM_DIMENSION_TITLE });
 }
 
+function expectProducedAttribution(kind: Kind, target: LaunchBook, launched: LaunchedTask, label: string): void {
+  const projection = store.executionLedgerForRun(launched.runRecordId).inspect(target.bookId);
+  expect(projection.taskOutcome?.report?.modelLabel).toBe(label);
+  if (kind === 'writing') expect(store.inspectWritingTask(target.bookId).types.find(type=>type.typeId===WRITING_REQUEST.typeId)?.drafted?.modelLabel).toBe(label);
+  else if (kind === 'initial-evaluation') expect(store.inspectEvaluation(target.bookId, null).initial.latest?.modelLabel).toBe(label);
+  else if (kind === 'readers-report') expect(store.inspectEvaluation(target.bookId, null).readersReport.templates.find(template=>template.template==='author')?.drafted?.modelLabel).toBe(label);
+  else if (kind === 'evaluation-rewrite') expect(store.inspectEvaluation(target.bookId, target.recordId).rewrite.proposal?.modelLabel).toBe(label);
+}
+
 function expectLaunchAuthorityOnly(kind: Kind, launches: ReadonlyArray<LaunchedTask>): void {
   const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
   try {
@@ -193,6 +216,21 @@ function expectLaunchAuthorityOnly(kind: Kind, launches: ReadonlyArray<LaunchedT
       expect(launched.ledger.currentRunState(launched.runRecordId)).toBe('authorized');
     }
   } finally { db.close(); }
+}
+
+function reconcileAll() {
+  store.reconcileStoppedBaselineAnalysisRuns(); store.reconcileStoppedInitialEvaluationRuns();
+  store.reconcileStoppedWritingRuns(); store.reconcileStoppedReadersReportRuns(); store.reconcileStoppedEvaluationRewriteRuns();
+  store.reconcileStoppedCustomAnalysisRuns();
+}
+
+function cancelQueued(kind: Kind, target: LaunchBook, launched: LaunchedTask) {
+  if (kind === 'baseline-analysis' || kind === 'custom-analysis') {
+    store.cancelWaitingBaselineAnalysis(target.bookId, launched.taskIntentId); capture!.owner.dequeue(launched.runRecordId);
+  } else {
+    const cancelled = store.cancelWaitingTask({ bookId: target.bookId, kind, ref: launched.taskIntentId });
+    if (cancelled.dequeue !== null) capture!.owner.dequeue(cancelled.dequeue);
+  }
 }
 
 async function baselineAnswers(): Promise<CapturedOrdinaryAnswer> {
@@ -247,6 +285,69 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
+  it('previews current manuscript and options without writing a task or checkpoint', async () => {
+    const target = await book(kind); ordinary(); typeBeforeLaunch(target);
+    const launch = launchRequest(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false,
+      { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 12345 } });
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const before = db.prepare('PRAGMA data_version').get();
+      const window = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
+      const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy);
+      expect(preview.units).toBeGreaterThan(0); expect(preview.steps.length).toBeGreaterThan(0);
+      expect(preview.scope).toContain('阅读单元'); expect(preview.send).toContain('会发送'); expect(preview.usage).toContain('12345');
+      expect(db.prepare('PRAGMA data_version').get()).toEqual(before);
+      expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null)).toEqual(window);
+      expect(capture!.requests).toHaveLength(0);
+    } finally { db.close(); }
+  });
+
+  it('replays the original cancelled command after a newer task exists', async () => {
+    const target = await book(kind); ordinary();
+    const firstCommand = command(kind, target, { reasoningEffort: 'high' }, randomUUID(), false, undefined, 'when-online');
+    const first = firstCommand(); cancelQueued(kind, target, first);
+    const second = command(kind, target, { reasoningEffort: 'low' }, randomUUID(), false, undefined, 'when-online')();
+    expect(firstCommand()).toMatchObject({ repeated: true, runRecordId: first.runRecordId, taskIntentId: first.taskIntentId });
+    expect(store.executionLedgerForRun(first.runRecordId).currentRunState(first.runRecordId)).toBe('cancelled');
+    expect(second.ledger.currentRunState(second.runRecordId)).toBe('awaiting-connectivity');
+    expect(capture!.requests).toHaveLength(0);
+  });
+
+  it.each(['now', 'idle', 'when-online'] as const)('restores an unadmitted %s launch after restart without a replay', async timing => {
+    const target = await book(kind), answer = await lifecycleAnswers(kind); let definition!: LaunchedTask['ledger']['definition'];
+    const schedule: CapturedOrdinaryAnswer = request => answer(request, definition);
+    ordinary(schedule);
+    const first = command(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false, undefined, timing)();
+    definition = first.ledger.definition;
+    await restart(schedule); reconcileAll();
+    capture!.owner.setBackgroundIdle(false);
+    for (const pending of store.pendingLaunchedLedgerRuns()) driveLaunchedLedgerRun(capture!.owner, pending);
+    if (timing === 'idle') {
+      expect(capture!.owner.queuePosition(first.runRecordId)).not.toBeNull();
+      capture!.owner.setBackgroundIdle(true);
+    } else if (timing === 'when-online') {
+      expect(capture!.requests).toHaveLength(0);
+      const waiting = store.waitingTaskRuns(target.bookId)[0]!;
+      expect(waiting.kind).not.toBe('review-run');
+      capture!.owner.admitAndDispatch(first.runRecordId, store.executionLedgerForRun(first.runRecordId), { afterReconnectPreflight: true });
+    }
+    await capture!.owner.whenIdle();
+    expect(store.executionLedgerForRun(first.runRecordId).currentRunState(first.runRecordId)).toMatch(/^completed/u);
+    expectProducedAttribution(kind, target, first, 'account-future-model@high');
+    expect(capture!.wireRequests.length).toBeGreaterThan(0);
+    expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+  });
+
+  it.each(['now', 'idle', 'when-online'] as const)('cancels a restored %s launch through its waiting control', async timing => {
+    const target = await book(kind); ordinary();
+    const first = command(kind, target, { reasoningEffort: 'high' }, randomUUID(), false, undefined, timing)();
+    await restart(); reconcileAll(); capture!.owner.freezeQueue(true);
+    for (const pending of store.pendingLaunchedLedgerRuns()) driveLaunchedLedgerRun(capture!.owner, pending);
+    cancelQueued(kind, target, first); capture!.owner.freezeQueue(false); capture!.owner.setBackgroundIdle(true);
+    await capture!.owner.whenIdle();
+    expect(store.executionLedgerForRun(first.runRecordId).currentRunState(first.runRecordId)).toBe('cancelled');
+    expect(capture!.requests).toHaveLength(0);
+  });
   it.each(['cancel', 'pause', 'restart'] as const)('releases an ordinary-production launched task after %s', async action => {
     const test = await launchedLifecycle(kind);
     try {

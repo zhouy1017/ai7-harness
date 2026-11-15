@@ -269,6 +269,8 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
       host.setStatus(SCOPED_AI_EDIT_WORDS.requesting, 'busy');
       settled = await host.api.startScopedAiEdit(sentInput);
     } catch (error) {
+      // A coded business refusal proves this command did not start. Transport failures keep the pin for idempotent replay.
+      if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && !error.code.startsWith('SERVICE_')) resetCommand();
       host.setStatus(host.errorMessage(error, SCOPED_AI_EDIT_WORDS.failed), 'error');
       submit.disabled = cancel.disabled = instruction.disabled = false;
       for (const { control, disabled } of controls) control.disabled = disabled;

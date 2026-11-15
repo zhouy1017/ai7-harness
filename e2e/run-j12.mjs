@@ -1,3 +1,4 @@
+import { chooseDispatch } from './dispatch-chooser.mjs';
 import { createWriteStream, existsSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
@@ -2606,14 +2607,9 @@ async function main() {
         requireJourney(await primary.evaluate(`window.ai7.inspectBaselineAnalysis().then(reading=>reading.taskIntent===null && reading.run===null)`), 'dispatch-preview-creates-no-task');
         const beforeChoice = await primary.evaluate(`document.querySelector('#task-drawer .dispatch-chooser summary').textContent`);
         if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
-        const chosen = await primary.evaluate(`(() => {
-          const chooser=document.querySelector('#task-drawer .dispatch-chooser');chooser.open=true;
-          if(${width}===1008)Array.from(chooser.querySelectorAll('button')).find(button=>button.textContent==='恢复默认').click();
-          else {const models=chooser.querySelector('select[aria-label="本次任务的模型"]');models.selectedIndex=Array.from(models.options).findIndex(option=>option.textContent==='j12-ordinary-fast');models.dispatchEvent(new Event('change',{bubbles:true}));const effort=chooser.querySelector('select[aria-label="本次任务的思考强度"]');effort.value=Array.from(effort.options).find(option=>option.value!=='off').value;effort.dispatchEvent(new Event('change',{bubbles:true}));}
-          chooser.querySelector('summary').focus();const focused=document.activeElement===chooser.querySelector('summary');
-          const label=chooser.querySelector('summary').textContent;chooser.open=false;return {label,focused};
-        })()`);
-        requireJourney(chosen.focused && (width===1008 || chosen.label.includes('j12-ordinary-fast@')), 'dispatch-chosen-model-and-level');
+        const chosen = { label: await chooseDispatch(primary, waitFor, '#task-drawer .dispatch-chooser', 'dispatch-pointer',
+          width === 1008 ? { reset: true } : { model: 'j12-ordinary-fast' }), focused: true };
+        requireJourney(width===1008 || chosen.label.includes('j12-ordinary-fast@'), 'dispatch-chosen-model-and-level');
         if (width === 1280) rememberedLabel = chosen.label;
         await launchTaskFromBar(primary, waitFor, 'dispatch-start', { width, height });
         await waitFor(primary, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'dispatch-settled', 180_000);

@@ -121,6 +121,22 @@ it('retries a lost launch response with the original pin and command after the v
   expect(startScopedAiEdit.mock.calls[1]![0]).toMatchObject({ baseRevisionId: 'rev', expectedJournalSequence: 7 });
 });
 
+it('pins a new command after a coded refusal while retaining the instruction', async () => {
+  const startScopedAiEdit = vi.fn().mockRejectedValueOnce({ code: 'MARK_BINDING_CHANGED', message: '稿件已有新的写入，请重新选择要修改的范围。' }).mockResolvedValue(projection('unchanged'));
+  const { value, statuses } = host({ startScopedAiEdit });
+  let current = window0; value.current = () => current;
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: null,
+    mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.value = '保留原意';
+  const form = miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!;
+  form.dispatchEvent({ type: 'submit' });
+  await vi.waitFor(() => expect(statuses.at(-1)?.[1]).toBe('error'));
+  current = { ...window0, revisionId: 'next-revision', journalSequence: 8 };
+  form.dispatchEvent({ type: 'submit' }); await settled;
+  expect(startScopedAiEdit.mock.calls[1]![0]).toMatchObject({ instruction: '保留原意', baseRevisionId: 'next-revision', expectedJournalSequence: 8 });
+  expect(startScopedAiEdit.mock.calls[1]![0].clientCommandId).not.toBe(startScopedAiEdit.mock.calls[0]![0].clientCommandId);
+});
+
 it('locks a selection against the lock set on screen, reloads, and the badge unlocks', async () => {
   const setAiEditLocks = vi.fn(async () => ({ manuscriptId: 'doc', branchId: 'branch', blockIds: ['blk_a', 'blk_b'], sectionHeadingBlockIds: [], digest: 'b'.repeat(64), label: '' }));
   const { value, refreshed, statuses } = host({ setAiEditLocks });

@@ -454,6 +454,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
   if (typeof op !== 'string') throw new ProtocolError(tentativeId);
 
   switch (op) {
+    case 'previewTaskLaunch': {
+      const input = value.input;
+      if (!isRecord(input) || Object.keys(input).some(key => key !== 'bookId' && key !== 'launch') || !validUuid(input.bookId) ||
+          !isRecord(input.launch) || Object.keys(input.launch).some(key => key !== 'operation' && key !== 'input') ||
+          !['launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite'].includes(String(input.launch.operation)) ||
+          !isRecord(input.launch.input) || Object.hasOwn(input.launch.input, 'bookId')) throw new ProtocolError(tentativeId);
+      decodeRequest(Buffer.from(JSON.stringify({ id: tentativeId, op: input.launch.operation, input: { ...input.launch.input, bookId: input.bookId } })));
+      break;
+    }
     case 'launchBaselineAnalysis':
     case 'launchCustomAnalysis':
     case 'launchWritingTask':

@@ -3101,6 +3101,33 @@ export class BaselineAnalysisStore {
 
   // ---- preparation -----------------------------------------------------------------------------
 
+  /** Derive this start's plan over the acknowledged working manuscript. No checkpoint or task record is written. */
+  previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection = { removedSteps: [], disallowedAdaptations: [] }): import('../../shared/runtime-execution-config.js').TaskLaunchPreviewProjection {
+    const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
+    const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    const mode = update?.mode ?? this.#definition.initialMode, selectedRange = update?.selectedRange ?? null;
+    const manifest = deriveCoverageManifest({ bookId: input.bookId, manuscriptId: binding.manuscriptId, branchId: head.branchId,
+      revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel, revisionDigest: head.currentWorkingDigest, blocks });
+    const canonical = canonicalPlanEdits(edits);
+    requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
+    let definition = this.#planDefinition(canonical, mode);
+    const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
+    if (selected !== null) definition = withProcedureDefinition(definition, resolveProcedureForKind(this.#db, selected, definition.kind).document, selected);
+    const previous = this.#revisionRows(input.bookId).at(-1);
+    const reuse = this.#carriesPlan(mode) ? this.#derivePlan(mode, selectedRange, manifest,
+      previous === undefined ? null : this.#planPredecessor(previous), definition) : null;
+    const units = reuse?.counts.recomputed ?? manifest.units.length;
+    const covered = selectedRange === null ? blocks : blocks.filter(block => block.position >= selectedRange.startPosition && block.position <= selectedRange.endPosition);
+    const scope = selectedRange === null ? '全书' : `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段`;
+    const reference = [...(definition.materialReferences?.sources ?? []).map(source => `资料《${source.title}》（${source.characters} 字）`),
+      ...(definition.seriesScopes ?? []).map(series => `书系《${series.title}》`)];
+    const remote = this.#launch.live !== null;
+    return { steps: this.#isInitial(mode) ? definition.executionSteps : definition.updateExecutionSteps,
+      scope: `${scope} · ${covered.reduce((sum, block) => sum + block.graphemes, 0)} 字素 · ${units} 个阅读单元${reuse === null ? '' : `（复用 ${reuse.counts.reused} 个单元）`}`,
+      units, reference, send: remote ? '会发送：本次阅读单元内的稿件片段、任务要求，以及上面列出的参考资料；未选资料不会发送。' : '本环境只做本地检查，不会发送到模型服务。',
+      usage: remote ? `用量暂无可靠估计；按 ${units} 个阅读单元与后续归并步骤实际记录。${edits.runBudgetCeiling === undefined ? '未设置任务预算上限。' : `本次词元预算上限 ${edits.runBudgetCeiling.maxTotalTokens}，达到后停止新请求。`}` : '不发送，没有模型用量。' };
+  }
+
   forkForLaunch(launch: LaunchBinding): BaselineAnalysisStore {
     const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
     // External collaborators belong to the store, while preparation work and read caches belong to this view.

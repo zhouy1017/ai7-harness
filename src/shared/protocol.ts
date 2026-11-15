@@ -1,4 +1,4 @@
-import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
 export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
@@ -485,6 +485,7 @@ export type J04ModelAdapterControl = string;
 export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const IPC_CHANNELS = {
+  previewTaskLaunch: 'ai7:j04:preview-task-launch',
   getStartup: 'ai7:j08:get-startup',
   getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
   viewRecoveryCandidate: 'ai7:j08:view-recovery-candidate',
@@ -4766,10 +4767,14 @@ export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', '
   'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
   'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
   'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
-  'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
+  'previewTaskLaunch', 'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
 export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
+
+export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in LedgerTaskLaunchOperation]: {
+  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
+} }[LedgerTaskLaunchOperation] };
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
@@ -5908,6 +5913,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
   inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
   launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  previewTaskLaunch: { input: TaskLaunchPreviewInput; output: TaskLaunchPreviewProjection };
   prepareBaselineAnalysis: {
     /**
      * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
@@ -6935,6 +6941,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
   inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
   launchBaselineAnalysis(input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
+  previewTaskLaunch(input: Omit<TaskLaunchPreviewInput, 'bookId'>): Promise<TaskLaunchPreviewProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the

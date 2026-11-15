@@ -264,6 +264,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectBookFindings']['output']>(IPC_CHANNELS.inspectBookFindings, input ?? { offset: 0 }),
   inspectParagraphAnalysis: (input: Omit<ServiceOperationMap['inspectParagraphAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectParagraphAnalysis']['output']>(IPC_CHANNELS.inspectParagraphAnalysis, input),
+  previewTaskLaunch: (input: Omit<ServiceOperationMap['previewTaskLaunch']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['previewTaskLaunch']['output']>(IPC_CHANNELS.previewTaskLaunch, input),
   launchBaselineAnalysis: (input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['launchBaselineAnalysis']['output']>(IPC_CHANNELS.launchBaselineAnalysis, input),
   launchCustomAnalysis: (input: Omit<ServiceOperationMap['launchCustomAnalysis']['input'], 'bookId'>) =>

@@ -487,8 +487,15 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {
         typeId: state.typeId, audience: state.audience, channel: state.channel,
         requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds],
-      }, ...(openDraftOnStart ? { onStarted: () => awaitDraft(typeId) } : {}) });
-      sheet = null; paint(null); return;
+      }, readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] }),
+      onStarted: () => {
+        const currentTitle = state.title.trim();
+        if (currentTitle !== '') rememberedTitles.set(titleKey(projection!.bookId, state.typeId ?? typeId), currentTitle);
+        if (sheet === state) { sheet = null; paint(null); }
+        if (openDraftOnStart) awaitDraft(state.typeId ?? typeId);
+      } });
+      return;
     }
     busy = true;
     options.setStatus(WRITING_STATUS.preparing, 'busy');

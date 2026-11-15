@@ -2358,6 +2358,13 @@ export function registerRendererHandlers(
       return result;
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.previewTaskLaunch, (event, input: Omit<ServiceOperationMap['previewTaskLaunch']['input'], 'bookId'>) => envelope(async () => {
+    const owned = requireSender(event); requireAuthority();
+    const route = requireCurrentBookRoute(owned), generation = owned.routeGeneration;
+    const result = await service.call('previewTaskLaunch', { ...input, bookId: route.bookId });
+    requireCurrentRouteGeneration(owned, generation);
+    return result;
+  }));
   for (const operation of Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[]) {
     ipcMain.handle(IPC_CHANNELS[operation], (event, input: Omit<ServiceOperationMap[typeof operation]['input'], 'bookId'>) => envelope(async () => {
       const owned = requireSender(event);
