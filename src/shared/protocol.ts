@@ -349,7 +349,7 @@ export * from './protocol/scoped-edit.js';
  * labels. PR #1488 adds six launch operations, launch preview, remembered task choices
  * and model labels on evaluation, writing and report projections. PR #1489 adds the
  * optional analysis planEnvelope.procedureContent { editorInstruction, exemptionRules } (#1476).
- * Schema 115 and Data Version 1 remain separate compatibility identities.
+ * Schema 116 and Data Version 1 remain separate compatibility identities.
  *
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
