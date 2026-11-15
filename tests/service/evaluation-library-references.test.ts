@@ -301,7 +301,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(firstPlan.start.readiness).toBe('ready');
     // The references add to the disclosure; they never take away what the plan already said it does not read or send.
     expect(firstPlan.scope.notRead).toContain('其他图书');
-    expect(firstPlan.service.send).toBe(`所读范围内的稿件正文${kind === 'readers-report' ? '与评估记录' : ''}发往 OpenCode Go`);
+    expect(firstPlan.service.send).toBe(`所读范围内的稿件正文${kind === 'readers-report' ? '与评估记录' : ''}发往 OpenCode Go · DeepSeek V4.1 Flash`);
     expect(frozenRows(kind)).toEqual({ lines: [expect.stringContaining('《合成背景资料》')], blocked: false });
     const digest = ledger(kind).definition.promptContractDigest;
     await close(); await open();

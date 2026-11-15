@@ -16,8 +16,9 @@ R2 starts from `dev@2026a9ee`. Under the Owner's [2026-11-14 decisions](https://
 | #1475 | Repeatedly split and merge paragraphs on a slow disk without checkpointing inside the save making the editor read-only | #1485 / `410771ff` |
 | #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
 | #1476 | Use a 工序 carrying 编辑任务说明 / 豁免规则 for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成; see what it adds to sending in the plan | #1489 / `a3a19670` |
+| #1491 | Read the model service and 「模型@思考强度」 chosen for this start in the pre-start and frozen plans, including after another service was used; waiting tasks keep their frozen attribution | #1493 / `6196f3ed` |
 
-The candidate is package 0.7.1, protocol 203, schema 115 and Data Version 1. All outcomes above await final closure evidence and dev delivery; #1489 is integrated at `a3a19670`.
+The candidate is package 0.7.1, protocol 203, schema 115 and Data Version 1. All outcomes above await final closure evidence and dev delivery; #1489 is integrated at `a3a19670` and #1493 at `6196f3ed`.
 
 Remaining delivery order:
 

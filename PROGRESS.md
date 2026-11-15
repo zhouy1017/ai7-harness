@@ -14,6 +14,7 @@ What R2 newly lets the editor do:
 | #1475 | Repeatedly split and merge paragraphs on a slow disk without checkpointing inside the save making the editor read-only | #1485 / `410771ff` |
 | #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
 | #1476 | Use a 工序 carrying 编辑任务说明 / 豁免规则 for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成; see what it adds to sending in the plan | #1489 / `a3a19670` |
+| #1491 | Read the model service and 「模型@思考强度」 chosen for this start in the pre-start and frozen plans, including after another service was used; waiting tasks keep their frozen attribution | #1493 / `6196f3ed` |
 
 Stage repairs #1482, #1484 and #1486 (`0089cc73`, `621cd767`, `5b4db618`) make J-16 and J-12 wait on durable state. R1's text-to-card selection, compact cards and one-row toolbar remain delivered; R2 adds occurrence hints and the overlay connector.
 
@@ -160,8 +161,6 @@ Three intermittents remain explicitly recorded: J-02 `j14-zoom-200-reflow / over
 The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus the four works admitted by ADR 0091. Their development admission does not include distribution. Ordinary production uses the editor's own manuscripts under its policy; protected material and raw captures stay outside development repositories, logs and hosted inputs.
 
 ## In flight and remaining risks
-
-- Carried item #1472 7a: the plan’s 会发送 line still names the model service. Adding model@思考强度 exposed a custom-analysis preview route that differs from the frozen launch route; completing this requires a wider preview change, so the closure leaves the established disclosure unchanged.
 
 - The provider-free fixture route records the fixture model. Chosen provider model@思考强度 on cards is proved by real-store service tests with captured ordinary transport; Journeys prove the choice is shown, sent, launched in one step and frozen on the task row.
 - No live model call was made in R2. Developer-live recordings invalidated in PRs #1474, #1477 and #1478 await Owner re-record authorization; #1476 invalidates no developer-live recording: that scope still refuses instruction-bearing procedures. PR #1477 identifies 8 factual quick /1 items, 15 standard /2 items, 4 strict /2 items and 2 earlier factual research-wrapper items; claim extraction and retained historical review /1 remain reusable. PR #1478 adds no further invalidation relative to its integration base. Gateway Responses routes (no `store` / `include`) and level lists on routes without declared reasoning control remain untested against real services.
