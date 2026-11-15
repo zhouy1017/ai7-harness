@@ -4302,7 +4302,7 @@ export class BaselineAnalysisStore {
     const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId);
     if (row === undefined) return false;
     const state = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
-    return state.reconciled === true && state.stopReason === 'shutdown';
+    return state.stopReason === 'shutdown';
   }
 
   /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */

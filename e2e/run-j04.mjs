@@ -3046,10 +3046,28 @@ async function main() {
       'review-governed-preference-exists', governedPreference?.current?.lines);
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
+    at('review-bar-ready');
+    // The former prepared-plan bar cannot occur on a sheet start: its estimate is read-only and Start is the launch.
+    requireJourney(await renderer.evaluate(`window.ai7.inspectReviewWorkspace().then(page=>page.run===null)`), 'review-estimate-no-prepared-record');
+    await assertRenderer(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false && !!document.querySelector('.review-estimate')?.textContent && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-one-step-ready');
+    at('review-offline-bar');
+    await writeFile(connectivityPath, 'offline');
+    await closeOwnedBrowser(); await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-offline-restart');
+    await renderer.evaluate(`document.querySelector('button[data-book-id="${imported.bookId}"]').click()`);
+    await waitFor(renderer, `document.querySelector('.editor-shell')`, 'review-offline-book');
+    await openReviewDestination(renderer, 'review-offline-destination');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'review-offline-sheet');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-offline-sheet-open');
+    await assertRenderer(renderer, `(() => {const sheet=document.querySelector('dialog.review-sheet');for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==['typos-and-usage','style-and-format','plot-consistency'].includes(box.value)&&!box.disabled)box.click();sheet.querySelector('input[name="review-scope"][value="whole"]').click();return sheet.querySelector('[data-review-action="start"]').textContent==='联网后开始任务';})()`, 'review-offline-offers-queue');
+    at('review-start-when-online');
     await launchReviewFromSheet(renderer, waitFor);
     const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3, 'review-launched-run');
-    // Offline queuing keeps its retained ledger/service coverage; ordinary review has no prepared approval bar.
+    requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3 && preparedReview.state==='waiting' && preparedReview.authorization!==null, 'review-launched-waiting-run');
+    const waitingReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
+    requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
+    at('review-online-dispatch');
+    await writeFile(connectivityPath, 'online');
     at('review-authorize');
     // The sheet launched the Run directly; each category starts from its frozen plan at its driver turn.
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-settled', 180_000);
@@ -3381,6 +3399,44 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'factual-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-sheet-open');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]');if(!select||select.disabled||select.value!=='standard')return false;select.scrollIntoView({block:'nearest'});const focus=select.nextElementSibling?.matches('.ui-select-trigger')?select.nextElementSibling:select;focus.focus();return document.activeElement===focus && Array.from(select.options).map(option=>option.value).join('|')==='quick|standard|strict';})()`, `factual-selector-${width}`);
+        for(const level of ['strict','quick','standard']) {
+          await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet select[data-review-field="evidenceAssuranceLevel"]');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(level)} && !!document.querySelector('.review-evidence-assurance .field-note')?.textContent;})()`, `factual-level-${level}-${width}`);
+        }
+        requireJourney(await renderer.evaluate(`window.ai7.inspectReviewWorkspace().then(page=>page.run===null)`), 'factual-level-selection-not-prepared');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    // Strict and quick choices enter the first frozen plan, without executing a different fixture contract.
+    // Their full ordinary-production execution is covered by the real-store captured-transport tests.
+    await writeFile(connectivityPath,'offline');
+    const reopenFactualSheet = async (name) => {
+      await closeOwnedBrowser(); await launchForCleanup();
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+      await renderer.evaluate(`document.querySelector('button[data-book-id="${factualBook.bookId}"]').click()`);
+      await waitFor(renderer, `document.querySelector('.editor-shell')`, `${name}-book`);
+      await openReviewDestination(renderer, `${name}-review`);
+      await reviewAction(renderer,'[data-review-action="new-review"]',`${name}-new`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `${name}-sheet`);
+      await assertRenderer(renderer, `(() => {const sheet=document.querySelector('dialog.review-sheet');for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='factual-review')&&!box.disabled)box.click();sheet.querySelector('input[name="review-scope"][value="whole"]').click();return true;})()`, `${name}-category`);
+    };
+    await reopenFactualSheet('factual-level-offline');
+    for(const level of ['strict','quick']) {
+      await assertRenderer(renderer, `(() => {const select=document.querySelector('dialog.review-sheet [data-review-field="evidenceAssuranceLevel"]');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(level)};})()`, `factual-freeze-${level}`);
+      const queuedId=await launchReviewFromSheet(renderer,waitFor);
+      const queuedPlan=await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(queuedId)}})`);
+      requireJourney(queuedPlan.edit.assurance?.level===level && queuedPlan.state.key==='waiting', `factual-first-plan-${level}`);
+      await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]',`factual-cancel-${level}`);
+      await drawerShowing(renderer,queuedId,'cancelled',`factual-cancelled-${level}`);
+      await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]',`factual-close-${level}`);
+      await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='cancelled'`, `factual-card-cancelled-${level}`);
+      await reviewAction(renderer,'[data-review-action="new-review"]',`factual-new-after-${level}`);
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, `factual-next-sheet-${level}`);
+    }
+    await writeFile(connectivityPath,'online');
+    await reopenFactualSheet('factual-standard-start');
     await launchReviewFromSheet(renderer, waitFor);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'factual-settled', 180_000);
@@ -3995,6 +4051,27 @@ async function main() {
           requireJourney(frozen.executionConfig.reasoningEffort && frozen.binding.model===frozen.executionConfig.modelId, 'dispatch-choice-frozen');
         } finally { after.close(); }
         requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`)===dispatchDefaults, 'dispatch-choice-role-defaults-unchanged');
+        if(width===1008) {
+          await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','dispatch-plan-close');
+          await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'dispatch-plan-settings');
+          await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'dispatch-plan-settings-ready');
+          await click(renderer,'帮助','dispatch-plan-help');
+          await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input||input.disabled)return false;if(input.checked)input.click();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'dispatch-plan-ordinary');
+          await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('library')),'dispatch-plan-library');
+          await waitFor(renderer,`document.querySelector('[data-screen="landing"]')`,'dispatch-plan-library-ready');
+          await renderer.evaluate(`document.querySelector('button[data-book-id="${choiceBook.bookId}"]').click()`);
+          await waitFor(renderer,`document.querySelector('.editor-shell')`,'dispatch-plan-book');
+          await openReviewDestination(renderer,'dispatch-plan-review');
+          // 查看计划 replaces the former prepared card's plan route; after launch it reads editorial content only.
+          for(const [planWidth,planHeight] of [[1280,800],[1008,681]]) {
+            await renderer.send('Emulation.setDeviceMetricsOverride',{width:planWidth,height:planHeight,deviceScaleFactor:1,mobile:false});
+            await reviewAction(renderer,'[data-review-action="view-plan"]',`dispatch-plan-open-${planWidth}`);
+            await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(reviewRunId)}`,`dispatch-plan-read-${planWidth}`);
+            await assertRenderer(renderer,`(() => {const drawer=document.querySelector('#task-drawer'),text=drawer.innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && !/[0-9a-f]{8}-[0-9a-f-]{27}/iu.test(text) && !/https?:\\/\\//u.test(text) && !drawer.querySelector('[data-task-drawer-control="start"],[data-task-drawer-control="update-plan"]');})()`,`dispatch-plan-editorial-only-${planWidth}`);
+            await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]',`dispatch-plan-close-${planWidth}`);
+          }
+          await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        }
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'dispatch-choice-tasks');
         await waitFor(renderer, `Array.from(document.querySelectorAll('.task-overview-card')).some(card=>card.dataset.taskItem?.includes('${reviewRunId}')&&card.querySelector('.task-overview-model')?.textContent===${JSON.stringify(chosenLabel)})`, 'dispatch-choice-frozen-task-row');
       }

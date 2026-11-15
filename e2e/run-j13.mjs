@@ -1922,30 +1922,47 @@ async function main() {
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'exact-drawer-closed');
 
     at('capture-stop');
+    // Sheet starts no longer leave a prepared Run. Reconstruct pre-refresh prepared work through the retained API,
+    // which the generic captured-procedure selection composer still uses, so its stop-preview protection remains covered.
+    const legacyPrepared = await renderer.evaluate(`(async () => {
+      const chosen=await window.ai7.inspectCapturedProcedureRun({procedureId:${JSON.stringify(procedureId)},versionId:${JSON.stringify(savedVersion.versionId)}});
+      let job=await window.ai7.prepareReviewRun({categoryIds:['style-and-format'],scope:{kind:'whole',fromChapterBlockId:null,toChapterBlockId:null},
+        capturedProcedure:{versionId:chosen.resolved.versionId,documentSha256:chosen.resolved.documentSha256}});
+      while(job.state==='queued'||job.state==='running')job=await window.ai7.pollServiceJob({jobId:job.jobId});
+      if(job.state!=='completed'||!job.result?.run)throw new Error('legacy-procedure-preparation-failed');
+      return {reviewRunId:job.result.run.reviewRunId,state:job.result.run.state};
+    })()`);
+    requireJourney(legacyPrepared.state==='prepared', 'legacy-procedure-still-prepared');
     // 停用… of version 1 shows what it touches before anything is stopped: both sheet-launched Runs retain the exact version,
     // both Runs keep naming it, a new use takes version 2, nothing is deleted (REUSE-038, REUSE-040, REUSE-041). 确认停用 makes
     // version 1 final; version 2 stays 最新可用. A linked Run opens that exact Run, which keeps naming the stopped version (REUSE-031).
     await leaveReviewToLibrary(renderer, 'stop-leave');
     await openProcedures(renderer, 'stop');
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'stop-versions');
-    const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.runLinks.length === 2, 'stop-listed');
+    const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.runLinks.length === 3, 'stop-listed');
     const versionOne = beforeStop.procedures[0].versions[1];
-    requireJourney(versionOne.version === '1' && versionOne.runs === '按这一版运行过 2 次' &&
-      versionOne.runLinks[0][0] === exactRun.reviewRunId && versionOne.runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · `) &&
-      versionOne.runLinks[1][0] === ran.reviewRunId, 'stop-runs-before', versionOne);
+    requireJourney(versionOne.version === '1' && versionOne.runs === '按这一版运行过 3 次' && versionOne.runLinks[0][0]===legacyPrepared.reviewRunId &&
+      versionOne.runLinks[1][0] === exactRun.reviewRunId && versionOne.runLinks[1][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · `) &&
+      versionOne.runLinks[2][0] === ran.reviewRunId, 'stop-runs-before', versionOne);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="stop"]`, 'stop-version');
     const stopPreview = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.stop !== null, 'stop-preview');
     const previewRead = stopPreview.procedures[0].versions[1].stop;
     requireJourney(stopPreview.procedures[0].versions[1].state === 'enabled' && previewRead.heading === `停用《${PROCEDURE_TITLE}》第 1 版` && previewRead.after === '2' &&
-      JSON.stringify(previewRead.versions) === JSON.stringify([['1', '0', '0']]) &&
-      JSON.stringify(previewRead.prepared) === '[]' &&
+      JSON.stringify(previewRead.versions) === JSON.stringify([['1', '1', '0']]) &&
+      previewRead.prepared.length===1 && previewRead.prepared[0].includes(`《${CAPTURE_TARGET_TITLE}》`) &&
       previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
     await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-stop h5')`, 'stop-preview-focused', 10_000);
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(() => {const panel=document.querySelector('.captured-procedure-stop'),button=panel.querySelector('[data-procedure-action="confirm-stop"]');button.scrollIntoView({block:'nearest'});button.focus();const box=button.getBoundingClientRect();return document.activeElement===button && box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight && panel.querySelector('.captured-procedure-stop-prepared [data-review-run-id="${legacyPrepared.reviewRunId}"]')!==null;})()`, `stop-preview-prepared-${width}`);
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await clickSelector(renderer, '.captured-procedure-stop [data-procedure-action="confirm-stop"]', 'stop-confirm');
     const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.state === 'stopped', 'stop-stopped');
     const [stoppedTwo, stoppedOne] = stopped.procedures[0].versions;
     requireJourney(stopped.procedures[0].runnable === 'true' && stopped.procedures[0].run && stoppedOne.pill === '已停用' && stoppedOne.pillBorder === 'dotted' &&
-      stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 2 次' && stoppedTwo.latestEligible === 'true' &&
+      stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 3 次' && stoppedTwo.latestEligible === 'true' &&
       stoppedTwo.state === 'enabled', 'stop-card', stopped.procedures[0]);
     await waitFor(renderer, `${notice}===${JSON.stringify(`已停用《${PROCEDURE_TITLE}》的这一版；按它运行过的审阅仍然记着它。`)}`, 'stop-status', 10_000);
     await clickSelector(renderer, `[data-version="1"] button.captured-procedure-run-link[data-review-run-id="${ran.reviewRunId}"]`, 'stop-open-linked-run');
@@ -2151,7 +2168,7 @@ async function main() {
       const proposal = await window.ai7.inspectDeveloperProposal({ proposalId: list.proposals[0].proposalId, before: null });
       return [list.procedures.length, procedure.runnable, procedure.versions.map((version) => [version.version, version.state, version.runCount]), proposal.versions[0].fileCount];
     })()`);
-    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 2]], 1]), 'capture-restart-kept', keptOnRestart);
+    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 3]], 1]), 'capture-restart-kept', keptOnRestart);
 
     at('j14-capture-keyboard-reflow-forced-colors');
     // Without a pointer: Tab reaches 修改… with its focus visible, and Enter opens the next version's form with focus on its title.

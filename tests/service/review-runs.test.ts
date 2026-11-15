@@ -2379,7 +2379,7 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
 
 const SERIES = 'series-consistency';
 /** Selection/procedure business coverage uses one actual ordinary Store; local review/2 and Series/1 remain separate. */
-async function openLayeredSelection(): Promise<Session> {
+async function openLayeredSelection(controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'); // unchanged response bytes, not an admission pin
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -2399,7 +2399,7 @@ async function openLayeredSelection(): Promise<Session> {
           .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
           : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
-  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), ...controls });
   launchPolicy = capture.policy;
   return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture };
 }
@@ -2899,6 +2899,37 @@ it('replays a committed launch after restart and drives it once without a second
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
     expect(eventTrail(reviewRunId)).toEqual(events);
   });
+});
+
+it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps later categories on the launch binding (#1455)', async () => {
+  let reached!: () => void, release!: () => void;
+  const held = new Promise<void>(resolve => { reached = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  const first = await openLayeredSelection({ unitHold: async settled => { if (settled === 1) { reached(); await gate; } } });
+  const book = await importBook(first);
+  const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+    executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
+  const run = first.store.launchReviewRun(input, launchPolicy).projection.run!;
+  const loop = first.driver.driveLaunch(run.reviewRunId);
+  await held;
+  const closing = close(first); release(); await closing; await loop;
+  const earlierRequests = [...first.capture!.requests], earlierWire = [...first.capture!.wireRequests];
+  const second = await openLayeredSelection();
+  try {
+    second.store.reconcileStoppedReviewCategoryRuns();
+    const defaults = second.store.getConfiguredModelRoleBinding('main-editorial')!;
+    second.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    const replay = second.store.launchReviewRun(input, launchPolicy);
+    expect(replay).toMatchObject({ repeated: true });
+    expect(replay.projection.run!.reviewRunId).toBe(run.reviewRunId);
+    await driveLaunchedReviewRun(second.driver, replay);
+    expect(workspace(second, book, run.reviewRunId).run!.state).toBe('settled');
+    const units = [...earlierRequests, ...second.capture!.requests].filter(request => request.stage === 'units');
+    expect(new Set(units.map(request => request.requestDigest)).size).toBe(units.length);
+    expect([...earlierWire, ...second.capture!.wireRequests].every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
+    const sent = second.capture!.wireRequests.length;
+    await driveLaunchedReviewRun(second.driver, second.store.launchReviewRun(input, launchPolicy));
+    expect(second.capture!.wireRequests).toHaveLength(sent);
+  } finally { await close(second); }
 });
 
 it('launches historical model-free baseline leads without a credential (#1455)', async () => {

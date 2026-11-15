@@ -23,5 +23,17 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
   if (typeof runId !== 'string') throw new Error('REVIEW_SHEET_RUN_MISSING');
   await renderer.evaluate(`(() => { const button=document.querySelector('[data-review-action="view-plan"]'); if(!button||button.disabled)return false;button.click();return true; })()`);
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef === ${JSON.stringify(runId)}`, 'review-sheet-run-plan');
+  if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`)) {
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        const reachable=await renderer.evaluate(`(() => {const button=document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]');if(!button||button.disabled)return false;button.scrollIntoView({block:'nearest'});button.focus();const box=button.getBoundingClientRect();return document.activeElement===button&&box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight;})()`);
+        if(reachable!==true)throw new Error('REVIEW_WAITING_CANCEL_OUTSIDE_VIEWPORT');
+      }
+    } finally {
+      if(viewport===undefined)await renderer.send('Emulation.clearDeviceMetricsOverride');
+      else await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
+    }
+  }
   return runId;
 }
