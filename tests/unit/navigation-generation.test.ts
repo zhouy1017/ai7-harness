@@ -121,7 +121,7 @@ it.each(['success', 'failure'])('keeps the late procedure selection %s while sup
   const root = document.createElement('section'); miniDocument.body.append(root as unknown as MiniElement);
   const status = document.createElement('p'), openRun = vi.fn();
   let selected: unknown = null;
-  const context = createContext({ page: navigation.read(root), formSlot: root, openRun,
+  const context = createContext({ navigation, page: navigation.read(root), formSlot: root, openRun,
     node: (tag: string, text?: string) => { const node = document.createElement(tag); node.textContent = text ?? ''; return node; },
     label: (_title: string, input: HTMLElement) => input, Option: function () { return document.createElement('option'); },
     showError: () => { status.textContent = '无法保存工序，请重试。'; },

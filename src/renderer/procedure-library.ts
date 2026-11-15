@@ -96,7 +96,9 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     chooser.append(label('选择图书', select), node('p', entry.document.members === undefined ? '为所选图书使用这个工序版本，在任务页选择范围即可开始。'
       : '为所选图书使用这个组合工序版本；可在审阅页调整类别和检查选项后开始。'), action('打开任务', async () => {
       const book = books.find((item) => item.bookId === select.value); if (book === undefined) return;
-      await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin }); if (page.isCurrent()) await openRun(book, entry.executorKind, pin);
+      const route = navigation.begin();
+      await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin });
+      if (page.isCurrent() && route.isCurrent()) await openRun(book, entry.executorKind, pin);
     }));
     formSlot.replaceChildren(chooser);
   };
