@@ -2699,7 +2699,7 @@ async function main() {
         await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-current');
         at('plan-revision-drawer-range');
         const current=await readBaseline(renderer), range=current.update.selectedRange;
-        requireJourney(current.taskIntent.taskIntentId===legacyTask && current.planVersion.ordinal>before.planVersion.ordinal && (await readDrawer(renderer)).fields['要处理'].includes(`第 ${range.startPosition}–${range.endPosition} 段`),'legacy-plan-range-shown');
+        requireJourney(current.taskIntent.taskIntentId===legacyTask && current.planVersion.ordinal>before.planVersion.ordinal && (await readDrawer(renderer)).terms['要处理'].includes(`第 ${range.startPosition}–${range.endPosition} 段`),'legacy-plan-range-shown');
         at('plan-edit-open');
         await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="revise"]','legacy-plan-revise');
         at('plan-edit-remove');
