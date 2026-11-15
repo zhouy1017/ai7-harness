@@ -67,9 +67,10 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
     return { launchPolicy: { operationalScope: scope } };
   });
   const navigation = new NavigationGeneration();
-  const context = createContext({ identityWords, navigation, page: navigation.read(host as unknown as HTMLElement),
+  const api = surface === 'task' ? { getModelServiceSettings, inspectTaskAuthorization } : new Proxy({}, { get: serviceRead });
+  const context = createContext({ identityWords, api, navigation, page: navigation.read(host as unknown as HTMLElement),
     document: miniDocument, screen: miniDocument.body, performance,
-    window: { setTimeout, ai7: surface === 'task' ? { getModelServiceSettings, inspectTaskAuthorization } : new Proxy({}, { get: serviceRead }) },
+    window: { setTimeout, ai7: api },
     host, taskHost: host, analysisHost: host, first: true,
     bookId: 'book-1', bookTitle: '测试图书', overview: { book: { bookId: 'book-1' }, manuscriptState: { state: 'populated' } },
     error: { code, message: '原有拒绝说明。' },

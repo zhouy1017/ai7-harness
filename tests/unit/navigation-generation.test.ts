@@ -2,15 +2,19 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { navigation } from '../../src/renderer/navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'leaveCurrentBookWorkbench', 'waitForBookWorkbenchLeave', 'retainBookWorkbenchAfterLeave', 'navigate', 'deferBookNavigation', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn'];
-const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text ?? ''));
-const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue'];
+const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
+const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
+let settingsLoader='';
+function findSettings(node:ts.Node):void {if(ts.isFunctionDeclaration(node)&&node.name?.text==='renderModelServiceSettings')settingsLoader=node.getText(settingsSource);ts.forEachChild(node,findSettings);}
+findSettings(settingsSource);
+const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const procedureSource = ts.createSourceFile('procedure-library.ts', readFileSync(new URL('../../src/renderer/procedure-library.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 const selectionDeclarations: string[] = [];
 function visit(node: ts.Node): void {
@@ -32,29 +36,36 @@ function harness(api: object = {}) {
     node.focus = focus; return node;
   };
   let context: ReturnType<typeof createContext>;
-  const replaceScreen = (state: string, node = element('section'), intent = true) => {
-    if (intent) navigation.begin();
+  const replaceScreen = (state: string, node = element('section')) => {
     context['replacement'] = node;
     runInContext(`replaceScreen(${JSON.stringify(state)}, replacement)`, context);
   };
   const shell = { leaveBook: vi.fn(), follow: vi.fn() };
-  const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined, false));
+  const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
-  context = createContext({ navigation, window: { ai7: api }, document, screen, shell, setStatus,
+  const guardedApi = reconcileBookWorkbenchApi(api as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:vi.fn()},navigation);
+  context = createContext({ navigation, api: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     mountGlobalAgent: vi.fn(() => element('section')), renderBookOverview, renderBaselineAnalysis,
-    HTMLElement, SETTINGS_HUB_GROUPS: [], overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
+    HTMLElement, SETTINGS_HUB_GROUPS: [], settingsNavigation:()=>element('nav'), overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
     restoreCurrentScreen: vi.fn(), currentRecoveryReturn: () => undefined, recoveryReturnContexts: new WeakMap(),
     manuscriptOnScreen: null, taskResultWindow: null, authorityInterrupted: false, keyboardSettingsOff: undefined,
     reviewWorkspace: undefined, deliverablesSurface: undefined, derivativesSurface: undefined, proposalWorkspaceSurface: undefined,
     agentWorkspaceSurface: undefined, proposalConflictSurface: undefined, globalAttentionSurface: undefined, taskOverviewSurface: undefined,
-    leaveGuard: null, pendingBookWorkbenchLeave: null, taskDrawer: {followScreen: vi.fn()}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(),
+    leaveGuard: null, taskDrawer: {followScreen: vi.fn()}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(),
     SHELL_LABELS: {openingBook:'正在打开图书',bookUnavailable:'无法打开图书'},
-    renderBookReview: vi.fn(() => replaceScreen('book-review', undefined, false)),
+    renderBookReview: vi.fn((bookId:string) => {const node=element('section');node.dataset['bookId']=bookId;replaceScreen('book-review',node);}),
     element, panel: () => element('section'), agentWorkspaceReturns: new WeakMap(), taskSurfaceRefresh: {},
     mountBackgroundAnalysis: vi.fn(), rendererErrorMessage: (_error: unknown, fallback: string) => fallback,
     settleScreen: vi.fn(async () => true),
     AGENT_WORKSPACE_RETURN_SECTIONS: {},
-    renderEditorWindow: vi.fn(() => replaceScreen('editor', undefined, false)),
+    modelServiceChannel:null,modelChoices:new Map(),modelFilters:new Map(),favourites:[],
+    paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
+    KEYBOARD_SECTION_LABEL:'键盘',KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
+    mountKeyboardSettings:()=>vi.fn(),applyKeyboardBindings:vi.fn(),
+    button:(label:string,_class:string,run:()=>void)=>{const button=element('button','',label);button.addEventListener('click',run);return button;},
+    renderEditorWindow: vi.fn((window:{bookId:string}) => {const node=element('section');node.dataset['bookId']=window.bookId;replaceScreen('editor',node);}),
+    mountProposalConflict:vi.fn((options)=>{context['conflictOptions']=options;return {start:vi.fn(),destroy:vi.fn(),settle:async()=>true};}),
+    conflictCompletionOn:()=> '修改已应用',technicalWords:(_technical:string,ordinary:string)=>ordinary,renderStartupProjection:vi.fn(),
     mountEvaluation: vi.fn((options) => {context['evaluationOptions']=options;return {load:async()=>undefined,refresh:vi.fn()};}),
     technicalDetails: vi.fn(), awaitServiceJob: vi.fn(), openTaskPlan: vi.fn(),
     EVALUATION_STATUS: {loading:'正在读取评估',opened:'评估已打开',unavailable:'无法读取评估'},
@@ -165,7 +176,7 @@ it('a real same-page replaceScreen repaint preserves the pending next navigation
   const page = harness({leaveBookWorkbench: () => leave.promise});
   page.replaceScreen('model-service');
   const pending = page.run('renderGlobalAgent()');
-  page.replaceScreen('model-service', undefined, false);
+  page.replaceScreen('model-service', undefined);
   leave.resolve(); await pending;
   expect(page.screen.dataset['screen']).toBe('global-agent');
 });
@@ -178,7 +189,7 @@ it.each(['leave-first','book-first'])('keeps the rendered Book usable across a p
     getBookWorkbenchRoute: async () => {calls.push('route'); reads+=1; routeStarted.resolve(); return order==='book-first' && reads===1 ? routeRead.promise : owned ? {kind:'book',bookId:owned,bookTitle:'图书'} : null;},
     openBookWorkbench: async (route: {bookId:string}) => {calls.push('open'); owned=route.bookId; return {target:'requesting-window',route:{...route,bookTitle:'图书'}};},
   });
-  page.replaceScreen('book-review');
+  const bookNode=document.createElement('section');bookNode.dataset['bookId']='book-a';page.replaceScreen('book-review',bookNode);
   let first: Promise<void>, second: Promise<void>;
   if(order==='leave-first') {
     first=page.run('renderGlobalAgent()'); second=page.run("openBookSection({bookId:'book-a',title:'图书'},'review')");
@@ -187,7 +198,7 @@ it.each(['leave-first','book-first'])('keeps the rendered Book usable across a p
     routeRead.resolve({kind:'book',bookId:'book-a',bookTitle:'图书'});
   }
   await Promise.resolve(); await Promise.resolve(); leave.resolve(); await Promise.all([first,second]);
-  if(order==='leave-first') {expect(page.screen.dataset['screen']).toBe('book-review'); expect(owned).toBe('book-a'); expect(calls).toEqual(['leave','left','route','open']);}
+  if(order==='leave-first') {expect(page.screen.dataset['screen']).toBe('book-review'); expect(owned).toBe('book-a'); expect(calls).toEqual(['leave','left','open','route']);}
   else {expect(page.screen.dataset['screen']).toBe('global-agent'); expect(owned).toBeNull(); expect(calls).toEqual(['route','leave','left']); await page.run("openBookSection({bookId:'book-a',title:'图书'},'review')");}
   const scopedRead=()=>{if(owned!=='book-a') throw new Error('AI7_EDITOR_ROUTE_INVALID'); return 'usable';};
   expect(page.screen.dataset['screen']).toBe('book-review'); expect(scopedRead()).toBe('usable');
@@ -258,4 +269,70 @@ it('direct openEditorWindow begins a newer intent before waiting for its context
  const leave=Promise.withResolvers<void>(); const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:async()=>({target:'requesting-window'})});
  const first=page.run('renderGlobalAgent()'); const next=page.run("openEditorWindow({bookId:'book-a',deliverable:'manuscript'},'图书')");
  leave.resolve(); await Promise.all([first,next]); expect(page.screen.dataset['screen']).toBe('editor');
+});
+
+
+it('the real keyboard destination supersedes a pending model-settings read without begin', async () => {
+ const read=Promise.withResolvers<object>(); const page=harness({getModelServiceSettings:()=>read.promise,getPreferences:async()=>({values:{'model.favourites':[]}})});
+ page.replaceScreen('settings'); const pending=page.run('renderModelServiceSettings()');
+ await page.run('renderKeyboardSettings()'); read.resolve({}); await pending;
+ expect(page.screen.dataset['screen']).toBe('keyboard');
+});
+
+it.each(['book','tab'])('the shell derives a different %s identity without a caller flag', async (change) => {
+ const page=harness(); const first=document.createElement('section'),second=document.createElement('section');
+ if(change==='book') {first.dataset['bookId']='book-a';second.dataset['bookId']='book-b';}
+ else {first.dataset['knowledgeTab']='home';second.dataset['knowledgeTab']='guidelines';}
+ page.replaceScreen(change==='book'?'book-review':'knowledge-base',first); const pending=navigation.route();
+ page.replaceScreen(change==='book'?'book-review':'knowledge-base',second);
+ expect(pending.isCurrent()).toBe(false);
+});
+
+it.each(['derivative','refused-exit'])('the shared API boundary restores the visible Book after a superseded leave (%s)', async (next) => {
+ const leave=Promise.withResolvers<void>();let owned:string|null='book-a';let capability=false;const calls:string[]=[];
+ const page=harness({
+  leaveBookWorkbench:async()=>{calls.push('leave');await leave.promise;owned=null;capability=false;calls.push('left');return {state:'library'};},
+  openBookWorkbench:async()=>{calls.push('reacquire');owned='book-a';return {target:'requesting-window',route:{kind:'book',bookId:owned}};},
+  getManuscriptWindow:async()=>{calls.push('window');if(owned!=='book-a')throw new Error('AI7_EDITOR_ROUTE_INVALID');capability=true;return {bookId:owned};},
+  flushJournalEdit:async()=>{calls.push('scoped');if(owned!=='book-a'||!capability)throw new Error('AI7_EDITOR_ROUTE_INVALID');return {bookId:owned};},
+ });
+ const book=document.createElement('section');book.dataset['bookId']='book-a';page.replaceScreen(next==='refused-exit'?'editor':'book-review',book);
+ if(next==='refused-exit')page.context['manuscriptOnScreen']={bookId:'book-a',manuscriptId:'document',branchId:'branch',readingPlace:()=>null,destroy:vi.fn()};
+ const pending=page.run('renderGlobalAgent()'); let nextAction:Promise<void>;
+ if(next==='derivative') nextAction=page.run("openProductionDocument({documentId:'document',branchId:'branch'}, {typeId:'type',label:'稿件'}, '图书')");
+ else {page.context['settleScreen']=async()=>false;nextAction=page.run('leaveThen(() => renderGlobalAgent())');}
+ await Promise.resolve();expect(calls).toEqual(['leave']);leave.resolve();await Promise.all([pending,nextAction]);
+ const result=await page.run("api.flushJournalEdit({manuscriptId:'document',branchId:'branch'})");expect(result).toEqual({bookId:'book-a'});
+ expect(page.screen.dataset['screen']).toBe('editor');
+ expect(calls).toEqual(['leave','left','reacquire','window','scoped']);
+});
+
+
+it('conflict success is announced after leaving while its navigation follow-up stays on the origin', async () => {
+ const windowRead=vi.fn(async()=>({bookId:'book-a'}));const page=harness({getManuscriptWindow:windowRead});
+ await page.run("renderProposalConflict({bookId:'book-a',manuscriptId:'manuscript',branchId:'branch',markId:'mark'},'图书')");
+ const options=page.context['conflictOptions'] as {returnToManuscript(at:null,completion:string):Promise<void>};
+ page.replaceScreen('knowledge-base');page.setStatus.mockClear();
+ await options.returnToManuscript(null,'applied');
+ expect(page.setStatus).toHaveBeenCalledWith('修改已应用','success');expect(windowRead).not.toHaveBeenCalled();
+ expect(page.screen.dataset['screen']).toBe('knowledge-base');
+});
+
+
+it('an abandoned-import acknowledgement preserves the newer destination and still announces success', async () => {
+ const write=Promise.withResolvers<object>();const page=harness({abandonImportDraft:()=>write.promise});
+ page.replaceScreen('import-review');const pending=page.run("abandonAndContinue({draftId:'draft',draftVersion:1})");
+ page.replaceScreen('knowledge-base');write.resolve({state:'none'});await pending;
+ expect(page.context['renderStartupProjection']).not.toHaveBeenCalled();
+ expect(page.setStatus).toHaveBeenCalledWith('已放弃本次导入','success');expect(page.screen.dataset['screen']).toBe('knowledge-base');
+});
+
+it('a nested return read error still reports while the workspace stays', async () => {
+ const read=Promise.withResolvers<object>(),started=Promise.withResolvers<void>();
+ const page=harness({getBookOverview:()=>{started.resolve();return read.promise;}});
+ const node=document.createElement('section');node.dataset['bookId']='book-a';page.replaceScreen('book-review',node);
+ (page.context['agentWorkspaceReturns'] as WeakMap<HTMLElement,()=>Promise<void>>).set(node,()=>page.run("renderResolvedBookWorkbenchRoute({kind:'book',bookId:'book-a'})"));
+ const back=runInContext("agentWorkspaceReturn('book-a','图书')",page.context) as ()=>void;back();await started.promise;
+ read.reject(new Error('read failed'));for(let i=0;i<12;i+=1)await Promise.resolve();
+ expect(page.setStatus).toHaveBeenCalledWith('无法打开图书','error');
 });

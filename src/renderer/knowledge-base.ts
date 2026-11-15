@@ -619,9 +619,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const off = button('停用', 'secondary', async () => {
           off.disabled = true;
           setStatus('正在停用默认执行规则…', 'busy');
+          const origin = navigation.read(content);
           try {
             await window.ai7.deactivateDefaultExecutionRule({ ruleId: rule.ruleId });
-            await renderKnowledgeBase('rules');
+            if (origin.isCurrent()) await renderKnowledgeBase('rules', false, null, navigation.route());
             setStatus(`已停用默认执行规则：${rule.name}；快速开始不再使用它。`, 'success');
           } catch (error) {
             off.disabled = false;

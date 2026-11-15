@@ -1456,7 +1456,7 @@ async function main() {
         while (!existsSync(`${navigationHoldPath}.held`) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
         requireJourney(existsSync(`${navigationHoldPath}.held`), 'navigation-answer-held');
         await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'navigation-open-knowledge');
-        await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-ready');
+        await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, 'navigation-knowledge-open');
         await renderer.evaluate(`window.__j11NavigationSnapshot = {screen:document.querySelector('#screen').firstElementChild,focus:document.activeElement,status:document.querySelector('#persistence-status').textContent}`);
         requireJourney(!existsSync(`${navigationHoldPath}.released`), 'navigation-still-held');
         await writeFile(navigationHoldPath, 'release');
@@ -1465,10 +1465,11 @@ async function main() {
         requireJourney(existsSync(`${navigationHoldPath}.released`), 'navigation-answer-released');
         // A subsequent ownership read crosses main after the released acknowledgement; two frames paint its microtasks.
         await renderer.evaluate(`(async () => {await window.ai7.getBookWorkbenchRoute();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));})()`);
+        await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-ready');
         await assertRenderer(renderer, `(() => {
           const held=window.__j11NavigationSnapshot; delete window.__j11NavigationSnapshot;
           return document.querySelector('#screen').firstElementChild===held.screen && document.activeElement===held.focus &&
-            document.querySelector('#persistence-status').textContent===held.status && document.querySelector('[data-screen="knowledge-base"]');
+            document.querySelector('#persistence-status').textContent==='知识库已打开' && document.querySelector('[data-screen="knowledge-base"]');
         })()`, 'navigation-late-answer-keeps-page-focus-status');
         await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'navigation-restore-library');
         await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, 'navigation-library-restored');
