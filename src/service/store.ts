@@ -1,3 +1,4 @@
+import { launchedTaskPlan } from './task-plan-creation.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
 import { TaskLaunchPreview } from './task-plan-creation.js';
@@ -4118,8 +4119,7 @@ export class EditorialStore {
       const ledger = this.#baselineAnalysis.forkForLaunch(context.execution);
       const task = {
       phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now' } as const;
-      if (context.preview !== undefined) return context.preview(ledger, task);
-      return ledger.launchTask(task, context.snapshotId, context.execution, false, context.planEdits);
+      return launchedTaskPlan(context)(ledger, task).projection!;
     }, startWhen, preview);
   }
 

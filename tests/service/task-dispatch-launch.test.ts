@@ -1,3 +1,4 @@
+import { makeJ13Series } from '../support/series-consistency.js';
 import { writeFile } from 'node:fs/promises';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { launchedRevisionModelLabels, markModelLabels } from '../../src/service/editorial-mark-source.js';
@@ -705,4 +706,70 @@ it.each([
   expect(plan.scope.send).toContain(`所选工序中的${words}`);
   if (instruction === '') expect(plan.scope.send).not.toContain('编辑任务说明');
   if (!exemptions) expect(plan.scope.send).not.toContain('豁免规则');
+});
+
+
+// A completed first task warms the actual kind cache before a different service is chosen.
+describe.each([...KINDS.map(kind => ({ kind, references: 'none' })),
+  { kind: 'initial-evaluation' as const, references: 'material' },
+  { kind: 'initial-evaluation' as const, references: 'series' }])('$kind $references preview execution (#1491)', ({ kind, references }) => {
+  it('binds both previews and the frozen waiting plan to this start after another service completed', async () => {
+    const target = await book(kind, true), answer = await lifecycleAnswers(kind);
+    let definition!: LaunchedTask['ledger']['definition'];
+    ordinary(request => answer(request, definition));
+    let materialId: string | undefined, seriesId: string | undefined;
+    if (references === 'material') {
+      const path = join(roots.inputRoot, 'sample-preview-reference.txt');
+      await writeFile(path, store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).filter(block => block.kind === 'paragraph').slice(0, 2).map(block => block.text).join('\n\n'));
+      const preview = await store.previewLibraryMaterial(path);
+      materialId = (await store.addLibraryMaterial({ previewId: preview.previewId, title: '样书预览参考', kind: 'document' })).materialId;
+      setLibraryDecision(store, { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: target.bookId } } });
+      setLibraryDecision(store, { materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      store.startMaterialIndexing(); await store.settleMaterialIndexing();
+    }
+    if (references === 'series') seriesId = makeJ13Series(store, target.bookId);
+    const request = (config: RuntimeExecutionConfig, when: 'now' | 'idle') => {
+      const launch = launchRequest(kind, target, config, randomUUID(), false, undefined, when);
+      if (launch.operation === 'launchInitialEvaluation') launch.input = { ...launch.input,
+        ...(materialId === undefined ? {} : { materialIds: [materialId] }), ...(seriesId === undefined ? {} : { seriesId }) };
+      return launch;
+    };
+    const first = commitLaunch(target, request({ modelId: 'service-a-model', reasoningEffort: 'high' }, 'now'));
+    definition = first.ledger.definition;
+    driveLaunchedLedgerRun(capture!.owner, first); await capture!.owner.whenIdle();
+    expect(first.ledger.currentRunState(first.runRecordId)).toMatch(/^completed/u);
+    expect(capture!.wireRequests.some(wire => wire.model === 'service-a-model' && wire.reasoning_effort === 'high')).toBe(true);
+    if (kind === 'evaluation-rewrite') store.decideEvaluationRewrite(target.bookId, first.ledger.inspect(target.bookId).resultSetRevision!.revisionId, 'discard');
+    const connection = store.saveModelServiceConnection('本次预览 B', null, 'needs-attention', 'deepseek-open-platform');
+    const ready = store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'deepseek-open-platform');
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const original = db.prepare('SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? ORDER BY component').all(first.taskIntentId);
+      const one = request({ modelConnectionId: ready.connectionId, modelId: 'service-b-first', reasoningEffort: 'high' }, 'idle');
+      const two = request({ modelConnectionId: ready.connectionId, modelId: 'service-b-second', reasoningEffort: 'low' }, 'idle');
+      const previewOne = store.previewTaskLaunch({ bookId: target.bookId, launch: one }, policy);
+      const previewTwo = store.previewTaskLaunch({ bookId: target.bookId, launch: two }, policy);
+      expect(previewOne.send).toContain('DeepSeek 开放平台 · service-b-first@high');
+      expect(previewTwo.send).toContain('DeepSeek 开放平台 · service-b-second@low');
+      expect(previewTwo.send).not.toBe(previewOne.send);
+      const off = request({ modelConnectionId: ready.connectionId, modelId: 'service-b-second', reasoningEffort: 'off' }, 'idle');
+      expect(store.previewTaskLaunch({ bookId: target.bookId, launch: off }, policy).send).not.toContain('@off');
+      const launched = commitLaunch(target, two);
+      const input = { bookId: target.bookId, kind: kind === 'custom-analysis' ? 'baseline-analysis' as const : kind, ref: launched.taskIntentId };
+      const frozen = store.inspectTaskPlan(input);
+      expect(previewTwo.send).toBe(`${frozen.scope.send}；${frozen.service.send}`);
+      expect(previewTwo.steps).toEqual(frozen.steps.map(step => `${step.label}${step.removed ? '（本次不做）' : ''}`));
+      expect(previewTwo.usage).toBe(frozen.service.usage);
+      expect(previewTwo.reference).toEqual(frozen.scope.reference);
+      const provider = JSON.parse(String(db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'provider-resolution-plan'").get(launched.taskIntentId)!.canonical_json));
+      expect(provider.executionRoute).toMatchObject({ kind: 'deepseek-open-platform', model: 'service-b-second', reasoningEffort: 'low' });
+      store.selectMainRoleModel('opencode-go', 'deepseek-v4.1-flash', 'off');
+      const waiting = store.inspectTaskPlan(input);
+      expect(waiting.service.send).toBe(frozen.service.send);
+      expect(waiting.notDo.technical.join('')).toContain('deepseek-open-platform · service-b-second');
+      expect(waiting.notDo.technical.join('')).not.toContain('opencode-go ·');
+      expect(db.prepare('SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? ORDER BY component').all(first.taskIntentId)).toEqual(original);
+      cancelQueued(kind, target, launched);
+    } finally { db.close(); }
+  });
 });
