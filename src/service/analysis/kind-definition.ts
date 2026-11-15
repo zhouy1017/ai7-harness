@@ -256,6 +256,8 @@ export interface AnalysisKindDefinition {
   /** A review-run summary consumes stored editorial outputs only, with no manuscript unit turns. */
   readonly structuredOnly?: boolean;
   readonly structuredInputKey?: string;
+  /** A structured final member inherits its parent Run's frozen ceiling. */
+  readonly inheritedBudgetCeiling?: import('../../shared/protocol.js').RunBudgetCeilingState;
   readonly priorBudgetUsage?: () => { inputTokens: number; outputTokens: number };
   readonly manuscriptTarget?: { readonly manuscriptId: string; readonly branchId: string };
   readonly procedureBinding?: import('../procedures/execution.js').ProcedureKindBinding;

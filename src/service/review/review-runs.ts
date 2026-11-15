@@ -1027,6 +1027,7 @@ export interface ReviewRunPlanFacts {
   readonly inputRevision: { readonly revisionId: string; readonly revisionLabel: string; readonly createdForDirtyJournal: boolean };
   /** The launch the categories' ledgers were bound to: the live binding under developer-live, `null` otherwise. */
   readonly live: BaselineAnalysisStore['launch']['live'];
+  readonly synthesis?: ReviewRunPlanFacts['categories'][number];
   readonly categories: ReadonlyArray<{
     readonly categoryId: string;
     readonly label: string;
@@ -1450,8 +1451,7 @@ export class ReviewRunStore {
     } else {
       for (const planned of work.planned) {
         if (planned.plan.kind === 'leads') { work.prepared.push(this.#snapshotCategory(planned, null)); continue; }
-        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined,
-          undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
+        const ledger = this.#preparationLedger(work, planned);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
         const projection = ledger.launchTask({ ...request, reconfirm: false,
           ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution, true,
@@ -1625,6 +1625,22 @@ export class ReviewRunStore {
     return { pin: scope.kind === 'selection' ? { ...pin, scope: 'selection' } : pin, leftOut };
   }
 
+  /** The last member shares the already frozen categories' total ceiling, without adding a new allowance. */
+  #preparationLedger(work: PreparationWork, planned: PlannedCategory): BaselineAnalysisStore {
+    const source = planned.entry.synthesisSource;
+    if (source !== undefined && source.budgetCeiling === undefined) {
+      const ceilings = work.prepared.flatMap(category => category.task === null ? [] : [
+        (this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest)
+          .components['provider-resolution-plan'] as { runBudgetCeiling: 'unset' | { kind: 'tokens'; maxTotalTokens: number } }).runBudgetCeiling]);
+      source.budgetCeiling = ceilings.length === 0 || ceilings.some(ceiling => ceiling === 'unset') ? 'unset'
+        : { kind: 'tokens', maxTotalTokens: work.composite === undefined
+          ? ceilings.reduce((sum, ceiling) => sum + (ceiling === 'unset' ? 0 : ceiling.maxTotalTokens), 0)
+          : Math.max(...ceilings.map(ceiling => ceiling === 'unset' ? 0 : ceiling.maxTotalTokens)) };
+    }
+    return this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined,
+      undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
+  }
+
   #advance(work: PreparationWork): ReviewRunPreparationProgress {
     const total = work.planned.filter((planned) => planned.plan.kind === 'task').length + 1;
     const progress = (): ReviewRunPreparationProgress => ({
@@ -1644,7 +1660,7 @@ export class ReviewRunStore {
           work.index += 1;
           continue;
         }
-        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined, undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]);
+        const ledger = this.#preparationLedger(work, planned);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
         // A draft's intent, plan, Review Run and promotion commit together, including on cancellation, drift or a repeated request.
         const draft = work.intentDraft === undefined ? {} : {
@@ -1700,7 +1716,7 @@ export class ReviewRunStore {
     this.#work.delete(work.workId);
     const planned = work.planned[work.index];
     if (work.ledgerWorkId !== null && planned !== undefined) {
-      this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined, undefined, undefined, work.housePreferences?.[this.#ledgers.ledgerOf(planned.entry).definition.kind]).prepare({ phase: 'cancel', workId: work.ledgerWorkId });
+      this.#preparationLedger(work, planned).prepare({ phase: 'cancel', workId: work.ledgerWorkId });
     }
   }
 
@@ -2188,7 +2204,7 @@ export class ReviewRunStore {
       ...(snapshot.localPlan === undefined ? {} : { localPlan: { digest: snapshot.localPlan.digest, options: snapshot.localPlan.options, paragraphs: snapshot.localPlan.blocks.length, blocks: snapshot.localPlan.blocks } }),
       ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : taskMaterialSettled(reading)) }),
-      ...(snapshot.housePreferences === undefined ? {} : { housePreferences: snapshot.categories.flatMap((category) => {
+      ...(snapshot.housePreferences === undefined ? {} : { housePreferences: snapshot.categories.filter(category => category.entry.synthesisKey === undefined).flatMap((category) => {
         const preference = category.task === null ? undefined : snapshot.housePreferences![category.task.kind];
         return preference === undefined ? [] : [{ categoryLabel: category.entry.label, preference }];
       }) }),
@@ -2209,7 +2225,9 @@ export class ReviewRunStore {
         ? { revisionId: snapshot.manuscript.revisionId, revisionLabel: snapshot.manuscript.revisionLabel, createdForDirtyJournal: false }
         : { revisionId: firstCheckpoint.revisionId, revisionLabel: firstCheckpoint.revisionLabel, createdForDirtyJournal: firstCheckpoint.createdForDirtyJournal },
       live: localOnly(snapshot) ? null : (firstTask === undefined ? this.#ledgers.baseline() : this.#categoryLedger(firstTask, snapshot)).launch.live,
-      categories: categories.map(({ checkpoint: _checkpoint, ...category }) => category),
+      categories: categories.filter(category => category.categoryId !== RUN_SYNTHESIS_CATEGORY).map(({ checkpoint: _checkpoint, ...category }) => category),
+      ...(() => { const category = categories.find(category => category.categoryId === RUN_SYNTHESIS_CATEGORY);
+        if (category === undefined) return {}; const { checkpoint: _checkpoint, ...synthesis } = category; return { synthesis }; })(),
       staleReasons,
     };
   }

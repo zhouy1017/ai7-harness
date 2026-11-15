@@ -401,9 +401,9 @@ class PlacesTakenOwner implements ReviewRunExecutionOwner {
   }
 }
 
-function eventTrail(reviewRunId: string): Array<[string, string]> {
+function categoryEventTrail(reviewRunId: string): Array<[string, string]> {
   return withDatabase((db) => {
-    return (db.prepare('SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid').all(reviewRunId) as Array<{ category_id: string; state: string }>)
+    return (db.prepare("SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? AND category_id <> 'run-synthesis' ORDER BY rowid").all(reviewRunId) as Array<{ category_id: string; state: string }>)
       .map((row) => [row.category_id, row.state]);
   });
 }
@@ -1064,7 +1064,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE));
       expect(settled).toMatchObject({ state: 'settled', stateLabel: '已完成', canContinue: false });
       expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
-      expect(eventTrail(settled.reviewRunId)).toEqual([
+      expect(categoryEventTrail(settled.reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
         [PLOT, 'dispatched'], [PLOT, 'settled'], [PLOT, 'materialized'],
@@ -1796,7 +1796,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(run).toMatchObject({ state: 'failed', canContinue: false });
       expect(run.categories.map((category) => category.state)).toEqual(['refused', 'refused']);
       expect(run.categories.every((category) => category.detail!.includes('plan-revision-required'))).toBe(true);
-      expect(eventTrail(fresh.reviewRunId)).toEqual([[TYPOS, 'refused'], [STYLE, 'refused']]);
+      expect(categoryEventTrail(fresh.reviewRunId)).toEqual([[TYPOS, 'refused'], [STYLE, 'refused']]);
       // No Run was recorded on either ledger: a refused approval never leaves a category authorized.
       expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run).toBeNull();
       expect(run.findings).toEqual([]);
@@ -1845,13 +1845,13 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(workRecords()).toMatchObject({ met: true, stateLabel: '审阅报告 1 份', route: null });
       expect(second.store.inspectBookDeliveryPackage(book.bookId).content.included.filter((item) => item.kind === 'review-report').map((item) => item.label))
         .toEqual(['审阅报告 · 第 1 次审阅 · 第 2 版']);
-      expect(eventTrail(reviewRunId)).toEqual([
+      expect(categoryEventTrail(reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
       ]);
       // Continuing a finished Run does nothing.
       await second.driver.continue(reviewRunId);
-      expect(eventTrail(reviewRunId)).toHaveLength(6);
+      expect(categoryEventTrail(reviewRunId)).toHaveLength(6);
     });
   }, 300_000);
 
@@ -1905,7 +1905,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       gated!.release();
       await stopped;
       await loop;
-      expect(eventTrail(reviewRunId)).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'interrupted']]);
+      expect(categoryEventTrail(reviewRunId)).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'interrupted']]);
     } finally {
       await close(first);
     }
@@ -2817,9 +2817,9 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
       if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
       else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
       gated!.release(); await loop;
-      const beforeReplay = eventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
+      const beforeReplay = categoryEventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
       await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
-      expect(eventTrail(run.reviewRunId)).toEqual(beforeReplay);
+      expect(categoryEventTrail(run.reviewRunId)).toEqual(beforeReplay);
       if (session.capture !== undefined) expect(session.capture.wireRequests).toHaveLength(sent!);
       expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(STYLE_AND_FORMAT)).run).toBeNull();
       if (action === 'cancel') {
@@ -2893,7 +2893,7 @@ it('reconnects an offline ordinary review with every category on its launched mo
     const repeated = session.store.launchReviewRun(input, launchPolicy);
     expect(repeated).toMatchObject({ repeated: true, projection: { run: { reviewRunId: launched.projection.run!.reviewRunId, state: 'waiting' } } });
     await driveLaunchedReviewRun(session.driver, repeated);
-    expect(eventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
+    expect(categoryEventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
     expect(session.capture!.wireRequests).toHaveLength(0);
     session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
     const changedDefault = session.store.getConfiguredModelRoleBinding('main-editorial');
@@ -2977,11 +2977,11 @@ it('replays a committed launch after restart and drives it once without a second
     expect(repeated.repeated).toBe(true);
     expect(repeated.projection.run!.reviewRunId).toBe(reviewRunId);
     await Promise.all([driveLaunchedReviewRun(session.driver, repeated), driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy))]);
-    const events = eventTrail(reviewRunId);
+    const events = categoryEventTrail(reviewRunId);
     expect(events.filter(([, state]) => state === 'dispatched')).toHaveLength(2);
     expect(workspace(session, book, reviewRunId).run!.state).toBe('settled');
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
-    expect(eventTrail(reviewRunId)).toEqual(events);
+    expect(categoryEventTrail(reviewRunId)).toEqual(events);
   });
 });
 

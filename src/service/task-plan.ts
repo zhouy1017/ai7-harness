@@ -2522,7 +2522,7 @@ export function reviewRunPlan(input: {
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
-  const members = facts.categories;
+  const members = facts.synthesis === undefined ? facts.categories : [...facts.categories, facts.synthesis];
   const categories = members.filter(category => category.categoryId !== 'run-synthesis');
   const synthesis = members.find(category => category.categoryId === 'run-synthesis');
   const materials = facts.materials ?? [];
@@ -2535,7 +2535,8 @@ export function reviewRunPlan(input: {
   const tasks = members.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
-  const ceilings = tasks.map((category) => frozenCeiling(category.task!.components));
+  const budgetTasks = tasks.filter(category => category.categoryId !== 'run-synthesis');
+  const ceilings = budgetTasks.map((category) => frozenCeiling(category.task!.components));
   const route = tasks.length === 0 ? null : frozenRoute(tasks[0]!.task!.components);
   const destinations = [...new Set(tasks.map(category => frozenRoute(category.task!.components))
     .filter(value => MODEL_SERVICE_ROUTES.some(remote => remote === value.kind)).map(planModelDestination))].join('、');
@@ -2652,10 +2653,10 @@ export function reviewRunPlan(input: {
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
       send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往 ${destinations}` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
+      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${budgetTasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
-      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）`
+      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${budgetTasks.length} 类合计）`
         : `任务运行预算上限：${groupedCount(sharedCeiling)} tokens；各成员的模型阶段按工序份额分用`,
       accountLimit: ACCOUNT_LIMIT_UNKNOWN,
     },

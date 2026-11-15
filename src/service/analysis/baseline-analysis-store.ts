@@ -1578,6 +1578,9 @@ export class BaselineAnalysisStore {
    * developer-live and the launch's under it.
    */
   #planCeiling(unitCount: number, editorCeiling: RunBudgetCeilingState, background: BackgroundRunBudgetCeiling | null): RunBudgetCeilingState {
+    const inherited = this.#definition.structuredOnly === true ? this.#definition.inheritedBudgetCeiling : undefined;
+    if (inherited !== undefined) return inherited === 'unset' ? editorCeiling : editorCeiling === 'unset' ? inherited
+      : { kind: 'tokens', maxTotalTokens: Math.min(inherited.maxTotalTokens, editorCeiling.maxTotalTokens) };
     const live = this.#launch.live;
     const share = background === null ? null : { kind: 'tokens' as const, maxTotalTokens: background.maxTotalTokens };
     if (live === null || live.scope === 'ordinary-production') return share ?? editorCeiling;
@@ -4198,7 +4201,7 @@ export class BaselineAnalysisStore {
       const plan = governed ? this.#planRecords(stored!.binding.taskIntentId, 'any', stored!.binding.planVersion) : null;
       const reuse = plan?.['reuse-plan'] as { units: Array<{ disposition: string }> } | undefined;
       const facts = governed ? null : this.loadExecutionPlan(runRecordId);
-      const expected = governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
+      const expected = definition.structuredOnly === true ? 0 : governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
         : facts!.update === null ? facts!.manifest.units.length : facts!.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
       if (this.unitCheckpoints(runRecordId).length !== expected) invalid();
       const usage = this.carriedUsageOf(runRecordId)?.stages;

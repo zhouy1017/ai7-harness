@@ -3617,7 +3617,7 @@ export class BaselineAnalysisExecutionOwner {
       // A settled reduction — a gap, or a sent request whose result cannot be known, included — is kept before a pause or
       // AI7 stopping, and continuation never sends it again (ADR 0095 §2). Only one AI7 stopping cut off before anything
       // of it settled is formed again by 续行, as a unit cut off there is read again (CONT-014).
-      const cutOff = (active.interrupted || active.pauseRequested) && active.resumableOnInterrupt && crossUnit.state === 'gap' && crossUnit.code === 'interrupted';
+      const cutOff = active.interrupted && active.resumableOnInterrupt && crossUnit.state === 'gap' && crossUnit.code === 'interrupted';
       if (accountLimit === null && !active.cancelRequested && !cutOff) stages.reduction = {
         inputDigest: reductionInput, contractDigest: reductionContract,
         requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest, outcome: crossUnit,
