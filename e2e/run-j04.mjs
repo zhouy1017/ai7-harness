@@ -2627,6 +2627,7 @@ async function main() {
     const legacyRule = (await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules()`)).rules.find(rule=>rule.bookId===legacyBook.bookId&&rule.pattern==='reanalyze-book');
     requireJourney(legacyRule?.state==='active','legacy-plan-rule-record');
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-rule-close');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="quick-reanalyze-book"]')?.dataset.ruleVersionId===${JSON.stringify(legacyRule.ruleVersionId)}`,'legacy-plan-rule-projected');
     await assertRenderer(renderer, `(() => {document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]').click();document.querySelector('.baseline-analysis-card #analysis-range-3').click();return true;})()`, 'legacy-plan-quick-range');
     await writeFile(connectivityPath,'offline');
     await quickStart(renderer,'reanalyze-book','重新分析全书',legacyRule.name,'legacy-plan-quick-offline');
