@@ -520,6 +520,16 @@ async function main() {
     fastCredentialSaved = true;
     await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
     await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    // Reuse J-12's product-authored catalogue choice; the placeholder credential remains the existing cleanup owner's.
+    await markTechnicalMode(renderer, true, 'dispatch-catalogue');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'dispatch-catalogue-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'dispatch-catalogue-settings-ready');
+    await click(renderer, '模型服务', 'dispatch-catalogue-models');
+    await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-catalogue-field');
+    await fill(renderer, '[data-custom-model-id]', 'j05-dispatch-alternative', 'dispatch-catalogue-alternative');
+    await assertRenderer(renderer, `(() => {const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-catalogue-save');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j05-dispatch-alternative')`, 'dispatch-catalogue-ready');
+    await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     // #1379 explicitly exercises the ordinary card branch.
     await markTechnicalMode(renderer, false, 'mark-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'mark-ordinary-library');
@@ -1203,6 +1213,9 @@ async function main() {
     await settled(renderer, 'revision-pending-settled');
 
     at('ai-locks');
+    // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
+    // is still refused before execution, so this stage sends no model request.
+    await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
     // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
     // offers 解锁; 就选中部分让 AI 修改… on only locked words is refused before any model is asked; the badge unlocks it again.
     const lockBlock = await renderer.evaluate(`(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && node.dataset.blockId!==window.__j05RevBlock && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return null; window.__j05LockOriginal=window.__j05.text(block.dataset.blockId); return block.dataset.blockId; })()`);
