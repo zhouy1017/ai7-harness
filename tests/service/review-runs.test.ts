@@ -2904,7 +2904,10 @@ it('replays a committed launch after restart and drives it once without a second
 it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps later categories on the launch binding (#1455)', async () => {
   let reached!: () => void, release!: () => void;
   const held = new Promise<void>(resolve => { reached = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
-  const first = await openLayeredSelection({ unitHold: async settled => { if (settled === 1) { reached(); await gate; } } });
+  let checkpointHeld = false;
+  const first = await openLayeredSelection({ unitHold: async settled => {
+    if (settled > 0 && !checkpointHeld) { checkpointHeld = true; reached(); await gate; }
+  } });
   const book = await importBook(first);
   const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
     executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
