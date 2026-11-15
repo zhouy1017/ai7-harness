@@ -2608,7 +2608,7 @@ async function main() {
         if (rememberedLabel !== undefined) requireJourney(beforeChoice === rememberedLabel, 'dispatch-choice-survives-restart');
         const chosen = await primary.evaluate(`(() => {
           const chooser=document.querySelector('#task-drawer .dispatch-chooser');chooser.open=true;
-          if(${width}===1008)chooser.querySelector('button').click();
+          if(${width}===1008)Array.from(chooser.querySelectorAll('button')).find(button=>button.textContent==='恢复默认').click();
           else {const models=chooser.querySelector('select[aria-label="本次任务的模型"]');models.selectedIndex=Array.from(models.options).findIndex(option=>option.textContent==='j12-ordinary-fast');models.dispatchEvent(new Event('change',{bubbles:true}));const effort=chooser.querySelector('select[aria-label="本次任务的思考强度"]');effort.value=Array.from(effort.options).find(option=>option.value!=='off').value;effort.dispatchEvent(new Event('change',{bubbles:true}));}
           chooser.querySelector('summary').focus();const focused=document.activeElement===chooser.querySelector('summary');
           const label=chooser.querySelector('summary').textContent;chooser.open=false;return {label,focused};
