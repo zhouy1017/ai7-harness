@@ -73,7 +73,7 @@ const PROVIDER_CACHE_DIRECTORY = 'entries';
 
 // --- Duplicated from src/service/analysis/{cross-unit,assurance-sampling,run-report}-contract.ts (Issue #808) ---------------
 const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
-export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '1cb1fb36d7cf54d0b887a01d85598b67fb4487e4f8446209861edc1c18018142';
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '165ee1266185d14d38d784c33ba8428be10b428270768e87ddd8e3bab441a9d0';
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = '4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db';
 /**
  * The two admitted sampling contracts (Issue #826) and the SHA-256 of each nine-line instruction as a message carries it

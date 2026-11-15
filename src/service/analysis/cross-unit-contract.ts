@@ -101,12 +101,17 @@ export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1 = {
 } as const;
 
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST = sha256Hex(canonicalJson(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1));
+const { citedBlocksHeader: _citedHeader, citedBlocksLine: _citedLine, ...rowContract } = BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1;
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT = {
-  ...BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1,
+  ...rowContract,
+  entityLine: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.entityLine.replace(' · 内容块 {blockIds}', ''),
+  eventLine: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.eventLine.replace(' · 内容块 {blockIds}', ''),
+  relationshipLine: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.relationshipLine.replace(' · 内容块 {blockIds}', ''),
+  settingClaimLine: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.settingClaimLine.replace(' · 内容块 {blockIds}', ''),
   schema: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA,
   instruction: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.instruction.split('\n')
     .filter((line) => !line.startsWith('sides 至少') && !line.startsWith('每个 sourceRanges'))
-    .join('\n').replace('description、sides、confidence', 'description、rowRefs、confidence') + '\n引用只填写 rowRefs: ["r1", "r15"]，对应下列行索引，至少跨两个单元。不要抄写内容块标识或计算字素偏移。',
+    .join('\n').replaceAll('sides', 'rowRefs') + '\n引用只填写 rowRefs: ["r1", "r15"]，对应下列行索引，至少跨两个单元。不要抄写内容块标识或计算字素偏移。',
 } as const;
 
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(BASELINE_CROSS_UNIT_PROMPT_CONTRACT));
@@ -151,8 +156,8 @@ interface TopicRow {
  * order. The cited-blocks section is derived from exactly this traversal, so "first citation order"
  * is the order the reader of the message actually meets each identity in.
  */
-function topicSections(closed: ReadonlyArray<ClosedUnitResult>): Array<{ header: string; rows: TopicRow[] }> {
-  const contract = BASELINE_CROSS_UNIT_PROMPT_CONTRACT;
+function topicSections(closed: ReadonlyArray<ClosedUnitResult>, indexed = false): Array<{ header: string; rows: TopicRow[] }> {
+  const contract = indexed ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1;
   const units = orderedClosed(closed);
   const rows = <T>(select: (result: BaselineUnitResult) => ReadonlyArray<T>, line: (item: T, unitOrdinal: number) => TopicRow): TopicRow[] =>
     units.flatMap((unit) => select(unit.result).map((item) => line(item, unit.unitOrdinal)));
@@ -263,13 +268,16 @@ export function buildCrossUnitMessage(closed: ReadonlyArray<ClosedUnitResult>, t
     fill(contract.messageHeader, { closed: String(units.length), total: String(totalUnits), unitSetDigest: unitSetDigest(units) }),
     contract.instruction,
   ];
-  for (const section of topicSections(units)) {
+  for (const section of topicSections(units, indexed)) {
     lines.push(section.header);
     for (const row of section.rows) lines.push(indexed ? `[r${++rowOrdinal}] ${row.text}` : row.text);
   }
-  lines.push(contract.citedBlocksHeader);
-  for (const [unitOrdinal, blockIds] of citedBlocksByUnit(units)) {
-    lines.push(fill(contract.citedBlocksLine, { unitOrdinal: String(unitOrdinal), blockIds: blockIds.join(contract.blockIdSeparator) }));
+  if (!indexed) {
+    const legacy = BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1;
+    lines.push(legacy.citedBlocksHeader);
+    for (const [unitOrdinal, blockIds] of citedBlocksByUnit(units)) {
+      lines.push(fill(legacy.citedBlocksLine, { unitOrdinal: String(unitOrdinal), blockIds: blockIds.join(legacy.blockIdSeparator) }));
+    }
   }
   return lines.join('\n');
 }
@@ -297,7 +305,7 @@ export function parseCrossUnitMessageHeader(text: string): CrossUnitMessageHeade
  * this contract's to own, so the reader lives here beside the writer.
  */
 export function parseCrossUnitCitedBlocks(text: string): Map<number, string[]> {
-  const contract = BASELINE_CROSS_UNIT_PROMPT_CONTRACT;
+  const contract = BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1;
   const lines = text.split('\n');
   const start = lines.indexOf(contract.citedBlocksHeader);
   const cited = new Map<number, string[]>();
@@ -392,12 +400,15 @@ export function parseCrossUnitResult(
     const description = reader.text(candidate.description, MAX_DESCRIPTION_GRAPHEMES, 'findings', index);
     if (description === null) { reader.drop('findings', index, 'description-invalid'); continue; }
     const sides: CrossUnitFindingSide[] = [];
+    const seen = new Set<string>();
+    const addSide = (side: CrossUnitFindingSide) => { const key = canonicalJson(side); if (!seen.has(key)) { seen.add(key); sides.push(side); } };
     if (candidate.rowRefs !== undefined) {
-      for (const [refIndex, ref] of reader.array(candidate.rowRefs, `findings.${index}.rowRefs`, MAX_SIDES).entries()) {
-        const match = typeof ref === 'string' ? /^r([1-9][0-9]*)$/u.exec(ref) : null;
-        const row = match === null ? undefined : expected.rows?.[Number(match[1]) - 1];
+      for (const [refIndex, ref] of reader.array(Array.isArray(candidate.rowRefs) ? candidate.rowRefs : [candidate.rowRefs], `findings.${index}.rowRefs`, MAX_SIDES).entries()) {
+        const reference = typeof ref === 'string' ? ref.trim().replace(/^\[\s*(.*?)\s*\]$/u, '$1').replace(/^r/iu, '') : ref;
+        const ordinal = modelNumber(reference);
+        const row = Number.isSafeInteger(ordinal) && ordinal > 0 ? expected.rows?.[ordinal - 1] : undefined;
         if (row === undefined) reader.drop(`findings.${index}.rowRefs`, refIndex, 'row-out-of-set');
-        else sides.push({ unitOrdinal: row.unitOrdinal, sourceRanges: row.sourceRanges });
+        else addSide({ unitOrdinal: row.unitOrdinal, sourceRanges: row.sourceRanges });
       }
     }
     const section = `findings.${index}.sides`;
@@ -408,7 +419,7 @@ export function parseCrossUnitResult(
       }
       const sourceRanges = salvageSourceRanges(reader, side.sourceRanges, new Set(expected.citedBlocksByUnit.get(ordinal) ?? []),
         `${section}.${sideIndex}.sourceRanges`, MAX_SIDE_RANGES, expected.blockLengths);
-      sides.push({ unitOrdinal: ordinal, sourceRanges });
+      addSide({ unitOrdinal: ordinal, sourceRanges });
     }
     const rawKind = typeof candidate.kind === 'string' ? candidate.kind.trim().toLowerCase().replace(/[\s_]+/gu, '-') : '';
     const kind = CROSS_UNIT_FINDING_KINDS.find((kind) => kind === rawKind) ?? (Object.hasOwn(kinds, rawKind) ? kinds[rawKind] : undefined);

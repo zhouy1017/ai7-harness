@@ -175,6 +175,8 @@ export type UnitResultParseOutcome =
 
 /** The cross-unit suboperation of a kind that declares one (ADR 0066); `null` for a kind that does not. */
 export interface CrossUnitContractBinding {
+  /** Message form is independent of identity wrappers applied to this binding. */
+  readonly baselineMessageFormat?: 'ranges' | 'rows';
   readonly promptContractDigest: string;
   readonly resultSchema: string;
   /**
@@ -540,7 +542,7 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
     reducerStages: BASELINE_REDUCER_STAGES,
     executionSteps: BASELINE_EXECUTION_STEPS,
     updateExecutionSteps: BASELINE_UPDATE_EXECUTION_STEPS,
-    crossUnit: { promptContractDigest: crossDigest, resultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA },
+    crossUnit: { baselineMessageFormat: promptContract === 'current' ? 'rows' : 'ranges', promptContractDigest: crossDigest, resultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA },
     crossUnitAbsentReason: '',
     assurance: {
       prompt: contract.sampling.prompt,

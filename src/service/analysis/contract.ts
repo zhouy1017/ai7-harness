@@ -85,8 +85,10 @@ export type UnitResultParse =
 /** Drop unknown blocks, retaining their parent entry; invalid offsets fall back to the whole block. */
 export function salvageSourceRanges(reader: ModelResultReader, value: unknown, blockIds: ReadonlySet<string>, section: string,
   maximum = MAX_ITEMS, blockLengths?: ReadonlyMap<string, number>): AnalysisSourceRangeProjection[] {
-  return reader.array(value, section, maximum).flatMap<AnalysisSourceRangeProjection>((range, index) => {
-    const ordinal = typeof range === 'number' ? range : isRecord(range) ? range.blockOrdinal : undefined;
+  const values = typeof value === 'number' || typeof value === 'string' ? [value] : value;
+  const ranges = reader.array(values, section, maximum).flatMap<AnalysisSourceRangeProjection>((range, index) => {
+    const ordinal = typeof range === 'number' || typeof range === 'string' ? modelNumber(range)
+      : isRecord(range) && range.blockOrdinal !== undefined ? modelNumber(range.blockOrdinal) : undefined;
     if (ordinal !== undefined) {
       const blockId = Number.isSafeInteger(ordinal) && (ordinal as number) > 0 ? [...blockIds][(ordinal as number) - 1] : undefined;
       if (blockId !== undefined) return [{ blockId, fromGrapheme: null, toGrapheme: null }];
@@ -107,6 +109,8 @@ export function salvageSourceRanges(reader: ModelResultReader, value: unknown, b
     }
     return [{ blockId: range.blockId, fromGrapheme: from as number, toGrapheme: to as number }];
   });
+  const seen = new Set<string>();
+  return ranges.filter((range) => { const key = canonicalJson(range); if (seen.has(key)) return false; seen.add(key); return true; });
 }
 
 export const CONFIDENCE_ALIASES: Readonly<Record<string, AnalysisConfidence>> = {
@@ -217,7 +221,7 @@ export const BASELINE_PROMPT_CONTRACT_V1 = {
 export const BASELINE_PROMPT_CONTRACT_V1_DIGEST = sha256Hex(canonicalJson(BASELINE_PROMPT_CONTRACT_V1));
 
 /**
- * The current frozen prompt contract, /2 (Issue #826). It asks for the same unit result under the same analysis contract
+ * The retained frozen prompt contract, /2 (Issue #826). It asks for the same unit result under the same analysis contract
  * and result schema as /1; only the system section changes. Each `conflicts` and `unresolved` element is given its literal
  * object shape, a bare string is ruled out, and an item no block of the unit anchors carries the empty `sourceRanges` the
  * schema already admits rather than an invented one. The unit message is /1's, header for header. Every field is
@@ -278,20 +282,20 @@ export function buildUnitMessage(
   unit: CoverageManifestUnitProjection,
   totalUnits: number,
   blocksById: ReadonlyMap<string, Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>>,
-  contract: { blockLine: string } = BASELINE_PROMPT_CONTRACT,
+  contract: { blockLine: string; unitMessageHeader: string; overlapHeader: string; ownHeader: string } = BASELINE_PROMPT_CONTRACT,
 ): string {
   let ordinal = 0;
   const lines = [
-    BASELINE_PROMPT_CONTRACT.unitMessageHeader
+    contract.unitMessageHeader
       .replace('{ordinal}', String(unit.ordinal))
       .replace('{total}', String(totalUnits))
       .replace('{unitDigest}', unit.digest),
   ];
   if (unit.overlapBlockIds.length > 0) {
-    lines.push(BASELINE_PROMPT_CONTRACT.overlapHeader);
+    lines.push(contract.overlapHeader);
     for (const blockId of unit.overlapBlockIds) lines.push(blockLine(requireBlock(blocksById, blockId), ++ordinal, contract.blockLine));
   }
-  lines.push(BASELINE_PROMPT_CONTRACT.ownHeader);
+  lines.push(contract.ownHeader);
   for (const blockId of unit.blockIds) lines.push(blockLine(requireBlock(blocksById, blockId), ++ordinal, contract.blockLine));
   return lines.join('\n');
 }

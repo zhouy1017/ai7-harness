@@ -1,4 +1,3 @@
-import { BASELINE_PROMPT_CONTRACT_V1_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST } from '../analysis/contract.js';
 import type { CallId, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { isRecord, canonicalJson } from '../analysis/canonical.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
@@ -14,7 +13,6 @@ import {
 import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
-  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST,
   crossUnitRequestDigest,
   parseCrossUnitCitedBlocks,
   parseCrossUnitMessageHeader,
@@ -295,7 +293,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     this.#profileEntryKeys = options.localFixture?.catalog.entriesFor(options.localFixture.execution, fixture, promptContractDigest) ?? null;
     this.#promptContractDigest = promptContractDigest;
     this.#assurancePromptContractDigest = options.assurancePromptContractDigest ?? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
-    this.#crossUnitPromptContractDigest = options.crossUnitPromptContractDigest ?? this.#crossContractDigest();
+    this.#crossUnitPromptContractDigest = options.crossUnitPromptContractDigest ?? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
     this.#codes = codes;
     this.#attemptsBefore = options.attemptsBefore ?? new Map();
     this.#answerHold = options.answerHold ?? null;
@@ -425,11 +423,6 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
 
   resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return Promise.resolve({ provider, id: model, name: 'AI7 确定性夹具', inputModalities: ['text'] });
-  }
-
-  #crossContractDigest(): string {
-    return [BASELINE_PROMPT_CONTRACT_V1_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST].includes(this.#promptContractDigest)
-      ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {

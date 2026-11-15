@@ -18,20 +18,26 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "c064bb35d02cd45a632df7e7ffb931ca6f27fcb6b0de05c104124b716fab8b92",
+      "requestDigest": "766ff9279a099e13d59a3d30262a71bf054995d5712df506c76f87b8e32c7cb1",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
-        "usage": { "inputTokens": 2000, "outputTokens": 300 }
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"confidence\":\"medium\",\"rowRefs\":[\"r8\",\"r4\"]},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"confidence\":\"low\",\"rowRefs\":[\"r8\",\"r4\"]}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
+        "usage": {
+          "inputTokens": 2000,
+          "outputTokens": 300
+        }
       }
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "c90545ba6d0bbc5437528687e8bd71b8f2bc765ec091c4809484af9d37310fa6",
+      "requestDigest": "c930c0cae9c0e7c8bea76b67008842b181a8d6b85cb6e5f0383ed2606655d072",
       "response": {
         "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
-        "usage": { "inputTokens": 2000, "outputTokens": 300 }
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"confidence\":\"medium\",\"rowRefs\":[\"r8\",\"r4\"]},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"confidence\":\"low\",\"rowRefs\":[\"r8\",\"r4\"]}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
+        "usage": {
+          "inputTokens": 2000,
+          "outputTokens": 300
+        }
       }
     },
     {
@@ -40,7 +46,10 @@
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行先单独重算以适配器失败闭合的那个单元，闭合后再发起跨单元归纳。\",\"basis\":\"本次提交 8 个单元，其中 1 个以 adapter-failure 闭合，跨单元归纳只看到 7 个已闭合单元。\"},{\"suggestion\":\"对估计精度为 0.00 的发现层级降低信任，下一轮优先复核该层级。\",\"basis\":\"保证抽样共判定 2 条，其中 low 层级 1 条判定为需降级，该层级估计精度为 0.00。\"},{\"suggestion\":\"维持当前单元预算：本次没有单元因规模触发重试。\",\"basis\":\"计划内调整次数为 0，每个提交单元都只用了一次尝试。\"}]}",
-        "usage": { "inputTokens": 900, "outputTokens": 210 }
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 210
+        }
       }
     },
     {
@@ -49,7 +58,10 @@
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"同步运行前先单独处理上一版遗留的缺口单元，避免它在新一轮里再次成为缺口。\",\"basis\":\"本次复用 6 个单元、重算 2 个，重算后仍有 1 个单元以缺口闭合。\"},{\"suggestion\":\"复用比例已经很高，可把单元预算集中给需要重算的单元。\",\"basis\":\"8 个单元中 6 个按血缘复用，只有 2 个单元产生了传输。\"}]}",
-        "usage": { "inputTokens": 860, "outputTokens": 180 }
+        "usage": {
+          "inputTokens": 860,
+          "outputTokens": 180
+        }
       }
     },
     {
@@ -58,7 +70,10 @@
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"所选范围下一次可以再向前扩一个单元，让重算集合完整覆盖仍是缺口的那个单元的上下文。\",\"basis\":\"本次按范围重算 3 个单元、复用 5 个，重算集合内仍有 1 个单元以缺口闭合。\"},{\"suggestion\":\"范围运行的抽样规模偏小，下一轮可在范围外也抽取候选以稳定估计精度。\",\"basis\":\"本次候选发现与抽样条数都很少，各层级的估计精度只由个位数的判定得出。\"}]}",
-        "usage": { "inputTokens": 880, "outputTokens": 190 }
+        "usage": {
+          "inputTokens": 880,
+          "outputTokens": 190
+        }
       }
     },
     {
@@ -67,7 +82,10 @@
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"全书重算下一次可先只重算上一版的缺口单元，确认其能闭合后再整本重算。\",\"basis\":\"本次重算了全部 8 个单元，仍有 1 个单元以 adapter-failure 闭合，其余 7 个的结论与上一版一致。\"},{\"suggestion\":\"整本重算的用量集中在单元阶段，下一轮可据此估算单元预算。\",\"basis\":\"各阶段用量中单元阶段的请求数等于提交单元数，归纳与抽样各只有个位数请求。\"}]}",
-        "usage": { "inputTokens": 910, "outputTokens": 200 }
+        "usage": {
+          "inputTokens": 910,
+          "outputTokens": 200
+        }
       }
     }
   ]

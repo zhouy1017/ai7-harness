@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1,
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
   BASELINE_CROSS_UNIT_RESULT_SCHEMA,
   CROSS_UNIT_FINDING_KINDS,
@@ -85,17 +86,18 @@ describe('the Baseline Cross-Unit Reduction Contract v1 message', () => {
     expect(at(contract.eventHeader)).toBeGreaterThan(at(contract.entityHeader));
     expect(at(contract.relationshipHeader)).toBeGreaterThan(at(contract.eventHeader));
     expect(at(contract.settingClaimHeader)).toBeGreaterThan(at(contract.relationshipHeader));
-    expect(at(contract.citedBlocksHeader)).toBeGreaterThan(at(contract.settingClaimHeader));
-    expect(lines).toContain(`[r1] - 合成人物甲（person；别名：阿甲）· 单元 1 · 内容块 ${BLOCK_A}`);
-    expect(lines).toContain(`[r4] - 合成事件（单元 3）。（时序：开端） · 单元 3 · 内容块 ${BLOCK_D}`);
-    expect(lines).toContain(`[r6] - 合成人物乙 —抵达→ 合成之城 · 单元 3 · 内容块 ${BLOCK_C}`);
-    expect(lines).toContain(`[r7] - 合成之城：位于北方 · 单元 1 · 内容块 ${BLOCK_B}`);
+    expect(message).not.toMatch(/blk_|fromGrapheme|每项 sides/u);
+    expect(lines).toContain(`[r1] - 合成人物甲（person；别名：阿甲）· 单元 1`);
+    expect(lines).toContain(`[r4] - 合成事件（单元 3）。（时序：开端） · 单元 3`);
+    expect(lines).toContain(`[r6] - 合成人物乙 —抵达→ 合成之城 · 单元 3`);
+    expect(lines).toContain(`[r7] - 合成之城：位于北方 · 单元 1`);
     // No placeholder survives interpolation, and the message carries no manuscript text of its own.
     expect(message).not.toMatch(/\{[a-zA-Z]+\}/u);
   });
 
-  it('ends with each unit’s distinct cited blocks in first-citation order, readable back from the text', () => {
-    const message = buildCrossUnitMessage(CLOSED, 8);
+  it('retains the legacy cited-block footer byte format', () => {
+    const message = buildCrossUnitMessage(CLOSED, 8, false);
+    expect(message).toContain(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.instruction);
     expect(message.split('\n').slice(-2)).toEqual([
       `单元 1：${BLOCK_A}、${BLOCK_B}`,
       `单元 3：${BLOCK_C}、${BLOCK_D}`,
@@ -129,7 +131,7 @@ describe('the cross-unit request digest', () => {
     ];
     // Not one identity in common, and the message bytes differ because they name those identities.
     expect(JSON.stringify(reminted)).not.toContain(BLOCK_A);
-    expect(buildCrossUnitMessage(reminted, 8)).not.toBe(buildCrossUnitMessage(CLOSED, 8));
+    expect(buildCrossUnitMessage(reminted, 8)).toBe(buildCrossUnitMessage(CLOSED, 8));
     expect(unitSetDigest(reminted)).toBe(unitSetDigest(CLOSED));
     // A third minting whose identities happen to sort the other way is still the same set.
     const resorted: ClosedUnitResult[] = [
@@ -217,4 +219,13 @@ it('resolves row references to the exact units and source ranges', () => {
   expect(parsed).toMatchObject({ ok: true, result: { findings: [{ sides: [
     { unitOrdinal: 1, sourceRanges: [range(BLOCK_B)] }, { unitOrdinal: 3, sourceRanges: [range(BLOCK_D)] },
   ] }] } });
+});
+
+it('recovers bracketed, case-variant and numeric row refs and removes duplicates', () => {
+  const parsed = parseCrossUnitResult(JSON.stringify({ findings: [{ kind: 'contradiction', description: '同一证据', rowRefs: ['[r1]', 'R2', 2] }] }), { ...EXPECTED, rows: crossUnitRows(CLOSED) });
+  expect(parsed).toMatchObject({ ok: true, result: { findings: [{ sides: [
+    { unitOrdinal: 1, sourceRanges: [range(BLOCK_A, 0, 4)] }, { unitOrdinal: 3, sourceRanges: [range(BLOCK_C, 0, 4)] },
+  ] }] } });
+  const repeated = parseCrossUnitResult(JSON.stringify({ findings: [{ kind: 'contradiction', description: '设定', rowRefs: ['r7', 'r8', 'r7'] }] }), { ...EXPECTED, rows: crossUnitRows(CLOSED) });
+  expect(repeated.ok && repeated.result.findings[0]!.sides).toHaveLength(2);
 });
