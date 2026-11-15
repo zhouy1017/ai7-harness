@@ -2909,7 +2909,7 @@ it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps
     if (settled > 0 && !checkpointHeld) { checkpointHeld = true; reached(); await gate; }
   } });
   const book = await importBook(first);
-  const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+  const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE, PLOT], scope: WHOLE,
     executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
   const run = first.store.launchReviewRun(input, launchPolicy).projection.run!;
   const loop = first.driver.driveLaunch(run.reviewRunId);
