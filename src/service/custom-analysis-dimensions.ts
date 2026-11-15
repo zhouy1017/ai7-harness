@@ -1,7 +1,7 @@
 import { baselineAnalysisPlan, isRemoteExecutionRoute } from './task-plan.js';
 import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
-import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
+import { procedureBasePromptDigest } from './procedures/execution.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -424,7 +424,7 @@ export function customAnalysisVersionOfTask(host: CustomAnalysisStoreHost, taskI
   if (envelope === undefined) return null;
   const json = asString(envelope.canonical_json);
   requireStore(sha256(json) === envelope.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
-  const frozen = editorialMemoryBasePromptDigest(JSON.parse(json) as Record<string, unknown>);
+  const frozen = procedureBasePromptDigest(JSON.parse(json) as Record<string, unknown>);
   const dimension = host.customAnalysisCall(() => host.customAnalysisDimensions.dimension(dimensionId));
   return dimension?.versions.find((version) => {
     const definition = customAnalysisDefinition(host, version);

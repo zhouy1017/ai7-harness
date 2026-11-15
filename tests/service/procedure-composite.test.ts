@@ -124,6 +124,8 @@ describe('composite procedures and 全文审校 (#1173)', () => {
     expect(run.preinstalledProcedures!.map((entry) => entry.procedure.procedureId)).toEqual(['ai7-procedure/local-text-check', ...Array(4).fill(FULL_REVIEW)]);
     const plan = target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId });
     expect([plan.goal.chips.procedure, plan.goal.sentence.startsWith('按工序《全文审校》第 1 版依次审阅全书')]).toEqual(['全文审校 第 1 版', true]);
+    expect(plan.scope.send).toContain('所选工序中的编辑任务说明和豁免规则');
+    expect(plan.scope.send).not.toContain('编辑指令');
     expect(plan.start.categoryDigests).toEqual([]); // The review authority was already recorded by launch.
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {

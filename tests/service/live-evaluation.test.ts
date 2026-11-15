@@ -1,3 +1,6 @@
+import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
+import { withProcedureDefinition } from '../../src/service/procedures/execution.js';
+import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { READERS_REPORT_NEEDS_FINALIZED } from '../../src/service/readers-reports.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -277,7 +280,7 @@ describe('evaluation on the Go execution path (#429)', () => {
     capture.assertMatched();
   });
 
-  it('explains that 初评 with a procedure editor instruction is not yet supported, before sending (#1476)', () => {
+  it('prepares, authorizes and completes ordinary 初评 with a procedure instruction (#1476)', async () => {
     const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
     store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
     store.selectSearchBackend('search-tinyfish');
@@ -287,10 +290,18 @@ describe('evaluation on the Go execution path (#429)', () => {
       title: original.document.title, editorInstruction: '保留叙述中的短句。', stages: original.document.stages } })
       .procedures.find((entry) => entry.procedureId === original.procedureId)!;
     store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
-    const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, () => undefined);
+    const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor,
+      (_request, message) => ({ kind: 'unit-result', ...answerOf(message) }));
     owners.push(capture.owner);
-    expect(() => store.createInitialEvaluationPreparationWork(bookId, capture.policy)).toThrow('这项任务暂不支持带编辑指令的工序。');
-    expect(capture.wireRequests).toHaveLength(0);
+    activeFamily = 'evaluation-initial';
+    let progress = store.createInitialEvaluationPreparationWork(bookId, capture.policy);
+    while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+    const prepared = progress.projection!;
+    const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    capture.owner.admitAndDispatch(authorized.dispatchRunRecordId!, authorized.ledger);
+    await capture.owner.whenIdle();
+    expect(store.inspectInitialEvaluation(bookId).run!.state).toBe('completed');
+    expect(capture.wireRequests.some(body => body.messages.some(message => message.role === 'system' && message.content.includes('保留叙述中的短句。')))).toBe(true);
     capture.assertMatched();
   });
 
@@ -581,4 +592,31 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(revision.gaps.every((gap) => gap.code === (gap.unitOrdinal === 2 ? 'outcome-unknown' : 'not-attempted'))).toBe(true);
     expect(runReportUsageReconciles(result.taskOutcome!.report!, revision.usage)).toBe(true);
   }, 300_000);
+});
+
+describe('developer-live procedure instruction admission', () => {
+  it.each(['evaluation', 'baseline-manuscript-analysis'] as const)('refuses %s instructions without sending while stock content remains admitted', async kind => {
+    const original = store.procedureLibrary({ action: 'inspect' }).procedures.find(entry => entry.executorKind === kind)!;
+    const pin = { procedureId: original.procedureId, version: original.version, digest: original.digest };
+    const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId, basedOn: pin,
+      title: original.document.title, editorInstruction: '保留叙述中的短句。', stages: original.document.stages } }).procedures.find(entry => entry.procedureId === original.procedureId)!;
+    const selectedPin = { procedureId: changed.procedureId, version: changed.version, digest: changed.digest };
+    store.procedureLibrary({ action: 'select', bookId, procedure: selectedPin });
+    const base = kind === 'evaluation' ? store.initialEvaluationLedger.definition : store.baselineAnalysisLedger.definition;
+    // Baseline has its own execution admission; 初评 also pins the shared non-baseline guard.
+    if (kind === 'evaluation') {
+      expect(liveKindAdmission(selected, base, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();
+      const definition = withProcedureDefinition(base, changed.document, selectedPin);
+      expect(liveKindAdmission(selected, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
+    }
+    const prepare = () => kind === 'evaluation' ? store.createInitialEvaluationPreparationWork(bookId, selected)
+      : store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, selected);
+    expect(prepare).toThrowError(expect.objectContaining({ code: 'PROCEDURE_INSTRUCTION_NOT_ADMITTED' }));
+    expect(sent).toBe(0);
+    store.procedureLibrary({ action: 'select', bookId, procedure: pin });
+    // Same executor and stages, without editorTaskInstruction content: preparation remains admitted.
+    expect(prepare).not.toThrow();
+    expect(withProcedureDefinition(base, original.document, pin)).toBe(base);
+    expect(sent).toBe(0);
+  });
 });

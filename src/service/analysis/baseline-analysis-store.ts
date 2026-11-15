@@ -16,7 +16,7 @@ import {
   procedureStopped,
   validateProcedureEdit,
 } from '../procedures/editable.js';
-import { withProcedureDefinition, procedureInstruction } from '../procedures/execution.js';
+import { withProcedureDefinition, procedureInstruction, procedureContent } from '../procedures/execution.js';
 import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
 import {
   recordProcedurePlanPin,
@@ -1011,6 +1011,7 @@ export class BaselineAnalysisStore {
         providerStatus: envelope.providerStatus as 'remote-denied-local-deterministic' | 'remote-denied-no-route',
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
+        procedureContent: procedureContent(readProcedurePlanView(this.#db, asString(digests['plan-envelope']), this.#definition.kind)?.document),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
         ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 || envelope.compositionVersion === 4 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
@@ -3648,7 +3649,7 @@ export class BaselineAnalysisStore {
       : firstEnvelope === undefined ? null : (parseCanonicalJson(asString(firstEnvelope.canonical_json)) as { editorialMemory?: EditorialMemorySnapshot }).editorialMemory ?? null;
     const definition = withEditorialMemoryDefinition(unwrappedDefinition, memory);
     if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
-    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null) {
+    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
         'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '这项任务暂不支持带编辑指令的工序。');
     }
@@ -3898,7 +3899,7 @@ export class BaselineAnalysisStore {
         runSourceScope: components['run-source-scope'] as BaselineAnalysisProjection['runSourceScope'],
         coverageManifest: manifest, providerResolutionPlan: components['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'],
         executionPlan: components['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
-        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null,
+        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null, procedureContent: procedureContent(document),
           providerStatus: envelopeBase.providerStatus as NonNullable<BaselineAnalysisProjection['planEnvelope']>['providerStatus'],
           boundary: envelopeBase.boundary, ...(composition.version === 1 ? {} : { compositionVersion: composition.version }) },
         planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],

@@ -1,7 +1,7 @@
 import { initialEvaluationPlan, evaluationMaterialPlan, seriesScopePlan } from './task-plan.js';
 import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
-import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
+import { procedureBasePromptDigest } from './procedures/execution.js';
 import {
   TASK_MATERIAL_LIVE_UNAVAILABLE,
   taskMaterialReferenceLine,
@@ -229,7 +229,7 @@ export function internalInitialProfileForTask(host: InitialEvaluationOperationsH
   const envelope = parseStoredJson(asString(row.canonical_json), '初评任务计划已损坏。');
   requireStore(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
   const scope = frozenSeriesScopes(host.authority, taskIntentId);
-  const baseDigest = internalEvaluationMaterialPlan(host, taskIntentId)?.baseDigest ?? (scope === undefined ? editorialMemoryBasePromptDigest(envelope) :
+  const baseDigest = internalEvaluationMaterialPlan(host, taskIntentId)?.baseDigest ?? (scope === undefined ? procedureBasePromptDigest(envelope) :
     asString(host.authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId)!.prompt_contract_sha256));
   const snapshot = host.evaluationProfiles.taskProfile(taskIntentId, baseDigest);
   if (snapshot !== null) return snapshot;

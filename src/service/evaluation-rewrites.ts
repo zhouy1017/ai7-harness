@@ -2,7 +2,7 @@ import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-co
 import { evaluationRewritePlan } from './task-plan.js';
 import { launchedTaskModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
-import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
+import { procedureBasePromptDigest } from './procedures/execution.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import {
@@ -482,7 +482,7 @@ export class EvaluationRewrites {
     requireRewrite(sha256Hex(json) === text(row.sha256), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
     const envelope = parseStoredJson(json, corrupt);
     requireRewrite(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-    return editorialMemoryBasePromptDigest(envelope);
+    return procedureBasePromptDigest(envelope);
   }
 
   /** The Book's latest rewrite Task by its intent, as the analysis ledger orders them; `null` before the first. */
