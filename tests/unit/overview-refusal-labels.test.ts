@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { miniDocument } from '../support/mini-dom.js';
 import { TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
 import { analysisRefusalView } from '../../src/renderer/overview-refusal-labels.js';
+import { NavigationGeneration } from '../../src/renderer/navigation-generation.js';
 
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
 
@@ -65,7 +66,8 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
     if (scope === 'read-failed') throw new Error('scope unavailable');
     return { launchPolicy: { operationalScope: scope } };
   });
-  const context = createContext({ identityWords,
+  const navigation = new NavigationGeneration();
+  const context = createContext({ identityWords, navigation, page: navigation.read(host as unknown as HTMLElement),
     document: miniDocument, screen: miniDocument.body, performance,
     window: { setTimeout, ai7: surface === 'task' ? { getModelServiceSettings, inspectTaskAuthorization } : new Proxy({}, { get: serviceRead }) },
     host, taskHost: host, analysisHost: host, first: true,
