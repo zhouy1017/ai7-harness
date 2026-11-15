@@ -1011,6 +1011,7 @@ export class BaselineAnalysisStore {
         providerStatus: envelope.providerStatus as 'remote-denied-local-deterministic' | 'remote-denied-no-route',
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
+        ...(typeof envelope.basePromptContractDigest === 'string' ? { basePromptContractDigest: envelope.basePromptContractDigest } : {}),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
         ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 || envelope.compositionVersion === 4 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
