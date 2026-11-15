@@ -1,5 +1,9 @@
 # E2E journeys: what each admitted runner proves
 
+## Navigation results after leaving a page (#1497)
+
+J-11 adds `navigation-late-answer`: the real analysis read is held while the editor opens the evaluation tab with the shared real-pointer helper. Releasing the old answer preserves the destination, focused control and status at both 1280×800 and 1008×681, then restores the native viewport. No existing stage or editorial choice is removed. Renderer regressions also cover global entries, knowledge-base load failures, a second Book, re-opened hosts, superseded notification lookups and failed or refused navigation whose original page still completes.
+
 ## #1472 synchronized deltas (0.7.1, `codex/integration-0.7.1`)
 
 Delivered identity is 0.7.1 Alpha at `dev@1654f386` through PR #1495, protocol 203, schema 115, Data Version 1; hosted Full Gate 43747897180 passed 15 of 15 Journeys. Existing slice stage descriptions below remain the detailed owners.

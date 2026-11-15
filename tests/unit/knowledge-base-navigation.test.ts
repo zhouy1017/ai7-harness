@@ -82,6 +82,21 @@ it('ignores a late rules response when mode changes while the rules loading page
   expect(page.setStatus).not.toHaveBeenCalledWith('工序与规则已打开');
 });
 
+it('does not report a late knowledge load error on the next page', async () => {
+  let fail!: (reason: Error) => void;
+  const response = new Promise<never>((_resolve, reject) => { fail = reject; });
+  vi.stubGlobal('window', { ai7: { inspectEvaluationProfiles: vi.fn(() => response) } });
+  const page = navigation();
+  const pending = page.renderKnowledgeBase('evaluation');
+  const help = document.createElement('section'); help.textContent = '帮助';
+  page.root.replaceChildren(help);
+  page.setStatus.mockClear();
+  fail(new Error('delayed load failure'));
+  await pending;
+  expect(page.root.textContent).toBe('帮助');
+  expect(page.setStatus).not.toHaveBeenCalled();
+});
+
 const sampleExemplar: ExemplarProjection = {
   title: '春季发布会新闻稿', documentId: 'news-a', typeId: 'news-release', typeLabel: '新闻稿', version: 1,
   revisionId: 'revision', revisionDigest: 'a'.repeat(64), deliveredTo: '营销部', deliveredAt: '2026-11-01T00:00:00Z',

@@ -184,7 +184,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     restoreInteraction();
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
   }
-  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error')).finally(() => { inFlight = false; }); }
+  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => { if (!destroyed) options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error'); }).finally(() => { inFlight = false; }); }
   function keydown(event: KeyboardEvent): void {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
     const cards = [...host.querySelectorAll<HTMLElement>('[data-task-item]')]; const index = cards.findIndex((node) => node === document.activeElement || node.contains(document.activeElement));

@@ -1,3 +1,4 @@
+import { navigation } from './navigation-generation.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalDisclosure, technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
@@ -266,17 +267,20 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   }
 
   async function renderModelServiceSettings(focus?: 'search'): Promise<void> {
+    const route = navigation.begin();
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
     modelFilters.clear();
     try {
       const [projection, preferences] = await Promise.all([window.ai7.getModelServiceSettings(), window.ai7.getPreferences()]);
+      if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
       paintModelServiceSettings(projection);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {
+      if (!route.isCurrent()) return;
       setStatus(rendererErrorMessage(error, '无法读取模型服务设置。'), 'error');
     }
   }

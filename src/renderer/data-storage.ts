@@ -1,3 +1,4 @@
+import { navigation } from './navigation-generation.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { DATA_VERSION_DATA, DATA_VERSION_HEADING, DATA_VERSION_MARKER, DATA_VERSION_MEANING, DATA_VERSION_PROMISE, DATA_VERSION_SOFTWARE, DATA_VERSION_UNAVAILABLE, DATA_VERSION_UPDATE, DATA_VERSION_UPGRADE, dataVersionRecordsLabel, dataVersionRollbackSteps, dataVersionStateLine, dataVersionUpdateLine, dataVersionUpgradeBackupLine, dataVersionUpgradeLine, dataVersionMarkerLine, storeVersionLine } from './data-version-labels.js';
@@ -29,9 +30,11 @@ export function createDataStorage(options: DataStorageOptions) {
   } = options;
 
   async function renderDataAndStorage(): Promise<void> {
+    const route = navigation.begin();
     setStatus('正在读取本机数据位置…', 'busy');
     try {
       const projection = await window.ai7.getProductDataLocation();
+      if (!route.isCurrent()) return;
       const content = panel();
       content.classList.add('data-storage-summary');
       content.dataset['platform'] = projection.platform;
@@ -156,6 +159,7 @@ export function createDataStorage(options: DataStorageOptions) {
       replaceScreen('data-storage', content);
       setStatus('数据与存储摘要已打开');
     } catch (error) {
+      if (!route.isCurrent()) return;
       setStatus(rendererErrorMessage(error, '无法读取本机数据位置。'), 'error');
     }
   }

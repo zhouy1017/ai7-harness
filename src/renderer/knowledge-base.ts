@@ -1,3 +1,4 @@
+import { navigation } from './navigation-generation.js';
 import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
 import { filterChoices, stateTerm } from './components/controls.js';
 import { EXEMPLARS_FILTER_EMPTY, EXEMPLAR_ELIGIBILITY_LABELS, exemplarTitle, exemplarKind, exemplarKindFilter, exemplarFacts, readersReportExemplarFacts, readersReportExemplarAdmission } from './knowledge-base-labels.js';
@@ -71,9 +72,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(button('返回', 'quiet', () => void returnToOrigin()));
       content.append(element('h2', undefined, KNOWLEDGE_BASE_TITLE), home, back);
       replaceScreen('knowledge-base', content);
+      const page = navigation.read(content);
       options.rememberReturn(content, () => renderKnowledgeBase());
       await mountKnowledgeBaseHome(home, window.ai7, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
-      if (content.isConnected) setStatus('知识库已打开');
+      if (page.isCurrent()) setStatus('知识库已打开');
       return;
     }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
@@ -83,33 +85,38 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     }
     if (tab === 'rules') {
       const { content } = knowledgeBasePage(tab, tabFocused);
+      const page = navigation.read(content);
       setStatus('正在读取工序与规则…', 'busy');
       try {
         const [rules, procedures] = await Promise.all([window.ai7.inspectDefaultExecutionRules(), window.ai7.inspectKnowledgeProcedures()]);
-        if (!content.isConnected || !technicalLayerVisible) return;
+        if (!page.isCurrent() || !technicalLayerVisible) return;
         renderKnowledgeBaseProjection(rules, tabFocused, procedures);
         setStatus('工序与规则已打开');
       } catch (error) {
-        if (!content.isConnected || !technicalLayerVisible) return;
+        if (!page.isCurrent() || !technicalLayerVisible) return;
         setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
       }
       return;
     }
     const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
+    const page = navigation.read(content);
     // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
     if (tab === 'memory') {
       try {
         await mountReviewPreferences(panelNode, window.ai7, openWordSourceVersion);
-        if (content.isConnected) setStatus('本社审阅偏好已打开');
-      } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
+        if (page.isCurrent()) setStatus('本社审阅偏好已打开');
+      } catch (error) { if (!page.isCurrent()) return; setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
       return;
     }
     if (tab === 'evaluation') {
       setStatus('正在读取评估方案…', 'busy');
       try {
-        renderEvaluationProfiles(panelNode, await window.ai7.inspectEvaluationProfiles(), { api: window.ai7, status: setStatus, error: rendererErrorMessage });
-        if (content.isConnected) setStatus('评估方案已打开');
+        const profiles = await window.ai7.inspectEvaluationProfiles();
+        if (!page.isCurrent()) return;
+        renderEvaluationProfiles(panelNode, profiles, { api: window.ai7, status: setStatus, error: rendererErrorMessage });
+        if (page.isCurrent()) setStatus('评估方案已打开');
       } catch (error) {
+        if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, '无法读取评估方案。'), 'error');
       }
       return;
@@ -117,9 +124,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (tab === 'exemplars') {
       setStatus(EXEMPLARS_STATUS.loading, 'busy');
       try {
-        await renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
-        if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
+        const exemplars = await window.ai7.inspectExemplars({ after: null });
+        if (!page.isCurrent()) return;
+        await renderExemplars(panelNode, exemplars);
+        if (page.isCurrent()) setStatus(EXEMPLARS_STATUS.opened);
       } catch (error) {
+        if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
       }
       return;
@@ -132,8 +142,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       });
       try {
         await surface.load();
-        if (content.isConnected) setStatus(LIBRARY_STATUS.opened);
+        if (page.isCurrent()) setStatus(LIBRARY_STATUS.opened);
       } catch (error) {
+        if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, LIBRARY_STATUS.unavailable), 'error');
       }
       return;
@@ -146,8 +157,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     const surface = mountReviewGuidelines({ root: panelNode, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
     try {
       await surface.load();
-      if (content.isConnected) setStatus(GUIDELINE_STATUS.opened);
+      if (page.isCurrent()) setStatus(GUIDELINE_STATUS.opened);
     } catch (error) {
+      if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, GUIDELINE_STATUS.unavailable), 'error');
     }
   }
@@ -411,6 +423,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back,
     );
     replaceScreen('quality-learning', content);
+    const page = navigation.read(content);
     options.rememberReturn(content, () => renderQualityLearning(tab, bookId, false, openMaterial, returnToReview));
     if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
     const status = tab === 'preferences' ? REVIEW_PREFERENCES_STATUS : tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : tab === 'learning' ? LEARNING_STATUS : LEARNING_AUDIT_STATUS;
@@ -422,12 +435,14 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         : mountLearningAudit({ root: host, api: window.ai7, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, openMaterial });
     try {
       await surface.load();
+      if (!page.isCurrent()) return;
       if (tab === 'feedback' && technicalLayerVisible) {
         const metrics = element('div'); section.append(metrics);
         await mountEditQualitySignals(metrics, window.ai7);
       }
-      if (content.isConnected) setStatus(status.opened);
+      if (page.isCurrent()) setStatus(status.opened);
     } catch (error) {
+      if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, status.unavailable), 'error');
     }
   }

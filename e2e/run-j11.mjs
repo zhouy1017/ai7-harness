@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1470,6 +1471,47 @@ async function main() {
     await clickSelector(renderer, '.findings-empty button', 'findings-empty-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'findings-empty-review-sheet');
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'findings-empty-review-close');
+
+    // #1497: hold the actual analysis read callback while the editor opens another tab.
+    at('navigation-late-answer');
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await assertRenderer(renderer, `(() => {
+          const original = Promise.prototype.then;
+          const held = { release: null, restore: () => { Promise.prototype.then = original; } };
+          window.__j11HeldNavigation = held;
+          Promise.prototype.then = function (success, failure) {
+            return original.call(this, (value) => {
+              if (typeof success === 'function' && value && typeof value === 'object' && 'resultSetRevision' in value && 'bookId' in value && held.release === null) {
+                held.restore();
+                return new Promise((resolve) => { held.release = () => resolve(success(value)); });
+              }
+              return typeof success === 'function' ? success(value) : value;
+            }, failure);
+          };
+          return true;
+        })()`, 'navigation-install-hold');
+        await pointerClick(renderer, waitFor, SIDEBAR.section('analysis'), 'navigation-open-analysis');
+        await waitFor(renderer, `typeof window.__j11HeldNavigation?.release === 'function'`, 'navigation-answer-held');
+        await pointerClick(renderer, waitFor, SIDEBAR.section('evaluation'), 'navigation-open-evaluation');
+        await readEvaluation(renderer, (page) => page.state === 'empty', 'navigation-evaluation-ready');
+        await assertRenderer(renderer, `(async () => {
+          const held = window.__j11HeldNavigation;
+          const screen = document.querySelector('#screen').firstElementChild;
+          const focus = document.activeElement;
+          const status = document.querySelector('#persistence-status')?.textContent;
+          held.release();
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          delete window.__j11HeldNavigation;
+          return document.querySelector('#screen').firstElementChild === screen && document.activeElement === focus &&
+            document.querySelector('#persistence-status')?.textContent === status && !document.querySelector('.book-analysis');
+        })()`, 'navigation-late-answer-keeps-page-focus-status');
+      }
+    } finally {
+      await renderer.evaluate(`window.__j11HeldNavigation?.restore(); delete window.__j11HeldNavigation;`);
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+    }
 
     at('evaluation-open');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-open');

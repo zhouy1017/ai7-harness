@@ -1,3 +1,4 @@
+import { navigation } from './navigation-generation.js';
 import { technicalWords } from './technical-layer.js';
 import { PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../shared/protocol/procedures.js';
 import type { EditableProcedureProjection, ProcedureDefinitionPin, SaveProcedureDefinitionInput } from '../shared/protocol/procedures.js';
@@ -7,6 +8,7 @@ import { mountProcedureRecommendation, ProcedureRecommendationSelection } from '
 /** The form owns only its unsaved values; the service owns versions and selections. */
 export async function mountEditableProcedureLibrary(root: HTMLElement, api: RendererApi,
   openRun: (book: BookSummaryProjection, kind: string, procedure: ProcedureDefinitionPin) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string, capturedCatalog?: HTMLElement): Promise<void> {
+  const page = navigation.read(root);
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
     const result = document.createElement(tag); if (text !== undefined) result.textContent = text; if (tag === 'button') result.className = `${result.className} btn`.trim(); return result;
   };
@@ -81,19 +83,20 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
   const readBooks = async (): Promise<BookSummaryProjection[]> => {
     const books: BookSummaryProjection[] = [];
     let after: BookSummaryCursor | null = null;
-    do { const page = await api.listBooks({ after }); books.push(...page.items); after = page.nextCursor; } while (after !== null);
+    do { const next = await api.listBooks({ after }); if (!page.isCurrent()) return []; books.push(...next.items); after = next.nextCursor; } while (after !== null);
     return books.filter((book) => book.manuscriptState === 'populated');
   };
   const chooseBook = async (entry: EditableProcedureProjection, pin: ProcedureDefinitionPin, bookId?: string): Promise<void> => {
     const chooser = node('div'), select = node('select'); chooser.className = 'procedure-book-chooser'; select.dataset['procedureField'] = 'book';
     const books = await readBooks();
+    if (!page.isCurrent()) return;
     for (const book of books) select.append(new Option(book.title, book.bookId));
     if (bookId !== undefined) select.value = bookId;
     // A composite (Issue #1173) is chosen for each of its members' kinds and runs as one 审阅 of the chosen Book.
     chooser.append(label('选择图书', select), node('p', entry.document.members === undefined ? '为所选图书使用这个工序版本，在任务页选择范围即可开始。'
       : '为所选图书使用这个组合工序版本；可在审阅页调整类别和检查选项后开始。'), action('打开任务', async () => {
       const book = books.find((item) => item.bookId === select.value); if (book === undefined) return;
-      await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin }); await openRun(book, entry.executorKind, pin);
+      await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin }); if (page.isCurrent()) await openRun(book, entry.executorKind, pin);
     }));
     formSlot.replaceChildren(chooser);
   };
@@ -119,6 +122,7 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
   recommendationBook.addEventListener('change', () => recommendation.refreshIntent());
   const load = async (): Promise<void> => {
     const [projection, books] = await Promise.all([api.procedureLibrary({ action: 'inspect' }), readBooks()]);
+    if (!page.isCurrent()) return;
     current = [...projection.procedures];
     const nextBody = node('div'); nextBody.className = 'procedure-catalog';
     const template = node('select'); template.dataset['procedureField'] = 'template';
