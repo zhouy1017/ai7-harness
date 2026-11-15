@@ -22,7 +22,7 @@ import { CONFIDENCE_ALIASES, salvageSourceRanges, type AnalysisConfidence, type 
  * character of it changes every request digest, which is the intent.
  */
 export const BASELINE_CROSS_UNIT_RESULT_SCHEMA = 'ai7.baseline-manuscript-analysis.cross-unit-result/1' as const;
-export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis.cross-unit-prompt-contract/1' as const;
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis.cross-unit-prompt-contract/2' as const;
 
 /** The four typed finding kinds ADR 0066 names; a closed set, listed in the reducer descriptor. */
 export const CROSS_UNIT_FINDING_KINDS = ['contradiction', 'continuity-break', 'alias-identity-divergence', 'chronology-conflict'] as const;
@@ -67,7 +67,7 @@ export type CrossUnitResultParse =
 
 /** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1 = {
-  schema: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA,
+  schema: 'ai7.baseline-manuscript-analysis.cross-unit-prompt-contract/1',
   contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
   responseSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
   instruction: [
@@ -103,7 +103,7 @@ export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1 = {
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST = sha256Hex(canonicalJson(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1));
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT = {
   ...BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1,
-  schema: 'ai7.baseline-manuscript-analysis.cross-unit-prompt-contract/2',
+  schema: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA,
   instruction: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.instruction.split('\n')
     .filter((line) => !line.startsWith('sides 至少') && !line.startsWith('每个 sourceRanges'))
     .join('\n').replace('description、sides、confidence', 'description、rowRefs、confidence') + '\n引用只填写 rowRefs: ["r1", "r15"]，对应下列行索引，至少跨两个单元。不要抄写内容块标识或计算字素偏移。',
