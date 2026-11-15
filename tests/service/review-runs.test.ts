@@ -2927,8 +2927,10 @@ it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps
     const replay = second.store.launchReviewRun(input, launchPolicy);
     expect(replay).toMatchObject({ repeated: true });
     expect(replay.projection.run!.reviewRunId).toBe(run.reviewRunId);
+    expect(second.store.reviewRunDriveSteps.launchDriveMode!(run.reviewRunId), JSON.stringify(replay.projection.run!.categories.map(category => ({ category: category.categoryId, state: category.state, detail: category.detail })))).toBe('resume');
     await driveLaunchedReviewRun(second.driver, replay);
-    expect(workspace(second, book, run.reviewRunId).run!.state).toBe('settled');
+    const resumed = workspace(second, book, run.reviewRunId).run!;
+    expect(resumed.state, JSON.stringify(resumed.categories.map(category => ({ category: category.categoryId, state: category.state, detail: category.detail })))).toBe('settled');
     const units = [...earlierRequests, ...second.capture!.requests].filter(request => request.stage === 'units');
     expect(new Set(units.map(request => request.requestDigest)).size).toBe(units.length);
     expect([...earlierWire, ...second.capture!.wireRequests].every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
