@@ -103,6 +103,8 @@ it('sends one structured synthesis request in ordinary production, preserves fin
     const sent = requests[0]!.messages.findLast((message) => message.role === 'user')!.content;
     const payload = JSON.parse(sent);
     expect(payload.evidence.length).toBeGreaterThan(0);
+    expect(new Set(run.synthesis!.evidence.map(entry => entry.chapterLabel)).size).toBeGreaterThan(1);
+    expect(payload.evidence.every((entry: Record<string, unknown>) => !Object.hasOwn(entry, 'chapterLabel'))).toBe(true);
     expect(payload.findings.every((finding: { ref: string }) => /^f\d+$/u.test(finding.ref))).toBe(true);
     const entireRequest = requests[0]!.messages.map(message => message.content).join('\n');
     for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.text.length > 160)) expect(entireRequest).not.toContain(block.text);

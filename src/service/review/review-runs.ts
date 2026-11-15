@@ -2833,7 +2833,7 @@ export class ReviewRunStore {
       const unit = manifestUnits.find((candidate) => finding.blockPosition !== null && finding.blockPosition >= candidate.startPosition && finding.blockPosition <= candidate.endPosition);
       const chapterOrdinal = unit?.sectionOrdinal ?? 1;
       return { findingId: finding.findingId, categoryId: finding.categoryId, clauseId: finding.clauseRef ?? '', severity: finding.severity,
-        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: unit?.headingText ?? (chapterOrdinal <= 0 ? '篇首' : `第 ${chapterOrdinal} 章`) };
+        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: unit?.headingText ?? (unit === undefined ? '全书' : `第 ${unit.ordinal} 部分 · 段落 ${unit.startPosition}–${unit.endPosition}`) };
     }), missingCategories, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), synopses } }, requestBytes);
     const record = canonicalRecord(input);
     const priorUsage = { inputTokens: 0, outputTokens: 0 };

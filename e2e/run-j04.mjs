@@ -2875,7 +2875,6 @@ async function main() {
     if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
       await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');
-    await pointerClick(renderer, waitFor, '[data-settings-route="help"], [data-settings-nav="help"]', 'review-synthesis-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-ordinary');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-synthesis-ordinary-ready');
@@ -2904,7 +2903,6 @@ async function main() {
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
-    await pointerClick(renderer, waitFor, '[data-settings-route="help"], [data-settings-nav="help"]', 'review-synthesis-restore-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
