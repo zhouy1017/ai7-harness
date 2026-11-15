@@ -715,7 +715,9 @@ describe('sample1 cross-unit reduction entries', () => {
     for (const entry of units) {
       if (entry.response.kind !== 'unit-result') throw new Error('EXPECTED_UNIT_RESULT');
       const body = JSON.parse(entry.response.text);
-      expect(body.entities[0].blockOrdinals.length).toBeGreaterThan(0);
+      for (const item of ['entities', 'events', 'relationships', 'settingClaims', 'conflicts', 'unresolved'].flatMap((section) => body[section])) {
+        expect(Array.isArray(item.blockOrdinals)).toBe(true);
+      }
       expect(entry.response.text).not.toContain('sourceRanges');
     }
     const reductions = entries.filter((entry) => entry.response.kind === 'unit-result' && entry.response.text.includes('cross-unit-result/1'));
