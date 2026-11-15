@@ -1,4 +1,5 @@
 import { launchedRunModelLabels } from '../editorial-mark-source.js';
+import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
 import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
@@ -3102,6 +3103,8 @@ export class BaselineAnalysisStore {
 
   forkForLaunch(launch: LaunchBinding): BaselineAnalysisStore {
     const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
+    // External collaborators belong to the store, while preparation work and read caches belong to this view.
+    ledger.#factualVerification = this.#factualVerification;
     ledger.bindLaunch(launch);
     return ledger;
   }
@@ -3125,11 +3128,11 @@ export class BaselineAnalysisStore {
 
   /** A fresh task and its run authority are written together; no pending approval is observable. */
   launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string,
-    execution: LaunchBinding, deferred = false): AnalysisProjection {
-    return this.forkForLaunch(execution).#launchTask(input, snapshotId, deferred);
+    execution: LaunchBinding, deferred = false, edits?: PlanEditsProjection): AnalysisProjection {
+    return this.forkForLaunch(execution).#launchTask(input, snapshotId, deferred, edits);
   }
 
-  #launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string, deferred: boolean): AnalysisProjection {
+  #launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string, deferred: boolean, edits?: PlanEditsProjection): AnalysisProjection {
     this.#requireDeniedPolicy(input.launchPolicy);
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     const existing = this.inspect(input.bookId);
@@ -3152,15 +3155,15 @@ export class BaselineAnalysisStore {
       ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }) };
     const persist = (checkpoint: ManuscriptCheckpointBinding): void => {
       this.#insertIntent(intent);
-      const edits = input.launchEdits === undefined ? undefined : canonicalPlanEdits(input.launchEdits);
-      requireAnalysis(edits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
-      requireAnalysis(input.launchEdits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
+      const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits);
+      requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
+      requireAnalysis(edits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
-      requireAnalysis(this.#definition.assurance !== null || (edits?.removedSteps.length ?? 0) === 0,
+      requireAnalysis(this.#definition.assurance !== null || (launchEdits?.removedSteps.length ?? 0) === 0,
         'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (edits?.askFirstAdaptations ?? []).length === 0,
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (launchEdits?.askFirstAdaptations ?? []).length === 0,
         'ANALYSIS_PLAN_EDIT_INVALID', '这项任务暂不能把安全重试改成先问你。');
-      this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy, edits);
+      this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy, launchEdits);
       const plan = this.inspect(input.bookId);
       requireAnalysis(plan.planEnvelope !== null && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
       if (deferred) return;
@@ -4311,6 +4314,13 @@ export class BaselineAnalysisStore {
     return isRecord(record) ? runStopOf(record.stop) : null;
   }
 
+  wasInterruptedByRestart(runRecordId: string): boolean {
+    const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId);
+    if (row === undefined) return false;
+    const state = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
+    return state.stopReason === 'shutdown';
+  }
+
   /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */
   #openClarificationOf(runRecordId: string, state: BaselineAnalysisRunState): { requestId: string; unitOrdinal: number; raisedAt: string; origin?: 'model' } | null {
     if (!(state === 'admitted' || state === 'executing' || state === 'pausing' || state === 'paused' || state === 'resumable' ||
@@ -4405,13 +4415,9 @@ export class BaselineAnalysisStore {
       WHERE r.run_record_id = ? AND json_type(a.canonical_json, '$.launchSnapshotId') = 'text'`).get(runRecordId) !== undefined;
   }
 
-  /** Only a shutdown reconciliation can turn a repeated launch into a continuation; an editor's pause stays paused. */
+  /** A recorded shutdown can continue a repeated launch; an editor's pause stays paused. */
   launchWasInterruptedByRestart(runRecordId: string): boolean {
-    if (!this.#launchedRun(runRecordId)) return false;
-    const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId);
-    if (row === undefined) return false;
-    const state = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
-    return state.reconciled === true && state.stopReason === 'shutdown';
+    return this.#launchedRun(runRecordId) && this.wasInterruptedByRestart(runRecordId);
   }
 
   /**

@@ -13,5 +13,5 @@ export interface TaskLaunchContext {
 
 export function launchedTaskPlan(context: TaskLaunchContext): TaskPlanCreator {
   return (ledger, input) => ({ done: true, workId: null, completed: 1, total: 1,
-    projection: ledger.launchTask({ ...input, launchStartWhen: context.startWhen ?? 'now', ...(context.planEdits === undefined ? {} : { launchEdits: context.planEdits }) }, context.snapshotId, context.execution) });
+    projection: ledger.launchTask({ ...input, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits) });
 }

@@ -25,6 +25,7 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
  * starts no further category, the owner interrupts the one in flight, and the driver records that.
  */
 export interface ReviewRunDriveSteps {
+  launchDriveMode?(reviewRunId: string): 'start' | 'resume' | null;
   local?(reviewRunId: string, stopping: () => boolean): Promise<void>;
   /** Whether the category waits on the background share: an idle start, or a composite member marked 空闲时处理 (Issue #1200). */
   background?(reviewRunId: string, categoryId: string): boolean;
@@ -36,7 +37,7 @@ export interface ReviewRunDriveSteps {
   start(reviewRunId: string, categoryId: string): ReviewRunHandOff | null;
   recordDispatch(reviewRunId: string, categoryId: string, runRecordId: string): void;
   refuseDispatch(reviewRunId: string, categoryId: string, runRecordId: string, code: string, message: string): void;
-  settle(reviewRunId: string, categoryId: string): void;
+  settle(reviewRunId: string, categoryId: string, options?: { shutdown: boolean }): void;
   write(reviewRunId: string, categoryId: string): void;
   fail(reviewRunId: string, categoryId: string, code: string, message: string): void;
   /** The category now waiting for a place of the governor, or `null` once it has one (Issue #632); in memory only. */
@@ -107,6 +108,11 @@ export class ReviewRunDriver {
    */
   continue(reviewRunId: string): Promise<void> {
     return this.drive(reviewRunId, { resume: true });
+  }
+
+  driveLaunch(reviewRunId: string): Promise<void> {
+    const mode = this.#steps.launchDriveMode?.(reviewRunId);
+    return mode === null ? Promise.resolve() : this.drive(reviewRunId, { resume: mode === 'resume' });
   }
 
   isDriving(reviewRunId: string): boolean {
@@ -180,7 +186,7 @@ export class ReviewRunDriver {
           this.#steps.write(reviewRunId, categoryId);
           break;
         case 'settle':
-          this.#steps.settle(reviewRunId, categoryId);
+          this.#steps.settle(reviewRunId, categoryId, { shutdown: this.#stopping });
           break;
         case 'start': {
           if (this.#stopping) return;
@@ -256,6 +262,6 @@ export function driveLaunchedReviewRun(driver: ReviewRunDriver, launched: {
   projection: import('../../shared/protocol.js').ReviewWorkspaceProjection; repeated: boolean;
 }): Promise<void> {
   const run = launched.projection.run;
-  if (run === null || run.state === 'settled' || run.state === 'cancelled') return Promise.resolve();
-  return driver.drive(run.reviewRunId, { resume: launched.repeated });
+  if (run === null || run.state === 'settled' || run.state === 'cancelled' || run.state === 'waiting') return Promise.resolve();
+  return driver.driveLaunch(run.reviewRunId);
 }

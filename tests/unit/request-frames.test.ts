@@ -51,6 +51,18 @@ describe('one-step drawer launch frames (#1455)', () => {
   });
 });
 
+it('carries the factual assurance and offline start in one review launch without widening legacy preparation (#1455)', () => {
+  const input = { bookId: randomUUID(), clientCommandId: randomUUID(), categoryIds: ['factual-review'],
+    scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, evidenceAssuranceLevel: 'strict', startWhen: 'when-online' };
+  const frame = { id: randomUUID(), op: 'launchReviewRun', input };
+  expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+  for (const invalid of [{ ...input, evidenceAssuranceLevel: 'unknown' }, { ...input, startWhen: 'later' },
+    { ...input, categoryIds: ['typos-and-usage'] }]) {
+    expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
+  }
+  expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, op: 'prepareReviewRun' })))).toThrow(ProtocolError);
+});
+
 describe('editable procedure commands (#1170)', () => {
   it('carries exact version selections and new versions without accepting execution authority', () => {
     const document = baselineProcedureDefinition();

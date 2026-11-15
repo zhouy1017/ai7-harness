@@ -101,9 +101,10 @@ function failureResponse(
  * and that refusal is the operation's answer. A store refusal is already coded, and a fatal store error
  * must reach the service's own handling unchanged.
  */
-function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false): void {
+function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false,
+  launched?: Parameters<typeof driveLaunchedReviewRun>[1]): void {
   try {
-    void (resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId));
+    void (launched === undefined ? resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId) : driveLaunchedReviewRun(reviewRuns, launched));
   } catch (error) {
     if (error instanceof StoreErrorClass || !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
     throw new StoreErrorClass(error.code, error.message.length > 0 ? error.message : '审阅未能开始。');
@@ -1150,23 +1151,25 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
+        result: { ...store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
           findingsAfterOrdinal: request.input.findingsAfterOrdinal ?? null,
           excludedAfterOrdinal: request.input.excludedAfterOrdinal ?? null,
           categoryId: request.input.categoryId ?? null,
           severity: request.input.severity ?? null,
           status: request.input.status ?? null,
           chapterBlockId: request.input.chapterBlockId ?? null,
-        }, request.input.executionConfig),
+        }, request.input.executionConfig), connectivity: connectivity.planConnectivity.reading() },
       };
     case 'inspectHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };
     case 'saveHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'launchReviewRun': {
-      const launched = store.launchReviewRun(request.input, launchPolicy);
-      void driveLaunchedReviewRun(reviewRuns, launched);
+      const launched = store.launchReviewRun(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
+      if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
+        connectivity: connectivity.planConnectivity.reading(),
         ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
     }
     case 'prepareReviewRun':

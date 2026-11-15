@@ -4102,8 +4102,7 @@ export class EditorialStore {
 
   launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection) {
     return this.#launchLedgerTask('baseline-analysis', input, policy, (context, launchPolicy) => this.#baselineAnalysis.launchTask({
-      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now',
-      ...(context.planEdits === undefined ? {} : { launchEdits: context.planEdits }) }, context.snapshotId, context.execution));
+      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits));
   }
 
   launchCustomAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchCustomAnalysis']['input'], policy: LaunchPolicyProjection) {
@@ -4140,7 +4139,8 @@ export class EditorialStore {
     });
   }
 
-  launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection): { projection: ReviewWorkspaceProjection; repeated: boolean } {
+  launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
+    startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
     try {
       const { clientCommandId, executionConfig = {}, ...request } = input;
       const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
@@ -4149,7 +4149,8 @@ export class EditorialStore {
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           const planned = this.#reviewRunRequest(input.bookId, input.categoryIds, input.scope, policy,
             input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
-          const run = this.#reviewRuns.launch(planned, snapshotId, choice.binding);
+          const run = this.#reviewRuns.launch(planned, snapshotId, choice.binding, {
+            ...(input.evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel: input.evidenceAssuranceLevel }), startWhen: input.startWhen ?? startWhen });
           return { runId: run.reviewRunId, manuscript: run.manuscript };
         });
       return { projection: { ...this.#reviewRuns.workspace(input.bookId, launched.runId), ...(launched.notice === undefined ? {} : { launchNotice: launched.notice }) }, repeated: launched.repeated };
@@ -4257,8 +4258,8 @@ export class EditorialStore {
       recordDispatch: (reviewRunId, categoryId, runRecordId) => this.#reviewCall(() => runs.recordDispatch(reviewRunId, categoryId, runRecordId)),
       refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
         this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
-      settle: (reviewRunId, categoryId) => {
-        this.#reviewCall(() => runs.settle(reviewRunId, categoryId));
+      settle: (reviewRunId, categoryId, options) => {
+        this.#reviewCall(() => runs.settle(reviewRunId, categoryId, options));
         if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
       },
       write: (reviewRunId, categoryId) => {
@@ -4269,6 +4270,7 @@ export class EditorialStore {
       fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
       waitingForPlace: (reviewRunId, categoryId) => runs.waitingForPlace(reviewRunId, categoryId),
       paused: (reviewRunId) => this.#reviewCall(() => runs.paused(reviewRunId)),
+      launchDriveMode: (reviewRunId) => this.#reviewCall(() => runs.launchDriveMode(reviewRunId)),
     };
   }
 

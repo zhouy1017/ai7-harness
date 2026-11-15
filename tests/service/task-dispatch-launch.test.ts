@@ -136,7 +136,8 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.revisionDigest).toBe(current.workingDigest);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 50_000 });
     expect(first.ledger.loadExecutionPlan(first.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
-    expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ credentialReference: alternative.credentialReference, model: 'account-future-model', reasoningEffort: 'low' });
+    expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
+    expect(second.ledger.inspect(b.bookId).providerResolutionPlan?.remoteBinding?.credentialReference).toBe(alternative.credentialReference);
     expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual(defaults);
     for (const [target, launched, effort] of [[a, first, 'high'], [b, second, 'low']] as const) {
       const task = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)

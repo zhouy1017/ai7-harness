@@ -899,6 +899,8 @@ export interface TaskMaterialOffersProjection {
  */
 export interface ReviewWorkspaceProjection {
   launchNotice?: string;
+  /** Device-local reading; never a connection probe. */
+  connectivity?: 'online' | 'offline';
   /** Own ranges of the current coverage units, without manuscript text. */
   scopeUnitCounts?: { whole: number; units: ReadonlyArray<{ startPosition: number; endPosition: number }> };
   /** Latest editor-declared Book table, carried by its existing local ReviewRun. */
