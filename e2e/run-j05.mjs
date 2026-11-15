@@ -527,9 +527,8 @@ async function main() {
     await click(renderer, '模型服务', 'dispatch-catalogue-models');
     await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-catalogue-field');
     await fill(renderer, '[data-custom-model-id]', 'j05-dispatch-alternative', 'dispatch-catalogue-alternative');
-    await assertRenderer(renderer, `(() => {const button=document.querySelector('[data-action="select-fast-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-catalogue-save');
-    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='fast-interaction')?.binding?.modelId==='j05-dispatch-alternative')`, 'dispatch-catalogue-ready');
-    await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    await assertRenderer(renderer, `(() => {const button=document.querySelector('[data-action="select-main-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-catalogue-save');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.modelId==='j05-dispatch-alternative')`, 'dispatch-catalogue-ready');
     // #1379 explicitly exercises the ordinary card branch.
     await markTechnicalMode(renderer, false, 'mark-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'mark-ordinary-library');

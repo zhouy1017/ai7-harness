@@ -2633,6 +2633,9 @@ async function main() {
     await quickStart(renderer,'reanalyze-book','重新分析全书',legacyRule.name,'legacy-plan-quick-offline');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='offline'`,'legacy-plan-prepared');
     await writeFile(connectivityPath,'online');
+    // Prepared work is read on opening its plan; unlike a queued Run it has no reconnect transition to follow.
+    await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-online-close');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-task-plan-open="baseline-analysis"]','legacy-plan-online-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-online');
     // Changing this retained prepared task's mode opens the same legacy editor with a fresh range Task.
     await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-initial-close');
