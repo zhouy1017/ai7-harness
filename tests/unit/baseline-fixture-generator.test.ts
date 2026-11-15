@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { it, expect } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
@@ -31,6 +31,7 @@ it.skipIf(process.env.AI7_REGENERATE_BASELINE !== '1')('rekeys authored baseline
     keys.set(crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST, set), crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, set));
   }
   keys.set(unitRequestDigest(BASELINE_PROMPT_CONTRACT_V2_DIGEST, 1, '0'.repeat(64)), unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, 1, '0'.repeat(64)));
+  mkdirSync(resolve('.cache'), { recursive: true });
   writeFileSync(resolve('.cache/1434-keys.json'), JSON.stringify(Object.fromEntries(keys)));
   let changed = 0;
   for (const name of readdirSync(resolve('tests/fixtures/model'))) {

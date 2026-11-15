@@ -15,6 +15,7 @@ import {
 } from '../../src/service/analysis/contract.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST,
   buildCrossUnitMessage,
   citedBlocksByUnit,
   crossUnitRequestDigest,
@@ -500,6 +501,16 @@ describe('cross-unit reduction replay', () => {
       messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }],
     };
   }
+
+  it('replays a frozen old reduction even when the task contract is wrapped', async () => {
+    const fixture = await loadModelFixture(root, 'reduction');
+    const original = [...fixture.entries.values()][0]!;
+    const digest = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST, unitSetDigest(CLOSED));
+    const old = { ...fixture, entries: new Map([[fixtureEntryKey(0, digest), { ...original, requestDigest: digest }]]) };
+    const adapter = new Ai7LocalDeterministicAdapter(old, 'a'.repeat(64), codes, { crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST });
+    const chunks = await collect(adapter.stream(reductionRequest(buildCrossUnitMessage(CLOSED, 8, false))));
+    expect(chunks.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 700, outputTokens: 90 } });
+  });
 
   it('answers the reduction from its ordinal-0 entry with every cited block substituted', async () => {
     const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
