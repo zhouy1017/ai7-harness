@@ -716,7 +716,7 @@ describe.each([...KINDS.map(kind => ({ kind, references: 'none' })),
   it('binds both previews and the frozen waiting plan to this start after another service completed', async () => {
     const target = await book(kind, true), answer = await lifecycleAnswers(kind);
     let definition!: LaunchedTask['ledger']['definition'];
-    ordinary(request => answer(request, definition));
+    ordinary(request => answer(request, definition), { seriesScopeGuard: id => store.seriesScopeGuard(id) });
     let materialId: string | undefined, seriesId: string | undefined;
     if (references === 'material') {
       const path = join(roots.inputRoot, 'sample-preview-reference.txt');
@@ -740,7 +740,8 @@ describe.each([...KINDS.map(kind => ({ kind, references: 'none' })),
     expect(first.ledger.currentRunState(first.runRecordId)).toMatch(/^completed/u);
     expect(capture!.wireRequests.some(wire => wire.model === 'service-a-model' && wire.reasoning_effort === 'high')).toBe(true);
     if (kind === 'evaluation-rewrite') store.decideEvaluationRewrite(target.bookId, first.ledger.inspect(target.bookId).resultSetRevision!.revisionId, 'discard');
-    const connection = store.saveModelServiceConnection('本次预览 B', null, 'needs-attention', 'deepseek-open-platform');
+    const connection = store.getModelServiceRouteConnection('deepseek-open-platform')
+      ?? store.saveModelServiceConnection('本次预览 B', null, 'needs-attention', 'deepseek-open-platform');
     const ready = store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'deepseek-open-platform');
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
