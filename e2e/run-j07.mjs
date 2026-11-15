@@ -2903,9 +2903,16 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-drawer-settled', 30_000);
     // AI7's draft waits to be opened: a plan started from the drawer leaves 打开草稿 to the editor.
     const writingDrafted = await readWriting((page) => page.drafted.length === 1, 'writing-drafted');
-    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成' && writingDrafted.drafted[0][0] === 'promotion-article' &&
+    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成 · AI7 本地检查' && writingDrafted.drafted[0][0] === 'promotion-article' &&
       (writingDrafted.drafted[0][1] ?? '').startsWith('「宣传文章」的草稿已写好（') &&
       (writingDrafted.drafted[0][1] ?? '').endsWith('）；打开后成为这本书的宣传文章，处于「起草」阶段。'), 'writing-drafted-words', writingDrafted);
+
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(() => {const mark=document.querySelector('.writing-drafted-model');return mark?.textContent==='模型 AI7 本地检查' && mark.clientWidth>0 && mark.scrollWidth<=mark.clientWidth;})()`, 'writing-producing-model');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
     at('writing-rule');
     // 设为快速开始默认… (Issue #432, S84b; AUTH-009, TASK-019): the settled plan offers it in 完整, the standard start having set
@@ -3041,7 +3048,7 @@ async function main() {
     at('writing-library-draft');
     // 开始任务 runs it on the authored fixture, reading the item through the index at its pin, and the 评论文章's draft is written;
     // 打开草稿 makes it the Book's 评论文章, its words the fixture's.
-    const libraryEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state) && page.task === '写作任务「评论文章」：已完成', 'writing-library-ended');
+    const libraryEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state) && page.task === '写作任务「评论文章」：已完成 · AI7 本地检查', 'writing-library-ended');
     requireJourney(libraryEnded.drafted.length === 1 && libraryEnded.drafted[0][0] === WRITING_LIBRARY_REQUEST.typeId, 'writing-library-drafted', libraryEnded);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-library-drawer-settled', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'writing-library-drawer-close');
