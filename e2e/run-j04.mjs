@@ -2888,6 +2888,10 @@ async function main() {
         at(`review-synthesis-${viewport}`);
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await waitFor(renderer, `document.querySelector('details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-ready`);
+        if (await renderer.evaluate(`document.querySelector('details.review-synthesis')?.open===true`)) {
+          await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
+          await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
+        }
         await assertRenderer(renderer, `(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect();return root && !root.open && r && r.top<innerHeight && r.bottom>0 && root.querySelector('summary').textContent.includes('组共性问题') && !/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent);})()`, `review-synthesis-${viewport}-compact-ordinary`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);

@@ -573,6 +573,18 @@
     },
     {
       "unitOrdinal": 0,
+      "requestDigest": "76885d438b6584de6518c7b3c51b55814e17f6418e31991c4f7b68d232f63ddc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.review.run-synthesis-result/1\",\"overallAssessment\":\"各章的发现应放回全书脉络逐条核对。建议先统一用字、数字与章题体例，再复核叙述表达和梦境与现场的衔接。\",\"recurringProblems\":[{\"title\":\"优先统一各章的编辑处理\",\"explanation\":\"以下发现提供了核对入口；同类问题应采用一致的编辑尺度，具体修改仍须逐条判断。\",\"evidenceRefs\":[\"e1\",\"e2\",\"e3\"],\"priority\":\"先处理必须核对的发现。\"}],\"contextualExplanations\":[],\"priorities\":[\"先核对用字与数字体例。\",\"再结合全书脉络处理表达与情节衔接。\"]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
       "requestDigest": "76fc79146bd24ee5c756a916ec22a956713b25107bba752acddf0f81023c59d5",
       "response": {
         "kind": "unit-result",

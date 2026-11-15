@@ -552,10 +552,12 @@ async function pass(): Promise<boolean> {
     note(await runReviewSynthesis(context, categoryIds, `synthesis-${withBaseline}-${mask}`));
   });
   const controls = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-review-contract-v2-controls');
-  for (const variant of ['plain', 'baseline', 'j04']) await withBook(async (context) => {
-    if (variant === 'j04') appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+  for (const variant of ['plain', 'baseline', 'j04', 'j04-closed-chain']) await withBook(async (context) => {
+    if (variant.startsWith('j04')) appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
     if (variant !== 'plain') await baseline(context);
-    if (variant === 'j04') appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    if (variant.startsWith('j04')) appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    // J-04 also retains a later matching baseline with recomputation gaps in the edited units.
+    if (variant === 'j04-closed-chain') await baseline(context);
     note(await runReviewSynthesis(context, ['typos-and-usage', 'style-and-format', 'plot-consistency'], `synthesis-controls-${variant}`));
   }, controls);
   return allClosed;
