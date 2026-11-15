@@ -1,3 +1,8 @@
+import { DatabaseSync } from 'node:sqlite';
+import { resolve } from 'node:path';
+import { BoundedManuscriptStore } from '../../src/service/bounded-manuscript.js';
+import { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
+import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { EditorialStore } from '../../src/service/store.js';
@@ -42,15 +47,19 @@ it('executes a task frozen under /2 after reopening with the new default', async
   const roots = await createServiceTestRoots('ai7-frozen-ordinals-');
   const controls = { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false };
-  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { ...controls, baselinePromptContract: 'retained-v2' });
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, controls);
   const answer = () => ({ kind: 'unit-result' as const, text: JSON.stringify({ synopsis: '概述', findings: [], notes: [], items: [] }), usage: { inputTokens: 10, outputTokens: 5 } });
   let captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer);
   const { bookId } = await importSample1Book(store, roots.codeRoot, '冻结旧契约');
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
-  let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, captured.policy);
-  while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+  const database = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'));
+  database.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
+  const old = new BaselineAnalysisStore(database, new BoundedManuscriptStore(database), null, baselineAnalysisKindDefinition('retained-v2'));
+  old.bindLaunch(captured.launch);
+  let progress = old.prepare({ phase: 'start', bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy: captured.policy });
+  while (!progress.done) progress = old.prepare({ phase: 'advance', workId: progress.workId! });
   const plan = progress.projection!;
-  await captured.owner.dispose(); store.close();
+  database.close(); await captured.owner.dispose(); store.close();
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, controls);
   captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer);
   try {
