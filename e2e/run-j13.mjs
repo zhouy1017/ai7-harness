@@ -1474,9 +1474,14 @@ async function main() {
     await openSeries(renderer, seriesId, 'exclusion-back-series');
 
     at('knowledge-bounded-pages');
+    // Pagination changes knowledge contents and history. Give it its own Series so later model-backed starts
+    // still read the unchanged knowledge the admitted Series fixture answers.
     const pagesSeeded = await renderer.evaluate(`(async () => {
-      const seriesId = ${JSON.stringify(seriesId)};
-      const itemId = ${JSON.stringify(itemId)};
+      const seriesId = (await window.ai7.createSeries({title:'知识分页书系',note:''})).seriesId;
+      const original = await window.ai7.proposeSeriesKnowledge({seriesId,target:{kind:'new',subject:${JSON.stringify(PLACE)},knowledgeClass:'places'},content:'初始分页内容',span:null});
+      const firstReview = await window.ai7.inspectSeriesKnowledgeReview({seriesId,candidateId:original.candidateId});
+      const firstItem = await window.ai7.promoteSeriesKnowledge({seriesId,candidateId:original.candidateId,candidateVersion:1,reviewDigest:firstReview.reviewDigest,reuseScope:'series-tasks',conflictDisposition:'none'});
+      const itemId = firstItem.itemId;
       for (let index = 0; index < 30; index += 1) {
         const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId,
           target: { kind: 'new', subject: '分页条目' + String(index).padStart(2, '0'), knowledgeClass: 'canon' }, content: '分页内容' + index, span: null });
@@ -1484,7 +1489,7 @@ async function main() {
         await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
           reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' });
       }
-      for (let index = 0; index < 10; index += 1) {
+      for (let index = -1; index < 10; index += 1) {
         const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '历次分页内容' + index, span: null });
         const review = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
         await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
@@ -1493,16 +1498,18 @@ async function main() {
       for (let index = 0; index < 31; index += 1) {
         await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '待审分页' + index, knowledgeClass: 'canon' }, content: '待审内容' + index, span: null });
       }
-      return true;
+      return {seriesId,itemId};
     })()`);
-    requireJourney(pagesSeeded === true, 'knowledge-pages-seeded');
+    requireJourney(UUID_PATTERN.test(pagesSeeded?.seriesId) && UUID_PATTERN.test(pagesSeeded?.itemId), 'knowledge-pages-seeded');
     await leaveSeries(renderer, 'knowledge-pages-leave');
-    await openSeries(renderer, seriesId, 'knowledge-pages-reopen');
+    await openSeries(renderer, pagesSeeded.seriesId, 'knowledge-pages-reopen');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 30 && document.querySelectorAll('.knowledge-candidate').length === 30`, 'knowledge-pages-first');
     const selectedTarget = await renderer.evaluate(`document.querySelector('.knowledge-item').dataset.itemId`);
     await clickSelector(renderer, '.knowledge-item [data-knowledge-action="propose-item"]', 'knowledge-pages-propose');
     await fill(renderer, '#knowledge-content-propose', '保留翻页中的草稿', 'knowledge-pages-draft');
-    for (let pass = 0; pass < 2; pass += 1) {
+    try { for (const viewport of [null,null,{width:1280,height:800},{width:1008,height:681}]) {
+      if (viewport) await renderer.send('Emulation.setDeviceMetricsOverride', {...viewport,deviceScaleFactor:1,mobile:false});
+      else await renderer.send('Emulation.clearDeviceMetricsOverride');
       await clickSelector(renderer, '[data-knowledge-action="items-more"]', 'knowledge-pages-items-next');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 1 && document.querySelector('[data-knowledge-action="items-reset"]')?.disabled === false && document.querySelector('input[name="knowledge-target"]:checked')?.value === ${JSON.stringify(selectedTarget)} && document.querySelector('#knowledge-content-propose')?.value === '保留翻页中的草稿' && document.activeElement === document.querySelector('.knowledge-item-title')`, 'knowledge-pages-items-last');
       await clickSelector(renderer, '[data-knowledge-action="items-reset"]', 'knowledge-pages-items-reset');
@@ -1511,18 +1518,20 @@ async function main() {
       await waitFor(renderer, `document.querySelectorAll('.knowledge-candidate').length === 1 && document.querySelector('[data-knowledge-action="candidates-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-candidate [data-knowledge-action="review"]')`, 'knowledge-pages-candidates-last');
       await clickSelector(renderer, '[data-knowledge-action="candidates-reset"]', 'knowledge-pages-candidates-reset');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-candidate').length === 30 && document.querySelector('[data-knowledge-action="candidates-reset"]') === null`, 'knowledge-pages-candidates-first');
-    }
+    } } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await clickSelector(renderer, '[data-knowledge-action="propose-cancel"]', 'knowledge-pages-cancel-draft');
     await clickSelector(renderer, '[data-knowledge-action="items-more"]', 'knowledge-pages-history-item');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 1`, 'knowledge-pages-history-item-ready');
     await clickSelector(renderer, '.knowledge-item-history summary', 'knowledge-pages-history-open');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-more"]')?.disabled === false`, 'knowledge-pages-history-first');
-    for (let pass = 0; pass < 2; pass += 1) {
+    try { for (const viewport of [null,null,{width:1280,height:800},{width:1008,height:681}]) {
+      if (viewport) await renderer.send('Emulation.setDeviceMetricsOverride', {...viewport,deviceScaleFactor:1,mobile:false});
+      else await renderer.send('Emulation.clearDeviceMetricsOverride');
       await clickSelector(renderer, '[data-knowledge-action="revisions-more"]', 'knowledge-pages-history-next');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 2 && document.querySelector('[data-knowledge-action="revisions-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-item-history summary')`, 'knowledge-pages-history-last');
       await clickSelector(renderer, '[data-knowledge-action="revisions-reset"]', 'knowledge-pages-history-reset');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-reset"]') === null`, 'knowledge-pages-history-reset-ready');
-    }
+    } } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
     // A separate Series keeps the existing list assertions unchanged while exercising one immutable conflict reader.
     const conflictSeed = await renderer.evaluate(`(async () => {
@@ -1638,7 +1647,7 @@ async function main() {
     await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await clickSelector(renderer, '[data-series-action="list-more"]', 'list-next');
-      await readSeriesList(renderer, (page) => page.items.length === 3 && page.focus === 'open', 'list-bounded');
+      await readSeriesList(renderer, (page) => page.items.length === 4 && page.focus === 'open', 'list-bounded');
       await clickSelector(renderer, '[data-series-action="list-first"]', 'list-reset');
       await readSeriesList(renderer, (page) => page.items.length === 50 && page.focus === 'open', 'list-reset-bounded');
     }
@@ -1962,7 +1971,7 @@ async function main() {
 
     at('procedure-series-fixture-relaunch');
     // Fresh Series preparations use their matching retained /1 fixture; the earlier style capture stays on review /2.
-    // Keep the same store and the still-unconsumed proposal Save dialog answer. The two Series Runs remain prepared.
+    // Keep the same store and the still-unconsumed proposal Save dialog answer. The earlier Series runs retain their recorded states.
     await closeBrowser();
     manager = await launch(FIXTURE_IDENTITY, ['--j13-save-path', proposalPath]);
     renderer = await waitForRenderer(manager, 'series-procedure-window');
@@ -2000,7 +2009,7 @@ async function main() {
     at('procedure-series-chosen-apart');
     // The member's 新建审阅 offers 《书系复核》 with how it fits this Book; filled from it, 书系一致性 stays unticked and open —
     // Series material is chosen apart at each run, never by the procedure — so 先看计划 prepares nothing until the editor ticks
-    // it. Ticked, the Run is prepared from version 1 with nothing left out.
+    // it. Ticked, the Run starts from version 1 with nothing left out.
     await openBookReview(renderer, MEMBER, member, 'series-sheet-review');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'series-sheet-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-sheet');
@@ -2037,17 +2046,6 @@ async function main() {
     await launchReviewFromSheet(renderer, waitFor);
     await waitFor(renderer, `['settled','failed'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    if (seriesRun?.state === 'failed' && localDebugEnabled()) {
-      const database = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), {readOnly:true});
-      try {
-        const taskId=seriesRun.categories[0].taskIntentId;
-        const rows=database.prepare("SELECT component,canonical_json FROM analysis_plan_records WHERE task_intent_id=? AND plan_version=1").all(taskId);
-        const parts=new Map(rows.map(row=>[row.component,JSON.parse(row.canonical_json)]));
-        const envelope=parts.get('plan-envelope'), manifest=parts.get('coverage-manifest');
-        process.stderr.write(`J13_SERIES_REQUEST_KEYS/${JSON.stringify({contract:envelope.promptContractDigest,base:envelope.basePromptContractDigest,memoryBase:envelope.editorialMemoryBasePromptContractDigest,clarificationBase:parts.get('execution-plan').clarificationBasePromptContractDigest,unitDigest:manifest.units[0].digest,
-          entries:manifest.units.map(unit=>({unitOrdinal:unit.ordinal,requestDigest:createHash('sha256').update(JSON.stringify({categoryId:'series-consistency',promptContractDigest:envelope.promptContractDigest,unitDigest:unit.digest,unitOrdinal:unit.ordinal})).digest('hex')}))})}\n`);
-      } finally { database.close(); }
-    }
     requireJourney(seriesRun?.state === 'settled', 'series-start-settled', { state: seriesRun?.state,
       categories: seriesRun?.categories.map(category => ({ categoryId: category.categoryId, state: category.state, detail: category.detail })) });
     requireJourney(['running','settled'].includes(seriesRun?.state) && seriesRun.procedure?.procedureId === seriesProcedureId && seriesRun.procedure.version === 1 &&
