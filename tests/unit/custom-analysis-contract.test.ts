@@ -19,7 +19,7 @@ import {
 } from '../../src/service/analysis/custom-analysis-contract.js';
 import { CUSTOM_ANALYSIS_REDUCER_DESCRIPTOR, CUSTOM_ANALYSIS_REDUCER_DIGEST, customAnalysisKindDefinition, customAnalysisPlan, reduceCustomAnalysis } from '../../src/service/analysis/custom-analysis-kind.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/contract.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V2_DIGEST, BASELINE_PROMPT_CONTRACT_V2, buildUnitMessage } from '../../src/service/analysis/contract.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
@@ -153,6 +153,8 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
       ],
     } as unknown as CoverageManifestProjection;
     const blocks = new Map([blockA, blockB].map((block) => [block.blockId, block as never] as const));
+    expect(customAnalysisKindDefinition(version).buildUnitMessage(manifest.units[1]!, 2, blocks))
+      .toBe(buildUnitMessage(manifest.units[1]!, 2, blocks, BASELINE_PROMPT_CONTRACT_V2));
     const dimension = { dimensionId: DIMENSION_ID, versionId: VERSION_ID, version: 1, documentDigest };
     const outcome = (unitOrdinal: number, rows: Array<{ blockOrdinal: number; quote: string }>) => ({
       unitOrdinal, state: 'closed' as const,
