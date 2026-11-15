@@ -32,7 +32,7 @@ async function mount(successfulSave = false) {
   const api = { inspectEvaluation: async () => ({ ...page, initial: { ...page.initial, prepare: { allowed: false, reason: `公开合成读取周期${++reads}` } } }), saveEvaluation: save } as unknown as MountEvaluationOptions['api'];
   const surface = mountEvaluation({ root: root as unknown as HTMLElement, api, bookId: 'book', setStatus: vi.fn(), errorMessage: (_e, fallback) => fallback,
     technicalDetails: (_key, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return node as unknown as HTMLElement; },
-    awaitServiceJob: async (job) => job, openPlan: vi.fn(), openReadersReportPlan: vi.fn(), openRewritePlan: vi.fn(), openDraft: async () => undefined });
+    awaitServiceJob: async (job) => job, openLaunch: vi.fn(), openPlan: vi.fn(), openReadersReportPlan: vi.fn(), openRewritePlan: vi.fn(), openDraft: async () => undefined });
   await surface.load();
   const risk = root.querySelector('.evaluation-risk')!;
   const reviewed = risk.querySelector('[data-evaluation-field="reviewed"]')!;

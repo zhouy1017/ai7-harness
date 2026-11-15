@@ -1,3 +1,6 @@
+import { initialEvaluationPlan, evaluationMaterialPlan, seriesScopePlan } from './task-plan.js';
+import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
+import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import {
   TASK_MATERIAL_LIVE_UNAVAILABLE,
@@ -143,6 +146,12 @@ export function startEvaluation(host: InitialEvaluationOperationsHost, bookId: s
 }
 
 export function internalWithEvaluationMaterials(host: InitialEvaluationOperationsHost, page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {
+  const task = <T extends { taskIntentId: string }>(value: T | null): T | null => value === null ? null : { ...value, ...launchedTaskModelLabels(host.authority, value.taskIntentId) };
+  const revision = <T extends { revisionId: string }>(value: T | null): T | null => value === null ? null : { ...value, ...launchedRevisionModelLabels(host.authority, value.revisionId) };
+  page = { ...page, initial: { ...page.initial, task: task(page.initial.task), latest: revision(page.initial.latest) },
+    record: page.record === null ? null : { ...page.record, initial: revision(page.record.initial) },
+    rewrite: { ...page.rewrite, task: task(page.rewrite.task), proposal: revision(page.rewrite.proposal) },
+    readersReport: { ...page.readersReport, task: task(page.readersReport.task), templates: page.readersReport.templates.map(template => ({ ...template, drafted: revision(template.drafted) })) } };
   // Only a plan not yet started can be refused for a reference that went away; a started one read it as it was.
   const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean; materialIds: string[] } => {
     const frozen = task === null ? null : internalEvaluationMaterialPlan(host, task.taskIntentId);
@@ -267,16 +276,25 @@ export function inspectInitialEvaluation(host: InitialEvaluationOperationsHost, 
 }
 
 export function createInitialEvaluationPreparationWork(host: InitialEvaluationOperationsHost, bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null, seriesId: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
+  return buildInitialEvaluationTask(host, bookId, launchPolicy, materialIds, redoOf, seriesId, (ledger, input) => ledger.prepare(input));
+}
+
+export function launchInitialEvaluationTask(host: InitialEvaluationOperationsHost, bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string>, redoOf: string | null, seriesId: string | null, context: TaskLaunchContext): InitialEvaluationProjection {
+  return buildInitialEvaluationTask(host, bookId, launchPolicy, materialIds, redoOf, seriesId, launchedTaskPlan(context)).projection!;
+}
+
+function buildInitialEvaluationTask(host: InitialEvaluationOperationsHost, bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string>, redoOf: string | null, seriesId: string | null, createPlan: TaskPlanCreator): AnalysisPreparationResult<InitialEvaluationProjection> {
   requireStore(seriesId === null || seriesKnowledgeAllowed(launchPolicy, INITIAL_EVALUATION_KIND), 'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
   const scopes = seriesId === null ? undefined : [freezeSeriesScope(host.authority, bookId, seriesId)];
   internalRequireEvaluationMaterialScope(host, materialIds.length > 0, INITIAL_EVALUATION_KIND);
   internalRequireInitialEvaluationScope(host);
   const current = host.inspectInitialEvaluation(bookId);
+  requireStore(!runIsActive(current.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(current.run?.state ?? null, INITIAL_EVALUATION_KIND));
   // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
   const profile = host.evaluationProfiles.current();
   const ledger = internalInitialLedger(host, profile, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) }, undefined, scopes);
   const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
-  const result = host.analysisCall(() => ledger.prepare({
+  const result = host.analysisCall(() => createPlan(ledger, {
     phase: 'start',
     bookId,
     goal: INITIAL_EVALUATION_MODE_GOALS[mode],
@@ -285,7 +303,7 @@ export function createInitialEvaluationPreparationWork(host: InitialEvaluationOp
     reconfirm: false,
     launchPolicy,
     ...(canonicalJson(host.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
-  }));
+  }, (projection, blocks, bookTitle) => evaluationMaterialPlan(seriesScopePlan(initialEvaluationPlan({ projection: projection as InitialEvaluationProjection, bookTitle, blocks, profile }), projection.runSourceScope?.seriesScopes), ledger.definition.materialReferences === undefined ? [] : host.taskMaterialReadings({ bookId, references: ledger.definition.materialReferences.sources }, '评估'))));
   // The snapshot pins the Task the preparation returned, inside `#snapshotInitialPreparation`, never a separate
   // "latest evaluation Task" query (Issue #798, P3-2): that query could pin an unrelated earlier row.
   internalSnapshotInitialPreparation(host, result, profile, ledger);

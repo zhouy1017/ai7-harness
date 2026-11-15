@@ -338,6 +338,7 @@ interface SheetState {
   evidenceAssuranceLevel?: EvidenceAssuranceLevel;
   estimate?: string;
   launchInput?: string;
+  rememberedChoice?: boolean;
   executionConfig?: RuntimeExecutionConfig;
   chooser?: ReturnType<typeof createDispatchChooser>;
   choicePending?: boolean;
@@ -2830,10 +2831,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const actions = el('div', 'button-row review-sheet-actions');
     const newChooser = state.chooser === undefined;
     const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
-    if (newChooser) void (async () => {
-      const [settings, preferences] = await Promise.all([api.getModelServiceSettings(), window.ai7.getPreferences()]);
-      if (!state.dismissed) chooser.render(settings, preferences.values['model.favourites'], state.executionConfig);
-    })().catch(() => { chooser.unavailable(); });
+    if (newChooser) { state.choicePending = true; void (async () => {
+      const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), window.ai7.getPreferences()]);
+      if (!state.dismissed) {
+        if (state.executionConfig === undefined) { state.executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices']['review-run'] ?? {} : {}; state.rememberedChoice = Object.keys(state.executionConfig).length > 0; }
+        if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, state.executionConfig);
+        else chooser.unavailable();
+      }
+    })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate(); } }); }
     const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
@@ -2920,6 +2925,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     sheetUpdate = updateSheet;
     sheetContent(sheet, bar, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== actions), actions, form);
+    queueMicrotask(chooser.refreshPanel);
     updateSheet();
     void refreshHouse?.();
   }
@@ -2940,7 +2946,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   async function updateExecutionChoice(state: SheetState, config: RuntimeExecutionConfig): Promise<void> {
-    state.executionConfig = config;
+    state.executionConfig = config; state.rememberedChoice = false;
     delete state.clientCommandId;
     const ticket = state.choiceTicket = (state.choiceTicket ?? 0) + 1;
     state.choicePending = true;
@@ -2952,7 +2958,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.choicePending = false;
       projection = next;
       renderSheet(next, state);
-      if (focused instanceof HTMLElement) focused.focus();
+      if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
     } catch (error) {
       if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
       state.choicePending = false;
@@ -3032,7 +3038,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.clientCommandId ??= crypto.randomUUID();
       sheetUpdate();
       const result = await api.launchReviewRun({ ...taskInput, clientCommandId: state.clientCommandId,
-        ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }) });
+        ...(state.executionConfig === undefined ? {} : { executionConfig: state.executionConfig }), rememberedChoice: state.rememberedChoice ?? false });
       state.launchPending = false;
       if (result.run !== null) options.recorded?.(result.run.reviewRunId);
       if (result.run === null) throw new Error(REVIEW_STATUS_LINES.launchFailed);
@@ -3049,7 +3055,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       clearFactual(true);
       stableKey = '';
       if (host.isConnected) show(result);
-      options.setStatus(REVIEW_STATUS_LINES.started, 'success');
+      options.setStatus(result.launchNotice ?? REVIEW_STATUS_LINES.started, 'success');
 
     } catch (error) {
       state.launchPending = false;

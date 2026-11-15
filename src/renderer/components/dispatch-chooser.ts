@@ -9,12 +9,42 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
   const element = document.createElement('details'); element.className = 'dispatch-chooser';
   const summary = document.createElement('summary'); summary.textContent = '模型 加载中 ▾';
   const panel = document.createElement('div'); panel.className = 'dispatch-chooser-panel';
+  // The native top layer escapes scrolling start bars and composers without widening their overflow.
+  const topLayer = typeof panel.showPopover === 'function';
+  if (topLayer) panel.setAttribute('popover', 'manual');
   const modelLabel = document.createElement('label'); modelLabel.textContent = '模型';
   const models = document.createElement('select'); models.setAttribute('aria-label', '本次任务的模型');
   const effortLabel = document.createElement('label'); effortLabel.textContent = '思考强度';
   const efforts = document.createElement('select'); efforts.setAttribute('aria-label', '本次任务的思考强度');
   const reset = document.createElement('button'); reset.type = 'button'; reset.textContent = '恢复默认';
   modelLabel.append(models); effortLabel.append(efforts); panel.append(modelLabel, effortLabel, reset); element.append(summary, panel);
+  const placePanel = (): void => {
+    if (!topLayer || !element.open) return;
+    const anchor = summary.getBoundingClientRect(), bounds = panel.getBoundingClientRect();
+    panel.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8))}px`;
+    panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, window.innerHeight - bounds.height - 8))}px`;
+  };
+  const stopListening = (): void => {
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('scroll', scrolled, true);
+    window.removeEventListener('resize', dismiss);
+  };
+  const dismiss = (): void => { element.open = false; if (topLayer && panel.matches(':popover-open')) panel.hidePopover(); stopListening(); };
+  const outside = (event: Event): void => { if (!element.contains(event.target as Node)) dismiss(); };
+  const scrolled = (event: Event): void => { if (!panel.contains(event.target as Node)) dismiss(); };
+  const refreshPanel = (): void => {
+    if (topLayer && element.isConnected && element.open) {
+      if (!panel.matches(':popover-open')) panel.showPopover();
+      placePanel();
+      document.addEventListener('pointerdown', outside, true);
+      document.addEventListener('scroll', scrolled, true);
+      window.addEventListener('resize', dismiss);
+    }
+  };
+  element.addEventListener('toggle', event => {
+    if (!topLayer || event.target !== element) return;
+    if (element.open) refreshPanel(); else dismiss();
+  });
   let settings: ModelServiceSettingsProjection | null = null;
   let choices: Array<{ config: RuntimeExecutionConfig; label: string; levels: readonly string[] }> = [];
   let defaultChoice: RuntimeExecutionConfig = {};
@@ -33,6 +63,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     efforts.value = effort ?? 'off'; effortLabel.hidden = choice.levels.length === 0;
     const sent = effortLabel.hidden || efforts.value === 'off' ? '' : `@${efforts.value}`;
     summary.textContent = `模型 ${choice.label}${sent} ▾`;
+    placePanel();
   };
   const notify = (): void => {
     const choice = choices[models.selectedIndex];
@@ -45,9 +76,11 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     const index = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
     models.selectedIndex = index; paint(defaultChoice.reasoningEffort); options.changed({});
   });
-  element.addEventListener('keydown', event => { if (event.key === 'Escape') { element.open = false; summary.focus(); } });
+  element.addEventListener('keydown', event => { if (event.key === 'Escape') { dismiss(); summary.focus(); } });
   return {
     element,
+    /** Moving a chooser into a rebuilt sheet dismisses its native popover while retaining the details state. */
+    refreshPanel,
     unavailable(): void { summary.textContent = '模型 使用角色默认 ▾'; panel.hidden = true; },
     render(next: ModelServiceSettingsProjection, favourites: ModelFavourites = {}, selection: RuntimeExecutionConfig = {}): void {
       panel.hidden = false;
@@ -73,7 +106,12 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
       inherited = Object.keys(selection).length === 0;
       const selected = resolveRuntimeExecutionConfig(defaultChoice, selection);
       models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === selected.modelConnectionId && choice.config.modelId === selected.modelId);
-      paint(selected.reasoningEffort);
+      if (models.selectedIndex < 0) {
+        models.selectedIndex = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
+        paint(defaultChoice.reasoningEffort);
+      } else paint(selected.reasoningEffort);
+      // A review choice redraws its sheet and reattaches this chooser. Re-enter the native top layer after that move.
+      if (topLayer) queueMicrotask(refreshPanel);
     },
   };
 }

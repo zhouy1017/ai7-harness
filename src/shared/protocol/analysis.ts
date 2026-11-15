@@ -433,6 +433,8 @@ export interface RunReportRecordProjection {
 /** The report as a reader receives it: the recorded record with the digest of its own canonical JSON. */
 export interface RunReportProjection extends RunReportRecordProjection {
   reportDigest: string;
+  /** Frozen dispatch attribution, outside the recorded report's digest. */
+  modelLabel?: string;
   /**
    * A Run a 后台分析登记 started (Issue #864): which Enrollment version started it, the share of its ceiling the Run was held to,
    * and how the Run ended against that ceiling, in the reader's words. Read beside the recorded report, never part of its digest;

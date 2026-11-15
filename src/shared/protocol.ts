@@ -1,5 +1,5 @@
-import type { RuntimeExecutionConfig } from './runtime-execution-config.js';
-export type { RuntimeExecutionConfig } from './runtime-execution-config.js';
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult, TaskLaunchPreviewProjection, LedgerTaskLaunchOperation } from './runtime-execution-config.js';
+export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
@@ -485,6 +485,7 @@ export type J04ModelAdapterControl = string;
 export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const IPC_CHANNELS = {
+  previewTaskLaunch: 'ai7:j04:preview-task-launch',
   getStartup: 'ai7:j08:get-startup',
   getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
   viewRecoveryCandidate: 'ai7:j08:view-recovery-candidate',
@@ -518,6 +519,7 @@ export const IPC_CHANNELS = {
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   inspectBookFindings: 'ai7:inspect-book-findings',
   inspectParagraphAnalysis: 'ai7:inspect-paragraph-analysis',
+  launchBaselineAnalysis: 'ai7:j04:launch-baseline-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
@@ -584,6 +586,7 @@ export const IPC_CHANNELS = {
   saveCustomAnalysisDimension: 'ai7:kb:save-custom-analysis-dimension',
   enableCustomAnalysisDimension: 'ai7:kb:enable-custom-analysis-dimension',
   stopCustomAnalysisDimension: 'ai7:kb:stop-custom-analysis-dimension',
+  launchCustomAnalysis: 'ai7:j04:launch-custom-analysis',
   prepareCustomAnalysis: 'ai7:j04:prepare-custom-analysis',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
   saveDeveloperProposalFile: 'ai7:j15:save-developer-proposal-file',
@@ -604,15 +607,19 @@ export const IPC_CHANNELS = {
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
   startEvaluation: 'ai7:j11:start-evaluation',
   saveEvaluation: 'ai7:j11:save-evaluation',
+  launchInitialEvaluation: 'ai7:j11:launch-initial-evaluation',
   prepareInitialEvaluation: 'ai7:j11:prepare-initial-evaluation',
   authorizeInitialEvaluation: 'ai7:j11:authorize-initial-evaluation',
+  launchReadersReport: 'ai7:j11:launch-readers-report',
   prepareReadersReport: 'ai7:j11:prepare-readers-report',
   authorizeReadersReport: 'ai7:j11:authorize-readers-report',
   createReadersReportDraft: 'ai7:j11:create-readers-report-draft',
+  launchEvaluationRewrite: 'ai7:j11:launch-evaluation-rewrite',
   prepareEvaluationRewrite: 'ai7:j11:prepare-evaluation-rewrite',
   authorizeEvaluationRewrite: 'ai7:j11:authorize-evaluation-rewrite',
   decideEvaluationRewrite: 'ai7:j11:decide-evaluation-rewrite',
   inspectWritingTask: 'ai7:j07:inspect-writing-task',
+  launchWritingTask: 'ai7:j07:launch-writing-task',
   prepareWritingTask: 'ai7:j07:prepare-writing-task',
   authorizeWritingTask: 'ai7:j07:authorize-writing-task',
   quickStartWritingTask: 'ai7:j07:quick-start-writing-task',
@@ -4574,7 +4581,7 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'import'; sourceDisplayName: string; relationship: 'first-manuscript' | 'source-only' | 'reimport' | null }
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
-  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
+  | { kind: 'analysis'; mode: BaselineAnalysisTaskMode; customTitle?: string }
   // A ledger Task of another kind whose Run waits to start once online, or whose plan moved meanwhile (Issue #760, S74c).
   | { kind: 'task'; taskKind: Exclude<StartWhenOnlineTaskKind, 'review-run'> }
   // A Review Run; `onSelection` for one that reads only the selection 就这段发起任务… handed over (Issue #423, S77b).
@@ -4760,10 +4767,14 @@ export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', '
   'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
   'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
   'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
-  'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
+  'previewTaskLaunch', 'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchWritingTask', 'launchInitialEvaluation', 'launchReadersReport', 'launchEvaluationRewrite', 'launchReviewRun', 'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
 export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
+
+export type TaskLaunchPreviewInput = { bookId: string; launch: { [K in LedgerTaskLaunchOperation]: {
+  operation: K; input: Omit<ServiceOperationMap[K]['input'], 'bookId'>;
+} }[LedgerTaskLaunchOperation] };
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
@@ -5901,6 +5912,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
   inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
+  launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  previewTaskLaunch: { input: TaskLaunchPreviewInput; output: TaskLaunchPreviewProjection };
   prepareBaselineAnalysis: {
     /**
      * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
@@ -6181,6 +6194,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   /** `停用`: final for the version; Runs prepared under it keep naming it. */
   stopCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
   /** ②A 自定义 › 运行: the dimension's enabled version prepared as a Task on the Book; its plan opens in the Task Drawer. */
+  launchCustomAnalysis: { input: ServiceOperationMap['prepareCustomAnalysis']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareCustomAnalysis: { input: PrepareCustomAnalysisInput; output: { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
@@ -6299,6 +6313,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 准备 AI7 初评 (Issue #429, S81b1): the evaluation kind's Task prepared as one cooperative job — the first 初评, or 重新初评
    * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
    */
+  launchInitialEvaluation: { input: ServiceOperationMap['prepareInitialEvaluation']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareInitialEvaluation: {
     input: { bookId: string; materialIds?: ReadonlyArray<string>; seriesId?: string | null };
     output: ServiceJobProjection;
@@ -6312,6 +6327,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one
    * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
    */
+  launchReadersReport: { input: ServiceOperationMap['prepareReadersReport']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareReadersReport: {
     input: { bookId: string; template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> };
     output: ServiceJobProjection;
@@ -6330,6 +6346,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 按我的评分重写评语 (Issue #429, S81b2; EVAL-008): the evaluation rewrite kind's Task over one version's latest saved entry,
    * prepared as one cooperative job. The completed job's result is 评估 with that version on show and the prepared Task named.
    */
+  launchEvaluationRewrite: { input: ServiceOperationMap['prepareEvaluationRewrite']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareEvaluationRewrite: {
     input: { bookId: string; recordId: string };
     output: ServiceJobProjection;
@@ -6356,6 +6373,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 先看计划 of a writing Task: one house type and the editor's audience, channel and requirements, prepared as one cooperative
    * job. The completed job's result is 新建文档 · 写作任务 with the prepared Task named, whose plan the Task Drawer opens.
    */
+  launchWritingTask: { input: ServiceOperationMap['prepareWritingTask']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareWritingTask: {
     /** `materialIds` (Issue #428): the 资料库 items the editor ticked under 允许参考, in the order offered; none when absent. */
     input: { bookId: string; typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> };
@@ -6397,7 +6415,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
    */
   inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
-  launchReviewRun: { input: PrepareReviewRunInput & { clientCommandId: string; executionConfig?: RuntimeExecutionConfig;
+  launchReviewRun: { input: PrepareReviewRunInput & TaskExecutionLaunchInput & {
     evidenceAssuranceLevel?: EvidenceAssuranceLevel; startWhen?: 'now' | 'when-online' }; output: ReviewWorkspaceProjection };
   prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
   authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
@@ -6922,6 +6940,8 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisWireProjection>;
   inspectBookFindings(input?: { offset: number }): Promise<BookFindingsProjection>;
   inspectParagraphAnalysis(input: { manuscriptId: string; blockId: string; radius: number }): Promise<ParagraphAnalysisProjection>;
+  launchBaselineAnalysis(input: Omit<ServiceOperationMap['launchBaselineAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
+  previewTaskLaunch(input: Omit<TaskLaunchPreviewInput, 'bookId'>): Promise<TaskLaunchPreviewProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; redoOf?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /**
    * The Task Drawer bar's 开始任务 for the analysis (Issue #420, S74a): records the Run Authorization and the
@@ -7027,6 +7047,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   enableCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
   stopCustomAnalysisDimension(input: { versionId: string }): Promise<CustomAnalysisDimensionsProjection>;
   /** The current Book's Task of one dimension; the window's route names the Book. */
+  launchCustomAnalysis(input: Omit<ServiceOperationMap['launchCustomAnalysis']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareCustomAnalysis(input: Omit<PrepareCustomAnalysisInput, 'bookId'>): Promise<{ taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection }>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
@@ -7067,16 +7088,19 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
+  launchInitialEvaluation(input: Omit<ServiceOperationMap['launchInitialEvaluation']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string>; seriesId?: string | null }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
+  launchReadersReport(input: Omit<ServiceOperationMap['launchReadersReport']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareReadersReport(input: { template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for 审稿意见. */
   authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
   createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
   /** 按我的评分重写评语 (Issue #429, S81b2): an `evaluation-rewrite-preparation` job over one version; its plan opens in the Task Drawer. */
+  launchEvaluationRewrite(input: Omit<ServiceOperationMap['launchEvaluationRewrite']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareEvaluationRewrite(input: { recordId: string }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for 按我的评分重写评语. */
   authorizeEvaluationRewrite(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
@@ -7085,6 +7109,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 新建文档 · 写作任务 of the Book the window is showing (Issue #432, S84a); the renderer never names the Book. */
   inspectWritingTask(): Promise<WritingTaskProjection>;
   /** 先看计划 of a writing Task: a `writing-preparation` job; its plan opens in the Task Drawer. */
+  launchWritingTask(input: Omit<ServiceOperationMap['launchWritingTask']['input'], 'bookId'>): Promise<TaskExecutionLaunchResult>;
   prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }): Promise<ServiceWireOutput<ServiceJobProjection>>;
   /** The Task Drawer bar's 开始任务 for a writing Task. */
   authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;

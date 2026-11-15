@@ -1,3 +1,6 @@
+import { readersReportPlan, evaluationMaterialPlan } from './task-plan.js';
+import { launchedRevisionModelLabels } from './editorial-mark-source.js';
+import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
@@ -629,6 +632,14 @@ export function readersReportExemplarStatement(host: ReadersReportStoreHost, rea
  * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
  */
 export function createReadersReportPreparationWork(host: ReadersReportStoreHost, bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<ReadersReportProjection> {
+  return buildReadersReportTask(host, bookId, template, launchPolicy, materialIds, redoOf, (ledger, input) => ledger.prepare(input));
+}
+
+export function launchReadersReportTask(host: ReadersReportStoreHost, bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string>, redoOf: string | null, context: TaskLaunchContext): ReadersReportProjection {
+  return buildReadersReportTask(host, bookId, template, launchPolicy, materialIds, redoOf, launchedTaskPlan(context)).projection!;
+}
+
+function buildReadersReportTask(host: ReadersReportStoreHost, bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string>, redoOf: string | null, createPlan: TaskPlanCreator): AnalysisPreparationResult<ReadersReportProjection> {
   host.requireEvaluationMaterialScope(materialIds.length > 0, READERS_REPORT_KIND);
   requireReadersReportScope(host);
   requireStore(StoreUUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
@@ -640,6 +651,7 @@ export function createReadersReportPreparationWork(host: ReadersReportStoreHost,
   const input = host.readersReportCall(() => readersReportContractInput(template, basis, readings.exemplars));
   const ledger = readersReportLedger(host, input, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) });
   const latest = latestReadersReport(host, bookId);
+  requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(latest?.projection.run?.state ?? null, READERS_REPORT_KIND));
   const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
   // What this preparation skipped for damage, and the contract it is recorded under (Issue #792).
   const skippedExemplars = [
@@ -655,7 +667,7 @@ export function createReadersReportPreparationWork(host: ReadersReportStoreHost,
   const recorded = latest === null ? null : host.readersReportCall(() =>
     host.readersReports.task(latest.task.taskIntentId, promptContractSha256));
   const noteChanged = recorded !== null && storeCanonicalJson(recorded.skippedExemplars) !== storeCanonicalJson(skippedExemplars);
-  const result = host.analysisCall(() => ledger.prepare({
+  const result = host.analysisCall(() => createPlan(ledger, {
     phase: 'start',
     bookId,
     goal: READERS_REPORT_MODE_GOALS[mode],
@@ -664,10 +676,10 @@ export function createReadersReportPreparationWork(host: ReadersReportStoreHost,
     reconfirm: false,
     launchPolicy,
     ...(noteChanged || storeCanonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) !== storeCanonicalJson(ledger.definition.materialReferences?.sources ?? []) ? { newTask: true } : {}),
-  }));
+  }, (projection, blocks, bookTitle) => evaluationMaterialPlan(readersReportPlan({ projection: projection as ReadersReportProjection, bookTitle, blocks, task: { template, recordOrdinal: host.evaluationRecordOrdinal(basis.recordId), profile: input.record.profile, exemplars: readersReportExemplarStatement(host, readings) } }), ledger.definition.materialReferences === undefined ? [] : host.taskMaterialReadings({ bookId, references: ledger.definition.materialReferences.sources }, '评估'))));
   // Which 定稿 version and template the Task drafts from, recorded once for it and this contract, and what that preparation
   // left out for damage: a plan is frozen, so its exemplar line names what was skipped when it was drafted (Issue #792).
-  const taskIntentId = host.readersReportCall(() => host.readersReports.latestTaskIntentId(bookId));
+  const taskIntentId = host.readersReportCall(() => result.projection?.taskIntent?.taskIntentId ?? host.readersReports.latestTaskIntentId(bookId));
   requireStore(taskIntentId !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务没有准备出来。');
   host.readersReportCall(() => host.transaction(host.authority, () => host.readersReports.recordTask({
     taskIntentId,
@@ -742,6 +754,7 @@ export function readersReportWorkspace(host: ReadersReportStoreHost, bookId: str
     const stored = drafts.find((draft) => draft.template === template);
     const row = stored === undefined ? undefined : host.documentCall(() => host.productionDocuments.documentById(bookId, stored.documentId));
     const draft = stored === undefined || row === undefined ? null : {
+      ...launchedRevisionModelLabels(host.authority, stored.analysisRevisionId),
       typeId,
       typeLabel: readersReportDocumentType(typeId)!.label,
       recordOrdinal: host.evaluationRecordOrdinal(stored.recordId),

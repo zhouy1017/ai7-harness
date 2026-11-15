@@ -536,6 +536,14 @@ export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSampli
  */
 export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = PUBLIC_SAMPLEBOOK_SOURCE_DIGESTS;
 
+/** New and replayed one-step starts share the execution owner's existing admission and continuation gates. */
+export function driveLaunchedLedgerRun(owner: BaselineAnalysisExecutionOwner, launched: { runRecordId: string; ledger: BaselineAnalysisStore }): void {
+  const { ledger, runRecordId } = launched;
+  const state = ledger.currentRunState(runRecordId);
+  if (state === 'authorized') owner.admitOrQueue(runRecordId, ledger);
+  else if (state === 'resumable' && ledger.launchWasInterruptedByRestart(runRecordId)) owner.resumeOrQueue(runRecordId, ledger);
+}
+
 export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
   readonly #broker: CredentialBroker;
@@ -1039,7 +1047,7 @@ export class BaselineAnalysisExecutionOwner {
     /** The 后台分析登记 dispatcher's start takes the background place (Issue #864); its plan's origin is checked again at admission. */
     origin: 'foreground' | 'background' = 'foreground',
   ): 'admitted' | 'queued' {
-    // AI7 is closing: the start stays `authorized`; restart recovery requires a fresh explicit start.
+    // AI7 is closing: the start stays `authorized`; startup restores a committed launch or blocks a legacy start with why.
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';

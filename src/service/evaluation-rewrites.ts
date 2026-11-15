@@ -1,3 +1,7 @@
+import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
+import { evaluationRewritePlan } from './task-plan.js';
+import { launchedTaskModelLabels } from './editorial-mark-source.js';
+import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
@@ -706,6 +710,14 @@ export function requireEvaluationRewriteScope(host: EvaluationRewriteStoreHost):
  * from AI7's yet — the 评语 then already speak to them. Its plan opens in the Task Drawer.
  */
 export function createEvaluationRewritePreparationWork(host: EvaluationRewriteStoreHost, bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection, redoOf: string | null = null): AnalysisPreparationResult<EvaluationRewriteProjection> {
+  return buildEvaluationRewriteTask(host, bookId, recordId, launchPolicy, redoOf, (ledger, input) => ledger.prepare(input));
+}
+
+export function launchEvaluationRewriteTask(host: EvaluationRewriteStoreHost, bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection, redoOf: string | null, context: TaskLaunchContext): EvaluationRewriteProjection {
+  return buildEvaluationRewriteTask(host, bookId, recordId, launchPolicy, redoOf, launchedTaskPlan(context)).projection!;
+}
+
+function buildEvaluationRewriteTask(host: EvaluationRewriteStoreHost, bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection, redoOf: string | null, createPlan: TaskPlanCreator): AnalysisPreparationResult<EvaluationRewriteProjection> {
   requireEvaluationRewriteScope(host);
   requireStore(StoreUUID_PATTERN.test(bookId) && StoreUUID_PATTERN.test(recordId), 'EVALUATION_REWRITE_INVALID', '评语重写参数无效。');
   const version = host.evaluationCall(() => host.evaluations.rewritable(bookId, recordId));
@@ -716,7 +728,7 @@ export function createEvaluationRewritePreparationWork(host: EvaluationRewriteSt
   const latest = latestEvaluationRewrite(host, bookId);
   requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, EVALUATION_REWRITE_KIND));
   const mode = latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again';
-  const result = host.analysisCall(() => ledger.prepare({
+  const result = host.analysisCall(() => createPlan(ledger, {
     phase: 'start',
     bookId,
     goal: EVALUATION_REWRITE_MODE_GOALS[mode],
@@ -724,9 +736,9 @@ export function createEvaluationRewritePreparationWork(host: EvaluationRewriteSt
     update: mode === 'evaluation-rewrite-first' ? null : { mode, selectedRange: null },
     reconfirm: false,
     launchPolicy,
-  }));
+  }, (projection, blocks, bookTitle) => evaluationRewritePlan({ projection: projection as EvaluationRewriteProjection, bookTitle, blocks, task: { recordOrdinal: host.evaluationRecordOrdinal(recordId), entryOrdinal: version.entryOrdinal, profile: input.profile, scored: evaluationRewriteScoredItems(input).map(item => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })) } })));
   // Which version and saved entry the Task rewrites, recorded once for it and this contract.
-  const taskIntentId = host.evaluationRewriteCall(() => host.evaluationRewrites.latestTaskIntentId(bookId));
+  const taskIntentId = host.evaluationRewriteCall(() => result.projection?.taskIntent?.taskIntentId ?? host.evaluationRewrites.latestTaskIntentId(bookId));
   requireStore(taskIntentId !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '评语重写任务没有准备出来。');
   host.evaluationRewriteCall(() => host.transaction(host.authority, () => host.evaluationRewrites.recordTask({
     taskIntentId,
@@ -846,7 +858,7 @@ export function evaluationRewriteWorkspace(host: EvaluationRewriteStoreHost, boo
       const last = host.evaluationRewriteCall(() => host.evaluationRewrites.latestDecision(version.recordId));
       // Every 采用 of the version, read under the same guard: a damaged one makes the rewrite unavailable (Issue #702 review).
       host.evaluationRewriteCall(() => host.evaluationRewrites.adoptionsOf(version.recordId));
-      decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
+      decided = last === null ? null : { ...launchedTaskModelLabels(host.authority, last.taskIntentId, true), decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
     }
   } catch (error) {
     if (!(error instanceof StoreError)) throw error;

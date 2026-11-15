@@ -824,6 +824,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-service-first-save',
     'model-effort-defaults-wide',
     'model-effort-defaults-gate',
+    'dispatch-model-wide',
+    'dispatch-model-gate',
     'model-service-openai-text-contract',
     'model-service-openai-restart-removal',
     'model-service-search-backends',
@@ -980,7 +982,6 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #418 (S72): the plan the preparation froze, in the Task Drawer beside ②A.
     'analysis-plan-drawer',
     // Issue #420 (S74a): the drawer's authorization bar before the start and, the Run settled, after it.
-    'analysis-bar-ready',
     'authorize-dispatch',
     'result-set-revision',
     'analysis-bar-started',
@@ -1017,6 +1018,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-drift',
     // Issue #418 (S72 D8): the drift in the drawer's words; then #288's range, the one version 2 froze.
     'plan-revision-drawer-diff',
+    'second-book-plan-revision',
+    'open-plan-revision',
+    'launch-options-wide',
+    'launch-options-gate',
     // Issue #420 (S74a A4): a changed plan's bar offers 重新确认计划 and 查看计划修订, and no start.
     'plan-revision-bar',
     'plan-revision-stale-authorize',
@@ -1092,6 +1097,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'comments-inline-apply-overlay',
     'editor-revision',
     'ai-locks',
+    'scoped-dispatch-wide',
+    'scoped-dispatch-gate',
     'selected-fast-text-scope-refusal',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
@@ -1298,6 +1305,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'writing-card',
     // Issue #428: a 评论文章 that lists a 资料库 item under 允许参考, read through the Material Index at the build its plan pins.
     'writing-library-material',
+    'writing-preview-material',
     'writing-library-plan',
     'writing-library-draft',
     'multi-documents-ordinary',
@@ -1335,12 +1343,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'second-book-launch',
     'second-book-import',
     'second-book-completed-run',
-    'second-book-plan-revision',
     'attention-groups',
     'attention-count',
     'attention-writes-nothing',
     'open-blocked-run',
-    'open-plan-revision',
     'open-completion',
     'j14-attention-keyboard',
     'j14-attention-zoom-200-reflow',
@@ -1479,6 +1485,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // reason a Proposal Decision is asked for once, on 修改建议 of the Journey's own words (Issue #61, S26a), and 质量与学习 ›
   // 学习准入 on the material those records make (Issue #61, S26b).
   'J-11': Object.freeze([
+    'readers-report-preview-basis',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',
     'evaluation-ai-lock',

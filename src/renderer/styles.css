@@ -692,6 +692,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 :root { --task-drawer-width: 500px; }
 .task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(var(--task-drawer-width), calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
 .task-drawer[hidden] { display: none; }
+/* An ordinary launch keeps its initiating form until success; its start controls sit in front of that sheet. */
+.task-drawer[data-task-drawer-view="launch"] { z-index: 61; }
+body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawer-separator { z-index: 62; }
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
   .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
@@ -704,6 +707,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-drawer-title:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .task-drawer-head .quiet { min-height: 28px; padding: .15rem .45rem; }
 .task-drawer-modes { display: inline-flex; border: 1px solid var(--boundary); border-radius: 8px; overflow: hidden; }
+.task-drawer-modes[hidden], .task-drawer-pill[hidden] { display: none; }
 .task-drawer-mode { min-height: 34px; padding: .2rem .7rem; border: 0; background: transparent; color: var(--text-subdued); font: inherit; font-size: .88rem; cursor: pointer; }
 .task-drawer-mode + .task-drawer-mode { border-left: 1px solid var(--boundary); }
 .task-drawer-mode[aria-pressed="true"] { background: var(--status-progress-surface); color: var(--text); font-weight: 800; box-shadow: inset 0 -3px 0 var(--selection-boundary); }
@@ -3089,7 +3093,11 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 /* The dispatch choice stays reachable in the compact start bar. */
 .dispatch-chooser { position: relative; max-width: 100%; min-width: 0; }
 .dispatch-chooser summary { cursor: pointer; overflow-wrap: anywhere; padding: 6px 8px; }
-.dispatch-chooser-panel { position: absolute; z-index: 20; bottom: 100%; left: 0; width: min(320px, 80vw); padding: 12px; background: var(--surface); border: 1px solid currentColor; border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); display: grid; gap: 8px; }
+.dispatch-chooser-panel { position: relative; width: min(320px, 80vw); max-height: calc(100vh - 24px); overflow: auto; padding: 12px; background: var(--surface); border: 1px solid currentColor; border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); display: grid; gap: 8px; }
+.dispatch-chooser-panel:popover-open { position: fixed; margin: 0; right: auto; bottom: auto; }
+.dispatch-chooser-panel[popover]:not(:popover-open) { display: none; }
 .dispatch-chooser-panel label { display: grid; gap: 4px; }
 .dispatch-chooser-panel[hidden], .dispatch-chooser-panel label[hidden] { display: none; }
 .dispatch-chooser-panel select { max-width: 100%; min-width: 0; }
+
+.evaluation-report-model, .evaluation-task-model, .evaluation-initial-task, .readers-report-task, .writing-task-line, .writing-drafted-model { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }

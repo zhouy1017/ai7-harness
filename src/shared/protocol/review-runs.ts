@@ -898,6 +898,7 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  launchNotice?: string;
   /** Device-local reading; never a connection probe. */
   connectivity?: 'online' | 'offline';
   /** Own ranges of the current coverage units, without manuscript text. */

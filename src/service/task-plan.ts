@@ -312,7 +312,7 @@ export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
 const PRODUCTION_UNSET_USAGE = '发送到所选模型服务；模型用量按实际调用记录，未设任务运行预算上限';
 type PlannedExecutionRoute = NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>['executionRoute'];
-function isRemoteExecutionRoute(route: PlannedExecutionRoute): route is Extract<PlannedExecutionRoute, { endpoint: string }> {
+export function isRemoteExecutionRoute(route: PlannedExecutionRoute): route is Extract<PlannedExecutionRoute, { endpoint: string }> {
   return MODEL_SERVICE_ROUTES.some((remote) => remote === route.kind);
 }
 function liveDecision(pin: ProviderProcessingPin): string {

@@ -1,3 +1,4 @@
+import { chooseDispatch } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
@@ -431,6 +432,7 @@ async function main() {
   let tempParent;
   let journeyCompleted = false;
   let fastCredentialSaved = false;
+  let fastCredentialReference;
   let fastDataRoot;
   let fastExecutable;
   const closeOwnedBrowser = async () => {
@@ -441,7 +443,8 @@ async function main() {
   const cancellation = installJourneyCancellationCleanup(async () => {
     await closeOwnedBrowser();
     if (fastCredentialSaved && fastDataRoot !== undefined && runRoot !== undefined) {
-      const recovered = await recoverSyntheticCredentialCleanupState('J-05', fastDataRoot, runRoot);
+      const recovered = fastCredentialReference === undefined ? await recoverSyntheticCredentialCleanupState('J-05', fastDataRoot, runRoot)
+        : { kind: 'reference', credentialReference: fastCredentialReference };
       if (recovered.kind === 'reference') await removeSyntheticCredentialWithElectron('J-05', fastExecutable, productEnvironment(fastExecutable), recovered.credentialReference);
     }
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
@@ -517,8 +520,18 @@ async function main() {
     at('selected-fast-text-scope-refusal');
     const fastSecret = randomBytes(48).toString('base64url');
     fastCredentialSaved = true;
-    await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
+    fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
+    requireJourney(typeof fastCredentialReference==='string','dispatch-placeholder-reference');
     await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    // Reuse J-12's product-authored catalogue choice; the placeholder credential remains the existing cleanup owner's.
+    await markTechnicalMode(renderer, true, 'dispatch-catalogue');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'dispatch-catalogue-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'dispatch-catalogue-settings-ready');
+    await click(renderer, '模型服务', 'dispatch-catalogue-models');
+    await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-catalogue-field');
+    await fill(renderer, '[data-custom-model-id]', 'j05-dispatch-alternative', 'dispatch-catalogue-alternative');
+    await assertRenderer(renderer, `(() => {const button=document.querySelector('[data-action="select-main-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-catalogue-save');
+    await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings=>settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.modelId==='j05-dispatch-alternative')`, 'dispatch-catalogue-ready');
     // #1379 explicitly exercises the ordinary card branch.
     await markTechnicalMode(renderer, false, 'mark-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'mark-ordinary-library');
@@ -547,9 +560,9 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
         await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click();return true; })()`, 'dispatch-chooser-open-sheet');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] .dispatch-chooser select')?.options.length>0`, 'dispatch-chooser-models-ready');
-        await assertRenderer(renderer, `(() => { const chooser=document.querySelector('dialog.review-sheet .dispatch-chooser');chooser.querySelector('summary').click();const panel=chooser.querySelector('.dispatch-chooser-panel'),bounds=panel.getBoundingClientRect();if(!chooser.open||bounds.left<0||bounds.right>innerWidth||bounds.top<0||bounds.bottom>innerHeight)return false;const models=chooser.querySelector('select');models.selectedIndex=models.options.length-1;window.__j05ChoiceLabel=models.selectedOptions[0].textContent.replace(/^★ /u,'');models.dispatchEvent(new Event('change',{bubbles:true}));return true; })()`, 'dispatch-chooser-select-ready-model');
-        await waitFor(renderer, `document.querySelector('dialog.review-sheet .dispatch-chooser summary')?.textContent.includes(window.__j05ChoiceLabel) && document.querySelector('dialog.review-sheet .review-preparation-progress')?.hidden===true`, 'dispatch-chooser-choice-retained');
-        await assertRenderer(renderer, `(() => { const chooser=document.querySelector('dialog.review-sheet .dispatch-chooser'),effort=chooser.querySelectorAll('select')[1];if(!effort.closest('label').hidden&&effort.options.length>1){effort.selectedIndex=effort.options.length-1;const level=effort.value;effort.dispatchEvent(new Event('change',{bubbles:true}));if(!chooser.querySelector('summary').textContent.endsWith('@'+level+' ▾'))return false;}chooser.querySelector('button').click();return true; })()`, 'dispatch-chooser-effort-and-reset');
+        const chosenLabel = await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer');
+        requireJourney(chosenLabel.startsWith('模型 '), 'dispatch-chooser-choice-retained');
+        await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-reset', { reset: true });
         await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-preparation-progress')?.hidden===true`, 'dispatch-chooser-reset-ready');
         requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles)===window.__j05RolesBefore)`), 'dispatch-chooser-keeps-role-defaults');
         await assertRenderer(renderer, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click();return true; })()`, 'dispatch-chooser-close-sheet');
@@ -1202,6 +1215,10 @@ async function main() {
     await settled(renderer, 'revision-pending-settled');
 
     at('ai-locks');
+    // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
+    // is still refused before execution, so this stage sends no model request.
+    fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
+    requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
     // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
     // offers 解锁; 就选中部分让 AI 修改… on only locked words is refused before any model is asked; the badge unlocks it again.
     const lockBlock = await renderer.evaluate(`(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && node.dataset.blockId!==window.__j05RevBlock && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return null; window.__j05LockOriginal=window.__j05.text(block.dataset.blockId); return block.dataset.blockId; })()`);
@@ -1213,6 +1230,15 @@ async function main() {
     await assertRenderer(renderer, `window.__j05.item('ai-unlock-selection')?.disabled===false && window.__j05.item('ai-lock-selection')===null && window.__j05.item('scoped-ai-edit')?.disabled===false`, 'lock-menu-offers-unlock');
     await chooseMenuItem(renderer, 'scoped-ai-edit', 'scoped-edit-choose');
     await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true && document.activeElement===document.querySelector('[data-scoped-ai-edit="instruction"]')`, 'scoped-edit-composer');
+    await waitFor(renderer, `!document.querySelector('[data-scoped-ai-edit="composer"] .dispatch-chooser summary')?.textContent.includes('加载中')`, 'scoped-choice-ready');
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        at(width===1280 ? 'scoped-dispatch-wide' : 'scoped-dispatch-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(async () => {const form=document.querySelector('[data-scoped-ai-edit="composer"]');form.scrollIntoView({block:'nearest'});await new Promise(resolve=>requestAnimationFrame(resolve));const summary=form.querySelector('.dispatch-chooser summary');summary.focus();const button=form.querySelector('[data-scoped-ai-edit="submit"]'),box=button.getBoundingClientRect();return document.activeElement===summary && summary.textContent.startsWith('模型 ') && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight && form.scrollWidth<=form.clientWidth;})()`, 'scoped-launch-controls-reachable');
+        await chooseDispatch(renderer, waitFor, '[data-scoped-ai-edit="composer"] .dispatch-chooser', 'scoped-dispatch-pointer');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value='把这段改短一点。'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
     await waitFor(renderer, `window.__j05.status().includes('所选的段落都已锁定，AI 不会修改它们；先解锁再试。') && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal`, 'scoped-edit-locked-refused', 30_000);
     await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-scoped-ai-edit="cancel"]'); if(cancel instanceof HTMLButtonElement) cancel.click(); return document.querySelector('[data-scoped-ai-edit="composer"]')===null; })()`, 'scoped-edit-closed');

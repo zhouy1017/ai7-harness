@@ -2,10 +2,52 @@
  * Missing fields inherit the role default; `off` explicitly omits the effort control on the wire.
  * Effort identifiers are vendor data, not a model/level admission list.
  */
+import type { PlanEditsProjection } from './protocol/analysis-plan.js';
+
 export interface RuntimeExecutionConfig {
   readonly modelConnectionId?: string;
   readonly modelId?: string;
   readonly reasoningEffort?: string;
+}
+
+export const DISPATCH_TASK_KINDS = ['review-run', 'baseline-analysis', 'custom-analysis', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'scoped-ai-edit'] as const;
+export type DispatchTaskKind = (typeof DISPATCH_TASK_KINDS)[number];
+
+/** Launch operation → local preference kind, shared by ordinary and cross-Book starts. */
+export const LEDGER_TASK_LAUNCH_KINDS = {
+  launchBaselineAnalysis: 'baseline-analysis', launchCustomAnalysis: 'custom-analysis', launchWritingTask: 'writing',
+  launchInitialEvaluation: 'initial-evaluation', launchReadersReport: 'readers-report', launchEvaluationRewrite: 'evaluation-rewrite',
+} as const satisfies Readonly<Record<string, DispatchTaskKind>>;
+export type LedgerTaskLaunchOperation = keyof typeof LEDGER_TASK_LAUNCH_KINDS;
+
+export interface TaskExecutionLaunchInput {
+  readonly clientCommandId: string;
+  readonly executionConfig?: RuntimeExecutionConfig;
+  /** A remembered catalogue choice may fall back; an explicit choice keeps upstream validation. */
+  readonly rememberedChoice?: boolean;
+}
+
+export interface LedgerTaskExecutionLaunchInput extends TaskExecutionLaunchInput {
+  /** Existing optional budget/retry controls, frozen in the first plan rather than a later plan revision. */
+  readonly planEdits?: PlanEditsProjection;
+  readonly startWhen?: 'now' | 'idle' | 'when-online';
+}
+
+export interface TaskExecutionLaunchResult {
+  readonly taskIntentId: string;
+  readonly runRecordId: string;
+  readonly launchNotice?: string;
+  readonly waitingForNetwork?: boolean;
+}
+
+export interface TaskLaunchPreviewProjection {
+  readonly steps: ReadonlyArray<string>;
+  readonly scope: string;
+  readonly units: number;
+  readonly reference: ReadonlyArray<string>;
+  readonly send: string;
+  readonly usage: string;
+  readonly adaptations: ReadonlyArray<string>;
 }
 
 export function validReasoningEffort(value: unknown): value is string {

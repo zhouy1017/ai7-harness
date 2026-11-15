@@ -1,3 +1,4 @@
+import { driveLaunchedLedgerRun } from './analysis/execution.js';
 import { prepareQuickTask } from './quick-tasks.js';
 import { controlOverviewTasks } from './task-overview.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
@@ -465,6 +466,29 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectBookFindings(request.input.bookId, request.input.offset) };
     case 'inspectParagraphAnalysis':
       return { id: request.id, ok: true, op: request.op, result: store.inspectParagraphAnalysis(request.input.bookId, request.input.manuscriptId, request.input.blockId, request.input.radius) };
+    case 'previewTaskLaunch':
+      return { id: request.id, ok: true, op: request.op, result: store.previewTaskLaunch(request.input, launchPolicy) };
+    case 'launchBaselineAnalysis':
+    case 'launchCustomAnalysis':
+    case 'launchWritingTask':
+    case 'launchInitialEvaluation':
+    case 'launchReadersReport':
+    case 'launchEvaluationRewrite': {
+      const startWhen = connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now';
+      const { ledger, repeated: _repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy, startWhen)
+        : request.op === 'launchCustomAnalysis' ? store.launchCustomAnalysis(request.input, launchPolicy, startWhen)
+        : request.op === 'launchWritingTask' ? store.launchWritingTask(request.input, launchPolicy, startWhen)
+        : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy, startWhen)
+        : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy, startWhen)
+        : store.launchEvaluationRewrite(request.input, launchPolicy, startWhen);
+      try { driveLaunchedLedgerRun(analysisExecution, { ...result, ledger }); }
+      catch (error) {
+        const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+        throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+      }
+      if (ledger.currentRunState(result.runRecordId) === 'awaiting-connectivity') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,
@@ -1153,7 +1177,8 @@ async function dispatch(
       driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
       if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
-        connectivity: connectivity.planConnectivity.reading() } };
+        connectivity: connectivity.planConnectivity.reading(),
+        ...(launched.projection.launchNotice === undefined ? {} : { launchNotice: launched.projection.launchNotice }) } };
     }
     case 'prepareReviewRun':
       return {
@@ -2339,8 +2364,8 @@ async function run(): Promise<void> {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
       }
     }
-    // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
-    // itself after a restart (ADR 0034), and the editor starts them again when they choose. A Run the editor had answered before
+    // Legacy starts the governor had not admitted were blocked with why by reconciliation (ADR 0034). Committed one-step
+    // launches retain the recorded start decision and restore their admission queue below (ADR 0104). A Run answered before
     // AI7 closed, and that was not yet taken on, is left 可续行 with its answer the same way (Issue #767).
     // Every ledger kind now keeps its continuation checkpoint; reconciliation leaves it for an explicit 续行.
     store.reconcileStoppedInitialEvaluationRuns();
@@ -2375,6 +2400,12 @@ async function run(): Promise<void> {
       }
       catch { /* The drawer keeps offering cancellation when the frozen contract cannot be read. */ }
     }
+    try {
+      for (const launched of store.pendingLaunchedLedgerRuns()) {
+        try { driveLaunchedLedgerRun(analysisExecution, launched); }
+        catch { /* Admission records its refusal; the task's ordinary controls remain available. */ }
+      }
+    } catch { /* An unreadable retained contract must not prevent the service and its task controls from opening. */ }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —
@@ -2559,7 +2590,7 @@ async function run(): Promise<void> {
             foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
           throw new Error('E2E interruption before foreground boundary response.');
         }
-        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) serving.background.nudge();
+        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare') || request.op.startsWith('launch'))) serving.background.nudge();
         return response;
       },
       afterResponse: (request, response) => {

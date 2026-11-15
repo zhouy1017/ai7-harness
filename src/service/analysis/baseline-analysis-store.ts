@@ -1,3 +1,4 @@
+import { launchedRunModelLabels } from '../editorial-mark-source.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
 import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
@@ -1208,6 +1209,7 @@ export class BaselineAnalysisStore {
         const state = asString(row.last_state) as BaselineAnalysisRunState;
         tasks.push({
           ...base,
+          ...launchedRunModelLabels(this.#db, runRecordId),
           run: {
             runRecordId,
             state,
@@ -1259,6 +1261,7 @@ export class BaselineAnalysisStore {
         bookTitle: asString(row.book_title),
         taskIntentId: asString(row.task_intent_id),
         mode: asString(row.mode) as BaselineAnalysisTaskMode,
+        ...launchedRunModelLabels(this.#db, asString(row.run_record_id)),
         outcomeId: asString(row.outcome_id),
         runRecordId: asString(row.run_record_id),
         classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
@@ -1328,7 +1331,7 @@ export class BaselineAnalysisStore {
       resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       safeNextAction: asString(record.safeNextAction),
       stop,
-      report: report === null ? null : runReportProjection(report),
+      report: report === null ? null : { ...runReportProjection(report), ...launchedRunModelLabels(this.#db, report.runRecordId, true) },
       reportAbsentReason: report === null ? PRE_RUN_REPORT_REASON : null,
     };
   }
@@ -3098,6 +3101,37 @@ export class BaselineAnalysisStore {
 
   // ---- preparation -----------------------------------------------------------------------------
 
+  /** Build the same frozen components in memory, then let the kind's editorial plan owner describe them. */
+  previewLaunch(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, edits: PlanEditsProjection | undefined,
+    describe: (projection: AnalysisProjection, blocks: ReadonlyArray<ManifestBlockInput>) => never): never {
+    this.#requireDeniedPolicy(input.launchPolicy);
+    requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
+    const existing = this.inspect(input.bookId);
+    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
+    const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
+    const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    const mode = update?.mode ?? this.#definition.initialMode, modeDefinition = this.#definition.mode(mode);
+    requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
+    const predecessor = modeDefinition.initial ? null : existing.resultSetRevision;
+    requireAnalysis(modeDefinition.initial || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
+    const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, blocks.length) : null;
+    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] });
+    requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
+    const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
+    const instant = new Date().toISOString(), taskIntentId = randomUUID();
+    const record = { bookId: input.bookId, taskIntentId, mode, goal: input.goal, createdAt: instant,
+      expectedOutcome: this.#definition.expectedOutcome, selectedRange, predecessorRevisionId: predecessor?.revisionId ?? null,
+      ...(selected === null ? {} : { procedure: selected }) };
+    const intent: IntentFacts = { ...record, record, redoOfRunRecordId: null, preparedByEnrollmentVersionId: null,
+      backgroundRunBudgetCeiling: null, intentDraftVersionId: null, intentDraftParagraphs: null };
+    this.#writePlanVersion({ policy: input.launchPolicy, intent, checkpoint: { bookId: input.bookId, manuscriptId: binding.manuscriptId,
+      branchId: head.branchId, revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel,
+      revisionDigest: head.currentWorkingDigest, journalSequence: head.currentJournalSequence, createdForDirtyJournal: false },
+      checkpointDigest: canonicalRecord(record).digest, ordinal: 1, selectedRange, planRevisionId: null, instant, edits: canonical,
+      preview: { blocks, consume: projection => describe(projection, blocks) } });
+    throw new AnalysisError('ANALYSIS_PREVIEW_INVALID', '这次计划暂时无法读取。');
+  }
+
   forkForLaunch(launch: LaunchBinding): BaselineAnalysisStore {
     const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
     // External collaborators belong to the store, while preparation work and read caches belong to this view.
@@ -3153,22 +3187,43 @@ export class BaselineAnalysisStore {
     const persist = (checkpoint: ManuscriptCheckpointBinding): void => {
       this.#insertIntent(intent);
       const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits);
-      requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效。');
+      requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
+      requireAnalysis(edits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
+        'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
+      const assuranceLevel = planEditAssuranceLevel(launchEdits ?? this.#redoPlanEdits(this.#intentFacts(this.#latestIntentRow(input.bookId)!)));
+      if (input.factualDecision !== undefined) requireAnalysis(assuranceLevel === input.factualDecision.level || assuranceLevel === 'strict',
+        'ANALYSIS_PLAN_EDIT_INVALID', '补充核查不能降低编辑决定要求的核查级别。');
+      requireAnalysis(!levelBelowPolicyMinimum(assuranceLevel), 'ANALYSIS_PLAN_EDIT_INVALID', FACTUAL_POLICY_MINIMUM_REASON);
+      requireAnalysis(this.#definition.assurance !== null || (launchEdits?.removedSteps.length ?? 0) === 0,
+        'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (launchEdits?.askFirstAdaptations ?? []).length === 0,
+        'ANALYSIS_PLAN_EDIT_INVALID', '这项任务暂不能把安全重试改成先问你。');
       this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy, launchEdits);
       const plan = this.inspect(input.bookId);
-      requireAnalysis(plan.planEnvelope?.dispatchAllowed && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
+      requireAnalysis(plan.planEnvelope !== null && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
       if (deferred) return;
       const authorizationId = randomUUID(), runRecordId = randomUUID(), instant = new Date().toISOString();
-      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen: 'now',
+      const startWhen = input.launchStartWhen ?? 'now';
+      // Connectivity Wait uses the existing immediate authority and a waiting Run state, as the retained start does.
+      const authorityStartWhen = startWhen === 'idle' ? 'idle' : 'now';
+      const authorityKind = plan.planEnvelope.dispatchAllowed ? 'standard-direct-dispatch' : 'record-only-no-dispatch';
+      requireAnalysis(startWhen === 'now' || plan.planEnvelope.dispatchAllowed, 'ANALYSIS_START_WHEN_ONLINE_INVALID', '这份计划没有可执行的路由，不能等待网络或空闲时开始。');
+      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen: authorityStartWhen,
         planEnvelopeDigest: plan.planEnvelope.digest, planVersionId: plan.planVersion.planVersionId, planVersionOrdinal: 1,
-        taskIntentId, authority: 'standard-direct-dispatch', launchSnapshotId: snapshotId });
+        taskIntentId, authority: authorityKind, launchSnapshotId: snapshotId });
       const procedure = readProcedurePlanPin(this.#db, plan.planEnvelope.digest);
       const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant, ...(procedure === null ? {} : { procedure }) });
       this.#db.prepare('INSERT INTO analysis_run_authorizations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', 'standard-direct-dispatch', instant, authority.json, authority.digest, 'now');
+        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', authorityKind, instant, authority.json, authority.digest, authorityStartWhen);
       this.#db.prepare('INSERT INTO analysis_run_records VALUES (?, ?, ?, ?, ?, ?)')
         .run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
       this.#insertRunState(runRecordId, 1, 'authorized', { detail: '任务已启动，等待运行名额。' }, instant);
+      if (!plan.planEnvelope.dispatchAllowed) {
+        const reasons = blockedReasons(this.#liveReading());
+        this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);
+      } else if (startWhen === 'when-online') {
+        this.#insertRunState(runRecordId, 2, 'awaiting-connectivity', { detail: CONNECTIVITY_WAIT_DETAIL }, instant);
+      }
     };
     const work = this.#checkpointOwner.createManuscriptCheckpointWork(head.manuscriptId, head.branchId, TASK_INPUT_CHECKPOINT_PURPOSE);
     if (work.workId === null) {
@@ -3544,6 +3599,7 @@ export class BaselineAnalysisStore {
      * material input, so an edit leaves the provider component as it froze. Absent, the connection is read now.
      */
     credentialReadiness?: ModelCredentialOperationState;
+    preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
     if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
@@ -3551,8 +3607,8 @@ export class BaselineAnalysisStore {
     'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于标准前台全文首次审阅。');
     const taskIntentId = intent.taskIntentId;
     // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
-    const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
-    const blocks = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
+    const facts = input.preview === undefined ? this.#binding(checkpoint.bookId, checkpoint, ordinal === 1) : this.#binding(checkpoint.bookId);
+    const blocks = input.preview?.blocks ?? this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
     const factualRange = this.#definition.kind === FACTUAL_REVIEW_KIND && input.selectedRange !== null;
     const priorManifest = !factualRange || intent.predecessorRevisionId === null ? null
       : this.#planPredecessor(this.#revisionRowById(intent.predecessorRevisionId)).manifest;
@@ -3827,6 +3883,29 @@ export class BaselineAnalysisStore {
       predecessorRevisionDigest: reusePlan.predecessor?.digest ?? null,
       reusePlanDigest: records['reuse-plan']!.digest,
     });
+    if (input.preview !== undefined) {
+      const components = Object.fromEntries(Object.entries(records).map(([key, value]) => [key, parseCanonicalJson(value.json)]));
+      components['plan-envelope'] = parseCanonicalJson(envelope.json);
+      const version: BaselineAnalysisPlanVersionProjection = { planVersionId: taskIntentId, ordinal, planEnvelopeDigest: envelope.digest,
+        planRevisionId: null, createdAt: instant, edits, state: 'current' };
+      const { compositionVersion: _compositionVersion, ...projectedEnvelope } = envelopeBase;
+      input.preview.consume(this.#asProjection({ ...this.#shape(checkpoint.bookId), state: 'prepared', stateLabel: '计划就绪',
+        taskIntent: { taskIntentId, goal: intent.goal, expectedOutcome: intent.expectedOutcome, createdAt: instant,
+          mode: intent.mode, modeLabel: this.#recordedMode(intent.mode).label, redoOf: null },
+        checkpoint: { ...checkpoint, purpose: TASK_INPUT_CHECKPOINT_PURPOSE },
+        manuscriptPin: components['manuscript-pin'] as BaselineAnalysisProjection['manuscriptPin'],
+        artifactPin: components['artifact-pin'] as BaselineAnalysisProjection['artifactPin'],
+        runSourceScope: components['run-source-scope'] as BaselineAnalysisProjection['runSourceScope'],
+        coverageManifest: manifest, providerResolutionPlan: components['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'],
+        executionPlan: components['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
+        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null,
+          providerStatus: envelopeBase.providerStatus as NonNullable<BaselineAnalysisProjection['planEnvelope']>['providerStatus'],
+          boundary: envelopeBase.boundary, ...(composition.version === 1 ? {} : { compositionVersion: composition.version }) },
+        planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],
+        update: this.#carriesPlan(intent.mode) ? this.#updateProjection(intent, reusePlan, records['reuse-plan']?.digest ?? null,
+          this.inspect(checkpoint.bookId).resultSetRevision as BaselineAnalysisResultSetRevisionProjection | null) : null,
+        actions: { canPrepare: false, canAuthorize: dispatchAllowed, canReconfirmPlan: false } }));
+    }
     const insert = this.#db.prepare(
       'INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     );
@@ -3864,7 +3943,9 @@ export class BaselineAnalysisStore {
     planEnvelopeDigest: string,
     start: 'now' | 'when-online' | 'idle' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
+    launchSnapshotId?: string,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+    requireAnalysis(launchSnapshotId === undefined || UUID_PATTERN.test(launchSnapshotId), 'ANALYSIS_RECORD_INVALID', '任务启动快照引用无效。');
     if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
@@ -3922,6 +4003,7 @@ export class BaselineAnalysisStore {
       planVersionOrdinal: prepared.planVersion.ordinal,
       taskIntentId,
       authority,
+      ...(launchSnapshotId === undefined ? {} : { launchSnapshotId }),
       ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
       ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
@@ -4384,7 +4466,7 @@ export class BaselineAnalysisStore {
         // stays recorded, and the Run waits for the editor's 续行 like every Run a restart left, so nothing is sent by itself.
         this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, stopReason: 'shutdown', reconciled: true });
         settled += 1;
-      } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true) {
+      } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true && !this.#launchedRun(runRecordId)) {
         // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its
         // authorization and its admission — never began: blocked with why, it waits for the editor, not for a place.
         this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: RECONCILED_QUEUED_DETAIL, reasons: [RECONCILED_QUEUED_DETAIL], reconciled: true });
@@ -4392,6 +4474,16 @@ export class BaselineAnalysisStore {
       }
     }
     return { settled, cancelling };
+  }
+
+  #launchedRun(runRecordId: string): boolean {
+    return this.#db.prepare(`SELECT 1 FROM analysis_run_records r JOIN analysis_run_authorizations a USING(authorization_id)
+      WHERE r.run_record_id = ? AND json_type(a.canonical_json, '$.launchSnapshotId') = 'text'`).get(runRecordId) !== undefined;
+  }
+
+  /** A recorded shutdown can continue a repeated launch; an editor's pause stays paused. */
+  launchWasInterruptedByRestart(runRecordId: string): boolean {
+    return this.#launchedRun(runRecordId) && this.wasInterruptedByRestart(runRecordId);
   }
 
   /**

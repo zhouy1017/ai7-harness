@@ -1,3 +1,5 @@
+import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../shared/runtime-execution-config.js';
+import type { DispatchTaskKind, RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { registerProductionAndPackageHandlers, registerDeliverablesHandlers } from './deliverables-handlers.js';
 import { registerReviewHandlers } from './review-handlers.js';
 import { registerReviewGuidelineVersionHandlers, registerKnowledgeBaseHandlers } from './knowledge-base-handlers.js';
@@ -1899,6 +1901,9 @@ export function registerRendererHandlers(
       throw error;
     }
   };
+  const rememberDispatchChoice = (kind: DispatchTaskKind, choice: RuntimeExecutionConfig | undefined, notice?: string): void => {
+    preferences.save({ key: 'model.dispatchChoices', value: { ...preferences.read().values['model.dispatchChoices'], [kind]: notice === undefined ? choice ?? {} : {} } });
+  };
   ipcMain.handle(PREFERENCE_IPC_CHANNELS.getPreferences, (event) =>
     envelope(() => {
       requireSender(event);
@@ -2353,6 +2358,27 @@ export function registerRendererHandlers(
       return result;
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.previewTaskLaunch, (event, input: Omit<ServiceOperationMap['previewTaskLaunch']['input'], 'bookId'>) => envelope(async () => {
+    const owned = requireSender(event); requireAuthority();
+    const route = requireCurrentBookRoute(owned), generation = owned.routeGeneration;
+    const result = await service.call('previewTaskLaunch', { ...input, bookId: route.bookId });
+    requireCurrentRouteGeneration(owned, generation);
+    return result;
+  }));
+  for (const operation of Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[]) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: Omit<ServiceOperationMap[typeof operation]['input'], 'bookId'>) => envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const generation = owned.routeGeneration;
+        const result = await service.call(operation, { ...input, bookId: route.bookId });
+        rememberDispatchChoice(LEDGER_TASK_LAUNCH_KINDS[operation], input.executionConfig, result.launchNotice);
+        requireCurrentRouteGeneration(owned, generation);
+        return result;
+      });
+    }));
+  }
   ipcMain.handle(
     IPC_CHANNELS.prepareBaselineAnalysis,
     (event, input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'bookId'>) =>
@@ -2821,7 +2847,7 @@ export function registerRendererHandlers(
   registerDataVersionHandler({ requireSender, requireAuthority, service });
   registerLearningDecisionHandlers({ requireSender, requireAuthority, service, serializeEffect });
   registerReviewGuidelineVersionHandlers({ chooseGuidelineFile, requireSender, serializeEffect, requireAuthority, service });
-  registerReviewHandlers({ requireSender, serializeEffect, requireAuthority, requireCurrentBookRoute, service, requireCurrentRouteReadEpoch, rememberEditorResource, requireCurrentRouteGeneration, requireManuscriptCapability });
+  registerReviewHandlers({ rememberDispatchChoice, requireSender, serializeEffect, requireAuthority, requireCurrentBookRoute, service, requireCurrentRouteReadEpoch, rememberEditorResource, requireCurrentRouteGeneration, requireManuscriptCapability });
   registerDeliverablesHandlers({ requireSender, requireAuthority, requireCurrentBookRoute, service, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration });
 
   // ① 任务面 (Issue #423, S77a): a read of the route's Book's Tasks, bound to its read epoch like every route read.
@@ -3125,9 +3151,16 @@ export function registerRendererHandlers(
         const result = await service.call('startScopedAiEdit', { bookId: route.bookId, manuscriptId: input.manuscriptId, branchId: input.branchId,
           baseRevisionId: input.baseRevisionId, expectedJournalSequence: input.expectedJournalSequence, expectedLocksDigest: input.expectedLocksDigest,
           instruction: input.instruction, scope: input.scope, ...(input.clientCommandId === undefined ? {} : { clientCommandId: input.clientCommandId }),
-          ...(input.executionConfig === undefined ? {} : { executionConfig: input.executionConfig }) });
-        requireCurrentRouteGeneration(owned, routeGeneration);
-        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
+          ...(input.executionConfig === undefined ? {} : { executionConfig: input.executionConfig }),
+          ...(input.rememberedChoice === undefined ? {} : { rememberedChoice: input.rememberedChoice }) });
+        try {
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
+          if (input.executionConfig !== undefined) rememberDispatchChoice('scoped-ai-edit', input.executionConfig, result.launchNotice);
+        } catch (error) {
+          // The command already committed. A retry must replay it, even if route validation or preference storage failed.
+          throw new ServiceCallError('SERVICE_RESPONSE_COMMITTED', error instanceof Error ? error.message : '任务已经启动，请重试读取这次任务。');
+        }
         return result;
       });
     }),
@@ -3146,7 +3179,7 @@ export function registerRendererHandlers(
       return result;
     }),
   );
-  registerProductionAndPackageHandlers({ chooseExportFolder, choosePackageArchiveFile, requireSender, requireAuthority, requireCurrentBookRoute, service, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration, requireManuscriptCapability });
+  registerProductionAndPackageHandlers({ rememberDispatchChoice, chooseExportFolder, choosePackageArchiveFile, requireSender, requireAuthority, requireCurrentBookRoute, service, requireCurrentRouteReadEpoch, serializeEffect, requireCurrentRouteGeneration, requireManuscriptCapability });
 
   // ④ 导出 (Issue #413, plan slice S64) belongs to 交付物's Book the same way: the renderer never names a Book
   // and never a path. The review may save a revision, so it is serialized with every other effect; the

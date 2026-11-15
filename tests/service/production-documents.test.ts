@@ -147,7 +147,7 @@ function switcherSurface(store: EditorialStore, book: Book, pickerPath?: string)
   };
   const surface = mountManuscriptSwitcher({ bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountManuscriptSwitcher>[0]['api'],
     currentDocumentId: null, setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败',
-    awaitServiceJob: async (job) => job, openPrimary: async () => {}, openDocument: opened, openWritingPlan: () => {} });
+    awaitServiceJob: async (job) => job, openPrimary: async () => {}, openDocument: opened, openLaunch: vi.fn(), openWritingPlan: () => {} });
   root.append(surface.element);
   /** 新建 / 导入衍生稿件 → 导入文件 → 创建并打开, the 稿件题目 left as offered. */
   const importFile = async (): Promise<void> => {

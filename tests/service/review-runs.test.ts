@@ -2878,6 +2878,86 @@ it('transmits a non-default channel and model with effort and stamps its card, r
 });
 
 
+it('reconnects an offline ordinary review with every category on its launched model after defaults change (#1455)', async () => {
+  const session = await openLayeredSelection();
+  try {
+    const book = await importBook(session), defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+    const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
+    const launched = session.store.launchReviewRun(input, launchPolicy, 'when-online');
+    expect(launched.projection.run!.state).toBe('waiting');
+    const repeated = session.store.launchReviewRun(input, launchPolicy);
+    expect(repeated).toMatchObject({ repeated: true, projection: { run: { reviewRunId: launched.projection.run!.reviewRunId, state: 'waiting' } } });
+    await driveLaunchedReviewRun(session.driver, repeated);
+    expect(eventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
+    expect(session.capture!.wireRequests).toHaveLength(0);
+    session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    const changedDefault = session.store.getConfiguredModelRoleBinding('main-editorial');
+    const waiting = session.store.waitingTaskRuns(book.bookId).find(run=>run.kind==='review-run')!;
+    expect(session.store.taskPreflightDrift(waiting)).toEqual([]);
+    let driven = Promise.resolve();
+    session.store.admitWaitingReviewRun(waiting.ref, () => { driven = session.driver.drive(waiting.ref); });
+    await driven;
+    const run = session.store.generateReviewReport(book.bookId, waiting.ref).run!;
+    expect(run.state).toBe('settled');
+    expect(run.modelLabel).toBe('account-future-model@high');
+    expect(run.report!.record.run.modelLabel).toBe(run.modelLabel);
+    for (const definition of [TYPOS_AND_USAGE, STYLE_AND_FORMAT]) {
+      const category = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(definition));
+      expect(category.providerResolutionPlan!.executionRoute).toMatchObject({ model: 'account-future-model', reasoningEffort: 'high' });
+      expect(category.taskOutcome!.report!.modelLabel).toBe(run.modelLabel);
+    }
+    expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+    expect(session.capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+    expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(changedDefault);
+  } finally { await close(session); }
+});
+
+it('cancels an offline ordinary review before any category starts and immediately relaunches them (#1455)', async () => {
+  const session = await openLayeredSelection();
+  try {
+    const book = await importBook(session);
+    const input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
+    const waiting = session.store.launchReviewRun(input, launchPolicy, 'when-online').projection.run!;
+    session.store.cancelWaitingTask({ bookId: book.bookId, kind: 'review-run', ref: waiting.reviewRunId });
+    const cancelled = workspace(session, book, waiting.reviewRunId).run!;
+    expect(cancelled.state).toBe('cancelled');
+    expect(cancelled.categories.map(category=>category.state)).toEqual(['refused','refused']);
+    expect(session.capture!.wireRequests).toHaveLength(0);
+    const next = session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy);
+    await driveLaunchedReviewRun(session.driver, next);
+    expect(workspace(session, book, next.projection.run!.reviewRunId).run!.state).toBe('settled');
+  } finally { await close(session); }
+});
+
+it('continues an ordinary launched review after its running ledger view is evicted from the bounded cache (#1455)', async () => {
+  const session = await openLayeredSelection();
+  const gated = new GatedOwner(session.owner, 2), driver = new ReviewRunDriver(session.store.reviewRunDriveSteps, gated);
+  try {
+    const book = await importBook(session);
+    const run = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, STYLE], scope: WHOLE,
+      executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } }, launchPolicy).projection.run!;
+    const driving = driver.drive(run.reviewRunId); await gated.reached;
+    for (let index = 0; index < 33; index += 1) {
+      const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
+      await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
+      const launched = session.store.launchReviewRun({ bookId: other.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
+      session.store.inspectReviewWorkspace(other.bookId, launched.projection.run!.reviewRunId);
+    }
+    const restored = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+    expect(restored.state).toBe('running'); expect(restored.modelLabel).toBe('account-future-model@high');
+    const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
+    session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    gated.release(); await driving;
+    const settled = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!;
+    expect(settled.state).toBe('settled'); expect(settled.modelLabel).toBe('account-future-model@high');
+    expect(settled.categories.every(category=>category.state==='settled')).toBe(true);
+    expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
+    expect(session.capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
+  } finally { gated.release(); await close(session); }
+});
+
 it('replays a committed launch after restart and drives it once without a second send (#1455)', async () => {
   let book!: Book;
   const clientCommandId = randomUUID();
@@ -2942,15 +3022,17 @@ it('replays a shutdown-interrupted ordinary review without resending its ended c
   } finally { await close(second); }
 });
 
-it('launches historical model-free baseline leads without a credential (#1455)', async () => {
+it('launches historical model-free baseline leads offline without a credential or waiting candidate (#1455)', async () => {
   // Explicitly reconstruct the retained v1 category owner; current v2 plot review remains model-backed.
   const session = await open('sample1-review-cross-chapter-authored', undefined, 1);
   try {
     const book = await importBook(session); await runBaseline(session, book);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);
     session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', live: null, policy });
-    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [PLOT], scope: WHOLE }, policy);
+    session.store.waitingTaskRuns(null);
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [PLOT], scope: WHOLE }, policy, 'when-online');
     expect(launched.projection.run!.categories[0]!.taskIntentId).toBeNull();
+    expect(session.store.waitingTaskRuns(book.bookId)).toEqual([]);
     await driveLaunchedReviewRun(session.driver, launched);
     expect(workspace(session, book, launched.projection.run!.reviewRunId).run!.state).toBe('settled');
   } finally { await close(session); }

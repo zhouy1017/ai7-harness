@@ -405,6 +405,7 @@ export class FastRoleRequests {
     const scopedStore = store as ScopedEditStore;
     let executionOwner = this.#owner;
     let captured: ReturnType<typeof prepareScopedEdit> | null = null;
+    let launchNotice: string | undefined;
     if (store.captureScopedAiEditLaunch !== undefined && (input.clientCommandId !== undefined || input.executionConfig !== undefined)) {
       const launched = store.captureScopedAiEditLaunch({ ...input, bookId, clientCommandId: input.clientCommandId ?? randomUUID() }, binding => {
         executionOwner = this.scopedOwner?.(binding) ?? this.#owner;
@@ -413,9 +414,10 @@ export class FastRoleRequests {
         return { runId: captured.requestId, manuscript: { manuscriptId: captured.manuscriptId, branchId: captured.branchId,
           revisionId: input.baseRevisionId, journalSequence: input.expectedJournalSequence, scope: input.scope, locksDigest: input.expectedLocksDigest, targets: captured.targets.map(({ blockId, blockDigest, fromGrapheme, toGrapheme }) => ({ blockId, blockDigest, fromGrapheme, toGrapheme })) } };
       });
+      launchNotice = launched.notice;
       if (launched.repeated) {
         const entry = this.#entries.get(launched.runId);
-        if (entry?.kind === 'scoped-edit') return entry.projection;
+        if (entry?.kind === 'scoped-edit') return { ...entry.projection, ...(launchNotice === undefined ? {} : { launchNotice }) };
         return scopedEditProjection({ bookId, requestId: launched.runId, manuscriptId: input.manuscriptId, branchId: input.branchId, totalBlocks: 0 },
           'failed', '这次修改请求已结束或中断；已应用的修改仍在稿件里。');
       }
@@ -427,7 +429,7 @@ export class FastRoleRequests {
       try { entry.projection = await finishScopedEdit(executionOwner, scopedStore, prepared); }
       finally { if (executionOwner !== this.#owner) executionOwner.dispose(); }
     }, (message) => { entry.projection = scopedEditProjection(prepared, 'failed', message); });
-    return entry.projection;
+    return { ...entry.projection, ...(launchNotice === undefined ? {} : { launchNotice }) };
   }
 
   /** A scoped AI edit of the Book, as it stands. */

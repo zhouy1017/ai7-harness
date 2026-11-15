@@ -288,6 +288,8 @@ export type BaselineAnalysisPrepareInput =
    */
   | {
     phase: 'start';
+    /** One-step launch options; retained preparation does not accept them. */
+    launchStartWhen?: 'now' | 'idle' | 'when-online';
     factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
     bookId: string;
     goal: AnalysisGoal;

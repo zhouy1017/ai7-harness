@@ -1,3 +1,5 @@
+import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -72,7 +74,6 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
-const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
@@ -108,7 +109,6 @@ const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorize
   'recordReviewFindingDisposition', 'generateReviewReport', 'inspectReviewFindingOfMark'];
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
-const ANALYSIS_DESTINATION_ACTIONS = ['打开稿件', '工作概览'];
 /** ②A's tabs in the specification's order (editor-surfaces §3); 自定义 since Issue #922 (slice 7f; ADR 0090 item 4). */
 const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '自定义', '历史与更新'];
 /** The four sentences' headings in the order V2-UX-ANALYSIS-025 fixes. */
@@ -414,11 +414,10 @@ async function openAnalysisDestination(renderer, name) {
 }
 
 /**
- * Synchronized delta (#406): a mode's own button opens the two ways to begin. 先看计划 prepares the Task
- * and shows its plan; the quick start is a Default Execution Rule's to give (S75), so until one exists
- * it is shown disabled with the reason, and no Run starts behind a plan nobody has seen.
+ * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
+ * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
-async function startUpdate(renderer, mode, label, name) {
+async function startUpdate(renderer, mode, label, name, launch = true) {
   // The three modes live under 历史与更新, so the editor goes there first, as they would.
   await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
   // The mode's start and 先看计划 stand on its block at once (Issue #1410 item 15): no button only unfolds them.
@@ -434,6 +433,9 @@ async function startUpdate(renderer, mode, label, name) {
     plan.click();
     return true;
   })()`, name);
+  if (!launch) return;
+  await launchTaskFromBar(renderer, waitFor, name);
+  await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', `${name}-read-full-plan`);
 }
 
 /**
@@ -584,18 +586,6 @@ async function pressEnter(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
 }
 
-/**
- * Start the prepared baseline Task from the drawer's authorization bar (Issue #420, S74a A2): the drawer
- * shows the Task the preparation opened it for, and the card's 查看计划并开始 opens it when it does not. One
- * activation of 开始任务 records the authorization and the Run and hands the Run to the execution owner, which admits it
- * to a place of its governor (Issue #49, S14).
- */
-async function startFromBar(renderer, name) {
-  const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
-  if (!showing) await reviewAction(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
-  await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start-click`);
-}
 
 /** Wait for the drawer to show one Task's plan in one state, then read it. */
 /**
@@ -638,12 +628,6 @@ function predecessorUnitsReading(plan) {
 
 /** The editor's words for the one adaptation class the analysis envelopes declare, and the three locked groups. */
 const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范围安全地再试一次';
-// The editable plan (Issue #419, S73): its two notes (`src/renderer/task-drawer-labels.ts`) and what a Run that
-// leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
-const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
-// Issue #422 (S76d): the move into 先问你 is offered, and the note says what it means for the Run.
-const PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
-const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
 async function clickSelector(renderer, selector, name) {
@@ -897,8 +881,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
  * Synchronized delta with Issue #420 (S74a): every Run starts from the drawer's bar, and once it settles the
  * same region of the bar reads `已完成` beside the way to the Run's surface — nothing that starts it again.
  */
-async function settleAuthorizedRun(renderer, name) {
-  await startFromBar(renderer, name);
+async function settleLaunchedRun(renderer, name) {
   await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, `${name}-settled`, 180_000);
   await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, `${name}-settled-state`);
   await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, `${name}-bar-settled`);
@@ -1270,11 +1253,12 @@ async function main() {
     at('coverage-manifest');
     cancellation.throwIfRequested();
     await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', 'prepare-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'prepared', 120_000);
+    await launchTaskFromBar(renderer, waitFor, 'baseline');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'prepared', 120_000);
     cancellation.throwIfRequested();
     const prepared = await readBaseline(renderer);
     const manifest = prepared?.coverageManifest;
-    requireJourney(prepared?.state === 'prepared' && prepared.bookId === imported.bookId && prepared.kind === 'baseline-manuscript-analysis' &&
+    requireJourney(prepared?.state === 'settled' && prepared.bookId === imported.bookId && prepared.kind === 'baseline-manuscript-analysis' &&
       prepared.contractVersion === 'ai7.baseline-manuscript-analysis/1' && UUID_PATTERN.test(prepared.taskIntent?.taskIntentId) &&
       prepared.taskIntent?.goal === TASK_GOAL && prepared.checkpoint?.revisionId === imported.revisionId &&
       prepared.checkpoint?.revisionLabel === 'r1' && prepared.checkpoint?.createdForDirtyJournal === false && prepared.checkpoint?.journalSequence === 0 &&
@@ -1309,24 +1293,24 @@ async function main() {
       prepared.planEnvelope?.dispatchAllowed === true && prepared.planEnvelope?.providerStatus === 'remote-denied-local-deterministic' &&
       DIGEST_PATTERN.test(prepared.planEnvelope?.digest) && prepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
       DIGEST_PATTERN.test(prepared.planEnvelope?.behaviorCompositionDigest) && prepared.planEnvelope?.compositionVersion === 2 &&
-      prepared.authorization === null && prepared.run === null && prepared.resultSetRevision === null && prepared.taskOutcome === null &&
-      prepared.actions?.canPrepare === false && prepared.actions?.canAuthorize === true,
+      prepared.authorization !== null && prepared.run !== null && prepared.resultSetRevision !== null && prepared.taskOutcome !== null &&
+      prepared.actions?.canPrepare === false && prepared.actions?.canAuthorize === false,
     'prepared-exact-envelope', { fixtureDigest, plan, executionPlan: prepared.executionPlan, planEnvelope: prepared.planEnvelope, actions: prepared.actions });
     // Synchronized delta with Issue #418 (S72 D4): ②A names the plan in one line. The eight manifest units,
     // the manifest digest, the fixture route and the policy reading the card used to list read in the Task
     // Drawer the preparation opened, asserted in the next stage. Synchronized delta with Issue #420 (S74a
     // A5): the start left the card for the drawer's bar, so the card's one action reads 查看计划并开始, and
     // the plan versions are its closed technical layer.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); const versions=card?.querySelector('details.analysis-plan-versions-technical'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]') && versions instanceof HTMLDetailsElement && (!versions.open || versions.hidden) && versions.querySelector('.analysis-plan-versions [data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null && ${AUTHORIZE_LABELED_BUTTONS}===0; })()`, 'prepared-preview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); const versions=card?.querySelector('details.analysis-plan-versions-technical'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]') && versions instanceof HTMLDetailsElement && (!versions.open || versions.hidden) && versions.querySelector('.analysis-plan-versions [data-plan-version-ordinal="1"][data-plan-version-state="bound"]')!==null && ${AUTHORIZE_LABELED_BUTTONS}===0; })()`, 'prepared-preview');
 
     at('analysis-plan-drawer');
     // The plan the preparation froze, in the drawer beside ②A: 精简 first, then 完整, whose 查看技术详情
     // holds each identity the card used to list, exactly as the plan froze it (Issue #418, S72 D5-D7).
     const bookName = 'J-04 sample1 基线稿件分析';
     const wholeCount = groupedCount(manifest.totalGraphemes);
-    const firstDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'ready', 'analysis-drawer-opened');
+    const firstDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-opened');
     requireJourney(firstDrawer?.hidden === false && firstDrawer.kind === 'baseline-analysis' && firstDrawer.version === '1' && firstDrawer.mode === 'compact' &&
-      firstDrawer.stored === null && firstDrawer.pill === '尚未开始' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
+      firstDrawer.stored === null && firstDrawer.pill === '已完成 · 1/8 个单元未读成' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
       JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
       firstDrawer.saved === null && firstDrawer.drift === null &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({
@@ -1357,28 +1341,17 @@ async function main() {
       firstTechnical['provider-processing'] === 'development-ci · v1 · 拒绝 · 0 次实时传输' &&
       firstTechnical['prompt-contract'] === PROMPT_CONTRACT_DIGEST && firstTechnical['plan-envelope'] === prepared.planEnvelope.digest &&
       firstTechnical['material-fields'] === PLAN_MATERIAL_FIELDS.join('、') &&
-      firstTechnical['plan-versions'] === `版本 1 · current · ${prepared.planEnvelope.digest}` &&
+      firstTechnical['plan-versions'] === `版本 1 · bound · ${prepared.planEnvelope.digest}` &&
       firstTechnical['not-do'] === prepared.namedNonEffects.join('；') &&
       firstTechnical['selected-range'] === undefined && firstTechnical['reuse-plan'] === undefined,
     'analysis-drawer-full-plan', firstFull);
 
-    at('analysis-bar-ready');
-    // Issue #420 (S74a): the drawer's footer is the authorization bar. The deterministic route sends nothing,
-    // so the credential this Book holds — `missing` since the model setup above — is not needed: 开始任务 is
-    // offered. The summary names the output; the version stays in drawer state, and no button says 授权.
-    requireJourney(missingConnection?.credentialOperationState === 'missing' && firstFull?.bar?.state === 'ready' && firstFull.bar.start === 'ready' &&
-      firstFull.bar.summary === '产出一份基线分析，不修改稿件。' &&
-      firstFull.bar.statement === BAR_STATEMENT && firstFull.bar.note === null && firstFull.bar.status === null && firstFull.bar.refusal === null &&
-      // Synchronized delta with Issue #419 (S73): 返回修改 opens the editing of a plan that takes edits.
-      barActions(firstFull) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
-      firstFull.bar.actions[1]?.reason === null, 'analysis-bar-ready', firstFull?.bar);
     await assertRenderer(renderer, `${AUTHORIZE_LABELED_BUTTONS}===0`, 'analysis-bar-no-authorize-label');
 
     at('authorize-dispatch');
     cancellation.throwIfRequested();
     // Synchronized delta with Issue #420 (S74a A2): one activation of the bar's 开始任务 records the
     // authorization and the Run and hands it to the execution owner's governor; ②A beside the drawer follows the Run.
-    await startFromBar(renderer, 'authorize');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'run-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'run-settled-state');
     cancellation.throwIfRequested();
@@ -1781,7 +1754,7 @@ async function main() {
     // accounting digest beside it is over the stable part alone — and the proof that the clocks are
     // out of it is that the reflection closed at all: the fixture entry was keyed by a digest minted
     // from a different Run, on a different host, whose wall times were not these.
-    const { reportDigest, ...reportBody } = report;
+    const { reportDigest, modelLabel: _modelLabel, ...reportBody } = report;
     const reportJson = canonicalJson(reportBody);
     requireJourney(DIGEST_PATTERN.test(reportDigest) && reportDigest === sha256Hex(reportJson) &&
       DIGEST_PATTERN.test(report.accountingDigest) && report.accountingDigest !== reportDigest &&
@@ -1889,7 +1862,7 @@ async function main() {
     // back byte for byte — its own digest included — after the product has been closed and reopened.
     const restartedReport = restarted.taskOutcome?.report;
     requireJourney(restartedReport !== undefined && restartedReport !== null &&
-      canonicalJson({ ...restartedReport, reportDigest: undefined }) === reportJson &&
+      canonicalJson({ ...restartedReport, reportDigest: undefined, modelLabel: undefined }) === reportJson && restartedReport.modelLabel === report.modelLabel &&
       restartedReport.reportDigest === reportDigest && restarted.taskOutcome?.reportAbsentReason === null,
       'restart-run-report-identical', { reportDigest: restartedReport?.reportDigest, expected: reportDigest });
     cancellation.throwIfRequested();
@@ -1966,18 +1939,18 @@ async function main() {
     at('sync-current-prepare');
     cancellation.throwIfRequested();
     await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'sync-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'sync-prepared', 120_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'sync-prepared', 120_000);
     const preparedSync = await readBaseline(renderer);
     const syncManifest = preparedSync?.coverageManifest;
     const syncExpected = deriveExpectedPlan(manifest, revision.units.map((unit) => unit.state), syncManifest, 'sync-current', null);
     const syncPlan = preparedSync?.update?.reusePlan;
-    requireJourney(preparedSync?.state === 'prepared' && preparedSync.taskIntent?.mode === 'sync-current' && preparedSync.taskIntent?.goal === SYNC_GOAL &&
+    requireJourney(preparedSync?.state === 'settled' && preparedSync.taskIntent?.mode === 'sync-current' && preparedSync.taskIntent?.goal === SYNC_GOAL &&
       preparedSync.taskIntent?.taskIntentId !== prepared.taskIntent.taskIntentId && preparedSync.checkpoint?.revisionId !== prepared.checkpoint.revisionId &&
       syncManifest?.totalBlocks === SAMPLE1_BLOCKS && syncManifest.units?.length === SAMPLE1_UNITS && syncManifest.manuscript?.revisionId === preparedSync.checkpoint.revisionId &&
       syncManifest.digest !== manifest.digest && syncManifest.units[0].digest !== manifest.units[0].digest &&
       syncManifest.units.slice(1).every((unit, index) => unit.digest === manifest.units[index + 1].digest && sameRange(unit, SAMPLE1_UNIT_RANGES[index + 1])) &&
       sameRecord(syncExpected.counts, { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 }) &&
-      preparedSync.update?.mode === 'sync-current' && preparedSync.update.modeLabel === '同步到当前稿件' && preparedSync.update.predecessorCurrent === true && preparedSync.update.selectedRange === null &&
+      preparedSync.update?.mode === 'sync-current' && preparedSync.update.modeLabel === '同步到当前稿件' && preparedSync.update.predecessorCurrent === false && preparedSync.update.selectedRange === null &&
       preparedSync.update.predecessor?.revisionId === revision.revisionId && preparedSync.update.predecessor.ordinal === 1 && preparedSync.update.predecessor.digest === revision.digest &&
       preparedSync.update.predecessor.manuscriptPin?.revisionId === revision.manuscriptPin.revisionId &&
       DIGEST_PATTERN.test(preparedSync.update.reusePlanDigest) && syncPlan?.schema === REUSE_PLAN_SCHEMA && syncPlan.mode === 'sync-current' &&
@@ -1995,14 +1968,14 @@ async function main() {
       preparedSync.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST && preparedSync.planEnvelope?.behaviorCompositionDigest === prepared.planEnvelope.behaviorCompositionDigest &&
       preparedSync.providerResolutionPlan?.executionRoute?.fixtureIdentity === FIXTURE_IDENTITY && preparedSync.providerResolutionPlan?.executionRoute?.fixtureSha256 === fixtureDigest &&
       preparedSync.providerResolutionPlan?.remoteBinding?.providerProcessing?.decision === 'deny' &&
-      preparedSync.resultSetRevision?.revisionId === revision.revisionId && preparedSync.authorization === null && preparedSync.run === null && preparedSync.taskOutcome === null &&
-      preparedSync.actions?.canPrepare === false && preparedSync.actions?.canAuthorize === true,
+      preparedSync.update.predecessor.revisionId === revision.revisionId && preparedSync.authorization !== null && preparedSync.run !== null && preparedSync.taskOutcome !== null &&
+      preparedSync.actions?.canPrepare === false && preparedSync.actions?.canAuthorize === false,
     'sync-prepared-plan', { syncExpected, update: preparedSync?.update, unitScope: preparedSync?.runSourceScope?.unitScope, executionPlan: preparedSync?.executionPlan, actions: preparedSync?.actions });
     // Synchronized delta with Issue #418 (S72 D4): the card keeps the reuse plan's counts and digests as its
     // own data and names the plan in one line; the plan unit by unit, the goal and the predecessor it names
     // read in the Task Drawer, which opened in 完整 — the mode chosen before the restart (PLAN-010).
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
-    const syncDrawer = await drawerShowing(renderer, preparedSync.taskIntent.taskIntentId, 'ready', 'sync-drawer');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
+    const syncDrawer = await drawerShowing(renderer, preparedSync.taskIntent.taskIntentId, 'settled', 'sync-drawer');
     requireJourney(syncDrawer?.mode === 'full' && syncDrawer.stored === 'full' && syncDrawer.chips.position === '全书' &&
       syncDrawer.chips.revision === `任务输入修订版 ${preparedSync.checkpoint.revisionLabel}` &&
       syncDrawer.saved === (preparedSync.checkpoint.createdForDirtyJournal ? `已为任务保存修订版 ${preparedSync.checkpoint.revisionLabel}，之后的编辑不影响这项任务。` : null) &&
@@ -2020,7 +1993,7 @@ async function main() {
 
     at('sync-current-dispatch');
     cancellation.throwIfRequested();
-    const settledSync = await settleAuthorizedRun(renderer, 'sync');
+    const settledSync = await settleLaunchedRun(renderer, 'sync');
 
     at('sync-current-revision');
     const revision2 = settledSync?.resultSetRevision;
@@ -2099,15 +2072,15 @@ async function main() {
     at('reanalyze-range-prepare');
     cancellation.throwIfRequested();
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'range-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-prepared', 120_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'range-prepared', 120_000);
     const preparedRange = await readBaseline(renderer);
     const rangeManifest = preparedRange?.coverageManifest;
     const rangeExpected = deriveExpectedPlan(syncManifest, revision2.units.map((unit) => unit.state), rangeManifest, 'reanalyze-range', selectedRange);
     const rangePlan = preparedRange?.update?.reusePlan;
-    requireJourney(preparedRange?.state === 'prepared' && preparedRange.taskIntent?.mode === 'reanalyze-range' && preparedRange.taskIntent?.goal === RANGE_GOAL &&
+    requireJourney(preparedRange?.state === 'settled' && preparedRange.taskIntent?.mode === 'reanalyze-range' && preparedRange.taskIntent?.goal === RANGE_GOAL &&
       rangeManifest?.digest === syncManifest.digest && preparedRange.checkpoint?.revisionId === preparedSync.checkpoint.revisionId &&
       sameRecord(preparedRange.update?.selectedRange, selectedRange) && preparedRange.update.predecessor?.revisionId === revision2.revisionId &&
-      preparedRange.update.predecessor.ordinal === 2 && preparedRange.update.predecessor.digest === revision2.digest && preparedRange.update.predecessorCurrent === true &&
+      preparedRange.update.predecessor.ordinal === 2 && preparedRange.update.predecessor.digest === revision2.digest && preparedRange.update.predecessorCurrent === false &&
       sameRecord(rangeExpected.counts, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) && JSON.stringify(rangeExpected.closure) === JSON.stringify([3, 4]) &&
       rangePlan?.mode === 'reanalyze-range' && sameRecord(rangePlan.selectedRange, selectedRange) && JSON.stringify(rangePlan.recomputeClosure) === JSON.stringify(rangeExpected.closure) &&
       sameRecord(rangePlan.counts, rangeExpected.counts) && sameRecord(rangePlan.counts, rangeOption.expected) &&
@@ -2117,12 +2090,12 @@ async function main() {
       JSON.stringify(rangePlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['reused', 'invalidated', 'bypassed', 'bypassed', 'reused', 'reused', 'reused', 'reused']) &&
       JSON.stringify(preparedRange.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify(rangeExpected.recomputed) &&
       preparedRange.executionPlan?.recomputedUnitCount === 3 && preparedRange.executionPlan?.reusedUnitCount === 5 &&
-      preparedRange.planEnvelope?.digest !== preparedSync.planEnvelope.digest && preparedRange.actions?.canAuthorize === true,
+      preparedRange.planEnvelope?.digest !== preparedSync.planEnvelope.digest && preparedRange.actions?.canAuthorize === false,
     'range-prepared-plan', { rangeExpected, update: preparedRange?.update, unitScope: preparedRange?.runSourceScope?.unitScope });
     // Synchronized delta with Issue #418 (S72 D4, D5): the plan names the range as the paragraphs it holds;
     // the exact block range and the plan unit by unit read in the drawer's 查看技术详情.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'range-plan-preview');
-    const rangeDrawer = await drawerShowing(renderer, preparedRange.taskIntent.taskIntentId, 'ready', 'range-drawer');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'range-plan-preview');
+    const rangeDrawer = await drawerShowing(renderer, preparedRange.taskIntent.taskIntentId, 'settled', 'range-drawer');
     const rangeSpans = readSpansLabel(rangePlan, rangeManifest);
     requireJourney(rangeDrawer?.chips.position === `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段` && /^已选 [\d,]+ 字$/u.test(rangeDrawer.chips.selected ?? '') &&
       rangeDrawer.sentence === '重新分析所选范围，其余阅读范围沿用上一份' && rangeDrawer.technical.goal === RANGE_GOAL &&
@@ -2135,7 +2108,7 @@ async function main() {
 
     at('reanalyze-range-dispatch');
     cancellation.throwIfRequested();
-    const settledRange = await settleAuthorizedRun(renderer, 'range');
+    const settledRange = await settleLaunchedRun(renderer, 'range');
 
     at('reanalyze-range-revision');
     const revision3 = settledRange?.resultSetRevision;
@@ -2158,23 +2131,23 @@ async function main() {
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedInvalidated==='1' && whole.dataset.expectedBypassed==='7' && !whole.querySelector('[data-analysis-action="reanalyze-book"]').disabled; })()`, 'book-control');
     await startUpdate(renderer, 'reanalyze-book', '重新分析全书', 'book-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'book-prepared', 120_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'book-prepared', 120_000);
     const preparedBook = await readBaseline(renderer);
     const bookManifest = preparedBook?.coverageManifest;
     const bookExpected = deriveExpectedPlan(rangeManifest, revision3.units.map((unit) => unit.state), bookManifest, 'reanalyze-book', null);
     const bookPlan = preparedBook?.update?.reusePlan;
-    requireJourney(preparedBook?.state === 'prepared' && preparedBook.taskIntent?.mode === 'reanalyze-book' && preparedBook.taskIntent?.goal === BOOK_GOAL &&
+    requireJourney(preparedBook?.state === 'settled' && preparedBook.taskIntent?.mode === 'reanalyze-book' && preparedBook.taskIntent?.goal === BOOK_GOAL &&
       bookManifest?.digest === rangeManifest.digest && preparedBook.update?.predecessor?.revisionId === revision3.revisionId && preparedBook.update.predecessor.ordinal === 3 &&
       preparedBook.update.selectedRange === null && sameRecord(bookExpected.counts, { reused: 0, recomputed: 8, invalidated: 1, bypassed: 7 }) &&
       bookPlan?.mode === 'reanalyze-book' && sameRecord(bookPlan.counts, bookExpected.counts) &&
       bookPlan.units.every((unit) => unit.disposition === 'recomputed' && unit.reason === 'bypassed-whole-book' && unit.reusedFrom === null) &&
       JSON.stringify(bookPlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['bypassed', 'invalidated', 'bypassed', 'bypassed', 'bypassed', 'bypassed', 'bypassed', 'bypassed']) &&
       JSON.stringify(preparedBook.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
-      preparedBook.executionPlan?.recomputedUnitCount === 8 && preparedBook.executionPlan?.reusedUnitCount === 0 && preparedBook.actions?.canAuthorize === true,
+      preparedBook.executionPlan?.recomputedUnitCount === 8 && preparedBook.executionPlan?.reusedUnitCount === 0 && preparedBook.actions?.canAuthorize === false,
     'book-prepared-plan', { bookExpected, update: preparedBook?.update });
     // Synchronized delta with Issue #418 (S72 D4): the plan unit by unit reads in the drawer.
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-book' && card.dataset.planReused==='0' && card.dataset.planRecomputed==='8' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='7' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析全书 · 全书 · 重新分析 8 个阅读范围，沿用 0 个 · 任务输入修订版 ${preparedBook.checkpoint.revisionLabel} · 计划版本 1`)}; })()`, 'book-plan-preview');
-    const bookDrawer = await drawerShowing(renderer, preparedBook.taskIntent.taskIntentId, 'ready', 'book-drawer');
+    const bookDrawer = await drawerShowing(renderer, preparedBook.taskIntent.taskIntentId, 'settled', 'book-drawer');
     requireJourney(bookDrawer?.chips.position === '全书' && bookDrawer.sentence === '重新分析全书，不沿用以前的结果' && bookDrawer.technical.goal === BOOK_GOAL &&
       bookDrawer.technical['reuse-plan'] === reusePlanReading(preparedBook.update.reusePlanDigest, bookPlan) &&
       bookPlan.units.every((unit) => unit.disposition === 'recomputed' && unit.reason === 'bypassed-whole-book') &&
@@ -2184,7 +2157,7 @@ async function main() {
 
     at('reanalyze-book-dispatch');
     cancellation.throwIfRequested();
-    const settledBook = await settleAuthorizedRun(renderer, 'book');
+    const settledBook = await settleLaunchedRun(renderer, 'book');
 
     at('reanalyze-book-revision');
     const revision4 = settledBook?.resultSetRevision;
@@ -2352,15 +2325,15 @@ async function main() {
     const retryRange = { startPosition: retryOption.startPosition, endPosition: retryOption.endPosition };
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'safe-retry-range-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'safe-retry-prepared', 120_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'safe-retry-prepared', 120_000);
     const preparedRetry = await readBaseline(renderer);
     const retryBoundary = preparedRetry?.planEnvelope?.boundary;
     // #1311 H1 synchronized delta: every kind declares a separate completed-not-json retry.
-    requireJourney(preparedRetry?.state === 'prepared' && preparedRetry.taskIntent?.mode === 'reanalyze-range' && sameRecord(preparedRetry.update?.selectedRange, retryRange) &&
+    requireJourney(preparedRetry?.state === 'settled' && preparedRetry.taskIntent?.mode === 'reanalyze-range' && sameRecord(preparedRetry.update?.selectedRange, retryRange) &&
       preparedRetry.update?.predecessor?.revisionId === revision4.revisionId && sameRecord(preparedRetry.update?.reusePlan?.counts, retryOption.expected) &&
       preparedRetry.providerResolutionPlan?.executionRoute?.fixtureIdentity === RETRY_FIXTURE_IDENTITY && preparedRetry.providerResolutionPlan?.executionRoute?.fixtureSha256 === retryFixtureDigest &&
       JSON.stringify(preparedRetry.providerResolutionPlan?.executionRoute?.fixtureLineage?.map((link) => link.identity)) === JSON.stringify([RETRY_FIXTURE_IDENTITY, FIXTURE_IDENTITY, FIXTURE_BASE_IDENTITY]) &&
-      preparedRetry.planEnvelope?.planVersion === 1 && preparedRetry.planVersion?.ordinal === 1 && preparedRetry.planVersion?.state === 'current' && preparedRetry.planVersion?.planRevisionId === null &&
+      preparedRetry.planEnvelope?.planVersion === 1 && preparedRetry.planVersion?.ordinal === 1 && preparedRetry.planVersion?.state === 'bound' && preparedRetry.planVersion?.planRevisionId === null &&
       preparedRetry.planVersion?.planEnvelopeDigest === preparedRetry.planEnvelope.digest && preparedRetry.planVersions?.length === 1 && preparedRetry.planRevisions?.length === 0 && preparedRetry.planRevision === null &&
       JSON.stringify(retryBoundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry', 'contract-retry']) &&
       JSON.stringify(retryBoundary?.material?.map((entry) => entry.field)) === JSON.stringify(PLAN_MATERIAL_FIELDS) &&
@@ -2368,7 +2341,7 @@ async function main() {
       sameRecord(preparedRetry.planVersion?.materialInputs?.selectedRange, retryRange) && preparedRetry.planVersion?.materialInputs?.predecessorRevision?.revisionId === revision4.revisionId &&
       preparedRetry.planVersion?.materialInputs?.providerBinding?.credentialReference === readyConnection.credentialReference &&
       preparedRetry.planVersion?.materialInputs?.runBudgetCeiling === 'unset' && preparedRetry.planVersion?.materialInputs?.outboundDataCategory === 'public-or-synthetic' &&
-      preparedRetry.actions?.canAuthorize === true && preparedRetry.actions?.canReconfirmPlan === false,
+      preparedRetry.actions?.canAuthorize === false && preparedRetry.actions?.canReconfirmPlan === false,
     'safe-retry-prepared-plan', { update: preparedRetry?.update, planVersion: preparedRetry?.planVersion, boundary: retryBoundary, route: preparedRetry?.providerResolutionPlan?.executionRoute, actions: preparedRetry?.actions });
     // Synchronized delta with Issue #418 (S72 D6, PLAN-012): the Plan Boundary Split reads in the drawer as
     // its two columns — what AI7 may adjust during the Run, and what makes it stop and ask, each locked —
@@ -2381,22 +2354,22 @@ async function main() {
       const versions=card?.querySelector('details.analysis-plan-versions-technical');
       return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
         !card.querySelector('.analysis-plan-boundary') && versions instanceof HTMLDetailsElement && (!versions.open || versions.hidden) &&
-        versions.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
+        versions.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="bound"]')!==null &&
         !card.querySelector('.analysis-plan-drift-note') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"], [data-analysis-action="authorize"]') &&
-        open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始';
+        open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划';
     })()`, 'safe-retry-plan-preview');
-    const retryDrawer = await drawerShowing(renderer, preparedRetry.taskIntent.taskIntentId, 'ready', 'safe-retry-drawer');
+    const retryDrawer = await drawerShowing(renderer, preparedRetry.taskIntent.taskIntentId, 'settled', 'safe-retry-drawer');
     requireJourney(retryDrawer?.version === '1' && JSON.stringify(retryDrawer.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(retryDrawer.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(retryDrawer.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
       JSON.stringify(retryDrawer.participation) === JSON.stringify(['预计无需中途参与']) && retryDrawer.footer === '计划说明，不是运行授权' &&
       retryDrawer.technical['material-fields'] === PLAN_MATERIAL_FIELDS.join('、') &&
       retryDrawer.technical['execution-route'] === `ai7-local-deterministic · ai7-deterministic-fixture · 夹具 ${RETRY_FIXTURE_IDENTITY} · ${retryFixtureDigest}` &&
-      retryDrawer.technical['plan-versions'] === `版本 1 · current · ${preparedRetry.planEnvelope.digest}` && retryDrawer.actions === 0,
+      retryDrawer.technical['plan-versions'] === `版本 1 · bound · ${preparedRetry.planEnvelope.digest}` && retryDrawer.actions === 0,
     'safe-retry-drawer-plan', retryDrawer);
 
     at('safe-retry-dispatch');
     cancellation.throwIfRequested();
-    const settledRetry = await settleAuthorizedRun(renderer, 'safe-retry');
+    const settledRetry = await settleLaunchedRun(renderer, 'safe-retry');
 
     at('safe-retry-adaptation');
     const revision5 = settledRetry?.resultSetRevision;
@@ -2444,430 +2417,90 @@ async function main() {
         card.querySelectorAll('[data-analysis-unit-adaptations]').length===1 && card.textContent.includes('计划版本 1') && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'safe-retry-overview-surface');
 
-    at('plan-revision-prepare');
-    cancellation.throwIfRequested();
-    // A new 重新分析所选范围 Task (the previous one has a Run) over unit 3 against revision 5; unit 8 is the later material change.
-    const driftOptionA = settledRetry.updateControls?.actions?.['reanalyze-range']?.options?.[2];
-    if (driftOptionA) Object.assign(driftOptionA, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: driftOptionA.unitOrdinal })})`));
-    const driftOptionB = settledRetry.updateControls?.actions?.['reanalyze-range']?.options?.[7];
-    if (driftOptionB) Object.assign(driftOptionB, await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({ unitOrdinal: driftOptionB.unitOrdinal })})`));
-    requireJourney(driftOptionA?.unitOrdinal === 3 && sameRecord(driftOptionA.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) &&
-      driftOptionB?.unitOrdinal === 8 && sameRecord(driftOptionB.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'plan-revision-options', settledRetry.updateControls);
-    const rangeA = { startPosition: driftOptionA.startPosition, endPosition: driftOptionA.endPosition };
-    const rangeB = { startPosition: driftOptionB.startPosition, endPosition: driftOptionB.endPosition };
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
-    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-prepare-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId!==${JSON.stringify(preparedRetry.taskIntent.taskIntentId)}`, 'plan-revision-prepared', 120_000);
-    const preparedDrift = await readBaseline(renderer);
-    const v1Digest = preparedDrift?.planEnvelope?.digest;
-    requireJourney(preparedDrift?.state === 'prepared' && preparedDrift.taskIntent?.taskIntentId !== preparedRetry.taskIntent.taskIntentId && sameRecord(preparedDrift.update?.selectedRange, rangeA) &&
-      preparedDrift.update?.predecessor?.revisionId === revision5.revisionId && DIGEST_PATTERN.test(v1Digest) && preparedDrift.planVersion?.ordinal === 1 && preparedDrift.planVersion?.state === 'current' &&
-      preparedDrift.planRevision === null && preparedDrift.planVersions?.length === 1 && preparedDrift.actions?.canAuthorize === true && preparedDrift.actions?.canReconfirmPlan === false &&
-      sameRecord(preparedDrift.update?.reusePlan?.counts, driftOptionA.expected),
-    'plan-revision-prepared-plan', { update: preparedDrift?.update, planVersion: preparedDrift?.planVersion, actions: preparedDrift?.actions });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]'); return card?.dataset.planVersion==='1' && card.dataset.planRevisionPending==='false' && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"], [data-analysis-action="authorize"]'); })()`, 'plan-revision-preview-current');
-
-    at('plan-revision-drift');
-    cancellation.throwIfRequested();
-    // The material change before authorization: the selected range moves to unit 8 and the same prepared Task is prepared again.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
-    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-drift-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-pending', 120_000);
-    const drifted = await readBaseline(renderer);
-    // Rebound by the revert stage below, which settles this revision and drifts the plan again.
-    let pendingRevision = drifted?.planRevision;
-    requireJourney(drifted?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && drifted.state === 'prepared' && drifted.planEnvelope?.digest === v1Digest &&
-      drifted.planVersion?.ordinal === 1 && drifted.planVersion?.state === 'superseded' && drifted.planVersions?.length === 1 && drifted.planRevisions?.length === 1 &&
-      UUID_PATTERN.test(pendingRevision?.planRevisionId) && pendingRevision.priorOrdinal === 1 && pendingRevision.nextOrdinal === null && pendingRevision.resolved === false && pendingRevision.trigger === 'prepare' &&
-      JSON.stringify(pendingRevision.changedFields) === JSON.stringify(['selectedRange', 'reusePlan.counts']) &&
-      pendingRevision.diff?.length === 2 && pendingRevision.diff[0].field === 'selectedRange' && pendingRevision.diff[0].materiality === 'material' &&
-      sameRecord(pendingRevision.diff[0].prior, rangeA) && sameRecord(pendingRevision.diff[0].proposed, rangeB) &&
-      pendingRevision.diff[1].field === 'reusePlan.counts' && pendingRevision.diff[1].materiality === 'derived' &&
-      sameRecord(pendingRevision.diff[1].prior, driftOptionA.expected) && sameRecord(pendingRevision.diff[1].proposed, driftOptionB.expected) &&
-      sameRecord(pendingRevision.proposed?.selectedRange, rangeB) && pendingRevision.label === '计划修订 · 版本 1 → 2（待重新确认） · selectedRange、reusePlan.counts' &&
-      sameRecord(drifted.update?.selectedRange, rangeA) && drifted.authorization === null && drifted.run === null &&
-      drifted.actions?.canAuthorize === false && drifted.actions?.canReconfirmPlan === true,
-    'plan-revision-diff', { planRevision: pendingRevision, planVersion: drifted?.planVersion, actions: drifted?.actions });
-    // The stale preview keeps no start action (AUTH-006). Synchronized delta with Issue #420 (S74a A4): ②A says
-    // in one line that the plan changed, and the diff, 查看计划修订 and 重新确认计划 are the drawer's — the
-    // next stages read them there; the pending revision stays in ②A's technical layer, exactly identified.
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.baseline-analysis-card');
-      const note=card?.querySelector('.analysis-plan-summary .analysis-plan-drift-note');
-      const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
-      return note instanceof HTMLElement && note.dataset.planRevisionState==='pending' && note.dataset.planRevisionPrior==='1' && note.dataset.planRevisionFields==='selectedRange,reusePlan.counts' &&
-        note.textContent==='计划的关键内容已变化：原计划不能再开始；在任务计划里查看计划修订并重新确认计划后，新的计划版本才能开始。' &&
-        open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' &&
-        !card.querySelector('.analysis-plan-revision, [data-analysis-action="authorize"], [data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
-        card.dataset.planVersion==='1' && card.dataset.planRevisionPending==='true' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null &&
-        card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-resolved="false"]')!==null &&
-        card.querySelector('.analysis-plan-versions [data-plan-revision-resolved="false"]')?.textContent.includes(${JSON.stringify(pendingRevision.label)}) === true && ${ONLY_ANALYSIS_ACTIONS};
-    })()`, 'plan-revision-surface');
-
-    at('plan-revision-drawer-diff');
-    // S72 D8: the drawer beside ②A reads the same drift in the editor's words, by field key — 处理范围 and
-    // 重新分析与沿用的阅读范围, 关键内容 and 随之变化 — with each range as the paragraphs and characters it
-    // holds. The chips still name the range the superseded version froze.
-    const driftDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'changed', 'plan-revision-drawer');
-    const priorCount = /^已选 ([\d,]+) 字$/u.exec(driftDrawer?.chips?.selected ?? '')?.[1];
-    // Synchronized delta with Issue #420 (S74a A4): 重新确认计划 is the drawer's own action now, so the
-    // resolution no longer sends the editor to ②A.
-    requireJourney(driftDrawer?.pill === '计划已变化' && driftDrawer.version === '1' && priorCount !== undefined &&
-      driftDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` &&
-      driftDrawer.drift?.kind === 'diff' && driftDrawer.drift.heading === '计划的关键内容已变化' && driftDrawer.drift.tableHidden === true &&
-      JSON.stringify(driftDrawer.drift.text) === JSON.stringify(['计划冻结之后，它的关键内容已经变化；原计划不能再开始。', '重新确认计划后，新的计划版本才能开始。']) &&
-      driftDrawer.actions === 0, 'plan-revision-drawer-diff', driftDrawer);
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="view-plan-revision"]', 'plan-revision-drawer-view');
-    const driftTable = (await readDrawer(renderer))?.drift;
-    const driftRange = driftTable?.rows?.[0];
-    const proposedCount = /^第 \d+–\d+ 段 · ([\d,]+) 字$/u.exec(driftRange?.[4] ?? '')?.[1];
-    requireJourney(driftTable?.tableHidden === false && driftTable.rows.length === 2 && proposedCount !== undefined &&
-      JSON.stringify(driftRange) === JSON.stringify(['selectedRange', 'material', '处理范围', `第 ${rangeA.startPosition}–${rangeA.endPosition} 段 · ${priorCount} 字`, `第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字`, '关键内容']) &&
-      JSON.stringify(driftTable.rows[1]) === JSON.stringify(['reusePlan.counts', 'derived', '重新分析与沿用的阅读范围', `重新分析 ${driftOptionA.expected.recomputed} 个，沿用 ${driftOptionA.expected.reused} 个`, `重新分析 ${driftOptionB.expected.recomputed} 个，沿用 ${driftOptionB.expected.reused} 个`, '随之变化']),
-    'plan-revision-drawer-rows', driftTable);
-
-    at('plan-revision-bar');
-    // Issue #420 (S74a, AUTH-006): the bar of a changed plan offers no start at all — 重新确认计划 and
-    // 查看计划修订 (whose table is open now) take its place, with the resolution beside them.
-    const driftBar = await readDrawer(renderer);
-    requireJourney(driftBar?.bar?.state === 'changed' && driftBar.bar.start === 'changed' && driftBar.bar.statement === BAR_STATEMENT &&
-      driftBar.bar.note === '重新确认计划后，新的计划版本才能开始。' && driftBar.bar.status === null &&
-      barActions(driftBar) === 'reconfirm-and-start:按新计划开始:enabled|reconfirm-plan:重新确认计划:enabled|view-plan-revision:查看计划修订:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled' &&
-      driftBar.drift?.tableHidden === false, 'plan-revision-bar', driftBar?.bar);
-    await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-drawer-control="start"]') && document.querySelector('#task-drawer [data-task-drawer-control="view-plan-revision"]')?.getAttribute('aria-expanded')==='true' && document.querySelector('#task-drawer [data-task-drawer-control="view-plan-revision"]')?.getAttribute('aria-controls')===document.querySelector('#task-drawer .task-plan-drift-table')?.id`, 'plan-revision-bar-no-start');
-
-    at('plan-revision-stale-authorize');
-    cancellation.throwIfRequested();
-    // Authorizing the stale version through the renderer API is refused with the safe reason and creates no Run Record.
-    const refusal = await renderer.evaluate(`window.ai7.authorizeBaselineAnalysis({ taskIntentId: ${JSON.stringify(preparedDrift.taskIntent.taskIntentId)}, planEnvelopeDigest: ${JSON.stringify(v1Digest)} }).then(()=>null,(error)=>({ code: error?.code ?? null, message: String(error?.message ?? error) }))`);
-    requireJourney(refusal !== null && refusal.code === 'ANALYSIS_PLAN_REVISION_REQUIRED' && refusal.message.includes('plan-revision-required'), 'plan-revision-refusal', refusal);
-    const afterRefusal = await readBaseline(renderer);
-    requireJourney(afterRefusal?.authorization === null && afterRefusal.run === null && afterRefusal.planRevision?.planRevisionId === pendingRevision.planRevisionId &&
-      afterRefusal.planVersions?.length === 1 && afterRefusal.planEnvelope?.digest === v1Digest, 'plan-revision-no-run');
-
-    at('plan-revision-revert');
-    cancellation.throwIfRequested();
-    // (iv) The way back (Issue #281). Preparing again at the range version 1 froze records the revert
-    // as its own append-only revision, settles the pending one, and returns 开始任务 to the version that was
-    // never replaced: the same envelope digest, still one plan version, nothing rewritten.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
-    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-revert-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
-    const reverted = await readBaseline(renderer);
-    const supersededRevision = reverted?.planRevisions?.[0];
-    const revertRevision = reverted?.planRevisions?.[1];
-    requireJourney(reverted?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && reverted.state === 'prepared' && reverted.planEnvelope?.digest === v1Digest &&
-      reverted.planVersions?.length === 1 && reverted.planVersion?.ordinal === 1 && reverted.planVersion?.state === 'current' && reverted.planRevisions?.length === 2 &&
-      supersededRevision?.planRevisionId === pendingRevision.planRevisionId && supersededRevision.state === 'superseded' && supersededRevision.resolved === true &&
-      supersededRevision.nextOrdinal === null && supersededRevision.detectedAt === pendingRevision.detectedAt &&
-      JSON.stringify(supersededRevision.diff) === JSON.stringify(pendingRevision.diff) &&
-      JSON.stringify(supersededRevision.proposed) === JSON.stringify(pendingRevision.proposed) &&
-      supersededRevision.label === '计划修订 · 版本 1 → 2（已被后一次修订取代） · selectedRange、reusePlan.counts' &&
-      revertRevision?.state === 'reverted' && revertRevision.resolved === true && revertRevision.trigger === 'prepare' && revertRevision.priorOrdinal === 1 && revertRevision.nextOrdinal === 1 &&
-      UUID_PATTERN.test(revertRevision.planRevisionId) && JSON.stringify(revertRevision.supersedes) === JSON.stringify([pendingRevision.planRevisionId]) &&
-      JSON.stringify(revertRevision.changedFields) === JSON.stringify(['selectedRange', 'reusePlan.counts']) &&
-      sameRecord(revertRevision.diff?.[0]?.prior, rangeB) && sameRecord(revertRevision.diff[0].proposed, rangeA) &&
-      sameRecord(revertRevision.diff?.[1]?.prior, driftOptionB.expected) && sameRecord(revertRevision.diff[1].proposed, driftOptionA.expected) &&
-      revertRevision.label === '计划修订 · 版本 1 → 1（已回退） · selectedRange、reusePlan.counts' &&
-      reverted.planRevision === null && sameRecord(reverted.update?.selectedRange, rangeA) && reverted.authorization === null && reverted.run === null &&
-      reverted.actions?.canAuthorize === true && reverted.actions?.canReconfirmPlan === false,
-    'plan-revision-revert-record', { planRevisions: reverted?.planRevisions, planVersions: reverted?.planVersions, actions: reverted?.actions });
-    // The 计划已被取代 note is gone, both revisions read as settled, and the start is back — in the drawer's bar
-    // since Issue #420 (S74a), with the card's one action reading 查看计划并开始 again.
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.baseline-analysis-card');
-      const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
-      return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
-        card.dataset.planEnvelopeDigest===${JSON.stringify(v1Digest)} && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
-        card.querySelector('.analysis-plan-versions')?.dataset.planRevisionCount==='2' &&
-        card.querySelectorAll('.analysis-plan-revision-list li').length===2 &&
-        card.querySelectorAll('.analysis-plan-versions [data-plan-revision-resolved="true"]').length===2 &&
-        card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="1"][data-plan-revision-resolved="true"]')!==null &&
-        card.querySelectorAll('.analysis-plan-revision-list li')[1]?.textContent.includes(${JSON.stringify(revertRevision.label)})===true &&
-        !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="authorize"], [data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
-        open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始';
-    })()`, 'plan-revision-revert-surface');
-    // The drawer follows the way back: the plan version 1 froze is the plan again, nothing reads as changed,
-    // and its bar offers 开始任务 again.
-    const revertedDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'ready', 'plan-revision-revert-drawer');
-    requireJourney(revertedDrawer?.drift === null && revertedDrawer.version === '1' && revertedDrawer.pill === '尚未开始' &&
-      revertedDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` && revertedDrawer.chips.selected === `已选 ${priorCount} 字` &&
-      revertedDrawer.bar?.state === 'ready' && barActions(revertedDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
-    'plan-revision-revert-drawer-plan', revertedDrawer);
-    // Back to the change this Task means to confirm: the same range drift, pending on its own again.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
-    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-redrift-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-redrift-pending', 120_000);
-    const redrifted = await readBaseline(renderer);
-    pendingRevision = redrifted?.planRevision;
-    requireJourney(redrifted?.planRevisions?.length === 3 && UUID_PATTERN.test(pendingRevision?.planRevisionId) &&
-      pendingRevision.planRevisionId !== supersededRevision.planRevisionId && pendingRevision.planRevisionId !== revertRevision.planRevisionId &&
-      pendingRevision.state === 'pending' && pendingRevision.resolved === false && pendingRevision.trigger === 'prepare' &&
-      JSON.stringify(pendingRevision.supersedes) === JSON.stringify([]) && sameRecord(pendingRevision.proposed?.selectedRange, rangeB) &&
-      pendingRevision.label === '计划修订 · 版本 1 → 2（待重新确认） · selectedRange、reusePlan.counts' &&
-      redrifted.planVersions?.length === 1 && redrifted.planEnvelope?.digest === v1Digest &&
-      redrifted.actions?.canAuthorize === false && redrifted.actions?.canReconfirmPlan === true,
-    'plan-revision-redrift', { planRevisions: redrifted?.planRevisions, actions: redrifted?.actions });
-
-    at('plan-revision-reconfirm');
-    cancellation.throwIfRequested();
-    // Synchronized delta with Issue #420 (S74a A4): 重新确认计划 is the drawer bar's; the re-drift opened the
-    // drawer on the changed plan, and ②A beside it reads version 2 once it is frozen.
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(preparedDrift.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`, 'plan-revision-reconfirm-ready');
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="reconfirm-plan"]', 'plan-revision-reconfirm-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2'`, 'plan-revision-version-2', 120_000);
-    const reconfirmed = await readBaseline(renderer);
-    const v2Digest = reconfirmed?.planEnvelope?.digest;
-    requireJourney(reconfirmed?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && reconfirmed.state === 'prepared' && DIGEST_PATTERN.test(v2Digest) && v2Digest !== v1Digest &&
-      reconfirmed.planEnvelope?.planVersion === 2 && reconfirmed.planVersion?.ordinal === 2 && reconfirmed.planVersion?.state === 'current' && reconfirmed.planVersion?.planRevisionId === pendingRevision.planRevisionId &&
-      JSON.stringify(reconfirmed.planVersions?.map((version) => [version.ordinal, version.state, version.planEnvelopeDigest])) === JSON.stringify([[1, 'superseded', v1Digest], [2, 'current', v2Digest]]) &&
-      reconfirmed.planRevisions?.length === 3 && reconfirmed.planRevisions[2].planRevisionId === pendingRevision.planRevisionId && reconfirmed.planRevisions[2].resolved === true && reconfirmed.planRevisions[2].nextOrdinal === 2 &&
-      reconfirmed.planRevisions[2].state === 'resolved' && reconfirmed.planRevisions.every((entry) => entry.resolved === true) &&
-      reconfirmed.planRevisions[2].label === '计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts' && reconfirmed.planRevision === null &&
-      sameRecord(reconfirmed.update?.selectedRange, rangeB) && sameRecord(reconfirmed.update?.reusePlan?.counts, driftOptionB.expected) &&
-      reconfirmed.coverageManifest?.digest === preparedDrift.coverageManifest.digest && reconfirmed.checkpoint?.revisionId === preparedDrift.checkpoint.revisionId &&
-      JSON.stringify(reconfirmed.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([2, 8]) &&
-      reconfirmed.authorization === null && reconfirmed.actions?.canAuthorize === true && reconfirmed.actions?.canReconfirmPlan === false,
-    'plan-revision-reconfirmed', { planVersion: reconfirmed?.planVersion, planVersions: reconfirmed?.planVersions, planRevisions: reconfirmed?.planRevisions, update: reconfirmed?.update });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="authorize"]') && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && card.textContent.includes(${JSON.stringify(`段落 ${rangeB.startPosition}–${rangeB.endPosition}`)}); })()`, 'plan-revision-version-2-surface');
-
-    at('plan-revision-drawer-range');
-    // #288's visible half: once version 2 is the plan, the range it names is the one version 2 froze —
-    // unit 8's — in the drawer's chips, in its 查看技术详情, and in ②A's one line; never the range the Task
-    // was first prepared with (the L2 suite pins that the Task Intent row keeps that one).
-    const v2Drawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'ready', 'plan-revision-v2-drawer');
-    requireJourney(v2Drawer?.version === '2' && v2Drawer.drift === null &&
-      v2Drawer.chips.position === `第 ${rangeB.startPosition}–${rangeB.endPosition} 段` && v2Drawer.chips.selected === `已选 ${proposedCount} 字` &&
-      v2Drawer.terms['要处理']?.includes(`第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围（${readSpansLabel(reconfirmed.update.reusePlan, reconfirmed.coverageManifest)}），沿用 ${driftOptionB.expected.reused} 个`) &&
-      v2Drawer.technical['selected-range'] === `段落 ${rangeB.startPosition}–${rangeB.endPosition}` &&
-      v2Drawer.technical['plan-versions'] === `版本 1 · superseded · ${v1Digest}；版本 2 · current · ${v2Digest}` &&
-      v2Drawer.technical['plan-envelope'] === v2Digest &&
-      // Issue #420 (S74a): version 2 is startable from the bar; its identity stays in the drawer state above.
-      v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary === '产出一份基线分析，不修改稿件。' &&
-      barActions(v2Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
-    'plan-revision-drawer-range', v2Drawer);
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个 · 任务输入修订版 ${reconfirmed.checkpoint.revisionLabel} · 计划版本 2`)}`, 'plan-revision-summary-range');
-
-    // ---- 更新计划 (Issue #419, plan slice S73; editor-surfaces §6 可编辑, V2-UX-PLAN-009, PLAN-011) --------------
-    // Version 2 is edited before it starts: the editor leaves out 核对与抽检 and withdraws the safe retry, which is all
-    // a baseline analysis can honour, and 更新计划 makes that version 3 — which the dispatch below runs.
-    at('plan-edit-open');
-    // 返回修改 opens the plan's editing: 完整, focused on the first thing that can change. Each item that can change
-    // offers ×, named for what it does; the others offer nothing, and two notes say why.
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'plan-edit-revise');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling'`, 'plan-edit-focus', 10_000);
-    const editable = await readEditable(renderer);
-    requireJourney(JSON.stringify(editable?.items) === JSON.stringify([
-      { id: 'units', removed: false, tag: null, control: null, name: null },
-      { id: 'reduction', removed: false, tag: null, control: null, name: null },
-      { id: 'assurance-sampling', removed: false, tag: null, control: 'remove', name: '去掉这一步：核对与抽检' },
-      { id: 'safe-retry', removed: false, tag: null, control: 'remove', name: `不允许：${SAFE_RETRY_ADAPTATION}` },
-    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
-    'plan-edit-controls', editable);
-    // The glyph is the style sheet's: the column still reads as the adaptation's words alone.
-    const openDrawer = await readDrawer(renderer);
-    requireJourney(JSON.stringify(openDrawer?.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && openDrawer.actions === 0, 'plan-edit-column-words', openDrawer?.adaptable);
-
-    at('plan-edit-remove');
-    // × on 核对与抽检 and on the safe retry: each reads 你改的 with 恢复, the bar counts two and offers 保存并开始 where
-    // 开始任务 was, with 仅保存 beside it (Issue #1431 item 40), and 保存草稿 waits for them. Nothing is recorded yet.
-    await reviewAction(renderer, '#task-drawer [data-task-plan-item="assurance-sampling"] [data-task-plan-edit="remove"]', 'plan-edit-remove-sampling');
-    await reviewAction(renderer, '#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="remove"]', 'plan-edit-withdraw-retry');
-    const pendingDrawer = await readDrawer(renderer);
-    requireJourney(pendingDrawer?.bar?.note === '你改了 2 处' && pendingDrawer.bar.statement === null && pendingDrawer.version === '2' &&
-      barActions(pendingDrawer) === 'update-and-start:保存并开始:enabled|update-plan:仅保存:enabled|discard-edits:撤销修改:enabled|save-draft:保存草稿:disabled' &&
-      pendingDrawer.bar.actions[3]?.reason === '先更新计划或撤销修改', 'plan-edit-pending-bar', pendingDrawer?.bar);
-    const pendingItems = await readEditable(renderer);
-    requireJourney(JSON.stringify(pendingItems?.items?.slice(2)) === JSON.stringify([
-      { id: 'assurance-sampling', removed: true, tag: '你改的 · 不做', control: 'restore', name: '恢复' },
-      { id: 'safe-retry', removed: true, tag: '你改的 · 不允许', control: 'restore', name: '恢复' },
-    ]), 'plan-edit-pending-items', pendingItems?.items);
-    const unrecordedEdit = await readBaseline(renderer);
-    requireJourney(unrecordedEdit?.planVersion?.ordinal === 2 && unrecordedEdit.planVersions?.length === 2 && unrecordedEdit.planRevisions?.length === 3, 'plan-edit-nothing-recorded');
-
-    at('plan-edit-discard');
-    // 撤销修改 lets them go: version 2 reads as it froze, with 开始任务 again.
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="discard-edits"]', 'plan-edit-discard-click');
-    await waitFor(renderer, `document.querySelectorAll('#task-drawer .task-plan-item-removed').length===0 && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'plan-edit-discarded', 10_000);
-    const discardedDrawer = await readDrawer(renderer);
-    requireJourney(barActions(discardedDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' && discardedDrawer.bar.note === null,
-      'plan-edit-discarded-bar', discardedDrawer?.bar);
-
-    at('j14-plan-edit-keyboard');
-    // Without a pointer: Enter on 返回修改 lands on 核对与抽检's ×; Enter leaves it out and focus stays on the item, now
-    // on its 恢复; Tab reaches ⑤'s 设置上限… (Issue #51, S16a) and then the safe retry's ×, and Enter withdraws it.
-    await assertRenderer(renderer, `(() => { const revise=document.querySelector('#task-drawer [data-task-drawer-control="revise"]'); if(!(revise instanceof HTMLButtonElement)||revise.disabled)return false; revise.focus(); return document.activeElement===revise; })()`, 'plan-edit-keyboard-start');
-    await pressEnter(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-remove-focused', 10_000);
-    await pressEnter(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-restore-focused', 10_000);
-    await pressTab(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.closest('[data-task-plan-section="5"]')!==null && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-budget', 10_000);
-    await pressTab(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.activeElement.matches(':focus-visible')`, 'plan-edit-keyboard-next', 10_000);
-    await pressEnter(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 2 处'`, 'plan-edit-keyboard-withdrawn', 10_000);
-
-    at('plan-edit-update');
-    // 更新计划: version 3 on the same Task, its Plan Revision the editor's edit — each line 你改的 — with the material
-    // inputs as they were; the envelope the Run will bind leaves the retry out, and the drawer says who changed what.
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'plan-edit-update-click');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='3' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'plan-edit-version-3', 60_000);
-    const edited = await readBaseline(renderer);
-    const v3Digest = edited?.planEnvelope?.digest;
-    const editRevision = edited?.planRevisions?.at(-1);
-    const PLAN_EDITS = { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'] };
-    // Withdrawing the transient-failure retry leaves the distinct contract retry declared.
-    requireJourney(edited?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && edited.state === 'prepared' && DIGEST_PATTERN.test(v3Digest) && v3Digest !== v2Digest &&
-      edited.planVersion?.ordinal === 3 && edited.planVersion.state === 'current' && sameValue(edited.planVersion.edits, PLAN_EDITS) &&
-      JSON.stringify(edited.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'current']]) &&
-      sameValue(edited.planVersion.materialInputs, reconfirmed.planVersion.materialInputs) && sameValue(edited.executionPlan?.editorEdits, PLAN_EDITS) &&
-      JSON.stringify(edited.planEnvelope?.boundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['contract-retry']) && edited.planRevisions?.length === 4 && edited.planRevision === null &&
-      editRevision?.trigger === 'plan-edit' && editRevision.state === 'resolved' && editRevision.priorOrdinal === 2 && editRevision.nextOrdinal === 3 &&
-      // The stored diff reads back in its canonical key order, so it is compared entry by entry, not as one string.
-      JSON.stringify(editRevision.diff?.map((entry) => [entry.field, entry.label, entry.prior, entry.proposed, entry.materiality])) === JSON.stringify([
-        ['steps.assurance-sampling', '核对与抽检', '要做', '不做', 'edited'],
-        ['adaptations.safe-retry', SAFE_RETRY_ADAPTATION, '允许', '不允许', 'edited'],
-      ]) && edited.actions?.canAuthorize === true,
-    'plan-edit-version', { planVersion: edited?.planVersion, planRevision: editRevision, boundary: edited?.planEnvelope?.boundary });
-    const v3Drawer = await readDrawer(renderer);
-    const v3Items = await readEditable(renderer);
-    requireJourney(v3Drawer?.version === '3' && v3Drawer.bar?.summary === '产出一份基线分析，不修改稿件。' &&
-      barActions(v3Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
-      v3Items?.record?.startsWith('第 3 版由你修改（') === true && v3Items.record.endsWith('）：步骤 · 核对与抽检：要做 → 不做；可以自己调整 · 安全地再试一次：允许 → 不允许') &&
-      JSON.stringify(v3Items.items.slice(2).map((item) => [item.id, item.removed, item.tag, item.control])) === JSON.stringify([
-        ['assurance-sampling', true, '你改的 · 不做', 'restore'],
-        ['safe-retry', true, '你改的 · 不允许', 'restore'],
-      ]) && v3Drawer.technical['plan-envelope'] === v3Digest,
-    'plan-edit-drawer', { bar: v3Drawer?.bar, record: v3Items?.record, items: v3Items?.items });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='3' && card.dataset.planVersionCount==='3' && card.dataset.planRevisionPending==='false' && card.querySelector('.analysis-plan-revision-list [data-plan-revision-next="3"][data-plan-revision-trigger="plan-edit"]')?.textContent.includes('你改的 · 已更新计划')===true; })()`, 'plan-edit-card');
-
-    at('plan-revision-dispatch');
-    cancellation.throwIfRequested();
-    const settledDrift = await settleAuthorizedRun(renderer, 'plan-revision');
-    const revision6 = settledDrift?.resultSetRevision;
-    const attemptDrift = settledDrift?.run?.attempt;
-    requireJourney(settledDrift?.state === 'settled' && settledDrift.run?.state === 'completed-with-gaps' &&
-      // Synchronized delta with Issue #419 (S73): the Run binds version 3, the one the editor edited.
-      settledDrift.authorization?.planEnvelopeDigest === v3Digest && settledDrift.authorization?.planVersionOrdinal === 3 &&
-      JSON.stringify(settledDrift.planVersions?.map((version) => version.state)) === JSON.stringify(['superseded', 'superseded', 'bound']) &&
-      attemptDrift?.executionBinding?.planEnvelopeDigest === v3Digest && JSON.stringify(attemptDrift.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([2, 8]) &&
-      settledDrift.run.adaptations?.length === 0 &&
-      revision6?.ordinal === 6 && revision6.update?.mode === 'reanalyze-range' && sameRecord(revision6.update?.selectedRange, rangeB) && sameRecord(revision6.update?.counts, driftOptionB.expected) &&
-      revision6.update?.predecessor?.revisionId === revision5.revisionId && revision6.provenance?.planVersion === 3 && JSON.stringify(revision6.provenance?.adaptations) === JSON.stringify({ count: 0, unitOrdinals: [] }) &&
-      // Synchronized delta (#274, #275, #419): two recomputed units and the reduction's turn; version 3 left 核对与抽检
-      // out, so no sample is drawn and the revision says why.
-      revision6.usage?.requests === 3 && revision6.assuranceSample?.state === 'not-run' && revision6.assuranceSample.reason === ASSURANCE_SAMPLING_REMOVED &&
-      settledDrift.taskOutcome?.report?.stages?.find((stage) => stage.stage === 'assurance-sampling')?.state === 'not-run' &&
-      revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2 &&
-      // Synchronized delta (#276): this Run adapted nothing, and its reflection closed from the
-      // fixture entry keyed by its own accounting.
-      settledDrift.taskOutcome?.report?.units?.retried === 0 && settledDrift.taskOutcome?.report?.ifRedone?.state === 'closed',
-    'plan-revision-settled', { authorization: settledDrift?.authorization, planVersions: settledDrift?.planVersions, provenance: revision6?.provenance, update: revision6?.update, usage: revision6?.usage, sample: revision6?.assuranceSample, ifRedone: settledDrift?.taskOutcome?.report?.ifRedone, accountingDigest: settledDrift?.taskOutcome?.report?.accountingDigest, stages: settledDrift?.taskOutcome?.report?.stages });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='6' && card.dataset.adaptationCount==='0' && card.dataset.planVersion==='3' && card.querySelector('[data-plan-version-ordinal="3"][data-plan-version-state="bound"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-next="3"][data-plan-revision-resolved="true"]')!==null && card.textContent.includes('计划版本 3') && card.querySelector('.analysis-timeline')?.dataset.timelineAdaptations==='0' && history?.dataset.historyCount==='6' && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'plan-revision-overview-surface');
-
-    at('plan-revision-edit-unchanged');
-    // (iii) An acknowledged manuscript edit after the checkpoint changes no plan version, no revision, and no binding.
+    // Ordinary starts choose sampling/retry in the first plan; retained prepared-plan controls are exercised below.
+    at('reanalyze-range-prepare');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card #analysis-range-8');if(!(radio instanceof HTMLInputElement)||radio.disabled)return false;radio.click();return radio.checked;})()`, 'current-range-selection');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'current-range-open', false);
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        at(width===1280?'launch-options-wide':'launch-options-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-options').open`))) await pointerClick(renderer,waitFor,'#task-drawer .task-launch-options > summary','launch-options-open');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-without-sampling');
+        const retry='#task-drawer [data-task-launch-option="retry"]';
+        const chooseRetry=async value=>{
+          const index=await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(retry)}).options).findIndex(option=>option.value===${JSON.stringify(value)})`);
+          await pointerClick(renderer,waitFor,`${retry} + .ui-select-trigger`,'launch-retry-open');
+          await pointerClick(renderer,waitFor,`${retry} ~ .ui-select-popover [data-index="${index}"]`,'launch-retry-option');
+        };
+        await chooseRetry('never');
+        requireJourney(await renderer.evaluate(`!document.querySelector('#task-drawer [data-task-launch-option="sampling"]').checked && document.querySelector('#task-drawer [data-task-launch-option="retry"]').value==='never'`),'launch-options-selected');
+        if(width===1280){await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-restore-sampling');await chooseRetry('auto');}
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    at('plan-revision-dispatch'); // This start freezes options in version 1; no ordinary prepared-plan revision exists.
+    await launchTaskFromBar(renderer,waitFor,'current-range-launch');
+    const settledDrift = await settleLaunchedRun(renderer, 'current-range');
+    const revision6 = settledDrift.resultSetRevision;
+    requireJourney(revision6.ordinal===6 && revision6.update.mode==='reanalyze-range', 'current-range-result');
+    requireJourney(settledDrift.planVersion.edits.removedSteps.includes('assurance-sampling') && settledDrift.planVersion.edits.disallowedAdaptations.includes('safe-retry'),'launch-options-frozen');
     const nextSequence = settledDrift.updateControls.working.journalSequence + 1;
     await saveEditorSuffix(renderer, '，J-04 计划版本形成后的确认编辑', nextSequence, cancellation);
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'plan-revision-edit-stale');
-    const afterEdit = await readBaseline(renderer);
-    requireJourney(afterEdit?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && afterEdit.planEnvelope?.digest === v3Digest &&
-      JSON.stringify(afterEdit.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'bound']]) &&
-      afterEdit.planRevisions?.length === 4 && afterEdit.planRevision === null && afterEdit.authorization?.planEnvelopeDigest === v3Digest &&
-      afterEdit.run?.attempt?.executionBinding?.bindingDigest === attemptDrift.executionBinding.bindingDigest && afterEdit.run?.runRecordId === settledDrift.run.runRecordId &&
-      afterEdit.resultSetRevision?.revisionId === revision6.revisionId && afterEdit.resultSetRevision?.freshness?.state === 'stale' && afterEdit.resultSetRevision?.freshness?.currentJournalSequence === nextSequence &&
-      afterEdit.checkpoint?.revisionId === settledDrift.checkpoint.revisionId,
-    'plan-revision-edit-unchanged', { planVersions: afterEdit?.planVersions, freshness: afterEdit?.resultSetRevision?.freshness, nextSequence });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='3' && card.dataset.planVersionCount==='3' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v3Digest)} && card.dataset.freshnessState==='stale' && card.dataset.resultRevisionOrdinal==='6'; })()`, 'plan-revision-edit-surface');
-    cancellation.throwIfRequested();
-
-    // ---- 联网后开始任务 (Issue #502, plan slice S74b; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002, AUTH-004,
-    // AUTH-007, OFF-004 to OFF-010). The device goes offline through J-04's control; the stale manuscript gives
-    // 同步到当前稿件 something to read.
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'current-range-edited');
+    at('plan-revision-edit-unchanged');
+    requireJourney((await readBaseline(renderer)).planEnvelope.digest===settledDrift.planEnvelope.digest,'launch-plan-unchanged-after-edit');
+    at('sync-current-prepare');
     at('connectivity-offline-bar');
     await writeFile(connectivityPath, 'offline');
-    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'offline-sync-prepared', 120_000);
-    const preparedOffline = await readBaseline(renderer);
-    requireJourney(preparedOffline?.state === 'prepared' && preparedOffline.taskIntent?.mode === 'sync-current' && preparedOffline.actions?.canAuthorize === true &&
-      preparedOffline.authorization === null && preparedOffline.run === null, 'offline-sync-plan', { state: preparedOffline?.state, mode: preparedOffline?.taskIntent?.mode });
-    const offlineIntent = preparedOffline.taskIntent.taskIntentId;
-    const offlineDrawer = await drawerShowing(renderer, offlineIntent, 'offline', 'offline-drawer');
-    // Two start actions are never shown ambiguously: 离线 offers 联网后开始任务 beside 仅保存任务草稿, and neither is
-    // preselected — focus is not on either when the drawer opens (AUTH-002, OFF-004).
-    requireJourney(offlineDrawer?.pill === '离线' && offlineDrawer.bar?.state === 'offline' && offlineDrawer.bar.start === 'offline' &&
-      offlineDrawer.bar.statement === '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定' &&
-      offlineDrawer.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
-      barActions(offlineDrawer) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:enabled' &&
-      offlineDrawer.bar.status === null && offlineDrawer.bar.refusal === null,
-    'offline-bar', offlineDrawer?.bar);
-    await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && bar.querySelector('[autofocus]')===null && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'offline-bar-nothing-preselected');
-
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false);
+    // A new start has no prepared record; the optional timing choice and launch remain keyboard reachable.
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const drawer=document.querySelector('#task-drawer'),options=drawer.querySelector('.task-launch-options'),timing=drawer.querySelector('[data-task-start-when]');options.open=true;const focus=timing.nextElementSibling?.matches('.ui-select-trigger')?timing.nextElementSibling:timing;focus.scrollIntoView({block:'center',behavior:'instant'});focus.focus({preventScroll:true});const rect=focus.getBoundingClientRect();return document.activeElement===focus && rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight && Array.from(timing.options).some(option=>option.value==='when-online'&&option.textContent==='联网后开始任务');})()`, `offline-launch-timing-${width}`).catch(async () => { requireJourney(false, `offline-launch-timing-${width}`, await renderer.evaluate(`(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]'),focus=timing?.nextElementSibling?.matches('.ui-select-trigger')?timing.nextElementSibling:timing;return {viewport:[innerWidth,innerHeight],rect:focus?.getBoundingClientRect().toJSON(),focused:document.activeElement===focus,options:Array.from(timing?.options??[],option=>[option.value,option.textContent])};})()`)); });
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    await assertRenderer(renderer, `(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]');timing.value='when-online';timing.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'offline-launch-choice');
     at('connectivity-start-when-online');
-    cancellation.throwIfRequested();
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start-when-online"]', 'offline-start-when-online');
-    const waitingDrawer = await drawerShowing(renderer, offlineIntent, 'waiting', 'waiting-drawer');
-    requireJourney(waitingDrawer?.pill === '等待网络' && waitingDrawer.bar?.state === 'started' && waitingDrawer.bar.status === '等待网络' &&
-      waitingDrawer.bar.note === '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
-      barActions(waitingDrawer) === 'cancel-wait:取消:enabled|run-link:查看运行:enabled' && waitingDrawer.bar.statement === null,
-    'waiting-bar', waitingDrawer?.bar);
+    const offlineIntent = await launchTaskFromBar(renderer, waitFor, 'offline-sync');
+    const waitingDrawer = await drawerShowing(renderer,offlineIntent,'waiting','offline-sync-waiting');
     const waitingAnalysis = await readBaseline(renderer);
-    // The exact authorization 开始任务 records, and a Run that has sent nothing: no attempt, no binding, no usage.
-    requireJourney(waitingAnalysis?.state === 'waiting' && waitingAnalysis.authorization?.origin === 'standard-direct' &&
-      waitingAnalysis.authorization?.authority === 'standard-direct-dispatch' && waitingAnalysis.run?.state === 'awaiting-connectivity' &&
-      waitingAnalysis.run.stateLabel === '等待网络 · 未启动' && waitingAnalysis.run.attempt === null && waitingAnalysis.run.progress === null &&
-      JSON.stringify(waitingAnalysis.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'awaiting-connectivity']),
-    'waiting-run', { state: waitingAnalysis?.state, run: waitingAnalysis?.run });
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='waiting'`, 'waiting-card');
-    // ②A's state reads as the Run does — never 运行已中断, which OFF-012 keeps for a Run that can resume.
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待网络 · 未启动'`, 'waiting-card-label');
-
+    requireJourney(waitingDrawer.bar.status==='等待网络' && waitingAnalysis.run.state==='awaiting-connectivity' && waitingAnalysis.run.attempt===null && waitingAnalysis.taskOutcome===null,
+      'offline-launch-no-send',waitingDrawer.bar);
+    requireJourney(waitingDrawer.pill==='等待网络' && waitingDrawer.bar.state==='started' && waitingDrawer.bar.statement===null &&
+      waitingDrawer.bar.note==='已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
+      barActions(waitingDrawer)==='cancel-wait:取消:enabled|run-link:查看运行:enabled','offline-launch-waiting-bar',waitingDrawer.bar);
+    requireJourney(waitingAnalysis.authorization.origin==='standard-direct' && waitingAnalysis.authorization.authority==='standard-direct-dispatch' &&
+      waitingAnalysis.run.progress===null && waitingAnalysis.run.stateLabel==='等待网络 · 未启动' &&
+      sameValue(waitingAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity']),'offline-launch-waiting-record');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='等待网络 · 未启动'`,'offline-launch-waiting-card');
+    const offlineAttention=await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(offlineAttention.groups.flatMap(group=>group.items).some(item=>item.target.kind==='analysis'&&item.target.taskIntentId===offlineIntent&&item.group==='active'&&item.state==='analysis-waiting-network'),'offline-launch-waiting-attention');
     at('connectivity-cancel');
-    cancellation.throwIfRequested();
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="cancel-wait"]', 'waiting-cancel');
-    const cancelledDrawer = await drawerShowing(renderer, offlineIntent, 'cancelled', 'cancelled-drawer');
-    requireJourney(cancelledDrawer?.pill === '已取消' && cancelledDrawer.bar?.status === '已取消 · 未发送任何内容' &&
-      barActions(cancelledDrawer) === 'run-link:查看运行:enabled', 'cancelled-bar', cancelledDrawer?.bar);
-    const cancelledAnalysis = await readBaseline(renderer);
-    // Terminal, before any dispatch, without provider work — and never 已中断, which OFF-012 keeps for a Run that can resume.
-    requireJourney(cancelledAnalysis?.state === 'cancelled' && cancelledAnalysis.run?.state === 'cancelled' && cancelledAnalysis.run.stateLabel === '已取消 · 未启动' &&
-      cancelledAnalysis.run.attempt === null && cancelledAnalysis.taskOutcome === null &&
-      JSON.stringify(cancelledAnalysis.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'cancelled']),
-    'cancelled-run', { state: cancelledAnalysis?.state, run: cancelledAnalysis?.run });
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已取消 · 未启动'`, 'cancelled-card-label');
-
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const button=document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]');button.scrollIntoView({block:'center',behavior:'instant'});button.focus({preventScroll:true});const rect=button.getBoundingClientRect();return !button.disabled && document.activeElement===button && rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight;})()`, `offline-launch-cancel-${width}`);
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]','offline-launch-cancel');
+    const cancelledDrawer = await drawerShowing(renderer,offlineIntent,'cancelled','offline-launch-cancelled');
+    requireJourney(cancelledDrawer.pill==='已取消' && cancelledDrawer.bar.status==='已取消 · 未发送任何内容' && barActions(cancelledDrawer)==='run-link:查看运行:enabled','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    const cancelledAnalysis=await readBaseline(renderer);
+    requireJourney(cancelledAnalysis.run.state==='cancelled'&&cancelledAnalysis.run.stateLabel==='已取消 · 未启动'&&cancelledAnalysis.run.attempt===null&&cancelledAnalysis.taskOutcome===null&&
+      sameValue(cancelledAnalysis.run.transitions.map(transition=>transition.state),['authorized','awaiting-connectivity','cancelled']),'offline-launch-cancelled-record');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','offline-launch-close');
     at('connectivity-wait-again');
-    cancellation.throwIfRequested();
-    // Cancelling freed the Book: the same mode is prepared again, and started again to wait for the network.
-    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'again-sync-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'again-sync-prepared', 120_000);
-    const preparedAgain = await readBaseline(renderer);
-    requireJourney(preparedAgain?.state === 'prepared' && preparedAgain.taskIntent?.taskIntentId !== offlineIntent, 'again-sync-plan');
-    const againIntent = preparedAgain.taskIntent.taskIntentId;
-    await drawerShowing(renderer, againIntent, 'offline', 'again-offline-drawer');
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start-when-online"]', 'again-start-when-online');
-    await drawerShowing(renderer, againIntent, 'waiting', 'again-waiting-drawer');
-
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'current-sync-launch');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`,'current-sync-waits-offline');
     at('connectivity-online-dispatch');
-    cancellation.throwIfRequested();
-    // The network returns. The drawer showing the waiting Run asks Reconnect Preflight on its own clock; the plan it
-    // bound still stands and a place of the governor is free, so the Run is admitted and runs to its end (OFF-008).
-    await writeFile(connectivityPath, 'online');
-    await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'online-settled', 180_000);
-    const onlineSettled = await readBaseline(renderer);
-    const onlineStates = onlineSettled?.run?.transitions?.map((transition) => transition.state) ?? [];
-    requireJourney(onlineSettled?.state === 'settled' && onlineSettled.taskIntent?.taskIntentId === againIntent &&
-      JSON.stringify(onlineStates.slice(0, 4)) === JSON.stringify(['authorized', 'awaiting-connectivity', 'admitted', 'executing']) &&
-      onlineSettled.run?.attempt !== null && onlineSettled.taskOutcome?.resultSetRevisionId === onlineSettled.resultSetRevision?.revisionId &&
-      onlineSettled.resultSetRevision?.ordinal === 7 && onlineSettled.resultSetRevision?.update?.mode === 'sync-current',
-    'online-settled-run', { state: onlineSettled?.state, transitions: onlineStates });
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && document.querySelector('#task-drawer .task-bar-status')?.textContent==='已完成' && document.querySelector('#task-drawer [data-task-drawer-control="run-link"]')?.textContent==='查看运行' && !document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]')`, 'online-bar-settled');
+    await writeFile(connectivityPath,'online');
+    const onlineSettled = await settleLaunchedRun(renderer, 'current-sync');
+    const againIntent = onlineSettled.taskIntent.taskIntentId;
+    requireJourney(onlineSettled.resultSetRevision.ordinal===7 && onlineSettled.resultSetRevision.update.mode==='sync-current', 'current-sync-result');
+    requireJourney(sameValue(onlineSettled.run.transitions.slice(0,4).map(transition=>transition.state),['authorized','awaiting-connectivity','admitted','executing']) &&
+      onlineSettled.run.attempt!==null && onlineSettled.taskOutcome.resultSetRevisionId===onlineSettled.resultSetRevision.revisionId,'offline-launch-reconnected-record');
 
-    // ---- 快速开始 under a 默认执行规则 (Issue #421, plan slice S75; editor-surfaces §3, §6; V2-UX-TASK-017, TASK-019,
-    // TASK-020, TASK-026, TASK-028, AUTH-009). The plan the editor just saw run is set as the quick-start default;
-    // the next 同步 starts under it — once stopping at its plan while offline, then starting — and the rule is
-    // read and turned off in 知识库 › 工序与规则.
     at('quick-start-set-rule');
     cancellation.throwIfRequested();
     const ruleInputs = onlineSettled.planVersion.materialInputs;
@@ -2972,6 +2605,134 @@ async function main() {
     requireJourney(offCard?.pill === '已停用' && offCard.deactivate === null && rulesAfterOff?.rules?.length === 1 &&
       rulesAfterOff.rules[0].state === 'deactivated' && rulesAfterOff.rules[0].ruleVersionId === rule.ruleVersionId, 'rules-off', { offCard, rules: rulesAfterOff?.rules });
 
+    // A rule-stopped quick start still produces a prepared task. Its editor keeps the pre-existing revision controls.
+    // Use a separate admitted sample1 Book so the ordinary launch history above stays independent.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'legacy-plan-import-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'legacy-plan-import-library-ready');
+    const legacyBook = await importSample1(renderer, cancellation, true);
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'legacy-plan-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'legacy-plan-library-ready');
+    await reviewAction(renderer, `button[data-book-id="${legacyBook.bookId}"]`, 'legacy-plan-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`, 'legacy-plan-book-ready');
+    await openAnalysisDestination(renderer, 'legacy-plan-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')?.disabled===false`, 'legacy-plan-first-ready');
+    await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="start"]','legacy-plan-first');
+    await launchTaskFromBar(renderer,waitFor,'legacy-plan-first'); await settleLaunchedRun(renderer,'legacy-plan-first');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-first-close');
+    await startUpdate(renderer,'reanalyze-book','重新分析全书','legacy-plan-book-run'); await settleLaunchedRun(renderer,'legacy-plan-book-run');
+    if(await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer,waitFor,'.task-result-window [data-task-result-action="close"]','legacy-plan-result-close');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="mode-full"]','legacy-plan-rule-full');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="default-rule"]')?.disabled===false`,'legacy-plan-rule-ready');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="default-rule"]','legacy-plan-rule');
+    const legacyRule = (await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules()`)).rules.find(rule=>rule.bookId===legacyBook.bookId&&rule.pattern==='reanalyze-book');
+    requireJourney(legacyRule?.state==='active','legacy-plan-rule-record');
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-rule-close');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="quick-reanalyze-book"]')?.dataset.ruleVersionId===${JSON.stringify(legacyRule.ruleVersionId)}`,'legacy-plan-rule-projected');
+    await assertRenderer(renderer, `(() => {document.querySelector('.baseline-analysis-card [data-analysis-tab="history"]').click();document.querySelector('.baseline-analysis-card #analysis-range-3').click();return true;})()`, 'legacy-plan-quick-range');
+    await writeFile(connectivityPath,'offline');
+    await quickStart(renderer,'reanalyze-book','重新分析全书',legacyRule.name,'legacy-plan-quick-offline');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='offline'`,'legacy-plan-prepared');
+    await writeFile(connectivityPath,'online');
+    // Prepared work is read on opening its plan; unlike a queued Run it has no reconnect transition to follow.
+    await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-online-close');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-task-plan-open="baseline-analysis"]','legacy-plan-online-open');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-online');
+    // Changing this retained prepared task's mode opens the same legacy editor with a fresh range Task.
+    await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-initial-close');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-tab="history"]','legacy-plan-initial-history');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card #analysis-range-3','legacy-plan-initial-range');
+    await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-action="reanalyze-range"]','legacy-plan-initial-read');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && window.ai7.inspectBaselineAnalysis().then(plan=>plan.update?.mode==='reanalyze-range' && plan.run===null)`,'legacy-plan-initial-ready');
+    const legacyTask = (await readBaseline(renderer)).taskIntent.taskIntentId;
+    const prepareLegacyRange = async unit => {
+      const expected=await renderer.evaluate(`window.ai7.getBaselineAnalysisRangePlan(${JSON.stringify({unitOrdinal:unit})})`);
+      if(await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`)) await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-close');
+      await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-tab="history"]','legacy-plan-history');
+      await pointerClick(renderer,waitFor,`.baseline-analysis-card #analysis-range-${unit}`,'legacy-plan-select-range');
+      await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-action="reanalyze-range"]','legacy-plan-read-range');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(legacyTask)} && ['ready','changed'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanStart) && window.ai7.inspectBaselineAnalysis().then(plan=>{const range=plan.planRevision?.proposed?.selectedRange??plan.update?.selectedRange;return range?.startPosition===${expected.selectedRange.startPosition}&&range.endPosition===${expected.selectedRange.endPosition};})`,'legacy-plan-updated');
+    };
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        at('plan-revision-prepare');
+        await prepareLegacyRange(3);
+        if((await readBaseline(renderer)).planRevision!==null){await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="reconfirm-plan"]','legacy-plan-initial-reconfirm');await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-initial-current');}
+        const before=await readBaseline(renderer), digest=before.planEnvelope.digest;
+        at('plan-revision-drift');
+        await prepareLegacyRange(8);
+        const changed=await readBaseline(renderer);
+        requireJourney(changed.taskIntent.taskIntentId===legacyTask && changed.authorization===null && changed.run===null && changed.planRevision?.changedFields.includes('selectedRange'),'legacy-plan-material-drift');
+        at('second-book-plan-revision');
+        const attention=await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+        const decision=attention.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis-plan'&&item.target.taskIntentId===legacyTask);
+        requireJourney(decision?.group==='decisions'&&decision.state==='analysis-plan-revision'&&decision.nextStep==='reconfirm-plan','legacy-plan-attention-decision');
+        at('open-plan-revision');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-attention-close');
+        await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'legacy-plan-attention-open');
+        await pointerClick(renderer,waitFor,`[data-attention-open="${decision.itemId}"]`,'legacy-plan-attention-item');
+        await waitFor(renderer,`document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(legacyTask)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='changed'`,'legacy-plan-attention-target');
+        const stillPending=await renderer.evaluate(`window.ai7.taskOverviewCall(${JSON.stringify({operation:'inspectBaselineAnalysis',bookId:legacyBook.bookId,input:{revisionId:null}})})`);
+        requireJourney(stillPending.taskIntent.taskIntentId===legacyTask&&stillPending.planRevision?.state==='pending','legacy-plan-attention-open-read-only');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-attention-return');
+        await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('library')),'legacy-plan-return-library');
+        await waitFor(renderer,`document.querySelector('[data-screen="landing"]')`,'legacy-plan-return-library-ready');
+        await reviewAction(renderer,`button[data-book-id="${legacyBook.bookId}"]`,'legacy-plan-return-book');
+        await waitFor(renderer,`document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`,'legacy-plan-return-book-ready');
+        await openAnalysisDestination(renderer,'legacy-plan-return-analysis');
+        await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-task-plan-open="baseline-analysis"]','legacy-plan-return-drawer');
+        at('plan-revision-drawer-diff');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-plan-revision"]','legacy-plan-diff-open');
+        await waitFor(renderer, `!document.querySelector('#task-drawer .task-plan-drift-table')?.hidden`,'legacy-plan-diff-visible');
+        at('plan-revision-bar');
+        requireJourney(await renderer.evaluate(`!document.querySelector('#task-drawer [data-task-drawer-control="start"]') && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`),'legacy-plan-reconfirm-gate');
+        at('plan-revision-stale-authorize');
+        // The legacy drawer still owns authorization; a stale digest cannot start that retained task.
+        const refused=await renderer.evaluate(`window.ai7.authorizeBaselineAnalysis(${JSON.stringify({taskIntentId:legacyTask,planEnvelopeDigest:digest})}).then(()=>null,error=>error.code)`);
+        requireJourney(refused==='ANALYSIS_PLAN_REVISION_REQUIRED' && (await readBaseline(renderer)).run===null,'legacy-plan-stale-refused');
+        at('plan-revision-revert');
+        await prepareLegacyRange(3);
+        requireJourney((await readBaseline(renderer)).planEnvelope.digest===digest && (await readBaseline(renderer)).planRevision===null,'legacy-plan-reverted');
+        at('plan-revision-reconfirm');
+        await prepareLegacyRange(8);
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="reconfirm-plan"]','legacy-plan-reconfirm');
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`,'legacy-plan-current');
+        at('plan-revision-drawer-range');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="mode-full"]','legacy-plan-range-full');
+        const current=await readBaseline(renderer), range=current.update.selectedRange;
+        requireJourney(current.taskIntent.taskIntentId===legacyTask && current.planVersion.ordinal>before.planVersion.ordinal && (await readDrawer(renderer)).terms['要处理'].includes(`第 ${range.startPosition}–${range.endPosition} 段`),'legacy-plan-range-shown');
+        at('plan-edit-open');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="revise"]','legacy-plan-revise');
+        at('plan-edit-remove');
+        for(const item of ['assurance-sampling','safe-retry'])await pointerClick(renderer,waitFor,`#task-drawer [data-task-plan-item="${item}"] [data-task-plan-edit="remove"]`,'legacy-plan-remove');
+        requireJourney((await readDrawer(renderer)).bar.note==='你改了 2 处','legacy-plan-unsaved-edits');
+        at('plan-edit-discard');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="discard-edits"]','legacy-plan-discard');
+        requireJourney((await readBaseline(renderer)).planEnvelope.digest===current.planEnvelope.digest,'legacy-plan-discard-unwritten');
+        at('j14-plan-edit-keyboard');
+        await renderer.evaluate(`document.querySelector('#task-drawer [data-task-drawer-control="revise"]').focus()`); await pressEnter(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-focused');
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='assurance-sampling' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-restored-focus');
+        await pressTab(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-budget');
+        await pressTab(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='remove' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.activeElement.matches(':focus-visible')`,'legacy-plan-keyboard-retry');
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.activeElement?.dataset.taskPlanEdit==='restore' && document.activeElement.closest('[data-task-plan-item]')?.dataset.taskPlanItem==='safe-retry' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 2 处'`,'legacy-plan-keyboard-edited');
+        at('plan-edit-update');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="update-plan"]','legacy-plan-save');
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion===${JSON.stringify(String(current.planVersion.ordinal+1))}`,'legacy-plan-saved');
+        const saved=await readBaseline(renderer);
+        requireJourney(saved.planVersion.edits.removedSteps.includes('assurance-sampling') && saved.planVersion.edits.disallowedAdaptations.includes('safe-retry') && saved.authorization===null && saved.run===null,'legacy-plan-first-authority-unchanged');
+        // Restore the same two options before the other viewport repeats this retained workflow.
+        for(const item of ['assurance-sampling','safe-retry'])await pointerClick(renderer,waitFor,`#task-drawer [data-task-plan-item="${item}"] [data-task-plan-edit="restore"]`,'legacy-plan-restore');
+        await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="update-plan"]','legacy-plan-save-restored');
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion===${JSON.stringify(String(saved.planVersion.ordinal+1))}`,'legacy-plan-restored');
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    // The prepared task is deliberately left unstarted: unlike an ordinary launch, this legacy product path still has one.
+
     // ---- 审阅 (Issue #417, plan slice S69; editor-surfaces §4; V2-UX-REV-001 to REV-013, MARK-010) ----
     at('review-relaunch');
     await closeOwnedBrowser();
@@ -3066,6 +2827,14 @@ async function main() {
     requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3 && preparedReview.state==='waiting' && preparedReview.authorization!==null, 'review-launched-waiting-run');
     const waitingReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
     requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
+    const waitingReview = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    requireJourney(waitingReview.run?.reviewRunId===preparedReview.reviewRunId && waitingReview.run.canContinue===false &&
+      waitingReview.run.categories.every(category=>category.state==='waiting') && waitingReview.newReview.available===false,
+      'review-waiting-no-new-or-continue');
+    await assertRenderer(renderer, `!document.querySelector('[data-review-action="continue"]') && document.querySelector('[data-review-action="new-review"]')?.disabled===true`, 'review-waiting-actions');
+    const waitingAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    const waitingItem = waitingAttention.groups.flatMap(group=>group.items).find(item=>item.itemId===`review:${preparedReview.reviewRunId}`);
+    requireJourney(waitingItem?.group==='active' && waitingItem.state==='analysis-waiting-network' && waitingItem.nextStep==='view-review', 'review-waiting-attention', waitingItem);
     at('review-online-dispatch');
     await writeFile(connectivityPath, 'online');
     at('review-authorize');
@@ -3633,11 +3402,15 @@ async function main() {
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     // 运行 runs in one step (Issue #1410 item 13): the plan is prepared and started at once; 查看计划 stays beside the result.
     await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
+    await assertRenderer(renderer, `(() => {const retry=document.querySelector('#task-drawer [data-task-launch-option="retry"]');if(!retry)return false;retry.value='never';retry.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'custom-withdraw-safe-retry');
+    await launchTaskFromBar(renderer, waitFor, 'custom-analysis');
     await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
     const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
     // The plan it ran: the dimension's exact version as its procedure, and nothing sent here.
     const customPlanRecord = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(customTask.taskIntentId)} })`);
     requireJourney(customPlanRecord?.scope?.send === `不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」` &&
+      customPlanRecord.boundary.adaptable.some(entry=>entry.id==='safe-retry'&&entry.removed===true) &&
       customPlanRecord.technical?.some((row) => row.key === 'custom-analysis-dimension' && row.value.startsWith(customDimension.versions[0].versionId)), 'custom-plan-record', customPlanRecord?.scope);
     cancellation.throwIfRequested();
 
@@ -3699,14 +3472,14 @@ async function main() {
     await openAnalysisDestination(renderer, 'recorded-open-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'recorded-analysis-available');
     await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-prepare');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-prepared', 120_000);
+    await launchTaskFromBar(renderer, waitFor, 'recorded');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-prepared', 120_000);
     const recordedPrepared = await readBaseline(renderer);
     // The replay asks what the recorded Run asked: prompt contract /1, whose plan pins no sampling contract (sampling /1).
     requireJourney(recordedPrepared?.bookId === recordedBook.bookId && recordedPrepared.coverageManifest?.units?.length === 8 &&
       recordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
       recordedPrepared.planEnvelope?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
       recordedPrepared.executionPlan !== null && !('assurancePromptContractDigest' in recordedPrepared.executionPlan), 'recorded-prepared-binding');
-    await startFromBar(renderer, 'recorded-start');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'recorded-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-settled-state');
     at('result-set-revision');
@@ -3769,17 +3542,17 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]')`, 'recorded-paused-manuscript');
     await openAnalysisDestination(renderer, 'recorded-paused-analysis');
     await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-paused-prepare');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-paused-prepared', 120_000);
+    let recordedPaused;
+    let recordedPausedCheckpoints;
+    try {
+      await writeFile(unitHoldPath, '2');
+      await launchTaskFromBar(renderer, waitFor, 'recorded-paused');
     const recordedPausedPrepared = await readBaseline(renderer);
     requireJourney(recordedPausedPrepared.bookId !== recordedBook.bookId && recordedPausedPrepared.checkpoint?.journalSequence === 0 &&
       recordedPausedPrepared.planEnvelope?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
       recordedPausedPrepared.executionPlan !== null && !('assurancePromptContractDigest' in recordedPausedPrepared.executionPlan),
     'recorded-paused-absent-sampling-pin');
-    let recordedPaused;
-    let recordedPausedCheckpoints;
-    try {
-      await writeFile(unitHoldPath, '2');
-      await startFromBar(renderer, 'recorded-paused-start');
+
       await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='executing' && analysis.run.progress?.unitsSettled===2 && analysis.run.progress.currentUnitOrdinal===3)`, 'recorded-paused-third-in-flight', 180_000);
       const inFlight = await readBaseline(renderer);
       await reviewAction(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'recorded-paused-pause');
@@ -3881,12 +3654,12 @@ async function main() {
 
     at('reanalyze-range-prepare');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'range-recorded-click');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-recorded-prepared', 120_000);
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'range-recorded-prepared', 120_000);
     const rangeRecordedPrepared = await readBaseline(renderer);
     const rangeRecordedPlan = rangeRecordedPrepared?.update?.reusePlan;
-    requireJourney(rangeRecordedPrepared?.state === 'prepared' && rangeRecordedPrepared.taskIntent?.mode === 'reanalyze-range' &&
+    requireJourney(rangeRecordedPrepared?.state === 'settled' && rangeRecordedPrepared.taskIntent?.mode === 'reanalyze-range' &&
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
-      rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
+      rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === false &&
       JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
       sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }) &&
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
@@ -3894,10 +3667,10 @@ async function main() {
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&
       rangeRecordedPrepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
       rangeRecordedPrepared.executionPlan?.assurancePromptContractDigest === SAMPLING_CONTRACT_DIGEST &&
-      rangeRecordedPrepared.actions?.canAuthorize === true, 'range-recorded-prepared-plan');
+      rangeRecordedPrepared.actions?.canAuthorize === false, 'range-recorded-prepared-plan');
 
     at('reanalyze-range-dispatch');
-    const rangeRecorded = await settleAuthorizedRun(renderer, 'range-recorded');
+    const rangeRecorded = await settleLaunchedRun(renderer, 'range-recorded');
 
     at('reanalyze-range-revision');
     const rangeRevision = rangeRecorded?.resultSetRevision;
@@ -4021,22 +3794,10 @@ async function main() {
         await openReviewDestination(renderer, 'dispatch-choice-review');
         await reviewAction(renderer, '[data-review-action="new-review"]', 'dispatch-choice-new');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('dialog.review-sheet .dispatch-chooser select')?.options.length>1`, 'dispatch-choice-sheet');
-        const chosenLabel = await renderer.evaluate(`(() => {
-          const sheet=document.querySelector('dialog.review-sheet');
+        await renderer.evaluate(`(() => {const sheet=document.querySelector('dialog.review-sheet');
           for(const box of sheet.querySelectorAll('input[name="review-category"]'))if(box.checked!==(box.value==='typos-and-usage')&&!box.disabled)box.click();
-          sheet.querySelector('input[name="review-scope"][value="whole"]').click();
-          const chooser=sheet.querySelector('.dispatch-chooser');chooser.open=true;
-          const models=chooser.querySelector('select[aria-label="本次任务的模型"]');
-          const other=Array.from(models.options).findIndex((option,index)=>index!==models.selectedIndex);
-          if(other<0)return null;
-          models.selectedIndex=other;models.dispatchEvent(new Event('change',{bubbles:true}));
-          const effort=chooser.querySelector('select[aria-label="本次任务的思考强度"]');
-          const value=Array.from(effort.options).find(option=>option.value!=='off')?.value;
-          if(!value)return null;
-          effort.value=value;effort.dispatchEvent(new Event('change',{bubbles:true}));
-          const label=chooser.querySelector('summary').textContent.replace(/^模型 /u,'').replace(/ ▾$/u,'');
-          chooser.open=false;return label;
-        })()`);
+          sheet.querySelector('input[name="review-scope"][value="whole"]').click();})()`);
+        const chosenLabel = (await chooseDispatch(renderer, waitFor, 'dialog.review-sheet .dispatch-chooser', 'dispatch-review-pointer')).replace(/^模型 /u,'').replace(/ ▾$/u,'');
         requireJourney(typeof chosenLabel==='string' && chosenLabel.includes('@'), 'dispatch-choice-model-and-effort');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-review-action="start"]')?.disabled===false`, 'dispatch-choice-selected-ready');
         await assertRenderer(renderer, `(() => {const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'), bounds=button.getBoundingClientRect();return bounds.left>=0&&bounds.right<=innerWidth&&bounds.top>=0&&bounds.bottom<=innerHeight;})()`, 'dispatch-choice-start-visible');

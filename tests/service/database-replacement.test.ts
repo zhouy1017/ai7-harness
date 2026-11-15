@@ -1,6 +1,7 @@
 import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
 import { DialogueExecutionOwner } from '../../src/service/dialogue/dialogue-execution.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { assembleProviderRequest, PROVIDER_ROUTE_PROFILES } from '../../src/service/provider/deepseek-adapter.js';
 import { modelProfileFor } from '../../src/service/provider/model-profile.js';
@@ -66,7 +67,7 @@ import {
   MODEL_SERVICE_ROW_COLUMNS,
 } from '../../src/service/model-service-connections.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { MAX_DATABASE_REPLACEMENTS_LISTED, FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
+import { MAX_DATABASE_REPLACEMENTS_LISTED, FACTUAL_REVIEW_TASK_GOAL, BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, composeRevisedDocx } from '../support/composed-fixture.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -1516,4 +1517,28 @@ it('replaces populated instance launch snapshots with the exported instance-free
       expect(db.prepare("SELECT count(*) n FROM sqlite_schema WHERE type='trigger' AND tbl_name='task_launch_snapshots'").get()!.n).toBe(2);
     });
   } finally { store.close(); }
+});
+
+it('recovers and cancels an unadmitted ordinary launch after replacement removed its instance command row (#1455)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const governor = new ModelRequestGovernor(); let captured: ReturnType<typeof capturedOrdinaryExecution> | undefined;
+  try {
+    const book = await importSample1Book(store, roots.codeRoot, '等待任务的导出与恢复');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined);
+    const launched = store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null,
+      executionConfig: { reasoningEffort: 'high' }, startWhen: 'idle' }, captured.policy);
+    await captured.owner.dispose();
+    const preview = await store.inspectDatabaseImport(await exported(store, 'pending-launch.ai7db'));
+    await store.prepareDatabaseReplacement(preview.previewId, T);
+    store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined);
+    store.reconcileStoppedBaselineAnalysisRuns();
+    expect(await inspectLaunchSnapshots(roots.dataRoot, db=>db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n)).toBe(0);
+    expect(store.pendingLaunchedLedgerRuns().map(run=>run.runRecordId)).toContain(launched.runRecordId);
+    store.cancelWaitingBaselineAnalysis(book.bookId, launched.taskIntentId);
+    expect(store.pendingLaunchedLedgerRuns()).toEqual([]);
+    expect(store.inspectBaselineAnalysis(book.bookId).run!.state).toBe('cancelled');
+    expect(captured.requests).toHaveLength(0); captured.assertMatched();
+  } finally { await captured?.owner.dispose(); governor.close(); await governor.whenIdle(); store.close(); }
 });

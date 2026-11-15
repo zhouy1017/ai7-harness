@@ -1,3 +1,6 @@
+import { baselineAnalysisPlan, isRemoteExecutionRoute } from './task-plan.js';
+import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
+import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -664,6 +667,15 @@ function preparationFrom(projection: BaselineAnalysisProjection, from: CustomAna
  * with 开始任务 — nothing is started, scheduled or enrolled here, and the baseline's preparation is never called.
  */
 export function prepareCustomAnalysis(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection): { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } {
+  const result = buildCustomAnalysisTask(host, input, launchPolicy, (ledger, request) => ledger.prepare(request));
+  return { taskIntentId: result.prepared.taskIntent!.taskIntentId, dimensions: result.dimensions };
+}
+
+export function launchCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection, context: TaskLaunchContext): BaselineAnalysisProjection {
+  return buildCustomAnalysisTask(host, input, launchPolicy, launchedTaskPlan(context)).prepared;
+}
+
+function buildCustomAnalysisTask(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection, createPlan: TaskPlanCreator): { prepared: BaselineAnalysisProjection; dimensions: CustomAnalysisDimensionsProjection } {
   host.assertAvailable();
   requireStore(typeof input === 'object' && input !== null && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
     isCustomAnalysisDimensionId(input.dimensionId) && (input.from == null || (typeof input.from === 'object' && UUID_PATTERN.test(input.from.taskIntentId) &&
@@ -682,10 +694,10 @@ export function prepareCustomAnalysis(host: CustomAnalysisStoreHost, input: Prep
   requireStore(again === null || sameUpdate(again.update, input.update ?? null), 'CUSTOM_ANALYSIS_REQUEST_INVALID',
     '准备的范围与这项任务的计划不一致；请重新打开它的计划。');
   const update = again?.update ?? input.update ?? null;
-  let progress = host.analysisCall(() => ledger.prepare({
+  let progress = host.analysisCall(() => createPlan(ledger, {
     phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(update?.mode ?? 'first-baseline'), update,
     reconfirm: again?.reconfirm ?? false, redoOf: again?.redoOf ?? null, launchPolicy,
-  }));
+  }, (projection, blocks, bookTitle) => customAnalysisPlan(baselineAnalysisPlan({ projection: projection as unknown as BaselineAnalysisProjection, bookTitle, blocks }), { ...customAnalysisVersionInput(version), version: version.version }, projection.providerResolutionPlan !== null && isRemoteExecutionRoute(projection.providerResolutionPlan.executionRoute))));
   while (!progress.done) {
     const workId = progress.workId;
     requireStore(workId !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
@@ -693,7 +705,7 @@ export function prepareCustomAnalysis(host: CustomAnalysisStoreHost, input: Prep
   }
   const prepared = progress.projection as unknown as BaselineAnalysisProjection | null;
   requireStore(prepared !== null && prepared.taskIntent !== null && prepared.planEnvelope !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
-  return { taskIntentId: prepared.taskIntent.taskIntentId, dimensions: inspectCustomAnalysisDimensions(host, input.bookId) };
+  return { prepared, dimensions: inspectCustomAnalysisDimensions(host, input.bookId) };
 }
 
 /** Startup reconciliation of every dimension's Runs a stopped service left under way, as each other kind's is. */

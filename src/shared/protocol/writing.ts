@@ -149,7 +149,7 @@ export interface WritingTaskTypeProjection {
   /** The house's 范例 of this type from other Books a draft would reference — never copy — and the plan's line for them. */
   readonly exemplars: { readonly count: number; readonly statement: string };
   /** The newest drafted result of this type whose document has not been made yet: 打开草稿 makes it the document. */
-  readonly drafted: null | { readonly revisionId: string; readonly createdAt: string };
+  readonly drafted: null | { readonly modelLabel?: string; readonly revisionId: string; readonly createdAt: string };
   /**
    * 快速开始 of this type (Issue #432, S84b; S75 D5, D6): offered only while the Book has this type's writing 默认执行规则 in
    * force that still matches the Book's facts, this launch may use one, and the type can be drafted now. A rule covers only the
@@ -204,6 +204,7 @@ export interface WritingTaskProjection {
   readonly types: ReadonlyArray<WritingTaskTypeProjection>;
   /** The Book's latest writing Task, which the Task Drawer opens; `null` before the first is prepared. */
   readonly task: null | {
+    readonly modelLabel?: string;
     readonly taskIntentId: string;
     readonly typeId: string;
     readonly typeLabel: string;
