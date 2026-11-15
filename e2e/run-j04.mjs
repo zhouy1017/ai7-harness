@@ -2663,6 +2663,14 @@ async function main() {
     requireJourney(UUID_PATTERN.test(preparedReview?.reviewRunId ?? '') && preparedReview.categories.length === 3 && preparedReview.state==='waiting' && preparedReview.authorization!==null, 'review-launched-waiting-run');
     const waitingReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
     requireJourney(waitingReviewDrawer?.bar?.status==='等待网络' && barActions(waitingReviewDrawer)==='cancel-wait:取消:enabled|run-link:查看审阅:enabled', 'review-waiting-cancellable', waitingReviewDrawer?.bar);
+    const waitingReview = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    requireJourney(waitingReview.run?.reviewRunId===preparedReview.reviewRunId && waitingReview.run.canContinue===false &&
+      waitingReview.run.categories.every(category=>category.state==='waiting') && waitingReview.newReview.available===false,
+      'review-waiting-no-new-or-continue');
+    await assertRenderer(renderer, `!document.querySelector('[data-review-action="continue"]') && document.querySelector('[data-review-action="new-review"]')?.disabled===true`, 'review-waiting-actions');
+    const waitingAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    const waitingItem = waitingAttention.groups.flatMap(group=>group.items).find(item=>item.itemId===`review:${preparedReview.reviewRunId}`);
+    requireJourney(waitingItem?.group==='active' && waitingItem.state==='analysis-waiting-network' && waitingItem.nextStep==='view-review', 'review-waiting-attention', waitingItem);
     at('review-online-dispatch');
     await writeFile(connectivityPath, 'online');
     at('review-authorize');
@@ -3230,12 +3238,15 @@ async function main() {
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     // 运行 runs in one step (Issue #1410 item 13): the plan is prepared and started at once; 查看计划 stays beside the result.
     await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
+    await assertRenderer(renderer, `(() => {const retry=document.querySelector('#task-drawer [data-task-launch-option="retry"]');if(!retry)return false;retry.value='never';retry.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'custom-withdraw-safe-retry');
     await launchTaskFromBar(renderer, waitFor, 'custom-analysis');
     await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
     const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;
     // The plan it ran: the dimension's exact version as its procedure, and nothing sent here.
     const customPlanRecord = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(customTask.taskIntentId)} })`);
     requireJourney(customPlanRecord?.scope?.send === `不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」` &&
+      customPlanRecord.boundary.adaptable.some(entry=>entry.id==='safe-retry'&&entry.removed===true) &&
       customPlanRecord.technical?.some((row) => row.key === 'custom-analysis-dimension' && row.value.startsWith(customDimension.versions[0].versionId)), 'custom-plan-record', customPlanRecord?.scope);
     cancellation.throwIfRequested();
 

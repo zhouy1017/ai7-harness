@@ -2819,7 +2819,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const kinds = LEDGER_TASK_LAUNCH_KINDS;
       root.dataset['taskLaunchKind'] = kinds[next.operation];
       const description = el('p', undefined, '开始时使用当前稿件，并固定本次任务的模型与思考强度。');
-      const estimate = el('details', 'task-launch-estimate'); estimate.append(el('summary', undefined, '查看预计用量'), el('p', undefined, '实际用量随稿件长度与模型回答变化，完成后可在运行记录查看。本次任务不会直接替换稿件。'));
+      const estimate = el('details', 'task-launch-estimate'), usage = el('p');
+      estimate.append(el('summary', undefined, '本次用量说明'), usage);
       body.replaceChildren(description, estimate);
       let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
       let commandId = crypto.randomUUID();
@@ -2830,19 +2831,30 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       budget.dataset['taskLaunchOption'] = 'budget';
       budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
       const budgetLabel = el('label', undefined, '本次预算上限 · 词元（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
+      const describeUsage = (): void => {
+        const limit = budget.value.trim() === '' ? '未设置词元预算上限。' : parseBudgetCeiling(budget.value) === null
+          ? '预算上限需要填写有效的词元数量。' : `词元预算上限为 ${budget.value.trim()}。`;
+        usage.textContent = `本次运行「${next.title}」。${limit}实际用量随稿件与回答变化，完成后可在运行记录查看；结果不会直接替换稿件。`;
+      };
+      describeUsage(); budget.addEventListener('input', describeUsage);
       runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
       const baselineOptions = next.operation === 'launchBaselineAnalysis';
+      const retryOptions = baselineOptions || next.operation === 'launchCustomAnalysis';
       const retry = el('select'); retry.dataset['taskLaunchOption'] = 'retry'; retry.setAttribute('aria-label', '遇到可重试的失败');
       for (const [value, label] of [['auto', '自动重试'], ['ask-first', '先问我'], ['never', '不重试']]) {
+        if (value === 'ask-first' && !baselineOptions) continue;
         const option = el('option', undefined, label); option.value = value!; retry.append(option);
       }
       retry.value = next.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : next.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
       const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
       sampling.checked = !next.input.planEdits?.removedSteps.includes('assurance-sampling');
-      if (baselineOptions) {
+      if (retryOptions) {
         const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
+        runOptions.append(retryLabel);
+      }
+      if (baselineOptions) {
         const samplingLabel = el('label', undefined, '完成后核对与抽检'); samplingLabel.prepend(sampling);
-        runOptions.append(retryLabel, samplingLabel);
+        runOptions.append(samplingLabel);
       }
       for (const event of ['input', 'change']) runOptions.addEventListener(event, () => { commandId = crypto.randomUUID(); });
       const timing = el('select'); timing.dataset['taskStartWhen'] = ''; timing.setAttribute('aria-label', '开始时间');
@@ -2893,7 +2905,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           if (tokens === null && budget.value.trim() !== '') { restore(); start.disabled = false; problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return; }
           const planEdits: PlanEditsProjection = {
             removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : next.input.planEdits?.removedSteps ?? [],
-            disallowedAdaptations: baselineOptions ? retry.value === 'never' ? ['safe-retry'] : [] : next.input.planEdits?.disallowedAdaptations ?? [],
+            disallowedAdaptations: retryOptions ? retry.value === 'never' ? ['safe-retry'] : [] : next.input.planEdits?.disallowedAdaptations ?? [],
             ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
             ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
           };

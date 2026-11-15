@@ -19,7 +19,8 @@ import { beginRewriteAsJ11, EVALUATION_REWRITE_FIXTURE_IDENTITY } from '../suppo
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { WRITING_REQUEST } from '../support/writing-task.js';
+import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
+import { READERS_REPORT_FIXTURE_IDENTITY } from '../support/readers-report.js';
 
 // D4: the six ordinary drawer starts use real stores and SampleBook input. No task is dispatched to a provider here.
 const KINDS = ['baseline-analysis', 'custom-analysis', 'writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'] as const;
@@ -69,11 +70,11 @@ async function book(kind: Kind) {
   return { ...imported, recordId };
 }
 
-function ordinary(answer: CapturedOrdinaryAnswer = () => undefined): void {
+function ordinary(answer: CapturedOrdinaryAnswer = () => undefined, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): void {
   const search = store.getSearchBackendConnections().find(connection => connection.backendId === 'search-tinyfish') ?? store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
   store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
   store.selectSearchBackend('search-tinyfish');
-  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer);
+  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer, controls);
 }
 
 async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
@@ -114,6 +115,48 @@ function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, execution
 
 type LaunchBook = Awaited<ReturnType<typeof book>>;
 type LaunchedTask = ReturnType<ReturnType<typeof command>>;
+
+/** Reuse admitted response bytes of this exact SampleBook/kind; the ordinary adapter still builds and admits every request. */
+async function lifecycleAnswers(kind: Kind) {
+  const fixtureId = kind === 'writing' ? WRITING_FIXTURE_IDENTITY : kind === 'readers-report' ? READERS_REPORT_FIXTURE_IDENTITY
+    : kind === 'custom-analysis' ? 'sample1-custom-analysis-authored' : kind === 'baseline-analysis' ? 'sample1-baseline-happy' : EVALUATION_REWRITE_FIXTURE_IDENTITY;
+  const fixtures = await Promise.all([fixtureId, 'sample1-baseline-transient-retry'].map(id =>
+    loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), id)));
+  const entries = fixtures.flatMap(fixture => [...fixture.entries.values()]).flatMap(entry => {
+    if (entry.response?.kind !== 'unit-result') return [];
+    try { return [{ entry, schema: String(JSON.parse(entry.response.text).schema) }]; } catch { return []; }
+  });
+  return (request: Parameters<CapturedOrdinaryAnswer>[0], definition: LaunchedTask['ledger']['definition']) => {
+    const schema = request.stage === 'units' ? definition.unitResultSchema : request.stage === 'cross-unit-reduction' ? definition.crossUnit?.resultSchema
+      : request.stage === 'assurance-sampling' ? definition.assurance?.resultSchema : request.stage === 'run-report-reflection' ? 'ai7.analysis.run-report-reflection-result/1' : null;
+    const ordinal = request.stage === 'units' ? request.unitOrdinal : 0;
+    return entries.find(({ entry, schema: actual }) => actual === schema && entry.unitOrdinal === ordinal &&
+      (entry.attempt === null || entry.attempt === request.attemptIndex))?.entry.response;
+  };
+}
+
+async function launchedLifecycle(kind: Kind) {
+  const target = await book(kind), answer = await lifecycleAnswers(kind);
+  let held!: () => void, release!: () => void, holding = true;
+  const reached = new Promise<void>(resolve => { held = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  let launched!: LaunchedTask;
+  const schedule: CapturedOrdinaryAnswer = request => answer(request, launched.ledger.definition);
+  ordinary(schedule, { unitHold: async () => { if (holding) { holding = false; held(); await gate; } } });
+  launched = command(kind, target, { modelId: 'account-future-model', reasoningEffort: 'high' }, randomUUID(), false,
+    { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } })();
+  driveLaunchedLedgerRun(capture!.owner, launched);
+  return { target, launched, schedule, reached: Promise.race([reached, capture!.owner.whenDone(launched.runRecordId).then(() => { throw new Error('run-ended-before-unit-hold'); })]), release };
+}
+
+function controlLaunched(kind: Kind, target: LaunchBook, launched: LaunchedTask, action: 'pause' | 'cancel' | 'resume') {
+  if (kind === 'baseline-analysis' || kind === 'custom-analysis') return {
+    runRecordId: action === 'cancel' ? store.requestBaselineAnalysisCancel(target.bookId, launched.taskIntentId)
+      : action === 'pause' ? store.requestBaselineAnalysisPause(target.bookId, launched.taskIntentId)
+        : store.continuableBaselineAnalysisRun(target.bookId, launched.taskIntentId),
+    ledger: store.executionLedgerForRun(launched.runRecordId),
+  };
+  return store.requestTaskRunControl({ bookId: target.bookId, kind, ref: launched.taskIntentId, action });
+}
 
 function typeBeforeLaunch(target: LaunchBook) {
   const shown = store.getManuscriptWindow(target.manuscriptId, target.branchId, null);
@@ -204,6 +247,41 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
+  it.each(['cancel', 'pause', 'restart'] as const)('keeps an ordinary-production launched task usable after %s', async action => {
+    const test = await launchedLifecycle(kind);
+    try {
+      await test.reached;
+      if (action === 'restart') {
+        const stopping = capture!.owner.dispose(); test.release(); await stopping;
+        await restart(test.schedule);
+        store.reconcileStoppedBaselineAnalysisRuns(); store.reconcileStoppedCustomAnalysisRuns(); store.reconcileStoppedWritingRuns();
+        store.reconcileStoppedInitialEvaluationRuns(); store.reconcileStoppedReadersReportRuns(); store.reconcileStoppedEvaluationRewriteRuns();
+        const replay = store.executionLedgerForRun(test.launched.runRecordId);
+        if (replay.currentRunState(test.launched.runRecordId) === 'resumable') {
+          driveLaunchedLedgerRun(capture!.owner, { runRecordId: test.launched.runRecordId, ledger: replay });
+          await capture!.owner.whenIdle();
+          expect(replay.currentRunState(test.launched.runRecordId)).toMatch(/^completed/u);
+        } else expect(replay.currentRunState(test.launched.runRecordId)).toBe('interrupted');
+      } else {
+        const controlled = controlLaunched(kind, test.target, test.launched, action);
+        if (action === 'cancel') capture!.owner.cancelRun(controlled.runRecordId!, controlled.ledger);
+        else capture!.owner.pauseRun(controlled.runRecordId!, controlled.ledger);
+        test.release(); await capture!.owner.whenIdle();
+        expect(controlled.ledger.currentRunState(controlled.runRecordId!)).toBe(action === 'cancel' ? 'cancelled' : 'paused');
+        if (action === 'pause') {
+          const sent = capture!.wireRequests.length;
+          driveLaunchedLedgerRun(capture!.owner, test.launched); await capture!.owner.whenIdle();
+          expect(capture!.wireRequests).toHaveLength(sent);
+          const resumed = controlLaunched(kind, test.target, test.launched, 'resume');
+          capture!.owner.resumeOrQueue(resumed.runRecordId!, resumed.ledger); await capture!.owner.whenIdle();
+          expect(controlled.ledger.currentRunState(controlled.runRecordId!)).toMatch(/^completed/u);
+        }
+      }
+      expect(store.executionLedgerForRun(test.launched.runRecordId).inspect(test.target.bookId).actions.canPrepare).toBe(true);
+      expect(capture!.owner.busy).toBe(false);
+    } finally { test.release(); }
+  });
+
   it('queues an offline launch in the same snapshot and preserves cancellation and replay without a send', async () => {
     const target = await book(kind); ordinary();
     const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
@@ -239,7 +317,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     const current = typeBeforeLaunch(a);
     const clientCommandId = randomUUID();
     const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId, false,
-      { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } }, 'idle');
+      { removedSteps: [], disallowedAdaptations: kind === 'custom-analysis' ? ['safe-retry'] : [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } }, 'idle');
     const secondCommand = command(kind, b, { modelConnectionId: alternative.connectionId, modelId: 'account-future-model', reasoningEffort: 'low' });
     const [first, second] = await Promise.all([Promise.resolve().then(firstCommand), Promise.resolve().then(secondCommand)]);
     expect(first.runRecordId).not.toBe(second.runRecordId);
@@ -248,6 +326,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.journalSequence).toBe(current.journalSequence);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.revisionDigest).toBe(current.workingDigest);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 50_000 });
+    expect(first.ledger.inspect(a.bookId).planVersion!.edits.disallowedAdaptations).toEqual(kind === 'custom-analysis' ? ['safe-retry'] : []);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
     expect(second.ledger.loadExecutionPlan(second.runRecordId).productionBinding).toMatchObject({ model: 'account-future-model', reasoningEffort: 'low' });
     expect(second.ledger.inspect(b.bookId).providerResolutionPlan?.remoteBinding?.credentialReference).toBe(alternative.credentialReference);

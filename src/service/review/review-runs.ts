@@ -1433,7 +1433,9 @@ export class ReviewRunStore {
     requireReview(options.evidenceAssuranceLevel === undefined || input.categoryIds.includes('factual-review'),
       'REVIEW_ASSURANCE_INVALID', '只有事实核查任务可以选择证据保证级别。');
     const execution = this.#ledgers.baseline().withExecutionChoice(binding, input.launchPolicy).launch;
-    if (this.requiresModel(input.bookId, input.categoryIds)) this.#ledgers.baseline().forkForLaunch(execution).checkpointAtLaunch(input.bookId);
+    const modelBacked = this.requiresModel(input.bookId, input.categoryIds);
+    const waitingForNetwork = options.startWhen === 'when-online' && modelBacked;
+    if (modelBacked) this.#ledgers.baseline().forkForLaunch(execution).checkpointAtLaunch(input.bookId);
     const work = this.#buildWork(input, execution);
     let reviewRunId: string;
     if ('done' in work) {
@@ -1457,12 +1459,13 @@ export class ReviewRunStore {
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({ schema: AUTHORIZATION_SCHEMA, reviewRunId, authorizedAt, actor: 'editor',
       interaction: 'authorize-review-run', startWhen: 'now', launchSnapshotId: snapshotId,
-      ...(options.startWhen === 'when-online' && this.requiresModel(input.bookId, input.categoryIds) ? { start: 'when-online' } : {}),
+      ...(waitingForNetwork ? { start: 'when-online' } : {}),
       approvals: snapshot.categories.flatMap<{ categoryId: string; taskIntentId: string | null; planEnvelopeDigest: string }>(category => category.task === null
         ? snapshot.localPlan === undefined ? [] : [{ categoryId: category.categoryId, taskIntentId: null, planEnvelopeDigest: snapshot.localPlan.digest }]
         : [{ categoryId: category.categoryId, taskIntentId: category.task.taskIntentId, planEnvelopeDigest: category.task.planEnvelopeDigest }]) });
     this.#db.prepare('INSERT INTO review_run_authorizations VALUES (?, ?, ?, ?)').run(reviewRunId, authorizedAt, record.json, record.digest);
-    if (options.startWhen === 'when-online') this.#unsettledApprovals?.set(reviewRunId, { bookId: input.bookId, authorizedAt });
+    if (waitingForNetwork) this.#unsettledApprovals?.set(reviewRunId, { bookId: input.bookId, authorizedAt });
+    else this.#unsettledApprovals?.delete(reviewRunId);
     return { reviewRunId, manuscript: snapshot.manuscript };
   }
 
@@ -2301,7 +2304,12 @@ export class ReviewRunStore {
     const ended = this.#runEnded(snapshot);
     if (ended) this.#launchLedgers.delete(snapshot.reviewRunId);
     const cached = this.#launchLedgers.get(snapshot.reviewRunId)?.get(category.categoryId);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      const entries = this.#launchLedgers.get(snapshot.reviewRunId)!;
+      this.#launchLedgers.delete(snapshot.reviewRunId);
+      this.#launchLedgers.set(snapshot.reviewRunId, entries);
+      return cached;
+    }
     const ledger = this.#categoryDefinitionLedger(category);
     if (ended || category.task === null || this.#ledgers.executionFor === undefined) return ledger;
     // Only one-step launches inherit the launch choice. Retained prepared work keeps its existing drift checks.
@@ -2319,6 +2327,9 @@ export class ReviewRunStore {
     const entries = this.#launchLedgers.get(snapshot.reviewRunId) ?? new Map<string, BaselineAnalysisStore>();
     entries.set(category.categoryId, frozenLedger);
     this.#launchLedgers.set(snapshot.reviewRunId, entries);
+    // Eviction loses no execution fact: the next read reconstructs this view from the immutable plan.
+    // In particular, abandoned partial runs cannot retain a ledger view for the lifetime of the service.
+    while (this.#launchLedgers.size > 32) this.#launchLedgers.delete(this.#launchLedgers.keys().next().value!);
     return frozenLedger;
   }
 

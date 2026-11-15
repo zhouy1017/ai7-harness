@@ -3159,6 +3159,10 @@ export class BaselineAnalysisStore {
       requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
       requireAnalysis(edits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
+      const assuranceLevel = planEditAssuranceLevel(launchEdits ?? this.#redoPlanEdits(this.#intentFacts(this.#latestIntentRow(input.bookId)!)));
+      if (input.factualDecision !== undefined) requireAnalysis(assuranceLevel === input.factualDecision.level || assuranceLevel === 'strict',
+        'ANALYSIS_PLAN_EDIT_INVALID', '补充核查不能降低编辑决定要求的核查级别。');
+      requireAnalysis(!levelBelowPolicyMinimum(assuranceLevel), 'ANALYSIS_PLAN_EDIT_INVALID', FACTUAL_POLICY_MINIMUM_REASON);
       requireAnalysis(this.#definition.assurance !== null || (launchEdits?.removedSteps.length ?? 0) === 0,
         'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || (launchEdits?.askFirstAdaptations ?? []).length === 0,

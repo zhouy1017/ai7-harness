@@ -14,6 +14,13 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
         chooser.querySelector('summary').focus();
         const focused=document.activeElement===chooser.querySelector('summary');
         const estimate=drawer.querySelector('.task-launch-estimate');estimate.open=true;
+        if(drawer.dataset.taskLaunchKind==='custom-analysis') {
+          drawer.querySelector('.task-launch-options').open=true;
+          const retry=drawer.querySelector('[data-task-launch-option="retry"]'),focus=retry.nextElementSibling?.matches('.ui-select-trigger')?retry.nextElementSibling:retry;
+          focus.scrollIntoView({block:'center',behavior:'instant'});focus.focus({preventScroll:true});
+          const rect=focus.getBoundingClientRect();
+          if(document.activeElement!==focus||rect.left<0||rect.right>innerWidth||rect.top<0||rect.bottom>innerHeight||Array.from(retry.options,option=>option.value).join('|')!=='auto|never')return false;
+        }
         return focused&&!button.disabled;
       })()`);
       if (reachable !== true) throw new Error(`task-launch-bar-unreachable-${width}x${height}`);
