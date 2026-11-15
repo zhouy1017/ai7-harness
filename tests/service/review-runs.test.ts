@@ -2932,7 +2932,7 @@ it('replays a shutdown-interrupted ordinary review without resending its ended c
     const resumed = workspace(second, book, run.reviewRunId).run!;
     // Ordinary non-factual categories end on shutdown; their kept partial result is never sent again.
     expect(resumed.state).toBe('partial');
-    expect(resumed.categories.map(category => category.state)).toEqual(['interrupted', 'materialized', 'materialized']);
+    expect(resumed.categories.map(category => category.state)).toEqual(['interrupted', 'settled', 'settled']);
     const units = [...earlierRequests, ...second.capture!.requests].filter(request => request.stage === 'units');
     expect(new Set(units.map(request => request.requestDigest)).size).toBe(units.length);
     expect([...earlierWire, ...second.capture!.wireRequests].every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
