@@ -2607,6 +2607,8 @@ async function main() {
 
     // A rule-stopped quick start still produces a prepared task. Its editor keeps the pre-existing revision controls.
     // Use a separate admitted sample1 Book so the ordinary launch history above stays independent.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'legacy-plan-import-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'legacy-plan-import-library-ready');
     const legacyBook = await importSample1(renderer, cancellation, true);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'legacy-plan-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'legacy-plan-library-ready');
