@@ -2522,7 +2522,9 @@ export function reviewRunPlan(input: {
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
-  const categories = facts.categories;
+  const members = facts.categories;
+  const categories = members.filter(category => category.categoryId !== 'run-synthesis');
+  const synthesis = members.find(category => category.categoryId === 'run-synthesis');
   const materials = facts.materials ?? [];
   // 本社审阅偏好 (Issue #911): each category that reads it names the version; a closed rule says so once.
   const preferences = facts.housePreferences ?? [];
@@ -2530,7 +2532,7 @@ export function reviewRunPlan(input: {
     : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
   const instructionSent = tasksWithInstruction(facts);
   const preferenceSent = preferences.length === 0 ? instructionSent : instructionSent + `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
-  const tasks = categories.filter((category) => category.task !== null);
+  const tasks = members.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
   const ceilings = tasks.map((category) => frozenCeiling(category.task!.components));
@@ -2625,7 +2627,7 @@ export function reviewRunPlan(input: {
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
-      ...categories.map((category): TaskPlanStepProjection => ({
+      ...members.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
         label: category.categoryId === 'run-synthesis' ? '全书审阅统合总结' : isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
         result: category.categoryId === 'run-synthesis' ? REVIEW_SYNTHESIS_PLAN_LINE : `${category.label}的发现（稿件上的标记）`,
@@ -2661,6 +2663,7 @@ export function reviewRunPlan(input: {
       ...categories.map((category) => category.riskPointsOnly
         ? `${category.label}：需人工复核的风险点（批注）`
         : `${category.label}：${category.output === 'change-suggestion' ? '修改建议' : '批注'}，标在稿件上，由你逐条处理`),
+      ...(synthesis === undefined ? [] : ['全书审阅统合总结：总体评价、共性问题与处理先后，保留逐条发现供你判断']),
       '审阅报告：在审阅里生成，按版本保存',
     ],
     notDo: {

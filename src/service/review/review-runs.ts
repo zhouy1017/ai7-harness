@@ -667,7 +667,7 @@ function seriesKnowledgeMovedReason(label: string): string {
  * is transmitted, so nothing is refused. `null` when nothing stands in the way.
  */
 export function houseGuidelineRefusal(entry: ReviewCategoryConfigurationEntry, live: boolean, seriesAdmitted = false): string | null {
-  if (!live || entry.executor !== 'review-category-contract') return null;
+  if (!live || entry.executor !== 'review-category-contract' || entry.synthesisKey !== undefined) return null;
   // 书系一致性's clauses are the house's own Series Knowledge (Issue #64, S29a), held back exactly as imported guidelines are.
   if (entry.seriesKnowledge !== undefined) {
     return seriesAdmitted ? null : SERIES_POLICY_CLOSED;

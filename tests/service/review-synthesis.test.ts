@@ -69,7 +69,7 @@ it('sends one structured synthesis request in ordinary production, preserves fin
     const first = session.store.launchReviewRun(input, launchPolicy);
     await driveLaunchedReviewRun(session.driver, first);
     const run = workspace(session, book).run!;
-    const outcome = synthesisOutcome(session, book);
+    const outcome = JSON.stringify(run.eventTrail) + synthesisOutcome(session, book);
     expect(run.synthesis?.state, outcome).toBe('completed');
     expect(run.findings.length).toBeGreaterThan(0);
     const requests = session.capture!.wireRequests.filter((request) => request.messages.some((message) => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')));
