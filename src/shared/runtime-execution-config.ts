@@ -25,11 +25,11 @@ export interface TaskExecutionLaunchInput {
   readonly executionConfig?: RuntimeExecutionConfig;
   /** A remembered catalogue choice may fall back; an explicit choice keeps upstream validation. */
   readonly rememberedChoice?: boolean;
-  /** Existing optional budget/retry controls, frozen in the first plan rather than a later plan revision. */
-  readonly planEdits?: PlanEditsProjection;
 }
 
 export interface LedgerTaskExecutionLaunchInput extends TaskExecutionLaunchInput {
+  /** Existing optional budget/retry controls, frozen in the first plan rather than a later plan revision. */
+  readonly planEdits?: PlanEditsProjection;
   readonly startWhen?: 'now' | 'idle';
 }
 

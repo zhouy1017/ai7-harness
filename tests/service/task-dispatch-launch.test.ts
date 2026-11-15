@@ -221,6 +221,7 @@ it('records a development-ci launch without a route and lets the existing admiss
   setupOwner = new BaselineAnalysisExecutionOwner({ requestGovernor: governor, ledger: store.baselineAnalysisLedger,
     launchPolicy: policy, fixture: null, secretResolver: { resolve: async () => null } });
   const target = await book('baseline-analysis');
+  recordMissingCredentialConnection(store, '本地检查缺少凭据');
   const launched = store.launchBaselineAnalysis({ bookId: target.bookId, clientCommandId: randomUUID(),
     goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy);
   driveLaunchedLedgerRun(setupOwner, launched);
