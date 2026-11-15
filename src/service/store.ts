@@ -3762,7 +3762,7 @@ export class EditorialStore {
       prior = toolBase.promptContractDigest === base.promptContractDigest ? definition : wrap(base);
     } else {
       const candidates: AnalysisKindDefinition[] = [];
-      for (const historical of historicalReviewCategoryDefinitions(input, contractVersion)) {
+      for (const historical of entry.synthesisKey === undefined ? historicalReviewCategoryDefinitions(input, contractVersion) : [base]) {
         try { candidates.push(wrap(historical)); }
         catch (error) {
           // Series consistency accepts only its own supported base; another historical form gains no proof.

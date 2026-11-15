@@ -12,7 +12,8 @@ export const RUN_SYNTHESIS_CATEGORY = 'run-synthesis';
 export const RUN_SYNTHESIS_ENTRY: ReviewCategoryConfigurationEntry = {
   categoryId: RUN_SYNTHESIS_CATEGORY, label: '全书审阅统合总结', description: '统合各章已经形成的发现，解释共性问题与全书脉络，保留逐条发现供编辑处理。',
   output: 'annotation', riskPointsOnly: false, batchApply: false, searchEngine: false,
-  executor: 'review-category-contract', unavailableReason: null, guidelineDocuments: [],
+  executor: 'review-category-contract', unavailableReason: null, guidelineDocuments: [{ documentId: 'ai7-review-run-synthesis',
+    title: '全书审阅统合', issuer: 'AI7', version: '1', clauses: [{ clauseId: 'run-synthesis/1', text: '只统合已经形成的发现与证据，保留逐条发现，由编辑判断。' }] }],
   procedure: { procedureId: 'ai7-procedure/review-run-synthesis', title: '全书审阅统合总结', version: '1' },
 };
 

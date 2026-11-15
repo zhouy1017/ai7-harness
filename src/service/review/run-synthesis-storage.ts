@@ -15,6 +15,7 @@ export const RUN_SYNTHESIS_SCHEMA_SQL = {
   CHECK((input_json IS NULL) = (input_digest IS NULL))
 ) STRICT`,
 };
+export const RUN_SYNTHESIS_FOREIGN_KEYS = { review_run_synthesis: ['review_run_id>review_runs.review_run_id:NO ACTION/NO ACTION/NONE'] };
 
 export function initializeRunSynthesisSchema(db: DatabaseSync): void {
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'review_run_synthesis'").get() === undefined) {

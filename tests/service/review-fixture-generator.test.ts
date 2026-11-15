@@ -1,7 +1,11 @@
 import { LOCAL_TOOL_DECLARATION_NAMES } from '../../src/service/provider/local-tools.js';
 import { spawnSync } from 'node:child_process';
 import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
-import { canonicalJson, graphemeCount } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, graphemeCount, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
+import { synthesisMessage, type SynthesisInput } from '../../src/service/review/run-synthesis-contract.js';
+import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of `sample1-review-cross-chapter-authored`, using the original #417 authored fixture as input. The findings below are
@@ -331,7 +335,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true): Promise<T> {
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
   const routedFixture = baselineFixture === undefined ? fixture : inheritGeneratedEntries
     ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
@@ -349,7 +353,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
     recordMissingCredentialConnection(store, 'S69 主编辑连接');
-    const result = await body({ store, owner, ...imported });
+    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...imported });
     store.markCleanShutdown();
     return result;
   } finally {
@@ -539,6 +543,30 @@ async function pass(): Promise<boolean> {
     appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J16_EDIT_SUFFIX);
     note(await runJ16Selection(context));
   }, workspace);
+  // The final member reads only materialized SampleBook findings; exercise every supported category
+  // combination both with and without the already-closed chapter synopsis chain.
+  const categories = ['typos-and-usage', 'style-and-format', 'literary-expression', 'plot-consistency'];
+  for (const withBaseline of [false, true]) for (let mask = 1; mask < 16; mask += 1) await withBook(async (context) => {
+    if (withBaseline) await baseline(context);
+    const categoryIds = categories.filter((_category, index) => (mask & (1 << index)) !== 0);
+    let work = context.store.createReviewRunPreparationWork(context.bookId, categoryIds,
+      { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy);
+    while (!work.done) work = context.store.advanceReviewRunPreparationWork(work.workId!);
+    const run = work.projection!.run!;
+    context.store.authorizeReviewRun(context.bookId, run.reviewRunId, run.categories.filter((category) => category.planEnvelopeDigest !== null)
+      .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+    const driver = new ReviewRunDriver(context.store.reviewRunDriveSteps, context.owner);
+    try { await driver.drive(run.reviewRunId); } finally { await driver.dispose(); }
+    const db = new DatabaseSync(join(context.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const row = db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(run.reviewRunId);
+      if (typeof row?.input_json !== 'string') return;
+      const message = synthesisMessage(JSON.parse(row.input_json) as SynthesisInput);
+      const response = sample1SynthesisAnswer(message)!;
+      add({ unitOrdinal: 0, requestDigest: sha256Hex(message), attempt: null, contentDigest: null, response }, 90, `synthesis-${withBaseline}-${mask}`);
+      note(context.store.inspectReviewWorkspace(context.bookId, run.reviewRunId).run?.synthesis?.state === 'completed');
+    } finally { db.close(); }
+  });
   return allClosed;
 }
 

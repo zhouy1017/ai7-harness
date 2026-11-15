@@ -268,7 +268,7 @@ it('keeps a failed synthesis optional and immediately permits a fresh ordinary r
     expect(completed.synthesis?.state).toBe('missing');
     expect(completed.state).toBe('settled');
     expect(() => session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy)).not.toThrow();
-  }, () => ({ kind: 'adapter-failure', message: 'Captured synthesis failure', status: 400 }));
+  }, () => ({ kind: 'adapter-failure', code: 'CAPTURED_SYNTHESIS_FAILED', message: 'Captured synthesis failure', status: 400 }));
 });
 
 function binding(session: Session, book: Book): { manuscriptId: string; branchId: string; windowStartBlockId: string } {
