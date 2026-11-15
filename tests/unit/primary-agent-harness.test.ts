@@ -53,15 +53,15 @@ describe('PrimaryAgentHarness', () => {
     expect(local.tools.registeredTools).toBe(2);
     expect(local.localTools?.names).toEqual(['exact_fetch', 'retrieve']);
     expect(local).not.toHaveProperty('platformTools');
-    expect(local.digest).toBe('85a2d753073c658ef6f44fea3d7895391565c4f7fe0b68af722247e6b6cdbbcd');
+    expect(local.digest).toBe('da9f4c83be90b1f69c58d440ae35f608b69cccade962614a780945fca41f638c');
     expect(both.tools.registeredTools).toBe(4);
-    expect(both.digest).toBe('2fb2e380b426c9c341b7bd29c8fe0d061a4337383e9ece825604fd5329221bba');
+    expect(both.digest).toBe('92045be31732b194b935434de5e8cd179218917c93be329359786da930776bb0');
   });
   it('pins the research declaration in tool compositions and preserves non-web compositions (#744)', () => {
     const plain = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST);
     const web = describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST, { platformTools: true });
     expect(web.researchDeclaration).toEqual({ webSearch: true, searchEngine: 'user-selected-backend' });
-    expect(web.digest).toBe('ba328a177e73f47501260431dea68b98bc660d39e8850390ce85491e2aa97bc2');
+    expect(web.digest).toBe('0e3577be97fd49350003bc58f1f7167eba2e2877a7dd741b80bf16babaaa51f9');
     expect(plain).not.toHaveProperty('researchDeclaration');
     // Flipping the declaration flips the digest, both ways.
     expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST,

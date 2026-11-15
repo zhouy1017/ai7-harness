@@ -39,7 +39,7 @@ it.each(['baseline', 'ambiguous'] as const)('replays the recorded /2 %s Run and 
     recordMissingCredentialConnection(store, 'Provider-free recorded replay');
     database = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'));
     database.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
-    const definition = mode === 'ambiguous' ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition()) : baselineAnalysisKindDefinition();
+    const definition = mode === 'ambiguous' ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition('retained-v2')) : baselineAnalysisKindDefinition('retained-v2');
     const ledger = new BaselineAnalysisStore(database, new BoundedManuscriptStore(database), route, definition);
     ledger.bindLaunch({ operationalScope: 'development-ci', live: null, policy, localFixtureRuntime: () => store!.localFixtureRuntime() });
     let work = ledger.prepare({ phase: 'start', bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy: policy });

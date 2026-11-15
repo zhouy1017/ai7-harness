@@ -143,6 +143,7 @@ describe('exact sample1 fixture exemption source proof', () => {
     const revision = canonicalJson({ ...(JSON.parse(row.canonical_json as string) as Record<string, unknown>), bindingPin: { promptContractDigest: BASELINE_PROMPT_CONTRACT_V1_DIGEST } });
     database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
     const v1 = { ...selection, taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_V1_DIGEST };
+    message = message.replace(/^\[[1-9][0-9]*\] /gmu, '');
     const under = (system: string) => tool.parseCachedRequest(JSON.stringify({ messages: [{ role: 'system', content: system }, { role: 'user', content: message }] }), BASELINE_PROMPT_CONTRACT_V1_DIGEST);
     expect(await tool.verifySample1Capture(request, v1, under(BASELINE_PROMPT_CONTRACT_V1.systemPrompt))).toBe(true);
     // The /2 system prompt is not the /1 task's, and a /2 selection does not match the /1 Task's records.

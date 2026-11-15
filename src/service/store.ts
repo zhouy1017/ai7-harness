@@ -688,6 +688,7 @@ import {
   baselineAnalysisKindDefinition,
   factualReviewKindDefinition,
   RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
+  RETAINED_V2_RECORDED_FIXTURE_IDENTITY,
   type AnalysisKindDefinition,
 } from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
@@ -3033,8 +3034,10 @@ export class EditorialStore {
     const route = control.baselineAnalysisRoute;
     requireStore((control.baselinePromptContract ?? 'current') === 'current' || (control.baselinePromptContract === 'retained-v1' &&
       route !== null && route.fixtureIdentity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY && route.fixtureLineage.length === 1 &&
-      route.fixtureLineage[0]!.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY),
-    'ANALYSIS_PROMPT_CONTRACT_REFUSED', '基线提示契约 v1 只随已准入的历史录制夹具重放。');
+      route.fixtureLineage[0]!.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY) || (control.baselinePromptContract === 'retained-v2' &&
+      route !== null && route.fixtureIdentity === RETAINED_V2_RECORDED_FIXTURE_IDENTITY && route.fixtureLineage.length === 1 &&
+      route.fixtureLineage[0]!.identity === RETAINED_V2_RECORDED_FIXTURE_IDENTITY),
+    'ANALYSIS_PROMPT_CONTRACT_REFUSED', '历史基线提示契约只随已准入的历史录制夹具重放。');
     const workflowProfile = await loadBuiltInManuscriptProfile(codeRoot);
     // The software version the store records beside its Data Version (Issue #433, S85a).
     const softwareVersion = control.softwareVersion ?? await readSoftwareVersion(codeRoot).catch((error: unknown) => {

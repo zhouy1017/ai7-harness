@@ -85,8 +85,8 @@ import {
   type ClarificationFacts,
 } from './clarifications.js';
 import {
-  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
-  buildCrossUnitMessage,
+  buildBoundCrossUnitMessage,
+  crossUnitRows,
   citedBlocksByUnit,
   crossUnitRequestDigest,
   parseCrossUnitResult,
@@ -2056,7 +2056,7 @@ export class BaselineAnalysisExecutionOwner {
               const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
               const profile = localFixture === null ? {} : { localFixture: { catalog: facts.localFixtureRuntime!.catalog, execution: localFixture } };
               return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
-                { ...assurance, ...profile, sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
+                { ...assurance, ...profile, ...(definition.crossUnit === null ? {} : { crossUnitPromptContractDigest: definition.crossUnit.promptContractDigest }), sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
             }
             liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
               ...effortConfig,
@@ -3529,7 +3529,7 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         } else {
-          const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
+          const message = step === null ? buildBoundCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
           if (production !== null && step !== null && definition.structuredOnly !== true && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
@@ -3579,6 +3579,7 @@ export class BaselineAnalysisExecutionOwner {
                 : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)), { code: parsed.code, detail: parsed.detail });
             } else {
               const parsed = withProviderResponseSalvage(parseCrossUnitResult(candidate.text, {
+                rows: crossUnitRows(closedOutcomes),
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
                 citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
                 blockLengths: new Map(blocks.map((block) => [block.blockId, block.graphemes])),

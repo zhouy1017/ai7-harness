@@ -583,6 +583,9 @@ describe('the semantic digest and the evidence generation', () => {
     expect(providerSemanticDigest(unitBody(BLOCK_B, '雨落在旧城。', 'e'))).toBe(providerSemanticDigest(base));
     expect(providerSemanticDigest(unitBody(BLOCK_A, '雨落在旧城！'))).not.toBe(providerSemanticDigest(base));
     expect(providerSemanticDigest(base.replace('1/7', '2/7'))).not.toBe(providerSemanticDigest(base));
+    const indexed = (body: string) => body.replace('[blk_', '[1] [blk_');
+    expect(providerSemanticDigest(indexed(unitBody(BLOCK_B, '雨落在旧城。', 'e')))).toBe(providerSemanticDigest(indexed(base)));
+    expect(providerSemanticDigest(indexed(unitBody(BLOCK_B, '雨落在旧城！', 'e')))).not.toBe(providerSemanticDigest(indexed(base)));
     const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: SHAPE, model: 'deepseek-v4-flash' };
     expect(providerEvidenceGeneration(namespace, CONTRACT)).not.toBe(providerEvidenceGeneration({ ...namespace, model: 'deepseek-v4.1-flash' }, CONTRACT));
     expect(providerCacheKey(namespace, CONTRACT)).not.toBe(legacyProviderCacheKey('deepseek-v4-flash', CONTRACT));
