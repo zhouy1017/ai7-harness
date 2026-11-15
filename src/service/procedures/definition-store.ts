@@ -119,7 +119,7 @@ export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = fal
   const expected = allowLegacy && schemaVersion < REVIEW_CONTRACT_SCHEMA_VERSION ? preinstalledProcedureDefinitions(1)
     : allPreinstalledProcedureDefinitions();
   for (const document of expected) {
-    if (allowLegacy && schemaVersion < 116 && document.id === 'ai7-procedure/review-run-synthesis') continue;
+    if (schemaVersion < 116 && document.id === 'ai7-procedure/review-run-synthesis') continue;
     if (schemaVersion < EDITABLE_PROCEDURE_SCHEMA_VERSION && ['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].some((kind) => document.id === `ai7-procedure/${kind}`)) continue;
     if (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check') continue;
     if (schemaVersion < COMPOSITE_PROCEDURE_SCHEMA_VERSION && document.id === FULL_REVIEW_PROCEDURE_ID) continue;

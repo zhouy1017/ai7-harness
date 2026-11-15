@@ -17,6 +17,7 @@ import { REVIEW_SYNTHESIS_PLAN_LINE } from '../../src/shared/review-synthesis-wo
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { setLibraryDecision } from '../support/library-materials.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
@@ -101,7 +102,8 @@ it('sends one structured synthesis request in ordinary production, preserves fin
     const payload = JSON.parse(sent);
     expect(payload.evidence.length).toBeGreaterThan(0);
     expect(payload.findings.every((finding: { ref: string }) => /^f\d+$/u.test(finding.ref))).toBe(true);
-    for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.text.length > 160)) expect(sent).not.toContain(block.text);
+    const entireRequest = requests[0]!.messages.map(message => message.content).join('\n');
+    for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.text.length > 160)) expect(entireRequest).not.toContain(block.text);
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
     expect(session.capture!.wireRequests).toHaveLength(session.capture!.requests.length);
     expect(session.capture!.wireRequests.filter((request) => request.messages.some((message) => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))).toHaveLength(1);
@@ -436,18 +438,35 @@ it('keeps cited quotations after an editor handles or removes their findings and
 
 it('freezes inherited procedure instructions for synthesis and accepts the next selected version (#1433)', async () => {
   await withCapturedReviewBook(async (session, book) => {
+    const materialText = '样书审阅参考：数字体例应结合全书用法解释。';
+    const path = join(roots.inputRoot, 'review-reference.txt'); await writeFile(path, materialText, 'utf8');
+    const preview = await session.store.previewLibraryMaterial(path);
+    const material = await session.store.addLibraryMaterial({ previewId: preview.previewId, title: '样书审阅参考', kind: 'document' });
+    setLibraryDecision(session.store, { materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: book.bookId } } });
+    setLibraryDecision(session.store, { materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    session.store.startMaterialIndexing(); await session.store.settleMaterialIndexing();
+    let preferenceEnabled = false;
     const stock = session.store.procedureLibrary({ action: 'inspect' }).procedures.find(procedure => procedure.procedureId === 'ai7-procedure/review-style-and-format')!;
     const pin = (procedure: typeof stock) => ({ procedureId: procedure.procedureId, version: procedure.version, digest: procedure.digest });
     let chosen = session.store.procedureLibrary({ action: 'save', input: { procedureId: null, basedOn: pin(stock), title: '样书数字体例审阅',
-      editorInstruction: '对数字体例先核对全书用法。', stages: stock.document.stages } }).procedures.find(procedure => procedure.document.title === '样书数字体例审阅')!;
+      editorInstruction: '对数字体例先核对全书用法。', stages: stock.document.stages.map((stage, index) => index === 0 ? { ...stage, exemptionRules: ['只提示编辑核对，不自动改写。'] } : stage) } }).procedures.find(procedure => procedure.document.title === '样书数字体例审阅')!;
     for (const text of ['对数字体例先核对全书用法。', '先解释全书脉络，再列待核对事项。']) {
       if (chosen.document.editorInstruction !== text) chosen = session.store.procedureLibrary({ action: 'save', input: { procedureId: chosen.procedureId,
         basedOn: pin(chosen), title: chosen.document.title, editorInstruction: text, stages: chosen.document.stages } }).procedures.find(procedure => procedure.procedureId === chosen.procedureId)!;
       session.store.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin(chosen) });
-      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], scope: WHOLE }, launchPolicy));
+      await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [STYLE], materialIds: [material.materialId], scope: WHOLE }, launchPolicy));
       expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
       const request = session.capture.wireRequests.findLast(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
-      expect(request.messages.find(message => message.role === 'system')!.content).toContain(text);
+      const system = request.messages.find(message => message.role === 'system')!.content;
+      expect(system).toContain(text); expect(system).toContain(materialText); expect(system).toContain('只提示编辑核对，不自动改写。');
+      if (preferenceEnabled) expect(system).toContain('本社审阅偏好');
+      else {
+        const run = workspace(session, book).run!, finding = run.findings.find(finding => finding.markId !== null)!;
+        session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, finding.findingId, '保留本书体例');
+        const learning = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials.find(entry => entry.kind === 'review-disposition')!;
+        session.store.decideLearningMaterial({ bookId: book.bookId, materialKey: learning.materialKey, materialDigest: learning.digest, expectedDecisions: 0, choice: 'house', note: null });
+        preferenceEnabled = true;
+      }
     }
   });
 });
