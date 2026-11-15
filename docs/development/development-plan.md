@@ -21,7 +21,7 @@ The candidate is package 0.7.1, protocol 203, schema 115 and Data Version 1. All
 
 Remaining delivery order:
 
-1. Merge the final #1489 integration tip into the closure branch and run host checks, the full guest ladder and two unbound hosted runs at the final head.
+1. After the early closure ladder, merge the supplied #1490 stage-repair tip into the closure branch; run host checks, the full guest ladder and two unbound hosted runs at the final head.
 2. Open a draft closure PR into `codex/integration-0.7.1`; the Commander then integrates the wave into dev and refreshes the fixed human-test folder.
 3. R3 (#1433, #1434, #1147, #1152, #1074) follows as 0.7.2 Alpha. Owner re-record authorization and human acceptance remain pending.
 

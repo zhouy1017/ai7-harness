@@ -161,6 +161,8 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 
 ## In flight and remaining risks
 
+- Carried item #1472 7a: the plan’s 会发送 line still names the model service. Adding model@思考强度 exposed a custom-analysis preview route that differs from the frozen launch route; completing this requires a wider preview change, so the closure leaves the established disclosure unchanged.
+
 - The provider-free fixture route records the fixture model. Chosen provider model@思考强度 on cards is proved by real-store service tests with captured ordinary transport; Journeys prove the choice is shown, sent, launched in one step and frozen on the task row.
 - No live model call was made in R2. Developer-live recordings invalidated in PRs #1474, #1477 and #1478 await Owner re-record authorization; #1476 invalidates no developer-live recording: that scope still refuses instruction-bearing procedures. PR #1477 identifies 8 factual quick /1 items, 15 standard /2 items, 4 strict /2 items and 2 earlier factual research-wrapper items; claim extraction and retained historical review /1 remain reusable. PR #1478 adds no further invalidation relative to its integration base. Gateway Responses routes (no `store` / `include`) and level lists on routes without declared reasoning control remain untested against real services.
 - A level typed by hand on a route without declared reasoning control is still sent and shown, at the editor's own risk with a notice.
