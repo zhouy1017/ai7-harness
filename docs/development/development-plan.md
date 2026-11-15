@@ -17,12 +17,13 @@ R2 starts from `dev@2026a9ee`. Under the Owner's [2026-11-14 decisions](https://
 | #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
 | #1476 | Use a 工序 carrying 编辑任务说明 / 豁免规则 for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成; see what it adds to sending in the plan | #1489 / `a3a19670` |
 | #1491 | Read the model service and 「模型@思考强度」 chosen for this start in the pre-start and frozen plans, including after another service was used; waiting tasks keep their frozen attribution | #1493 / `6196f3ed` |
+| #1490 stage fix | Click a settled target when opening a retained plan revision; the shared real-click helper waits for rectangle stability across animation frames after drawer close | #1492 / `1cb2cf1d` |
 
 The candidate is package 0.7.1, protocol 203, schema 115 and Data Version 1. All outcomes above await final closure evidence and dev delivery; #1489 is integrated at `a3a19670` and #1493 at `6196f3ed`.
 
 Remaining delivery order:
 
-1. After the early closure ladder, merge the supplied #1490 stage-repair tip into the closure branch; run host checks, the full guest ladder and two unbound hosted runs at the final head.
+1. All R2 slices and stage repairs are merged through `1cb2cf1d`; run host checks, the full guest ladder and two unbound hosted runs at the final closure head.
 2. Open a draft closure PR into `codex/integration-0.7.1`; the Commander then integrates the wave into dev and refreshes the fixed human-test folder.
 3. R3 (#1433, #1434, #1147, #1152, #1074) follows as 0.7.2 Alpha. Owner re-record authorization and human acceptance remain pending.
 

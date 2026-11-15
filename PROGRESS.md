@@ -15,8 +15,9 @@ What R2 newly lets the editor do:
 | #1455 | Choose model and 思考强度 at each task start, launch in one step, keep result attribution and remember the last choice per task kind | #1487, #1488 / `d2a1c5a5`, `e7c44ac8` |
 | #1476 | Use a 工序 carrying 编辑任务说明 / 豁免规则 for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成; see what it adds to sending in the plan | #1489 / `a3a19670` |
 | #1491 | Read the model service and 「模型@思考强度」 chosen for this start in the pre-start and frozen plans, including after another service was used; waiting tasks keep their frozen attribution | #1493 / `6196f3ed` |
+| #1490 stage fix | Click a settled target when opening a retained plan revision; the shared real-click helper waits for rectangle stability across animation frames after drawer close | #1492 / `1cb2cf1d` |
 
-Stage repairs #1482, #1484 and #1486 (`0089cc73`, `621cd767`, `5b4db618`) make J-16 and J-12 wait on durable state. R1's text-to-card selection, compact cards and one-row toolbar remain delivered; R2 adds occurrence hints and the overlay connector.
+Stage repairs #1482, #1484 and #1486 (`0089cc73`, `621cd767`, `5b4db618`) make J-16 and J-12 wait on durable state. #1490 / PR #1492 fixes J-04 `open-plan-revision`: the target was moving with the drawer-close transition, and the shared real-click helper now waits for a stable rectangle across animation frames; 31 of 31 slice-head Gate runs passed on ai7-testbed-02. R1's text-to-card selection, compact cards and one-row toolbar remain delivered; R2 adds occurrence hints and the overlay connector.
 
 Next is R3 → **0.7.2 Alpha** (#1433, #1434, #1147, #1152, #1074), after R2 delivery and human-test refresh. The development plan owns subsequent R4 and R5 order.
 
@@ -171,4 +172,4 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 
 ## Resume
 
-Read this checkpoint, the development plan, Orca dispatch and #1472. Continue the dispatched closure: run the early host checks and guest ladder, then merge the supplied #1490 stage-repair tip without rebasing, rerun host checks, the final guest ladder and two unbound hosted runs, then open a draft PR into `codex/integration-0.7.1`. The Commander owns dev integration and the fixed human-test refresh; Owner human acceptance, tags, release and main promotion remain separate.
+Read this checkpoint, the development plan, Orca dispatch and #1472. Continue the dispatched closure: verify the final closure head containing #1490 (`1cb2cf1d`) and #1491 (`6196f3ed`) with host checks, the full guest ladder and two unbound hosted runs, then open a draft PR into `codex/integration-0.7.1`. The Commander owns dev integration and the fixed human-test refresh; Owner human acceptance, tags, release and main promotion remain separate.

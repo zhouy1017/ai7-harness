@@ -284,7 +284,7 @@ async function attachRenderer(browser, excludedTargetId = null) {
 async function waitFor(renderer, expression, name, timeout = 60_000, detailExpression) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`)) return;
+    if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   if (detailExpression !== undefined) {

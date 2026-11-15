@@ -13,10 +13,17 @@ Closure candidate identity is 0.7.1 Alpha, protocol 203, schema 115, Data Versio
 | #1455 (#1487, #1488) | Existing launch/preview, model-choice and frozen task-row stages below replace ordinary prepare/authorize ceremony across J-04/J-05/J-07/J-09/J-10/J-11/J-12/J-13/J-16; retained plan editing stays covered. |
 | #1476 (#1489) | Instruction-carrying procedures for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成, with frozen plan sending disclosures; integration commit `a3a19670`. |
 | #1491 (#1493) | The pre-start plan names this start’s model service and 「模型@思考强度」; shared builders keep preview and frozen plan equal, with unsent effort omitted; see the service-test delta below (`6196f3ed`). |
+| #1490 (#1492) | Shared real-click targets must have stable rectangles across animation frames; fixes J-04 `open-plan-revision` during drawer close (`1cb2cf1d`); see the settled-pointer delta below. |
 | #1482, #1484, #1486 | J-16 and J-12 wait on durable state rather than transient toasts. |
 
 The fixture route retains its fixture-model attribution. Chosen provider labels are proved with captured ordinary transport in real-store service tests; Journeys prove selection, one-step launch and frozen task rows. No live call or new closure evidence is claimed.
 
+
+## #1490 settled pointer targets
+
+PR #1492 integrated at `1cb2cf1d`. The fixed slice passed 31 of 31 actual Gate invocations on ai7-testbed-02; those slice-head runs do not replace the final closure ladder or hosted runs.
+
+The shared real-pointer helper waits for the visible, topmost target's rectangle to match across consecutive animation frames before pressing. This keeps J-04's `open-plan-revision` from aiming at a moving attention button while the drawer-close body padding transition is still running. J-11 awaits the frame predicate before converting its result to a boolean, as the other helper consumers do. The real press/release, viewport and topmost checks, post-press hit check, read-only plan assertions, both viewports and existing timeouts remain; product motion and Gate selection are unchanged.
 
 #1491 keeps the existing launch/preview Journey stages. Ordinary-production service tests on real stores with SampleBook input warm each task-kind cache by completing a task on service A, change the chooser between two service-B previews, and compare the chosen preview with the frozen waiting plan. They cover baseline/custom analysis, writing, readers report, rewrite and initial evaluation with no references, material references or Series context; saved plan bytes/digests and waiting-task attribution remain frozen. The shared plan wording now names the model service and model@sent effort, omitting an unsent level. No live service call is made.
 
