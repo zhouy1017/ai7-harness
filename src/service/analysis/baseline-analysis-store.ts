@@ -696,6 +696,7 @@ export class BaselineAnalysisStore {
       : (({ document, executor }) => ({ document, pin: executor }))(resolveProcedureForKind(this.#db, selected, this.#definition.kind));
     const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
       ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
+    if (definition.structuredOnly === true) return { version: 2, ...procedureOptions };
     const stock = reviewCategoryEntry('typos-and-usage')!;
     const expected = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
     const localLeaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
@@ -802,6 +803,7 @@ export class BaselineAnalysisStore {
   }
 
   #refreshClarificationDefinition(): void {
+    if (this.#definition.structuredOnly === true) return;
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
     const leaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
@@ -2170,7 +2172,7 @@ export class BaselineAnalysisStore {
     providerPlanPolicyMetadata(records['provider-resolution-plan']);
     const envelope = records['plan-envelope'] as Record<string, unknown>;
     const route = (records['provider-resolution-plan'] as { executionRoute?: { kind: string; model: string; fixtureIdentity?: string; fixtureSha256?: string } }).executionRoute;
-    if (route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE || envelope.compositionVersion === 3 || envelope.compositionVersion === 4) {
+    if ((this.#definition.structuredOnly !== true && route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) || envelope.compositionVersion === 3 || envelope.compositionVersion === 4) {
       const stock = reviewCategoryEntry('typos-and-usage')!;
       const definition = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
       const options = envelope.compositionOptions as CompositionOptions | undefined;
@@ -3621,7 +3623,7 @@ export class BaselineAnalysisStore {
     preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
-    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
+    if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
       intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null,
     'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于标准前台全文首次审阅。');
     const taskIntentId = intent.taskIntentId;
@@ -3968,7 +3970,7 @@ export class BaselineAnalysisStore {
     launchSnapshotId?: string,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(launchSnapshotId === undefined || UUID_PATTERN.test(launchSnapshotId), 'ANALYSIS_RECORD_INVALID', '任务启动快照引用无效。');
-    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+    if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);

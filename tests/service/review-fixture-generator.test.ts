@@ -17,7 +17,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //
 // Ordinary service tests derive and compare the current fixture without writing. After a clause, label or 工序
 // changes, explicitly write the provider-free derivation with
-//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|regeneration preserves'
+//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|authors the stock|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
@@ -335,10 +335,12 @@ beforeEach(async () => {
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
-  const routedFixture = baselineFixture === undefined ? fixture : inheritGeneratedEntries
-    ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
+  const stockAnswers = [...entries.values()].filter(({ order }) => order === 'synthesis-leaf').map(({ entry }) => ({ ...entry, attempt: 1 }));
+  const routedFixture = baselineFixture === undefined ? fixture : ownProfile
+    ? { ...baselineFixture, entries: new Map([...baselineFixture.entries, ...stockAnswers.map(entry => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, 1), entry] as const)]) }
+    : inheritGeneratedEntries ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
   const store = await EditorialStore.open(scenarioRoots.dataRoot, scenarioRoots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -573,6 +575,10 @@ async function runReviewSynthesis(context: { store: EditorialStore; owner: Basel
       .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
     const driver = new ReviewRunDriver(context.store.reviewRunDriveSteps, context.owner);
     try { await driver.drive(run.reviewRunId); } finally { await driver.dispose(); }
+    if (label === 'synthesis-leaf') {
+      const settled = context.store.inspectReviewWorkspace(context.bookId, run.reviewRunId).run!;
+      expect(settled.findings.length, JSON.stringify(settled.categories)).toBeGreaterThan(0);
+    }
     const db = new DatabaseSync(join(context.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
       const row = db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(run.reviewRunId);
@@ -682,6 +688,25 @@ it('generates the authored review fixture without unreachable committed entries'
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);
 
+
+it('authors the stock review synthesis through its independent native-child fixture', async () => {
+  const leafPath = resolve(FIXTURE_PATH, '..', 'sample1-stock-typos-leaf-authored.json');
+  const leaf = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-stock-typos-leaf-authored');
+  let closed = false;
+  // The first pass authors the missing response; the second proves it closes through the same exact profile.
+  for (let pass = 0; pass < 2 && !closed; pass += 1) await withBook(async context => {
+    closed = await runReviewSynthesis(context, ['typos-and-usage'], 'synthesis-leaf');
+  }, leaf, true, true);
+  expect(closed).toBe(true);
+  const body = JSON.parse(await readFixture(leafPath, 'utf8'));
+  const answers = [...entries.values()].filter(({ order }) => order === 'synthesis-leaf').map(({ entry }) =>
+    ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, attempt: 1, response: entry.response }));
+  expect(answers).toHaveLength(1);
+  const combined = new Map([...body.entries, ...answers].map((entry: ModelFixtureEntry) => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry]));
+  const content = `${JSON.stringify({ ...body, entries: [...combined.values()] }, null, 2)}\n`;
+  await emitFixture(leafPath, content, 'utf8');
+  if (!regenerating) expect(await readFile(leafPath, 'utf8')).toBe(content);
+}, 120_000);
 
 it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the overlap fixture derived requests', async () => {
   const path = resolve(FIXTURE_PATH, '..', 'review-overlap-authored.json');

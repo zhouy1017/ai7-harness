@@ -2789,6 +2789,15 @@ export class ReviewRunStore {
   // ---- the drive loop's steps (B1, B2) ------------------------------------------------------------
 
   /** Freeze only editorial outputs at the member's turn; this method never reads manuscript blocks. */
+  #synthesisUnits(snapshot: RunSnapshot, modelCategories: readonly SnapshotCategory[]) {
+    return modelCategories.flatMap((entry) => {
+      const frozen = this.#categoryLedger(entry, snapshot).frozenPlan(entry.task!.taskIntentId, entry.task!.planEnvelopeDigest);
+      const manifest = frozen.components['coverage-manifest'] as { units?: Array<{ ordinal: number; sectionOrdinal: number; headingText: string | null; startPosition: number; endPosition: number }> };
+      return (manifest?.units ?? []).filter((unit) => snapshot.scope.selectedRange === null ||
+        unit.endPosition >= snapshot.scope.selectedRange.startPosition && unit.startPosition <= snapshot.scope.selectedRange.endPosition);
+    });
+  }
+
   #freezeSynthesisInput(snapshot: RunSnapshot, category: SnapshotCategory): boolean {
     const kept = this.#db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
     if (kept?.input_json != null) return true;
@@ -2796,12 +2805,7 @@ export class ReviewRunStore {
     const views = this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null);
     const modelIds = new Set(modelCategories.map((entry) => entry.categoryId));
     const findings = views.filter((finding) => modelIds.has(finding.categoryId));
-    const manifestUnits = modelCategories.flatMap((entry) => {
-      const frozen = this.#categoryLedger(entry, snapshot).frozenPlan(entry.task!.taskIntentId, entry.task!.planEnvelopeDigest);
-      const manifest = frozen.components['coverage-manifest'] as { units?: Array<{ ordinal: number; sectionOrdinal: number; headingText: string | null; startPosition: number; endPosition: number }> };
-      return (manifest?.units ?? []).filter((unit) => snapshot.scope.selectedRange === null ||
-        unit.endPosition >= snapshot.scope.selectedRange.startPosition && unit.startPosition <= snapshot.scope.selectedRange.endPosition);
-    });
+    const manifestUnits = this.#synthesisUnits(snapshot, modelCategories);
     if (new Set(manifestUnits.map((unit) => unit.ordinal)).size < 2 || findings.length === 0) {
       const saved = canonicalRecord({ notNeeded: true });
       this.#db.prepare('UPDATE review_run_synthesis SET summary_json = ?, summary_digest = ? WHERE review_run_id = ?').run(saved.json, saved.digest, snapshot.reviewRunId);
@@ -2874,8 +2878,14 @@ export class ReviewRunStore {
     const ledgerState = runId === null ? null : this.#categoryLedger(category, snapshot).currentRunState(runId);
     const paused = ledgerState === 'paused' || ledgerState === 'resumable';
     const findings = new Map(this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).map((finding) => [finding.findingId, finding]));
-    return { synthesis: { state: saved?.budgetReached === true ? 'budget' : summary !== null ? 'completed' : terminal ? 'missing' : event?.state === 'dispatched' && !paused ? 'running' : 'pending',
-      detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? '已形成全书审阅统合总结。' : terminal ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
+    if (terminal && input === null) {
+      const modelCategories = snapshot.categories.filter(member => member.task !== null && member.entry.synthesisKey === undefined);
+      const modelIds = new Set(modelCategories.map(member => member.categoryId));
+      if (![...findings.values()].some(finding => modelIds.has(finding.categoryId)) ||
+        new Set(this.#synthesisUnits(snapshot, modelCategories).map(unit => unit.ordinal)).size < 2) return {};
+    }
+    return { synthesis: { state: saved?.budgetReached === true ? 'budget' : summary !== null ? 'completed' : terminal && !paused ? 'missing' : event?.state === 'dispatched' && !paused ? 'running' : 'pending',
+      detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? '已形成全书审阅统合总结。' : terminal && !paused ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
         : paused ? '统合已暂停；继续审阅后接着完成。' : event?.state === 'dispatched' ? '正在统合各章发现。' : '各章审阅后将统合已有发现。',
       summary, missingCategories: input?.missingCategories ?? [],
       omissionLabel: input === null || Object.values(input.omitted).every((count) => count === 0) ? null

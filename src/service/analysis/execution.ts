@@ -1783,7 +1783,7 @@ export class BaselineAnalysisExecutionOwner {
       } else if (production === null || policy.providerProcessing.subAgents === undefined) {
         throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '当前策略未声明父尝试子代理。');
       }
-    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE) {
+    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE && definition.structuredOnly !== true) {
       throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '子代理夹具不得回退到父代理执行配置。');
     }
     const admittedLocalRule = childProfile ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : definition.structuredOnly === true || live === null || definition.evidenceAssuranceLevel === 'quick' || definition.factualClaims !== undefined ? null

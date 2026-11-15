@@ -39,10 +39,11 @@ describe('whole-book synthesis contract', () => {
     const input = buildSynthesisInput({ findings, missingCategories: [], baseline: null });
     const summary = parseSynthesisSummary(JSON.stringify({ overallAssessment: '先统一数字体例，再逐条核对表达。',
       recurringProblems: [null, { title: '数字体例', explanation: '跨章存在相同问题。', evidenceRefs: ['e1', 'e99999'] },
-        { title: '无依据', explanation: '不能采用。', evidenceRefs: ['e99999'] }], priorities: [null, '先核对数字体例。'] }), input);
+        { title: '无依据', explanation: '不能采用。', evidenceRefs: ['e99999'] }], contextualExplanations: [null, { explanation: '放回全书脉络后，先保留原发现供编辑判断。', evidenceRefs: ['e1'] }, { explanation: '无依据', evidenceRefs: ['e99999'] }], priorities: [null, '先核对数字体例。'] }), input);
     expect(summary?.overallAssessment).toBe('先统一数字体例，再逐条核对表达。');
     expect(summary?.recurringProblems).toEqual([{ title: '数字体例', explanation: '跨章存在相同问题。', evidenceRefs: ['e1'], priority: '' }]);
     expect(summary?.priorities).toEqual(['先核对数字体例。']);
+    expect(summary?.contextualExplanations).toEqual([{ explanation: '放回全书脉络后，先保留原发现供编辑判断。', evidenceRefs: ['e1'] }]);
   });
 
   it('fits smaller contexts while retaining valid evidence references and disclosing omitted records', () => {

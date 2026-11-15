@@ -217,6 +217,8 @@ it('refuses the remaining synthesis after category cancellation and relaunches i
     const control = session.store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId, action: 'cancel' });
     session.owner.cancelRun(control.runRecordId!, control.ledger); release(); await driving;
     expect(workspace(session, book).run!.state).toBe('cancelled');
+    const stopped = workspace(session, book).run!;
+    expect(stopped.synthesis?.state).toBe(stopped.findings.length === 0 ? undefined : 'missing');
     expect(session.capture.requests.some(request => request.stage === 'cross-unit-reduction')).toBe(false);
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy));
     expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
@@ -465,7 +467,7 @@ it('freezes inherited procedure instructions for synthesis and accepts the next 
       const request = session.capture.wireRequests.findLast(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
       const system = request.messages.find(message => message.role === 'system')!.content;
       expect(system).toContain(text); expect(system).toContain(materialText); expect(system).toContain('只提示编辑核对，不自动改写。');
-      if (preferenceEnabled) expect(system).toContain('本社审阅偏好');
+      if (preferenceEnabled) { expect(system).toContain('本社审阅与编辑偏好'); expect(system).toContain('保留本书体例'); }
       else {
         const run = workspace(session, book).run!, finding = run.findings.find(finding => finding.markId !== null)!;
         session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, finding.findingId, '保留本书体例');
