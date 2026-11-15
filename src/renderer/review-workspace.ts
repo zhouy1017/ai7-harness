@@ -4,6 +4,7 @@ import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_A
   EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, type EvidenceAssuranceLevel } from '../shared/protocol/factual-verification.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
+import { reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -1071,6 +1072,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     heading.append(meta);
     section.append(heading);
+    if (run.synthesis !== undefined) section.append(reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
+      if (evidence.blockId !== null) void options.goToText({ manuscriptId: run.manuscript.manuscriptId,
+        branchId: run.manuscript.branchId, blockId: evidence.blockId, markId: null });
+    }));
     const leading = runHasResults(run);
     if (leading) section.append(renderResults(next, run));
     if (run.localCheck !== undefined) {
@@ -2014,6 +2019,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const overview = part('overview', record.overview.title, table);
     if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
+      ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.run.modelLabel)]),
       overview,
       part('must-items', record.mustItems.title, must),
       ...derived,

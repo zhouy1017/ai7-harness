@@ -1,6 +1,7 @@
 import { REVIEW_FINDING_SEVERITY_LABELS, type ExportFidelityRowProjection, type ManuscriptExportFormat, type ReviewEvidenceSource, type ReviewReportFindingEntry,
   type ReviewReportRecord } from '../shared/protocol.js';
 import { resolveEditorialMarkCategory, type EditorialMarkCategoryKey } from '../shared/editorial-mark-category.js';
+import { reviewSynthesisLines } from '../shared/review-synthesis-wording.js';
 import {
   FINDING_EVIDENCE_HEADING,
   REVIEW_REPORT_HEADING,
@@ -57,6 +58,7 @@ export interface ReportExportResult {
 
 /** The report as a file states it, whatever the format. */
 interface ReportLayout {
+  synthesis: string[];
   title: string;
   meta: string;
   overview: { title: string; columns: ReadonlyArray<string>; rows: ReadonlyArray<ReadonlyArray<string>>; totals: string | null };
@@ -80,6 +82,7 @@ function layoutOf(input: ReportExportInput): ReportLayout {
   const stateLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.stateLabel] as const));
   return {
     title: `${input.bookTitle} · ${REVIEW_REPORT_HEADING}`,
+    synthesis: record.synthesis === undefined ? [] : ['全书审阅统合总结', ...reviewSynthesisLines(record.synthesis)],
     meta: `${record.run.label}审阅 · ${record.run.scopeLabel} · 稿件修订版 ${record.run.manuscript.revisionLabel} · 报告${reviewReportVersionLine(input.version, localInstantLabel(input.generatedAt))}${record.run.modelLabel ? ` · ${record.run.modelLabel}` : ''}`,
     overview: {
       title: record.overview.title,
@@ -164,6 +167,7 @@ function reportDocx(layout: ReportLayout): Uint8Array {
   const body = [
     wordParagraph(layout.title, 'Title'),
     wordParagraph(layout.meta),
+    ...layout.synthesis.map((line, index) => wordParagraph(line, index === 0 ? 'Heading1' : undefined)),
     wordParagraph(layout.overview.title, 'Heading1'),
     wordTable(layout.overview.columns, layout.overview.rows),
     ...(layout.overview.totals === null ? [] : [wordParagraph(layout.overview.totals)]),
@@ -371,6 +375,9 @@ function publishedReportDocx(input: ReportExportInput): Uint8Array {
     publishedParagraph(reviewed.join(' · '), center, `<w:color w:val="555555"/>${size(22)}`),
     publishedParagraph(`审阅对象：《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}｜审阅日期：${publishedDate(input.generatedAt)}`,
       `<w:spacing w:after="240"/>${center}`, `<w:color w:val="777777"/>${size(19)}`),
+    ...(record.synthesis === undefined ? [] : [styled('全书审阅统合总结', 'Heading1'),
+      ...(record.run.modelLabel === undefined ? [] : [publishedParagraph(record.run.modelLabel)]),
+      ...reviewSynthesisLines(record.synthesis).map((line) => publishedParagraph(line))]),
     styled('一、审阅说明', 'Heading1'),
     publishedParagraph(`本次审阅对象为《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}，稿件修订版 ${record.run.manuscript.revisionLabel}，审阅范围：${record.run.scopeLabel}。` +
       (record.compilation === undefined ? '' : `本报告汇总本书 ${record.compilation.runCount} 次审阅的发现，同一问题只列一次。`)),
@@ -433,6 +440,7 @@ function reportPage(layout: ReportLayout): Uint8Array {
     (entry.sources.length === 0 ? '' : `<ul>${entry.sources.map(htmlSource).join('')}</ul>`)).join('') +
     (layout.findings.omitted === null ? '' : `<p>${escapeHtml(layout.findings.omitted)}</p>`);
   const body = `<main><h1 class="book-title">${htmlLines(layout.title)}</h1><p class="report-meta">${htmlLines(layout.meta)}</p>` +
+    layout.synthesis.map((line, index) => index === 0 ? `<h2>${htmlLines(line)}</h2>` : `<p>${htmlLines(line)}</p>`).join('') +
     `<h2>${escapeHtml(layout.overview.title)}</h2>${htmlTable(layout.overview.columns, layout.overview.rows)}` +
     (layout.overview.totals === null ? '' : `<p>${escapeHtml(layout.overview.totals)}</p>`) +
     `<h2>${escapeHtml(layout.mustItems.title)}</h2>${must}${statistics}${findings}` +
@@ -472,6 +480,7 @@ function reportMarkdown(layout: ReportLayout): Uint8Array {
   const blocks = [
     `# ${markdownOneLine(layout.title)}`,
     markdownLines(layout.meta, ''),
+    ...layout.synthesis.map((line, index) => index === 0 ? `## ${markdownOneLine(line)}` : markdownLines(line, '')),
     `## ${markdownOneLine(layout.overview.title)}`,
     table(layout.overview.columns, layout.overview.rows),
     ...(layout.overview.totals === null ? [] : [markdownLines(layout.overview.totals, '')]),
