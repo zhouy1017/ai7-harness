@@ -3888,7 +3888,9 @@ export class BaselineAnalysisStore {
     planEnvelopeDigest: string,
     start: 'now' | 'when-online' | 'idle' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
+    launchSnapshotId?: string,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+    requireAnalysis(launchSnapshotId === undefined || UUID_PATTERN.test(launchSnapshotId), 'ANALYSIS_RECORD_INVALID', '任务启动快照引用无效。');
     if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
@@ -3946,6 +3948,7 @@ export class BaselineAnalysisStore {
       planVersionOrdinal: prepared.planVersion.ordinal,
       taskIntentId,
       authority,
+      ...(launchSnapshotId === undefined ? {} : { launchSnapshotId }),
       ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
       ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });

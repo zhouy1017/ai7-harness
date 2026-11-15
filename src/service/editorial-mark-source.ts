@@ -13,7 +13,7 @@ export function launchedRunModelLabels(db: DatabaseSync, runRecordId: string, pr
     FROM analysis_run_records r JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
     JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
     JOIN analysis_plan_records p ON p.task_intent_id = r.task_intent_id AND p.plan_version = v.ordinal AND p.component = 'provider-resolution-plan'
-    LEFT JOIN task_launch_snapshots s ON s.run_id = r.run_record_id WHERE r.run_record_id = ?`).get(runRecordId);
+    LEFT JOIN task_launch_snapshots s ON s.snapshot_id = json_extract(a.canonical_json, '$.launchSnapshotId') WHERE r.run_record_id = ?`).get(runRecordId);
   if (row === undefined || typeof JSON.parse(String(row.authority)).launchSnapshotId !== 'string') return {};
   const binding = producingPlan || row.snapshot === null ? null : JSON.parse(String(row.snapshot)).binding;
   const route = JSON.parse(String(row.plan)).executionRoute;

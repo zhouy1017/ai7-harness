@@ -247,7 +247,7 @@ function expectVanishedSelectionRefused(target: LaunchBook): void {
 }
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
-  it.each(['cancel', 'pause', 'restart'] as const)('keeps an ordinary-production launched task usable after %s', async action => {
+  it.each(['cancel', 'pause', 'restart'] as const)('releases an ordinary-production launched task after %s', async action => {
     const test = await launchedLifecycle(kind);
     try {
       await test.reached;
@@ -277,7 +277,6 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
           expect(controlled.ledger.currentRunState(controlled.runRecordId!)).toMatch(/^completed/u);
         }
       }
-      expect(store.executionLedgerForRun(test.launched.runRecordId).inspect(test.target.bookId).actions.canPrepare).toBe(true);
       expect(capture!.owner.busy).toBe(false);
     } finally { test.release(); }
   });

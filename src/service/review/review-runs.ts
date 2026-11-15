@@ -2853,9 +2853,12 @@ export class ReviewRunStore {
     let dispatchRunRecordId: string | null;
     try {
       const ruleVersionId = this.defaultRuleVersion(reviewRunId);
+      const launchSnapshotId = this.#db.prepare("SELECT json_extract(canonical_json, '$.launchSnapshotId') snapshot_id FROM review_run_authorizations WHERE review_run_id = ?")
+        .get(reviewRunId)?.snapshot_id;
       // A deferred member starts on the idle lane under the Run's one approval, never sooner (Issue #1200; ADR 0095 §3).
       dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, this.backgroundOrigin(reviewRunId, categoryId) ? 'idle' : 'now',
-        ruleVersionId === null ? { kind: 'standard-direct' } : { kind: 'default-execution-rule', ruleVersionId }).dispatchRunRecordId;
+        ruleVersionId === null ? { kind: 'standard-direct' } : { kind: 'default-execution-rule', ruleVersionId },
+        typeof launchSnapshotId === 'string' ? launchSnapshotId : undefined).dispatchRunRecordId;
     } catch (error) {
       if (!(error instanceof AnalysisError)) throw error;
       this.#recordEvent(reviewRunId, categoryId, 'refused', error.message, { extra: { code: error.code } });
