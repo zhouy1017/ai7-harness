@@ -1090,6 +1090,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'comments-inline-apply-overlay',
     'editor-revision',
     'ai-locks',
+    'scoped-dispatch-wide',
+    'scoped-dispatch-gate',
     'selected-fast-text-scope-refusal',
     ...J14_DARK_PASS_LOCATIONS,
     'entry',

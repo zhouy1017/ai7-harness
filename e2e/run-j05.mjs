@@ -1213,6 +1213,14 @@ async function main() {
     await assertRenderer(renderer, `window.__j05.item('ai-unlock-selection')?.disabled===false && window.__j05.item('ai-lock-selection')===null && window.__j05.item('scoped-ai-edit')?.disabled===false`, 'lock-menu-offers-unlock');
     await chooseMenuItem(renderer, 'scoped-ai-edit', 'scoped-edit-choose');
     await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true && document.activeElement===document.querySelector('[data-scoped-ai-edit="instruction"]')`, 'scoped-edit-composer');
+    await waitFor(renderer, `!document.querySelector('[data-scoped-ai-edit="composer"] .dispatch-chooser summary')?.textContent.includes('加载中')`, 'scoped-choice-ready');
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        at(width===1280 ? 'scoped-dispatch-wide' : 'scoped-dispatch-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(async () => {const form=document.querySelector('[data-scoped-ai-edit="composer"]');form.scrollIntoView({block:'nearest'});await new Promise(resolve=>requestAnimationFrame(resolve));const summary=form.querySelector('.dispatch-chooser summary');summary.focus();const button=form.querySelector('[data-scoped-ai-edit="submit"]'),box=button.getBoundingClientRect();return document.activeElement===summary && summary.textContent.startsWith('模型 ') && box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight && form.scrollWidth<=form.clientWidth;})()`, 'scoped-launch-controls-reachable');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value='把这段改短一点。'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
     await waitFor(renderer, `window.__j05.status().includes('所选的段落都已锁定，AI 不会修改它们；先解锁再试。') && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal`, 'scoped-edit-locked-refused', 30_000);
     await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-scoped-ai-edit="cancel"]'); if(cancel instanceof HTMLButtonElement) cancel.click(); return document.querySelector('[data-scoped-ai-edit="composer"]')===null; })()`, 'scoped-edit-closed');
