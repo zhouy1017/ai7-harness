@@ -2,7 +2,7 @@
 
 ## #1472 synchronized deltas (0.7.1, `codex/integration-0.7.1`)
 
-Closure candidate identity is 0.7.1 Alpha, protocol 203, schema 115, Data Version 1; final closure runs and dev delivery are pending. Existing slice stage descriptions below remain the detailed owners.
+Delivered identity is 0.7.1 Alpha at `dev@1654f386` through PR #1495, protocol 203, schema 115, Data Version 1; hosted Full Gate 43747897180 passed 15 of 15 Journeys. Existing slice stage descriptions below remain the detailed owners.
 
 | Slice | Journey delta / existing stage owner |
 | --- | --- |
@@ -60,7 +60,7 @@ Issues #1401–#1413 changed what the runners drive, under [ADR 0096 §4](../adr
 | J-09 | Background enrollment opens with the first starting point and a 100000 ceiling, one `登记` records, `撤销登记` is one click with what is kept in the status line; baseline update `查看计划` directly (#1410). |
 | J-10 | Whole-Book re-analysis opens its plan without the mode chooser; otherwise shared label and layout deltas only (#1410, #1413). |
 | J-11 | 评估 leads with AI7's report; `修改报告`, one-click `按我的修改重新生成` (saves edits first) and `采用新版报告`; 🔒 item and part locks (`evaluation-ai-lock`); 审稿意见 `起草` starts at once and its DOCX writes on the Save choice; learning eligibility opens on its recommendation; `停止今后使用` is one step; house memories widened explicitly (#1406–#1408, #1410, #1412). |
-| J-12 | Ordinary-mode model author with recorded effort (#1402); first factual range verdict and range retention (#1401); ordinary `新增并启用偏好`, edit and stop (#1408); database export writes on the Save choice; same-Book reuse preselected; diagnostics read protocol 203 / schema 115 at package 0.7.1 at the closure candidate (#1472). |
+| J-12 | Ordinary-mode model author with recorded effort (#1402); first factual range verdict and range retention (#1401); ordinary `新增并启用偏好`, edit and stop (#1408); database export writes on the Save choice; same-Book reuse preselected; diagnostics read protocol 203 / schema 115 at delivered package 0.7.1 (#1472, PR #1495). |
 | J-13 | Series membership, removal, exclusion and stop are one click with their impact recorded; chooser and knowledge forms open on their first choice; the review history folds into the summary bar; the imported-Skill chain (#1410, #1413). |
 | J-15 | Guideline import on file choice; imported-Skill keep/validate/install/select chain with its restricted/rejected refusals; library additions under their own names (#1410). |
 | J-16 | Agent workspace `生成修改建议` becomes 修改建议 marks and opens them in one step (#1431); shared editorial memory in Book dialogue and Global Agent; Global Agent conversation-first with pills (#1408, #1410, #1413). |
