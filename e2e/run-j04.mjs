@@ -2613,6 +2613,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'legacy-plan-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'legacy-plan-library-ready');
     await reviewAction(renderer, `button[data-book-id="${legacyBook.bookId}"]`, 'legacy-plan-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`, 'legacy-plan-book-ready');
     await openAnalysisDestination(renderer, 'legacy-plan-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')?.disabled===false`, 'legacy-plan-first-ready');
     await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="start"]','legacy-plan-first');
@@ -2666,6 +2667,7 @@ async function main() {
         await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('library')),'legacy-plan-return-library');
         await waitFor(renderer,`document.querySelector('[data-screen="landing"]')`,'legacy-plan-return-library-ready');
         await reviewAction(renderer,`button[data-book-id="${legacyBook.bookId}"]`,'legacy-plan-return-book');
+        await waitFor(renderer,`document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`,'legacy-plan-return-book-ready');
         await openAnalysisDestination(renderer,'legacy-plan-return-analysis');
         await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-task-plan-open="baseline-analysis"]','legacy-plan-return-drawer');
         at('plan-revision-drawer-diff');
