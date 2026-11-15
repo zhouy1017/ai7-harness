@@ -1,3 +1,4 @@
+import { openaiResponsesBody } from '../../src/service/provider/family-openai-responses.js';
 import { geminiReplayItems } from '../../src/service/provider/family-gemini.js';
 import { CONFIGURED_MODEL_REASONING } from '../../src/shared/provider-configuration.generated.js';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -136,4 +137,17 @@ describe('native reasoning through the real DSH loop and send gate (#1453)', () 
       expect(evaluateEgress({ ...payload, reasoningEffort: 'different-level' }, binding, tools.egressScope)).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
     } finally { await handle.finish(); retrieval.dispose(); rmSync(ledgerRoot, { recursive: true, force: true }); }
   });
+});
+
+
+it('declares stateless encrypted Responses by profile rather than route identity (#1472)', () => {
+  const model = modelProfileFor('openai-platform', 'custom-account-model')!;
+  const payload: AssembledModelPayload = { provider: 'openai-platform', model: model.model, system: 'Protocol test.',
+    messages: [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Return result.' }] }] };
+  const profile = PROVIDER_ROUTE_PROFILES['openai-platform'];
+  expect(JSON.parse(openaiResponsesBody({ ...profile, route: 'opencode-go' }, model, payload)))
+    .toMatchObject({ store: false, include: ['reasoning.encrypted_content'] });
+  const without = JSON.parse(openaiResponsesBody({ ...profile, statelessReasoning: false }, model, payload));
+  expect(without).not.toHaveProperty('include');
+  expect(without).not.toHaveProperty('store');
 });

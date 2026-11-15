@@ -22,7 +22,7 @@ import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { attemptTurn } from '../../src/service/dialogue/dialogue-history.js';
 import { splitFragments } from '../../src/service/dialogue/fragments.js';
-import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, harnessSessionLogPath, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
@@ -399,6 +399,8 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       // A real process death preserves exactly the prefix that reached disk, so freeze that durable checkpoint first.
       const durableLog = await waitFor(() => readHarnessSessionLog(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), oldSession),
         (log) => log?.events.some((event) => event.type === 'tool/result') === true, 'tool result durable before process death');
+      expect(await readFile(harnessSessionLogPath(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), oldSession), 'utf8'))
+        .not.toContain('SYNTHETIC_TOOL_GAP_REASONING');
       // The unchanged history reader releases the final complete sentence when streaming becomes interrupted.
       // Compare against that base cut projection of the exact durable log, not its answering projection.
       const durableFragments = splitFragments(attemptTurn(durableLog!, 0, null).streamed, 'cut');

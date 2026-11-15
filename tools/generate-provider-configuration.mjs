@@ -603,6 +603,7 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
           dshAttribution: route.dshAttribution,
           sessionHeader: route.sessionHeader,
           maxOutputTokens: route.maxOutputTokens,
+          ...(route.statelessReasoning === undefined ? {} : { statelessReasoning: route.statelessReasoning }),
           ...(route.reasoning === undefined ? {} : { reasoning: route.reasoning }),
           credentialHeaderEvidence: headerEvidence,
           displayName: route.displayName,

@@ -1,6 +1,27 @@
 # E2E journeys: what each admitted runner proves
 
+## #1472 synchronized deltas (0.7.1, `codex/integration-0.7.1`)
+
+Closure candidate identity is 0.7.1 Alpha, protocol 203, schema 115, Data Version 1; final closure runs and dev delivery are pending. Existing slice stage descriptions below remain the detailed owners.
+
+| Slice | Journey delta / existing stage owner |
+| --- | --- |
+| #1470 (#1473, #1480) | J-02 narrow overlay connector and deferred card selection; see its comment-pane stages. |
+| #1453 (#1474, #1478) | J-03/J-04/J-12 no-policy-lock boundary; J-12 per-role effort defaults at both viewports, as described below. |
+| #1471 (#1477) | J-04 repeated-word occurrence hints and bulk Apply; see review grounding stages. |
+| #1475 (#1485) | J-02 structure burst waits on durable saves with checkpointing off commit; amplification remains for R5. |
+| #1455 (#1487, #1488) | Existing launch/preview, model-choice and frozen task-row stages below replace ordinary prepare/authorize ceremony across J-04/J-05/J-07/J-09/J-10/J-11/J-12/J-13/J-16; retained plan editing stays covered. |
+| #1476 (#1489) | Instruction-carrying procedures for 初评, 基线分析, 写作, 审稿意见 and 按我的修改重新生成, with frozen plan sending disclosures; integration commit `a3a19670`. |
+| #1491 (#1493) | The pre-start plan names this start’s model service and 「模型@思考强度」; shared builders keep preview and frozen plan equal, with unsent effort omitted; see the service-test delta below (`6196f3ed`). |
+| #1490 (#1492) | Shared real-click targets must have stable rectangles across animation frames; fixes J-04 `open-plan-revision` during drawer close (`1cb2cf1d`); see the settled-pointer delta below. |
+| #1482, #1484, #1486 | J-16 and J-12 wait on durable state rather than transient toasts. |
+
+The fixture route retains its fixture-model attribution. Chosen provider labels are proved with captured ordinary transport in real-store service tests; Journeys prove selection, one-step launch and frozen task rows. No live call or new closure evidence is claimed.
+
+
 ## #1490 settled pointer targets
+
+PR #1492 integrated at `1cb2cf1d`. The fixed slice passed 31 of 31 actual Gate invocations on ai7-testbed-02; those slice-head runs do not replace the final closure ladder or hosted runs.
 
 The shared real-pointer helper waits for the visible, topmost target's rectangle to match across consecutive animation frames before pressing. This keeps J-04's `open-plan-revision` from aiming at a moving attention button while the drawer-close body padding transition is still running. J-11 awaits the frame predicate before converting its result to a boolean, as the other helper consumers do. The real press/release, viewport and topmost checks, post-press hit check, read-only plan assertions, both viewports and existing timeouts remain; product motion and Gate selection are unchanged.
 
@@ -39,7 +60,7 @@ Issues #1401–#1413 changed what the runners drive, under [ADR 0096 §4](../adr
 | J-09 | Background enrollment opens with the first starting point and a 100000 ceiling, one `登记` records, `撤销登记` is one click with what is kept in the status line; baseline update `查看计划` directly (#1410). |
 | J-10 | Whole-Book re-analysis opens its plan without the mode chooser; otherwise shared label and layout deltas only (#1410, #1413). |
 | J-11 | 评估 leads with AI7's report; `修改报告`, one-click `按我的修改重新生成` (saves edits first) and `采用新版报告`; 🔒 item and part locks (`evaluation-ai-lock`); 审稿意见 `起草` starts at once and its DOCX writes on the Save choice; learning eligibility opens on its recommendation; `停止今后使用` is one step; house memories widened explicitly (#1406–#1408, #1410, #1412). |
-| J-12 | Ordinary-mode model author with recorded effort (#1402); first factual range verdict and range retention (#1401); ordinary `新增并启用偏好`, edit and stop (#1408); database export writes on the Save choice; same-Book reuse preselected; diagnostics read protocol 202 / schema 113 at the package version, 0.7.0 at the closure candidate (#1410, #1412, #1426, #1444, #1459). |
+| J-12 | Ordinary-mode model author with recorded effort (#1402); first factual range verdict and range retention (#1401); ordinary `新增并启用偏好`, edit and stop (#1408); database export writes on the Save choice; same-Book reuse preselected; diagnostics read protocol 203 / schema 115 at package 0.7.1 at the closure candidate (#1472). |
 | J-13 | Series membership, removal, exclusion and stop are one click with their impact recorded; chooser and knowledge forms open on their first choice; the review history folds into the summary bar; the imported-Skill chain (#1410, #1413). |
 | J-15 | Guideline import on file choice; imported-Skill keep/validate/install/select chain with its restricted/rejected refusals; library additions under their own names (#1410). |
 | J-16 | Agent workspace `生成修改建议` becomes 修改建议 marks and opens them in one step (#1431); shared editorial memory in Book dialogue and Global Agent; Global Agent conversation-first with pills (#1408, #1410, #1413). |
@@ -52,7 +73,7 @@ Issue #1431 hides mechanism words in ordinary mode behind `technicalWords` / `te
 
 ## #1459 synchronized deltas (0.7.0, `codex/integration-0.7.0`)
 
-The slice stage text below already records the changes: #1451’s J-05/J-08 overflow mark-to-pane selection, alignment and connector stages; #1454’s compact/expanded cards, seven-visible check, source chips and one-row filters (J-04/J-05/J-08/J-12); and #1452’s shared 改稿方式 menu, icon undo/redo, derivative menu and J-02/J-07 toolbar geometry stages. See the synchronized slice deltas below rather than repeating their steps. #1435 keeps repeated/punctuation-variant replacements and excludes guessed anchors from batch apply, covered by service/unit tests; its existing Journey stages are reused. J-12’s diagnostics pin moves to protocol 202, schema 113, with package version 0.7.0 at the closure candidate. Gate selection and provider-free boundaries are unchanged; final candidate verification is pending.
+The slice stage text below already records the changes: #1451’s J-05/J-08 overflow mark-to-pane selection, alignment and connector stages; #1454’s compact/expanded cards, seven-visible check, source chips and one-row filters (J-04/J-05/J-08/J-12); and #1452’s shared 改稿方式 menu, icon undo/redo, derivative menu and J-02/J-07 toolbar geometry stages. See the synchronized slice deltas below rather than repeating their steps. #1435 keeps repeated/punctuation-variant replacements and excludes guessed anchors from batch apply, covered by service/unit tests; its existing Journey stages are reused. J-12’s diagnostics pin moves to protocol 202, schema 113, with package version 0.7.0 at the closure candidate. Gate selection and provider-free boundaries are unchanged; R1 verification and delivery are recorded in PR #1468.
 
 ## #1444 synchronized deltas (0.6.5, `codex/integration-0.6.5`)
 
