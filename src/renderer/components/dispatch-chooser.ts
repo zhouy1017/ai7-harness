@@ -50,6 +50,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     element,
     unavailable(): void { summary.textContent = '模型 使用角色默认 ▾'; panel.hidden = true; },
     render(next: ModelServiceSettingsProjection, favourites: ModelFavourites = {}, selection: RuntimeExecutionConfig = {}): void {
+      panel.hidden = false;
       settings = next; choices = []; models.replaceChildren();
       const role = settings.roles.find(role => role.roleId === options.role);
       defaultChoice = { ...(role?.connection === null || role?.connection === undefined ? {} : { modelConnectionId: role.connection.connectionId }),
