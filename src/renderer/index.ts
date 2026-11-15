@@ -3042,13 +3042,14 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
       if (!origin.isCurrent()) return;
       const current = completion === null ? navigation.begin() : navigation.route();
       let opened: ManuscriptWindowProjection | undefined;
+      let shown: NavigationCheckpoint | undefined;
       if (at === null) {
         // With no place to return to, a conflict on a Production Document returns to that document, and one on the
         // Manuscript to where the Book opens.
         opened = await guardNavigationRead(current, () => api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }));
         if (!opened || !current.isCurrent()) return;
-        if (opened.deliverable === 'production-document') await openEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, current);
-        else await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, bookTitle }, undefined, current);
+        if (opened.deliverable === 'production-document') shown = await guardNavigationRead(current, () => openEditorWindowNow(opened!, bookTitle, undefined, undefined, undefined, undefined, current));
+        else shown = await guardNavigationRead(current, () => renderResolvedBookWorkbenchRouteNow({ kind: 'book', bookId: target.bookId, bookTitle }, undefined, current));
       } else {
         opened = await guardNavigationRead(current, () => api.getManuscriptWindowAt({
           manuscriptId: target.manuscriptId,
@@ -3056,10 +3057,10 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
           target: { kind: 'block', blockId: at.blockId },
         }));
         if (!opened || !current.isCurrent()) return;
-        await openEditorWindow(opened, bookTitle, undefined, undefined, at.markId, undefined, current);
+        shown = await guardNavigationRead(current, () => openEditorWindowNow(opened!, bookTitle, undefined, undefined, at.markId, undefined, current));
       }
       // Said once the window is drawn, so nothing drawn after it takes its place — on a document, in its own words.
-      if (current.isCurrent() && completion !== null) setStatus(conflictCompletionOn(opened.deliverable === 'production-document', completion), 'success');
+      if (shown?.isCurrent() && completion !== null) setStatus(conflictCompletionOn(opened.deliverable === 'production-document', completion), 'success');
     },
     openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
   });

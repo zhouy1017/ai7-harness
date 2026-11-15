@@ -65,7 +65,7 @@ function harness(api: object = {}) {
     button:(label:string,_class:string,run:()=>void)=>{const button=element('button','',label);button.addEventListener('click',run);return button;},
     renderEditorWindow: vi.fn((window:{bookId:string}) => {const node=element('section');node.dataset['bookId']=window.bookId;replaceScreen('editor',node);}),
     mountProposalConflict:vi.fn((options)=>{context['conflictOptions']=options;return {start:vi.fn(),destroy:vi.fn(),settle:async()=>true};}),
-    conflictCompletionOn:()=> '修改已应用',technicalWords:(_technical:string,ordinary:string)=>ordinary,renderStartupProjection:vi.fn(),
+    conflictCompletionOn:(onDocument:boolean)=>onDocument?'文档结果':'修改已应用',documentContextOf:async()=>({}),technicalWords:(_technical:string,ordinary:string)=>ordinary,renderStartupProjection:vi.fn(),
     mountEvaluation: vi.fn((options) => {context['evaluationOptions']=options;return {load:async()=>undefined,refresh:vi.fn()};}),
     technicalDetails: vi.fn(), awaitServiceJob: vi.fn(), openTaskPlan: vi.fn(),
     EVALUATION_STATUS: {loading:'正在读取评估',opened:'评估已打开',unavailable:'无法读取评估'},
@@ -335,4 +335,13 @@ it('a nested return read error still reports while the workspace stays', async (
  const back=runInContext("agentWorkspaceReturn('book-a','图书')",page.context) as ()=>void;back();await started.promise;
  read.reject(new Error('read failed'));for(let i=0;i<12;i+=1)await Promise.resolve();
  expect(page.setStatus).toHaveBeenCalledWith('无法打开图书','error');
+});
+
+
+it('conflict success keeps its document wording after its own destination commits', async () => {
+ const page=harness({getManuscriptWindowAt:async()=>({bookId:'book-a',deliverable:'production-document'})});
+ await page.run("renderProposalConflict({bookId:'book-a',manuscriptId:'manuscript',branchId:'branch',markId:'mark'},'图书')");
+ const options=page.context['conflictOptions'] as {returnToManuscript(at:{blockId:string;markId:null},completion:string):Promise<void>};
+ await options.returnToManuscript({blockId:'block',markId:null},'kept');
+ expect(page.screen.dataset['screen']).toBe('editor');expect(page.setStatus).toHaveBeenLastCalledWith('文档结果','success');
 });
