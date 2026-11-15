@@ -1,5 +1,8 @@
 # E2E journeys: what each admitted runner proves
 
+#1455 PR A moves review-sheet starts in J-04, J-10, J-11, J-13 and J-15 onto the product's one-step launch. The obsolete prepared-review approval/plan-edit Journey ceremony is retired; retained preparation, queued-start and drift behavior still has real-store service coverage and the existing non-review Journey paths. The shared sheet helper checks reachable controls at 1280×800 and 1008×681 and restores the native viewport. J-04's `dispatch-model-choice` stage chooses a ready non-default model and effort, starts model-backed review, and checks its frozen task row and unchanged role defaults at both viewports; J-05 retains the direct local-review checks. The chosen-binding-to-card half of the criterion is proved at the real-store service layer with captured ordinary transport, rather than in a Journey. Existing fixture execution remains local and network-denied.
+
+
 #1453 / ADR 0102 synchronizes J-03, J-04 and J-12's processing-boundary assertions with the fixed `no-policy-lock` marker. Historical pins remain readable; fixtures and SampleBook-based Journeys remain, without frozen manifest admission. J-05 now checks the available review choices for its frozen three-paragraph draft at both 1280×800 and 1008×681, then restores the native viewport; saving still creates no Task or Run. SampleBook source metadata is computed from the admitted input rather than a pinned file fingerprint. All Journeys cross the shared model execution seam, so PR A verifies `e2e:all` on a background guest.
 
 ## #1453 PR B synchronized delta

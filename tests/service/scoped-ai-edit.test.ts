@@ -123,6 +123,19 @@ async function settled(requests: FastRoleRequests, projection: ScopedAiEditProje
 const primary = (): Target => ({ manuscriptId: book.manuscriptId, branchId: book.branchId });
 
 describe('就选中部分让 AI 修改: the scoped splice guard', () => {
+  it('replays a scoped launch command once and refuses changed input without another edit (#1455)', async () => {
+    const target = primary();
+    const { blocks } = threeParagraphs(target);
+    const input = { ...base(target, '只检查所选文字', spanOver(blocks)), clientCommandId: randomUUID() };
+    const requests = answering(frozen(input), { schema: SCOPED_EDIT_RESULT_SCHEMA, targets: [] });
+    const first = requests.scopedEdit(book.bookId, input);
+    expect(requests.scopedEdit(book.bookId, input).requestId).toBe(first.requestId);
+    const result = await settled(requests, first);
+    expect(requests.scopedEdit(book.bookId, input)).toEqual(result);
+    expect(() => requests.scopedEdit(book.bookId, { ...input, instruction: '另一个修改要求' })).toThrow();
+    expect(allBlocks(target).get(blocks[0].blockId)!.digest).toBe(blocks[0].digest);
+  });
+
   it('changes only the selected words of a partial cross-paragraph span and drops what the model wrote outside them', async () => {
     const target = primary();
     const { blocks } = threeParagraphs(target);

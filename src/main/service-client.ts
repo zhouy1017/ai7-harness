@@ -95,7 +95,7 @@ export function requestTimeoutMs(operation: ServiceOperation): number | null {
     operation === 'authorizeBaselineAnalysis' ||
     // A Review Run's drive loop starts inside these two answers, and it writes at once whatever
     // needs no model: the leads, or a category whose Run finished before a restart.
-    operation === 'authorizeReviewRun' || operation === 'continueReviewRun' ||
+    operation === 'launchReviewRun' || operation === 'authorizeReviewRun' || operation === 'continueReviewRun' ||
     // An export renders the whole file for its review, its staging, its preparation and its approval; a timeout
     // would stop the service mid-write and leave its stage behind.
     operation === 'reviewManuscriptExport' || operation === 'stageManuscriptExport' ||

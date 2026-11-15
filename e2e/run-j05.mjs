@@ -538,6 +538,25 @@ async function main() {
       const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});
       return JSON.stringify(routes).includes('当前运行范围未允许');
     })`), 'selected-fast-ci-text-task-refused');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'dispatch-chooser-entry');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-review"]')?.disabled===false`, 'dispatch-chooser-entry-ready');
+    await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>{window.__j05RolesBefore=JSON.stringify(settings.roles)})`);
+    try {
+      for (const viewport of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
+        at(viewport.width === 1280 ? 'dispatch-chooser-wide' : 'dispatch-chooser-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+        await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click();return true; })()`, 'dispatch-chooser-open-sheet');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] .dispatch-chooser select')?.options.length>0`, 'dispatch-chooser-models-ready');
+        await assertRenderer(renderer, `(() => { const chooser=document.querySelector('dialog.review-sheet .dispatch-chooser');chooser.querySelector('summary').click();const panel=chooser.querySelector('.dispatch-chooser-panel'),bounds=panel.getBoundingClientRect();if(!chooser.open||bounds.left<0||bounds.right>innerWidth||bounds.top<0||bounds.bottom>innerHeight)return false;const models=chooser.querySelector('select');models.selectedIndex=models.options.length-1;window.__j05ChoiceLabel=models.selectedOptions[0].textContent.replace(/^★ /u,'');models.dispatchEvent(new Event('change',{bubbles:true}));return true; })()`, 'dispatch-chooser-select-ready-model');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet .dispatch-chooser summary')?.textContent.includes(window.__j05ChoiceLabel) && document.querySelector('dialog.review-sheet .review-preparation-progress')?.hidden===true`, 'dispatch-chooser-choice-retained');
+        await assertRenderer(renderer, `(() => { const chooser=document.querySelector('dialog.review-sheet .dispatch-chooser'),effort=chooser.querySelectorAll('select')[1];if(!effort.closest('label').hidden&&effort.options.length>1){effort.selectedIndex=effort.options.length-1;const level=effort.value;effort.dispatchEvent(new Event('change',{bubbles:true}));if(!chooser.querySelector('summary').textContent.endsWith('@'+level+' ▾'))return false;}chooser.querySelector('button').click();return true; })()`, 'dispatch-chooser-effort-and-reset');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-preparation-progress')?.hidden===true`, 'dispatch-chooser-reset-ready');
+        requireJourney(await renderer.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles)===window.__j05RolesBefore)`), 'dispatch-chooser-keeps-role-defaults');
+        await assertRenderer(renderer, `(() => { document.querySelector('dialog.review-sheet [data-review-action="close-sheet"]').click();return true; })()`, 'dispatch-chooser-close-sheet');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'dispatch-chooser-back-to-text');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'dispatch-chooser-back-ready');
     await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
     at('selection-menu-empty');
 
@@ -1095,10 +1114,22 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'local-explicit-entry-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'local-entry-click');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-local-check-options]')?.hidden===false`, 'local-options-open');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const profile=sheet.querySelector('[data-local-check-numerals]'); const prose=sheet.querySelector('[data-local-check-prose]'); if(profile?.value!=='off'||!prose?.checked)return false; const button=sheet.querySelector('[data-review-action="prepare"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-confirm-prose-numerals-off');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'local-frozen-plan-ready');
-    await assertRenderer(renderer, `(async () => { const workspace=await window.ai7.inspectReviewWorkspace({reviewRunId:null}); const run=workspace.run; const plan=await window.ai7.inspectTaskPlan({kind:'review-run',ref:run.reviewRunId}); window.__j05LocalRun=run.reviewRunId; window.__j05LocalDigest=run.localCheck.planDigest; return run.localCheck.options.numerals==='off' && run.preinstalledProcedures.some((pin)=>pin.procedure.procedureId==='ai7-procedure/local-text-check'&&pin.procedure.version===3) && !plan.start.needsModelConnection && plan.service.provider==='不调用模型' && plan.start.categoryDigests.length===1 && plan.start.categoryDigests[0].planEnvelopeDigest===run.localCheck.planDigest; })()`, 'local-plan-exact-no-model-binding');
-    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'local-authorize-exact-plan');
+    try {
+      for (const viewport of [{ width: 1280, height: 800 }, { width: 1008, height: 681 }]) {
+        at(viewport.width === 1280 ? 'dispatch-review-wide' : 'dispatch-review-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+        if (viewport.width === 1008) {
+          await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'dispatch-reopen-local');
+          await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'dispatch-local-sheet');
+        }
+        const before=await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length)`);
+        await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'), start=sheet.querySelector('[data-review-action="start"]'), estimate=sheet.querySelector('[data-review-action="prepare"]'), chooser=sheet.querySelector('.dispatch-chooser'); if(!start||start.disabled||!estimate||estimate.disabled||!chooser)return false; const bounds=start.getBoundingClientRect(); if(bounds.left<0||bounds.right>innerWidth||bounds.top<0||bounds.bottom>innerHeight)return false; estimate.click();return true; })()`, 'dispatch-estimate-read-only');
+        requireJourney(await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length)`)===before, 'dispatch-estimate-no-run');
+        await assertRenderer(renderer, `(() => { const button=document.querySelector('dialog.review-sheet [data-review-action="start"]'); if(!button||button.disabled)return false;button.click();return true; })()`, 'dispatch-one-step-start');
+        await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled' && document.querySelector('dialog.review-sheet')?.open===false`, 'dispatch-local-complete');
+        requireJourney(await renderer.evaluate(`(async () => { const workspace=await window.ai7.inspectReviewWorkspace({reviewRunId:null}), run=workspace.run; window.__j05LocalRun=run.reviewRunId;window.__j05LocalDigest=run.localCheck.planDigest;const plan=await window.ai7.inspectTaskPlan({kind:'review-run',ref:run.reviewRunId});const finding=run.findings.find(item=>item.markId!==null);if(!finding)return false;const card=await window.ai7.getEditorialMarkCard({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,markId:finding.markId});return card.source.modelLabel==='AI7 本地检查'&&run.localCheck.options.numerals==='off'&&run.preinstalledProcedures.some(pin=>pin.procedure.procedureId==='ai7-procedure/local-text-check'&&pin.procedure.version===3)&&plan.service.provider==='不调用模型'; })()`), 'dispatch-local-pinned-plan');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
     // Q1 / Issue #1410 item 5: 批量采纳机械修正 applies at once, and 撤销本批应用 stands beside the result.

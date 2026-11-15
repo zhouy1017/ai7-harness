@@ -1,3 +1,4 @@
+import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -572,11 +573,6 @@ async function leaveReviewToLibrary(renderer, name) {
 
 /** Prepare a Review Run on the open 审阅 sheet, start it from the drawer, and wait for it to settle; its projection. */
 async function startPreparedReview(renderer, name) {
-  await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, `${name}-prepared`, 180_000);
-  const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-  requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId ?? ''), `${name}-prepared-run`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(prepared.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, `${name}-drawer`);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
   await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, `${name}-settled`, 300_000);
   await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
   await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, `${name}-drawer-closed`);
@@ -1257,17 +1253,17 @@ async function main() {
     const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
     requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['typos-and-usage']), 'consistency-sheet-offered', sheet);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='series-consistency'`, 'consistency-prepared', 120_000);
+    await launchReviewFromSheet(renderer, waitFor);
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState!=='prepared'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId) && prepared.categories.length === 1 &&
+    requireJourney(['running','settled'].includes(prepared?.state) && UUID_PATTERN.test(prepared.reviewRunId) && prepared.categories.length === 1 &&
       prepared.categories[0].categoryId === 'series-consistency' && prepared.categories[0].basis.searchEngine === false && prepared.categories[0].basis.guidelineDocuments[0].version === '2' &&
       (prepared.categories[0].planEnvelopeDigest ?? '').length === 64, 'consistency-prepared-run', prepared?.categories);
 
     at('consistency-review-run');
     // The one approval is the drawer's 开始任务; the Run executes on the J-04 adapter through the authored fixture, and its
     // three findings — place names to check against the first book's writing, citing the one clause — become 批注.
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(prepared.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'consistency-drawer');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'consistency-start');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(prepared.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState!=='ready'`, 'consistency-drawer');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'consistency-settled', 180_000);
     const reviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     const findings = reviewed?.findings ?? [];
@@ -1333,11 +1329,11 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'exclusion-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-sheet-open');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exclusion-prepared', 120_000);
+    await launchReviewFromSheet(renderer, waitFor);
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState!=='prepared'`, 'exclusion-prepared', 120_000);
     const heldRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(heldRun?.state === 'prepared' && heldRun.ordinal === 2 && UUID_PATTERN.test(heldRun.reviewRunId), 'exclusion-prepared-run', heldRun?.state);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(heldRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'exclusion-drawer');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'exclusion-start');
+    requireJourney(['running','settled'].includes(heldRun?.state) && heldRun.ordinal === 2 && UUID_PATTERN.test(heldRun.reviewRunId), 'exclusion-prepared-run', heldRun?.state);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(heldRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState!=='ready'`, 'exclusion-drawer');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='running' && document.querySelector('ol.review-progress li[data-review-category="series-consistency"]')?.dataset.categoryState==='running'`, 'exclusion-running', 120_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'exclusion-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'exclusion-drawer-closed');
@@ -1478,9 +1474,14 @@ async function main() {
     await openSeries(renderer, seriesId, 'exclusion-back-series');
 
     at('knowledge-bounded-pages');
+    // Pagination changes knowledge contents and history. Give it its own Series so later model-backed starts
+    // still read the unchanged knowledge the admitted Series fixture answers.
     const pagesSeeded = await renderer.evaluate(`(async () => {
-      const seriesId = ${JSON.stringify(seriesId)};
-      const itemId = ${JSON.stringify(itemId)};
+      const seriesId = (await window.ai7.createSeries({title:'知识分页书系',note:''})).seriesId;
+      const original = await window.ai7.proposeSeriesKnowledge({seriesId,target:{kind:'new',subject:${JSON.stringify(PLACE)},knowledgeClass:'places'},content:'初始分页内容',span:null});
+      const firstReview = await window.ai7.inspectSeriesKnowledgeReview({seriesId,candidateId:original.candidateId});
+      const firstItem = await window.ai7.promoteSeriesKnowledge({seriesId,candidateId:original.candidateId,candidateVersion:1,reviewDigest:firstReview.reviewDigest,reuseScope:'series-tasks',conflictDisposition:'none'});
+      const itemId = firstItem.itemId;
       for (let index = 0; index < 30; index += 1) {
         const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId,
           target: { kind: 'new', subject: '分页条目' + String(index).padStart(2, '0'), knowledgeClass: 'canon' }, content: '分页内容' + index, span: null });
@@ -1488,7 +1489,7 @@ async function main() {
         await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
           reviewDigest: review.reviewDigest, reuseScope: 'series-tasks', conflictDisposition: 'none' });
       }
-      for (let index = 0; index < 10; index += 1) {
+      for (let index = -1; index < 10; index += 1) {
         const candidate = await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'existing', itemId }, content: '历次分页内容' + index, span: null });
         const review = await window.ai7.inspectSeriesKnowledgeReview({ seriesId, candidateId: candidate.candidateId });
         await window.ai7.promoteSeriesKnowledge({ seriesId, candidateId: candidate.candidateId, candidateVersion: 1,
@@ -1497,16 +1498,18 @@ async function main() {
       for (let index = 0; index < 31; index += 1) {
         await window.ai7.proposeSeriesKnowledge({ seriesId, target: { kind: 'new', subject: '待审分页' + index, knowledgeClass: 'canon' }, content: '待审内容' + index, span: null });
       }
-      return true;
+      return {seriesId,itemId};
     })()`);
-    requireJourney(pagesSeeded === true, 'knowledge-pages-seeded');
+    requireJourney(UUID_PATTERN.test(pagesSeeded?.seriesId) && UUID_PATTERN.test(pagesSeeded?.itemId), 'knowledge-pages-seeded');
     await leaveSeries(renderer, 'knowledge-pages-leave');
-    await openSeries(renderer, seriesId, 'knowledge-pages-reopen');
+    await openSeries(renderer, pagesSeeded.seriesId, 'knowledge-pages-reopen');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 30 && document.querySelectorAll('.knowledge-candidate').length === 30`, 'knowledge-pages-first');
     const selectedTarget = await renderer.evaluate(`document.querySelector('.knowledge-item').dataset.itemId`);
     await clickSelector(renderer, '.knowledge-item [data-knowledge-action="propose-item"]', 'knowledge-pages-propose');
     await fill(renderer, '#knowledge-content-propose', '保留翻页中的草稿', 'knowledge-pages-draft');
-    for (let pass = 0; pass < 2; pass += 1) {
+    try { for (const viewport of [null,null,{width:1280,height:800},{width:1008,height:681}]) {
+      if (viewport) await renderer.send('Emulation.setDeviceMetricsOverride', {...viewport,deviceScaleFactor:1,mobile:false});
+      else await renderer.send('Emulation.clearDeviceMetricsOverride');
       await clickSelector(renderer, '[data-knowledge-action="items-more"]', 'knowledge-pages-items-next');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 1 && document.querySelector('[data-knowledge-action="items-reset"]')?.disabled === false && document.querySelector('input[name="knowledge-target"]:checked')?.value === ${JSON.stringify(selectedTarget)} && document.querySelector('#knowledge-content-propose')?.value === '保留翻页中的草稿' && document.activeElement === document.querySelector('.knowledge-item-title')`, 'knowledge-pages-items-last');
       await clickSelector(renderer, '[data-knowledge-action="items-reset"]', 'knowledge-pages-items-reset');
@@ -1515,18 +1518,20 @@ async function main() {
       await waitFor(renderer, `document.querySelectorAll('.knowledge-candidate').length === 1 && document.querySelector('[data-knowledge-action="candidates-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-candidate [data-knowledge-action="review"]')`, 'knowledge-pages-candidates-last');
       await clickSelector(renderer, '[data-knowledge-action="candidates-reset"]', 'knowledge-pages-candidates-reset');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-candidate').length === 30 && document.querySelector('[data-knowledge-action="candidates-reset"]') === null`, 'knowledge-pages-candidates-first');
-    }
+    } } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await clickSelector(renderer, '[data-knowledge-action="propose-cancel"]', 'knowledge-pages-cancel-draft');
     await clickSelector(renderer, '[data-knowledge-action="items-more"]', 'knowledge-pages-history-item');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-item').length === 1`, 'knowledge-pages-history-item-ready');
     await clickSelector(renderer, '.knowledge-item-history summary', 'knowledge-pages-history-open');
     await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-more"]')?.disabled === false`, 'knowledge-pages-history-first');
-    for (let pass = 0; pass < 2; pass += 1) {
+    try { for (const viewport of [null,null,{width:1280,height:800},{width:1008,height:681}]) {
+      if (viewport) await renderer.send('Emulation.setDeviceMetricsOverride', {...viewport,deviceScaleFactor:1,mobile:false});
+      else await renderer.send('Emulation.clearDeviceMetricsOverride');
       await clickSelector(renderer, '[data-knowledge-action="revisions-more"]', 'knowledge-pages-history-next');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 2 && document.querySelector('[data-knowledge-action="revisions-reset"]')?.disabled === false && document.activeElement === document.querySelector('.knowledge-item-history summary')`, 'knowledge-pages-history-last');
       await clickSelector(renderer, '[data-knowledge-action="revisions-reset"]', 'knowledge-pages-history-reset');
       await waitFor(renderer, `document.querySelectorAll('.knowledge-item-history ol li').length === 10 && document.querySelector('[data-knowledge-action="revisions-reset"]') === null`, 'knowledge-pages-history-reset-ready');
-    }
+    } } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
     // A separate Series keeps the existing list assertions unchanged while exercising one immutable conflict reader.
     const conflictSeed = await renderer.evaluate(`(async () => {
@@ -1642,7 +1647,7 @@ async function main() {
     await readSeriesList(renderer, (page) => page.items.length === 50, 'list-first-page');
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await clickSelector(renderer, '[data-series-action="list-more"]', 'list-next');
-      await readSeriesList(renderer, (page) => page.items.length === 3 && page.focus === 'open', 'list-bounded');
+      await readSeriesList(renderer, (page) => page.items.length === 4 && page.focus === 'open', 'list-bounded');
       await clickSelector(renderer, '[data-series-action="list-first"]', 'list-reset');
       await readSeriesList(renderer, (page) => page.items.length === 50 && page.focus === 'open', 'list-reset-bounded');
     }
@@ -1754,6 +1759,7 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'capture-source-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'capture-source-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
+    await launchReviewFromSheet(renderer, waitFor);
     const sourceRun = await startPreparedReview(renderer, 'capture-source-run');
     // The member's 第 3 次审阅, after 书系一致性's two: the capture names it by those words, so the Journey pins it by its ordinal here.
     requireJourney(sourceRun?.state === 'settled' && sourceRun.ordinal === 3 && sourceRun.procedure === null && sourceRun.capture?.available === true &&
@@ -1855,7 +1861,7 @@ async function main() {
     requireJourney(filled.procedure === procedureId && JSON.stringify(filled.checked) === JSON.stringify(['style-and-format']) && filled.enabled.length === 0 &&
       filled.scope === 'whole' && filled.book === targetBook &&
       JSON.stringify(filled.lines) === JSON.stringify([`按《${PROCEDURE_TITLE}》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划可按需查看。`]), 'run-sheet-words', filled);
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'run-prepare');
+    await launchReviewFromSheet(renderer, waitFor);
     const ran = await startPreparedReview(renderer, 'run-review');
     requireJourney(ran?.state === 'settled' && JSON.stringify(ran.categories.map((category) => category.categoryId)) === JSON.stringify(['style-and-format']) &&
       ran.procedure?.procedureId === procedureId && ran.procedure.version === 1 && ran.procedure.stopped === false && ran.procedure.missing === false &&
@@ -1905,41 +1911,58 @@ async function main() {
     requireJourney(olderSheet.latestEligible === 'false' && olderSheet.chosen === 1 && JSON.stringify(olderSheet.checked) === JSON.stringify(['style-and-format']) &&
       olderSheet.lines.includes('你选了第 1 版；最新可用的是第 2 版。'), 'exact-older-words', olderSheet);
     await waitFor(renderer, `(() => { const native=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'),trigger=native?.nextElementSibling; return native instanceof HTMLSelectElement && !native.disabled && native.selectedIndex===1 && trigger instanceof HTMLButtonElement && trigger.matches('.ui-select-trigger') && !trigger.disabled && !trigger.hidden && trigger.getClientRects().length>0 && trigger.textContent.includes('第 1 版') && document.activeElement===trigger; })()`, 'exact-version-focused', 10_000);
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'exact-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exact-prepared', 180_000);
+    await launchReviewFromSheet(renderer, waitFor);
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'exact-prepared', 180_000);
     const exactRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(exactRun?.state === 'prepared' && exactRun.procedure?.procedureId === procedureId && exactRun.procedure.version === 1 &&
+    requireJourney(['running','settled'].includes(exactRun?.state) && exactRun.procedure?.procedureId === procedureId && exactRun.procedure.version === 1 &&
       exactRun.procedure.stopped === false && JSON.stringify(exactRun.categories.map((category) => category.categoryId)) === JSON.stringify(['style-and-format']),
     'exact-pinned', exactRun?.procedure);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(exactRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'exact-drawer');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(exactRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState!=='ready'`, 'exact-drawer');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'exact-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'exact-drawer-closed');
 
     at('capture-stop');
-    // 停用… of version 1 shows what it touches before anything is stopped: the prepared Run in the second Book is prepared again,
+    // Sheet starts no longer leave a prepared Run. Reconstruct pre-refresh prepared work through the retained API,
+    // which the generic captured-procedure selection composer still uses, so its stop-preview protection remains covered.
+    const legacyPrepared = await renderer.evaluate(`(async () => {
+      const chosen=await window.ai7.inspectCapturedProcedureRun({procedureId:${JSON.stringify(procedureId)},versionId:${JSON.stringify(savedVersion.versionId)}});
+      let job=await window.ai7.prepareReviewRun({categoryIds:['style-and-format'],scope:{kind:'whole',fromChapterBlockId:null,toChapterBlockId:null},
+        capturedProcedure:{versionId:chosen.resolved.versionId,documentSha256:chosen.resolved.documentSha256}});
+      while(job.state==='queued'||job.state==='running')job=await window.ai7.pollServiceJob({jobId:job.jobId});
+      if(job.state!=='completed'||!job.result?.run)throw new Error('legacy-procedure-preparation-failed');
+      return {reviewRunId:job.result.run.reviewRunId,state:job.result.run.state};
+    })()`);
+    requireJourney(legacyPrepared.state==='prepared', 'legacy-procedure-still-prepared');
+    // 停用… of version 1 shows what it touches before anything is stopped: both sheet-launched Runs retain the exact version,
     // both Runs keep naming it, a new use takes version 2, nothing is deleted (REUSE-038, REUSE-040, REUSE-041). 确认停用 makes
     // version 1 final; version 2 stays 最新可用. A linked Run opens that exact Run, which keeps naming the stopped version (REUSE-031).
     await leaveReviewToLibrary(renderer, 'stop-leave');
     await openProcedures(renderer, 'stop');
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'stop-versions');
-    const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.runLinks.length === 2, 'stop-listed');
+    const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.runLinks.length === 3, 'stop-listed');
     const versionOne = beforeStop.procedures[0].versions[1];
-    requireJourney(versionOne.version === '1' && versionOne.runs === '按这一版运行过 1 次；另有 1 次已准备、未开始' &&
-      versionOne.runLinks[0][0] === exactRun.reviewRunId && versionOne.runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · 计划已冻结 · 待授权 · `) &&
-      versionOne.runLinks[1][0] === ran.reviewRunId, 'stop-runs-before', versionOne);
+    requireJourney(versionOne.version === '1' && versionOne.runs === '按这一版运行过 2 次；另有 1 次已准备、未开始' && versionOne.runLinks[0][0]===legacyPrepared.reviewRunId &&
+      versionOne.runLinks[1][0] === exactRun.reviewRunId && versionOne.runLinks[1][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · `) &&
+      versionOne.runLinks[2][0] === ran.reviewRunId, 'stop-runs-before', versionOne);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="stop"]`, 'stop-version');
     const stopPreview = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.stop !== null, 'stop-preview');
     const previewRead = stopPreview.procedures[0].versions[1].stop;
     requireJourney(stopPreview.procedures[0].versions[1].state === 'enabled' && previewRead.heading === `停用《${PROCEDURE_TITLE}》第 1 版` && previewRead.after === '2' &&
       JSON.stringify(previewRead.versions) === JSON.stringify([['1', '1', '0']]) &&
-      JSON.stringify(previewRead.prepared) === JSON.stringify([`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · 计划已冻结 · 待授权`]) &&
+      previewRead.prepared.length===1 && previewRead.prepared[0].includes(`《${CAPTURE_TARGET_TITLE}》`) &&
       previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
     await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-stop h5')`, 'stop-preview-focused', 10_000);
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const panel=document.querySelector('.captured-procedure-stop'),button=panel.querySelector('[data-procedure-action="confirm-stop"]');button.scrollIntoView({block:'center',behavior:'instant'});button.focus({preventScroll:true});const box=button.getBoundingClientRect();return document.activeElement===button && box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight && panel.querySelector('.captured-procedure-stop-prepared [data-review-run-id="${legacyPrepared.reviewRunId}"]')!==null;})()`, `stop-preview-prepared-${width}`);
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await clickSelector(renderer, '.captured-procedure-stop [data-procedure-action="confirm-stop"]', 'stop-confirm');
     const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.state === 'stopped', 'stop-stopped');
     const [stoppedTwo, stoppedOne] = stopped.procedures[0].versions;
     requireJourney(stopped.procedures[0].runnable === 'true' && stopped.procedures[0].run && stoppedOne.pill === '已停用' && stoppedOne.pillBorder === 'dotted' &&
-      stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 1 次；另有 1 次已准备、未开始' && stoppedTwo.latestEligible === 'true' &&
+      stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 2 次；另有 1 次已准备、未开始' && stoppedTwo.latestEligible === 'true' &&
       stoppedTwo.state === 'enabled', 'stop-card', stopped.procedures[0]);
     await waitFor(renderer, `${notice}===${JSON.stringify(`已停用《${PROCEDURE_TITLE}》的这一版；按它运行过的审阅仍然记着它。`)}`, 'stop-status', 10_000);
     await clickSelector(renderer, `[data-version="1"] button.captured-procedure-run-link[data-review-run-id="${ran.reviewRunId}"]`, 'stop-open-linked-run');
@@ -1965,7 +1988,7 @@ async function main() {
 
     at('procedure-series-fixture-relaunch');
     // Fresh Series preparations use their matching retained /1 fixture; the earlier style capture stays on review /2.
-    // Keep the same store and the still-unconsumed proposal Save dialog answer. The two Series Runs remain prepared.
+    // Keep the same store and the still-unconsumed proposal Save dialog answer. The earlier Series runs retain their recorded states.
     await closeBrowser();
     manager = await launch(FIXTURE_IDENTITY, ['--j13-save-path', proposalPath]);
     renderer = await waitForRenderer(manager, 'series-procedure-window');
@@ -2003,7 +2026,7 @@ async function main() {
     at('procedure-series-chosen-apart');
     // The member's 新建审阅 offers 《书系复核》 with how it fits this Book; filled from it, 书系一致性 stays unticked and open —
     // Series material is chosen apart at each run, never by the procedure — so 先看计划 prepares nothing until the editor ticks
-    // it. Ticked, the Run is prepared from version 1 with nothing left out.
+    // it. Ticked, the Run starts from version 1 with nothing left out.
     await openBookReview(renderer, MEMBER, member, 'series-sheet-review');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'series-sheet-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-sheet');
@@ -2037,14 +2060,16 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
     await assertRenderer(renderer, `['prepare','start'].every((action) => { const button=document.querySelector('dialog.review-sheet [data-review-action="'+action+'"]'); return button instanceof HTMLButtonElement && !button.disabled; })`, 'series-sheet-selected-actions-enabled');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')===null && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
+    await launchReviewFromSheet(renderer, waitFor);
+    await waitFor(renderer, `['settled','failed'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(seriesRun?.state === 'prepared' && seriesRun.procedure?.procedureId === seriesProcedureId && seriesRun.procedure.version === 1 &&
+    requireJourney(seriesRun?.state === 'settled', 'series-start-settled', { state: seriesRun?.state,
+      categories: seriesRun?.categories.map(category => ({ categoryId: category.categoryId, state: category.state, detail: category.detail })) });
+    requireJourney(['running','settled'].includes(seriesRun?.state) && seriesRun.procedure?.procedureId === seriesProcedureId && seriesRun.procedure.version === 1 &&
       JSON.stringify(seriesRun.procedure.leftOut) === JSON.stringify([]) &&
       JSON.stringify(seriesRun.categories.map((category) => category.categoryId)) === JSON.stringify(['series-consistency']), 'series-pinned', seriesRun?.procedure);
     await waitFor(renderer, `document.querySelector('.review-procedure-pin .review-procedure-line')?.textContent===${JSON.stringify(`按可复用工序《${SERIES_PROCEDURE_TITLE}》第 1 版`)} && document.querySelectorAll('.review-procedure-pin .review-procedure-left-out').length===0`, 'series-pin-shown', 30_000);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(seriesRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'series-drawer');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(seriesRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState!=='ready'`, 'series-drawer');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'series-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'series-drawer-closed');
     await leaveReviewToLibrary(renderer, 'series-sheet-leave');
@@ -2143,7 +2168,7 @@ async function main() {
       const proposal = await window.ai7.inspectDeveloperProposal({ proposalId: list.proposals[0].proposalId, before: null });
       return [list.procedures.length, procedure.runnable, procedure.versions.map((version) => [version.version, version.state, version.runCount]), proposal.versions[0].fileCount];
     })()`);
-    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 1]], 1]), 'capture-restart-kept', keptOnRestart);
+    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 2]], 1]), 'capture-restart-kept', keptOnRestart);
 
     at('j14-capture-keyboard-reflow-forced-colors');
     // Without a pointer: Tab reaches 修改… with its focus visible, and Enter opens the next version's form with focus on its title.

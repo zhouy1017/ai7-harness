@@ -77,7 +77,7 @@ import type { CooperativeJobOwner } from './cooperative-jobs.js';
 import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacementWaits } from './replacement-gate.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/baseline-analysis-store.js';
-import type { ReviewRunDriver } from './review/review-run-driver.js';
+import { driveLaunchedReviewRun, type ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
 // Session-only, scoped to the open store; never written into the device setting or database.
@@ -100,9 +100,10 @@ function failureResponse(
  * and that refusal is the operation's answer. A store refusal is already coded, and a fatal store error
  * must reach the service's own handling unchanged.
  */
-function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false): void {
+function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string, resume = false,
+  launched?: Parameters<typeof driveLaunchedReviewRun>[1]): void {
   try {
-    void (resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId));
+    void (launched === undefined ? resume ? reviewRuns.continue(reviewRunId) : reviewRuns.drive(reviewRunId) : driveLaunchedReviewRun(reviewRuns, launched));
   } catch (error) {
     if (error instanceof StoreErrorClass || !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
     throw new StoreErrorClass(error.code, error.message.length > 0 ? error.message : '审阅未能开始。');
@@ -1134,19 +1135,26 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
+        result: { ...store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
           findingsAfterOrdinal: request.input.findingsAfterOrdinal ?? null,
           excludedAfterOrdinal: request.input.excludedAfterOrdinal ?? null,
           categoryId: request.input.categoryId ?? null,
           severity: request.input.severity ?? null,
           status: request.input.status ?? null,
           chapterBlockId: request.input.chapterBlockId ?? null,
-        }),
+        }, request.input.executionConfig), connectivity: connectivity.planConnectivity.reading() },
       };
     case 'inspectHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };
     case 'saveHouseWordList':
       return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
+    case 'launchReviewRun': {
+      const launched = store.launchReviewRun(request.input, launchPolicy, connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now');
+      driveReviewRun(reviewRuns, launched.projection.run!.reviewRunId, false, launched);
+      if (launched.projection.run?.state === 'waiting') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
+      return { id: request.id, ok: true, op: request.op, result: { ...store.inspectReviewWorkspace(request.input.bookId, launched.projection.run!.reviewRunId, analysisProgress),
+        connectivity: connectivity.planConnectivity.reading() } };
+    }
     case 'prepareReviewRun':
       return {
         id: request.id,
@@ -2404,7 +2412,14 @@ async function run(): Promise<void> {
             () => productionState.fast?.reasoningEffort)
           : null,
     });
-    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store), connectionTesting: () => requestLoop?.probing === true };
+    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store, () => new Date(), binding => {
+      if (production === null || binding === null) return fastRoleOwner;
+      const policy = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', null, binding);
+      const unchanged = (): boolean => openedStore.getModelServiceConnections().some(connection => connection.credentialReference === binding.credentialReference && connection.credentialOperationState === 'ready');
+      return fastRoleOwner.fork(productionFastRoleRoutes(production, () => policy, () => binding.credentialReference, createKeyringSecretResolver(),
+        () => unchanged(), () => openedStore.getModelServiceConnections().find(connection => connection.credentialReference === binding.credentialReference)?.credentialUpdatedAt ?? null,
+        () => binding.reasoningEffort));
+    }), connectionTesting: () => requestLoop?.probing === true };
     // Agent 工作区 (Issue #90, slice 13a): its rounds run on the dialogue's owner and are held in this service's memory only.
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every

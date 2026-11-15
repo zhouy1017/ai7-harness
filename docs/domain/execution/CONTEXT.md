@@ -77,6 +77,11 @@ Wherever a Task names its range, the range reads as its latest plan version's, n
 _中文_: 任务意图
 _Avoid_: Prompt, Run, Execution Plan
 
+**Task Launch Snapshot**:
+The immutable execution choice and exact manuscript state bound to one task by the editor's start action, shared by all categories and units of its Run. Later role-default changes do not retarget it ([ADR 0104](../../adr/0104-launch-tasks-with-an-immutable-execution-snapshot.md)).
+_中文_: 任务启动快照
+_Avoid_: Role default, prepared plan, per-category model choice
+
 **Execution Plan**:
 A versioned plan of capabilities, steps, expected artifacts, declared Effects and gates, stop conditions, and provider needs for one Task Intent.
 _中文_: 执行计划

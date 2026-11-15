@@ -375,6 +375,24 @@ function syntheticClaimLedger() {
 }
 
 describe('factual claim occurrence ledger', () => {
+  it.each(['standard', 'quick', 'strict'] as const)('launches ordinary-production factual claims with the frozen %s level and the bound claim owner (#1455)', async level => {
+    await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('sample1 启动事实核查');
+    const launched = store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: ['factual-review'],
+      scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, evidenceAssuranceLevel: level }, policy);
+    const runId = launched.projection.run!.reviewRunId;
+    expect(store.inspectFactualReview(book.bookId).planVersion?.edits.evidenceAssuranceLevel ?? 'standard').toBe(level);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+    try { await driver.driveLaunch(runId); } finally { await driver.dispose(); }
+    expect(store.inspectReviewWorkspace(book.bookId, runId).run!.state).toBe('settled');
+    const results = lens(book, runId).results;
+    expect(results).toHaveLength(1);
+    expect(results[0]!.level).toBe(level);
+    expect(sends.model).toBeGreaterThan(0);
+    if (level === 'quick') expect(sends.search).toBe(0);
+    else expect(sends.search).toBeGreaterThan(0);
+  });
+
   it('starts a first factual selection through the ordinary claim pipeline and reuses it outside a later range', async () => {
     await setup({ claimStages: true, assertionsInEveryUnit: true, relations: [] });
     const book = await newBook('范围事实核查');
@@ -603,7 +621,7 @@ describe('factual claim occurrence ledger', () => {
         let migrated: EditorialStore | undefined;
         try {
           migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 114, dataVersion: 1 });
+          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 115, dataVersion: 1 });
           expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
         } finally { migrated?.close(); await migration.dispose(); }
       }

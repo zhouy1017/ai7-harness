@@ -1,3 +1,4 @@
+import { launchLocalForSnapshot, inspectLaunchSnapshots } from '../support/task-launch.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
@@ -189,7 +190,9 @@ describe('导出数据库 over the real store', () => {
   it('stages one package on preparation, writes it on the one approval, and says what it came to', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      await importBook(store);
+      const bookId = await importBook(store);
+      launchLocalForSnapshot(store, roots.codeRoot, bookId);
+      expect(await inspectLaunchSnapshots(roots.dataRoot, db => db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n)).toBe(1);
       // The shell's browser profile lives under the Agent Data Root too, and is never carried.
       await mkdir(join(roots.dataRoot, 'shell'), { recursive: true });
       await writeFile(join(roots.dataRoot, 'shell', 'Preferences'), '{}');
@@ -239,11 +242,18 @@ describe('导出数据库 over the real store', () => {
       try {
         expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
         expect((copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count).toBe(1);
+        expect(copy.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n).toBe(0);
+        expect(copy.prepare("SELECT count(*) n FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'task_launch_snapshots'").get()!.n).toBe(2);
       } finally {
         copy.close();
       }
 
       // The approval writes exactly the prepared package, once.
+      await inspectLaunchSnapshots(roots.dataRoot, db => {
+        expect(db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()!.n).toBe(1);
+        expect(() => db.exec('DELETE FROM task_launch_snapshots')).toThrow('TASK_LAUNCH_IMMUTABLE');
+        expect(() => db.exec("UPDATE task_launch_snapshots SET task_kind = 'writing'")).toThrow('TASK_LAUNCH_IMMUTABLE');
+      });
       const receipt = await store.approveDatabaseExport(preparation.preparationId, true);
       expect(receipt).toMatchObject({ outcome: 'created', outcomeLabel: '已导出到所选位置', detail: '已新建「AI7 数据库.ai7db」。', fileName: 'AI7 数据库.ai7db' });
       const written = await readFile(destination);

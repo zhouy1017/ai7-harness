@@ -459,6 +459,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   saveHouseWordList: (input: ServiceOperationMap['saveHouseWordList']['input']) => invoke<ServiceOperationMap['saveHouseWordList']['output']>(IPC_CHANNELS.saveHouseWordList, input),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
+  launchReviewRun: (input: Omit<ServiceOperationMap['launchReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['launchReviewRun']['output']>(IPC_CHANNELS.launchReviewRun, input),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['prepareReviewRun']['output']>(IPC_CHANNELS.prepareReviewRun, input),
   authorizeReviewRun: (input: Omit<ServiceOperationMap['authorizeReviewRun']['input'], 'bookId'>) =>

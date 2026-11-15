@@ -1,3 +1,5 @@
+import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
+import { allowedProductionBindingOf } from '../launch-policy.js';
 import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from '../provider/model-profile.js';
@@ -3096,6 +3098,91 @@ export class BaselineAnalysisStore {
 
   // ---- preparation -----------------------------------------------------------------------------
 
+  forkForLaunch(launch: LaunchBinding): BaselineAnalysisStore {
+    const ledger = new BaselineAnalysisStore(this.#db, this.#checkpointOwner, this.#route, this.#originalDefinition);
+    // External collaborators belong to the store, while preparation work and read caches belong to this view.
+    ledger.#factualVerification = this.#factualVerification;
+    ledger.bindLaunch(launch);
+    return ledger;
+  }
+
+  withExecutionChoice(binding: import('../launch-policy.js').ConfiguredProviderBinding | null, policy: LaunchPolicyProjection): BaselineAnalysisStore {
+    const route = allowedProductionBindingOf(binding);
+    return this.forkForLaunch({ ...this.#launch, policy, live: this.#launch.operationalScope === 'ordinary-production' && binding !== null && route !== null
+      ? { ...binding, route: route.route, credentialSlot: route.credentialSlot, scope: 'ordinary-production', runBudgetCeiling: 'unset' } : this.#launch.live });
+  }
+
+  /** Freeze the journal before a mixed review reads its local and model-backed members. */
+  checkpointAtLaunch(bookId: string): void {
+    const head = this.#binding(bookId);
+    const work = this.#checkpointOwner.createManuscriptCheckpointWork(head.manuscriptId, head.branchId, TASK_INPUT_CHECKPOINT_PURPOSE);
+    if (work.workId === null) return;
+    try {
+      while (!this.#checkpointOwner.advanceManuscriptCheckpointWork(work.workId).done) { /* Same launch transaction. */ }
+      this.#checkpointOwner.finalizeManuscriptCheckpointWork(work.workId, () => undefined);
+    } catch (error) { this.#checkpointOwner.cancelManuscriptCheckpointWork(work.workId); throw error; }
+  }
+
+  /** A fresh task and its run authority are written together; no pending approval is observable. */
+  launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string,
+    execution: LaunchBinding, deferred = false, edits?: PlanEditsProjection): AnalysisProjection {
+    return this.forkForLaunch(execution).#launchTask(input, snapshotId, deferred, edits);
+  }
+
+  #launchTask(input: Extract<BaselineAnalysisPrepareInput, { phase: 'start' }>, snapshotId: string, deferred: boolean, edits?: PlanEditsProjection): AnalysisProjection {
+    this.#requireDeniedPolicy(input.launchPolicy);
+    requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
+    const existing = this.inspect(input.bookId);
+    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
+    const update = this.#resolveSelectedBlocks(input.bookId, input.update);
+    const mode = update?.mode ?? this.#definition.initialMode;
+    const modeDefinition = this.#definition.mode(mode);
+    requireAnalysis(input.goal === modeDefinition.goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
+    const first = modeDefinition.initial;
+    const predecessor = first ? null : existing.resultSetRevision;
+    requireAnalysis(first || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
+    const head = this.#binding(input.bookId);
+    const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, this.readWorkingBlocks(head.branchId).length) : null;
+    const taskIntentId = randomUUID();
+    const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
+    const intent: PendingIntent = { taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf: input.redoOf ?? null,
+      preparedByEnrollmentVersionId: null, backgroundRunBudgetCeiling: null,
+      predecessor: predecessor === null ? null : { revisionId: predecessor.revisionId, digest: predecessor.digest }, selectedRange,
+      intentDraftVersionId: null, intentDraftParagraphs: null, ...(selected === null ? {} : { procedure: selected }),
+      ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }) };
+    const persist = (checkpoint: ManuscriptCheckpointBinding): void => {
+      this.#insertIntent(intent);
+      const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits);
+      requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效。');
+      this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy, launchEdits);
+      const plan = this.inspect(input.bookId);
+      requireAnalysis(plan.planEnvelope?.dispatchAllowed && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
+      if (deferred) return;
+      const authorizationId = randomUUID(), runRecordId = randomUUID(), instant = new Date().toISOString();
+      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen: 'now',
+        planEnvelopeDigest: plan.planEnvelope.digest, planVersionId: plan.planVersion.planVersionId, planVersionOrdinal: 1,
+        taskIntentId, authority: 'standard-direct-dispatch', launchSnapshotId: snapshotId });
+      const procedure = readProcedurePlanPin(this.#db, plan.planEnvelope.digest);
+      const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant, ...(procedure === null ? {} : { procedure }) });
+      this.#db.prepare('INSERT INTO analysis_run_authorizations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', 'standard-direct-dispatch', instant, authority.json, authority.digest, 'now');
+      this.#db.prepare('INSERT INTO analysis_run_records VALUES (?, ?, ?, ?, ?, ?)')
+        .run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
+      this.#insertRunState(runRecordId, 1, 'authorized', { detail: '任务已启动，等待运行名额。' }, instant);
+    };
+    const work = this.#checkpointOwner.createManuscriptCheckpointWork(head.manuscriptId, head.branchId, TASK_INPUT_CHECKPOINT_PURPOSE);
+    if (work.workId === null) {
+      requireAnalysis(work.checkpoint !== null, 'ANALYSIS_CHECKPOINT_INVALID', '任务输入固定点缺失。');
+      persist(work.checkpoint);
+    } else {
+      try {
+        while (!this.#checkpointOwner.advanceManuscriptCheckpointWork(work.workId).done) { /* Complete the pinned input within the launch transaction. */ }
+        this.#checkpointOwner.finalizeManuscriptCheckpointWork(work.workId, persist);
+      } catch (error) { this.#checkpointOwner.cancelManuscriptCheckpointWork(work.workId); throw error; }
+    }
+    return this.inspect(input.bookId);
+  }
+
   prepare(input: BaselineAnalysisPrepareInput): BaselineAnalysisPreparationResult {
     if (input.phase === 'cancel-all') {
       for (const workId of Array.from(this.#work.keys())) this.prepare({ phase: 'cancel', workId });
@@ -3368,7 +3455,7 @@ export class BaselineAnalysisStore {
     return { done: true, workId: null, completed: progress.total, total: progress.total, projection: this.inspect(asString(intent.book_id)) };
   }
 
-  #persistPrepared(taskIntentId: string, checkpoint: ManuscriptCheckpointBinding, purpose: CheckpointPurpose, launchPolicy: LaunchPolicyProjection): void {
+  #persistPrepared(taskIntentId: string, checkpoint: ManuscriptCheckpointBinding, purpose: CheckpointPurpose, launchPolicy: LaunchPolicyProjection, launchEdits?: PlanEdits): void {
     requireAnalysis(purpose === TASK_INPUT_CHECKPOINT_PURPOSE, 'ANALYSIS_CHECKPOINT_INVALID', '任务输入固定点用途无效。');
     this.#requireDeniedPolicy(launchPolicy);
     const intentRow = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
@@ -3397,7 +3484,7 @@ export class BaselineAnalysisStore {
       checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
       checkpointRecord.json, checkpointRecord.digest, instant);
     this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange,
-      planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
+      planRevisionId: null, instant, edits: launchEdits ?? this.#redoPlanEdits(intent), policy: launchPolicy });
   }
 
   /** Derive the search pins for both fresh preparation reuse and plan freezing. */
@@ -4209,6 +4296,13 @@ export class BaselineAnalysisStore {
     if (row === undefined) return null;
     const record = parseCanonicalJson(asString(row.canonical_json));
     return isRecord(record) ? runStopOf(record.stop) : null;
+  }
+
+  wasInterruptedByRestart(runRecordId: string): boolean {
+    const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId);
+    if (row === undefined) return false;
+    const state = parseCanonicalJson(String(row.canonical_json)) as Record<string, unknown>;
+    return state.stopReason === 'shutdown';
   }
 
   /** The first question of a Run under way or stopped that still waits for its answer; `null` when none does. */

@@ -89,6 +89,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 112, class: 'additive' }, // #1427: editable derivative categories and workspace metadata.
   { revision: 113, class: 'additive' }, // #1428: inline revision journal/card links.
   { revision: 114, class: 'additive' }, // #1453: nullable independent role-default efforts.
+  { revision: 115, class: 'additive' }, // #1455: instance-local immutable launch snapshots.
 ];
 
 /**

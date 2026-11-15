@@ -561,6 +561,8 @@ export interface ReviewFindingCountsProjection {
 
 /** One entry of the 审阅记录 list, newest first: 第 N 次 with its categories, scope and outcome. */
 export interface ReviewRunSummaryProjection {
+  /** Frozen producing model and sent effort; absent when no model was used. */
+  modelLabel?: string;
   reviewRunId: string;
   ordinal: number;
   label: string;
@@ -759,6 +761,7 @@ export interface ReviewReportRecord extends ReviewReportDerivedSections {
   version: number;
   generatedAt: string;
   run: {
+    modelLabel?: string;
     ordinal: number;
     label: string;
     createdAt: string;
@@ -812,6 +815,7 @@ export interface ReviewReportRecord extends ReviewReportDerivedSections {
 
 /** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
 export interface ReviewRunProjection {
+  modelLabel?: string;
   /** Existing repeat preparation input for optional references before authorization. */
   referenceInput?: Omit<PrepareReviewRunInput, 'bookId'>;
   localCheck?: {
@@ -894,6 +898,8 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  /** Device-local reading; never a connection probe. */
+  connectivity?: 'online' | 'offline';
   /** Own ranges of the current coverage units, without manuscript text. */
   scopeUnitCounts?: { whole: number; units: ReadonlyArray<{ startPosition: number; endPosition: number }> };
   /** Latest editor-declared Book table, carried by its existing local ReviewRun. */
@@ -967,6 +973,8 @@ export const REVIEW_FINDING_PAGE_KEYS = ['findingsAfterOrdinal', 'categoryId', '
  * process supplies the Book its window is showing.
  */
 export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRequest> {
+  /** Read-only availability for a task choice; it creates no task or snapshot. */
+  executionConfig?: import('../runtime-execution-config.js').RuntimeExecutionConfig;
   bookId: string;
   /** The Review Run to open; `null` opens the latest. */
   reviewRunId: string | null;

@@ -80,7 +80,7 @@ function layoutOf(input: ReportExportInput): ReportLayout {
   const stateLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.stateLabel] as const));
   return {
     title: `${input.bookTitle} · ${REVIEW_REPORT_HEADING}`,
-    meta: `${record.run.label}审阅 · ${record.run.scopeLabel} · 稿件修订版 ${record.run.manuscript.revisionLabel} · 报告${reviewReportVersionLine(input.version, localInstantLabel(input.generatedAt))}`,
+    meta: `${record.run.label}审阅 · ${record.run.scopeLabel} · 稿件修订版 ${record.run.manuscript.revisionLabel} · 报告${reviewReportVersionLine(input.version, localInstantLabel(input.generatedAt))}${record.run.modelLabel ? ` · ${record.run.modelLabel}` : ''}`,
     overview: {
       title: record.overview.title,
       columns: REVIEW_REPORT_OVERVIEW_COLUMNS,
