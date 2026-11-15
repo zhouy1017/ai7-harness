@@ -37,7 +37,7 @@ export interface ReviewRunDriveSteps {
   start(reviewRunId: string, categoryId: string): ReviewRunHandOff | null;
   recordDispatch(reviewRunId: string, categoryId: string, runRecordId: string): void;
   refuseDispatch(reviewRunId: string, categoryId: string, runRecordId: string, code: string, message: string): void;
-  settle(reviewRunId: string, categoryId: string): void;
+  settle(reviewRunId: string, categoryId: string, options?: { shutdown: boolean }): void;
   write(reviewRunId: string, categoryId: string): void;
   fail(reviewRunId: string, categoryId: string, code: string, message: string): void;
   /** The category now waiting for a place of the governor, or `null` once it has one (Issue #632); in memory only. */
@@ -186,7 +186,7 @@ export class ReviewRunDriver {
           this.#steps.write(reviewRunId, categoryId);
           break;
         case 'settle':
-          this.#steps.settle(reviewRunId, categoryId);
+          this.#steps.settle(reviewRunId, categoryId, { shutdown: this.#stopping });
           break;
         case 'start': {
           if (this.#stopping) return;

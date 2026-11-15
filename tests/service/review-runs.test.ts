@@ -2901,7 +2901,7 @@ it('replays a committed launch after restart and drives it once without a second
   });
 });
 
-it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps later categories on the launch binding (#1455)', async () => {
+it('replays a shutdown-interrupted ordinary review without resending its ended category and keeps later categories on the launch binding (#1455)', async () => {
   let reached!: () => void, release!: () => void;
   const held = new Promise<void>(resolve => { reached = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
   let checkpointHeld = false;
@@ -2927,10 +2927,12 @@ it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps
     const replay = second.store.launchReviewRun(input, launchPolicy);
     expect(replay).toMatchObject({ repeated: true });
     expect(replay.projection.run!.reviewRunId).toBe(run.reviewRunId);
-    expect(second.store.reviewRunDriveSteps.launchDriveMode!(run.reviewRunId), JSON.stringify(replay.projection.run!.categories.map(category => ({ category: category.categoryId, state: category.state, detail: category.detail })))).toBe('resume');
+    expect(second.store.reviewRunDriveSteps.launchDriveMode!(run.reviewRunId)).toBe('start');
     await driveLaunchedReviewRun(second.driver, replay);
     const resumed = workspace(second, book, run.reviewRunId).run!;
-    expect(resumed.state, JSON.stringify(resumed.categories.map(category => ({ category: category.categoryId, state: category.state, detail: category.detail })))).toBe('settled');
+    // Ordinary non-factual categories end on shutdown; their kept partial result is never sent again.
+    expect(resumed.state).toBe('partial');
+    expect(resumed.categories.map(category => category.state)).toEqual(['interrupted', 'materialized', 'materialized']);
     const units = [...earlierRequests, ...second.capture!.requests].filter(request => request.stage === 'units');
     expect(new Set(units.map(request => request.requestDigest)).size).toBe(units.length);
     expect([...earlierWire, ...second.capture!.wireRequests].every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);

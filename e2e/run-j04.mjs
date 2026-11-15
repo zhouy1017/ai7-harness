@@ -3429,7 +3429,8 @@ async function main() {
       const queuedPlan=await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(queuedId)}})`);
       requireJourney(queuedPlan.edit.assurance?.level===level && queuedPlan.state.key==='waiting', `factual-first-plan-${level}`);
       await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]',`factual-cancel-${level}`);
-      await drawerShowing(renderer,queuedId,'cancelled',`factual-cancelled-${level}`);
+      const cancelled=await drawerShowing(renderer,queuedId,'stopped',`factual-cancelled-${level}`);
+      requireJourney(cancelled.pill==='已取消' && cancelled.bar.status==='已取消', `factual-cancelled-label-${level}`, cancelled.bar);
       await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]',`factual-close-${level}`);
       await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='cancelled'`, `factual-card-cancelled-${level}`);
       await reviewAction(renderer,'[data-review-action="new-review"]',`factual-new-after-${level}`);

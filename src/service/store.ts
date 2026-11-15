@@ -4172,8 +4172,8 @@ export class EditorialStore {
       recordDispatch: (reviewRunId, categoryId, runRecordId) => this.#reviewCall(() => runs.recordDispatch(reviewRunId, categoryId, runRecordId)),
       refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
         this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
-      settle: (reviewRunId, categoryId) => {
-        this.#reviewCall(() => runs.settle(reviewRunId, categoryId));
+      settle: (reviewRunId, categoryId, options) => {
+        this.#reviewCall(() => runs.settle(reviewRunId, categoryId, options));
         if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
       },
       write: (reviewRunId, categoryId) => {

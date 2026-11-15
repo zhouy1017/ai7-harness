@@ -2285,7 +2285,8 @@ export class ReviewRunStore {
       const runId = this.#runRecordOf(task.taskIntentId);
       if (runId === null) continue;
       const state = task.ledger.currentRunState(runId);
-      if (state === 'paused' || state === 'awaiting-clarification' || state === 'interrupted') return null;
+      if (state === 'paused' || state === 'awaiting-clarification') return null;
+      if (state === 'interrupted' && this.#events(reviewRunId, task.categoryId).at(-1)?.record.stopReason !== 'shutdown') return null;
       if (state === 'resumable') {
         if (!task.ledger.wasInterruptedByRestart(runId)) return null;
         resume = true;
@@ -2883,7 +2884,7 @@ export class ReviewRunStore {
    * left behind: it is ended on its ledger as `interrupted` — the category can then be prepared again —
    * and recorded so.
    */
-  settle(reviewRunId: string, categoryId: string): void {
+  settle(reviewRunId: string, categoryId: string, options?: { shutdown: boolean }): void {
     const { snapshot, category } = this.#category(reviewRunId, categoryId);
     requireReview(category.task !== null, 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有任务。');
     const runRecordId = this.#runRecordOf(category.task.taskIntentId);
@@ -2918,7 +2919,8 @@ export class ReviewRunStore {
         // A 本社审阅偏好 material withdrawn while it read (Issue #912; LAUD-008) stops it the same way, in its own words.
         const influence = !scope && outcomeSummary?.startsWith(LEARNING_INFLUENCE_STOP_SUMMARY) === true;
         this.#recordEvent(reviewRunId, categoryId, 'interrupted', outcomeSummary ?? (state === 'cancelled' ? '这一类的运行已取消。' : '运行已中断。'),
-          { runRecordId, resultSetRevisionId: terminal?.revisionId ?? null, ...(scope ? { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } } : influence ? { extra: { code: LEARNING_INFLUENCE_WITHDRAWN } } : {}) });
+          { runRecordId, resultSetRevisionId: terminal?.revisionId ?? null, ...(scope ? { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } } : influence ? { extra: { code: LEARNING_INFLUENCE_WITHDRAWN } }
+            : state === 'interrupted' && options?.shutdown === true ? { extra: { stopReason: 'shutdown' } } : {}) });
         if (scope) this.#blockUndispatchedStarts(this.#run(reviewRunId), SERIES_SCOPE_STOP_SUMMARY);
         if (influence) this.#blockUndispatchedStarts(this.#run(reviewRunId), LEARNING_INFLUENCE_STOP_SUMMARY);
       } else if (state === 'blocked-before-dispatch') {
