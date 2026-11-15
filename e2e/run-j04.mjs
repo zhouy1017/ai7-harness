@@ -2902,6 +2902,7 @@ async function main() {
         await pointerClick(renderer, waitFor, `[data-synthesis-evidence="${synthesisEvidence.ref}"]`, `review-synthesis-${viewport}-citation`);
         await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${synthesisEvidence.blockId}"]')!==null`, `review-synthesis-${viewport}-passage`);
         await pointerClick(renderer, waitFor, SIDEBAR.section('review'), `review-synthesis-${viewport}-back`);
+        await waitFor(renderer, `document.querySelector('[data-screen="book-review"] details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-returned`);
       }
     } finally {
       await renderer.send('Emulation.clearDeviceMetricsOverride');
