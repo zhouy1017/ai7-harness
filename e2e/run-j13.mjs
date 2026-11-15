@@ -2037,6 +2037,17 @@ async function main() {
     await launchReviewFromSheet(renderer, waitFor);
     await waitFor(renderer, `['settled','failed'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    if (seriesRun?.state === 'failed' && localDebugEnabled()) {
+      const database = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), {readOnly:true});
+      try {
+        const taskId=seriesRun.categories[0].taskIntentId;
+        const rows=database.prepare("SELECT component,canonical_json FROM analysis_plan_records WHERE task_intent_id=? AND plan_version=1").all(taskId);
+        const parts=new Map(rows.map(row=>[row.component,JSON.parse(row.canonical_json)]));
+        const envelope=parts.get('plan-envelope'), manifest=parts.get('coverage-manifest');
+        process.stderr.write(`J13_SERIES_REQUEST_KEYS/${JSON.stringify({contract:envelope.promptContractDigest,identity:envelope.contractIdentity,
+          entries:manifest.units.map(unit=>({unitOrdinal:unit.ordinal,requestDigest:createHash('sha256').update(JSON.stringify({categoryId:'series-consistency',promptContractDigest:envelope.promptContractDigest,unitDigest:unit.digest,unitOrdinal:unit.ordinal})).digest('hex')}))})}\n`);
+      } finally { database.close(); }
+    }
     requireJourney(seriesRun?.state === 'settled', 'series-start-settled', { state: seriesRun?.state,
       categories: seriesRun?.categories.map(category => ({ categoryId: category.categoryId, state: category.state, detail: category.detail })) });
     requireJourney(['running','settled'].includes(seriesRun?.state) && seriesRun.procedure?.procedureId === seriesProcedureId && seriesRun.procedure.version === 1 &&
