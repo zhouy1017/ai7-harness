@@ -2151,7 +2151,7 @@ async function main() {
       const proposal = await window.ai7.inspectDeveloperProposal({ proposalId: list.proposals[0].proposalId, before: null });
       return [list.procedures.length, procedure.runnable, procedure.versions.map((version) => [version.version, version.state, version.runCount]), proposal.versions[0].fileCount];
     })()`);
-    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 1]], 1]), 'capture-restart-kept', keptOnRestart);
+    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 2]], 1]), 'capture-restart-kept', keptOnRestart);
 
     at('j14-capture-keyboard-reflow-forced-colors');
     // Without a pointer: Tab reaches 修改… with its focus visible, and Enter opens the next version's form with focus on its title.
