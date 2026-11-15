@@ -93,23 +93,47 @@ async function previousConnectionId(): Promise<string> {
   } finally { previous.markCleanShutdown(); previous.close(); await previousRoots.dispose(); }
 }
 
-function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' = 'now') {
+function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' | 'when-online' = 'now', serviceStartWhen: 'now' | 'when-online' = 'now') {
   const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice, startWhen, ...(planEdits === undefined ? {} : { planEdits }) };
   switch (kind) {
-    case 'baseline-analysis': return () => store.launchBaselineAnalysis({ ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy);
+    case 'baseline-analysis': return () => store.launchBaselineAnalysis({ ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy, serviceStartWhen);
     case 'custom-analysis': {
       dimensionId ??= store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE }).dimensions[0]!.dimensionId;
       const selectedDimension = dimensionId;
-      return () => store.launchCustomAnalysis({ ...common, dimensionId: selectedDimension, update: null }, policy);
+      return () => store.launchCustomAnalysis({ ...common, dimensionId: selectedDimension, update: null }, policy, serviceStartWhen);
     }
-    case 'writing': return () => store.launchWritingTask({ ...common, ...WRITING_REQUEST }, policy);
-    case 'initial-evaluation': return () => store.launchInitialEvaluation(common, policy);
-    case 'readers-report': return () => store.launchReadersReport({ ...common, template: 'author' }, policy);
-    case 'evaluation-rewrite': return () => store.launchEvaluationRewrite({ ...common, recordId: target.recordId }, policy);
+    case 'writing': return () => store.launchWritingTask({ ...common, ...WRITING_REQUEST }, policy, serviceStartWhen);
+    case 'initial-evaluation': return () => store.launchInitialEvaluation(common, policy, serviceStartWhen);
+    case 'readers-report': return () => store.launchReadersReport({ ...common, template: 'author' }, policy, serviceStartWhen);
+    case 'evaluation-rewrite': return () => store.launchEvaluationRewrite({ ...common, recordId: target.recordId }, policy, serviceStartWhen);
   }
 }
 
 describe.each(KINDS)('%s one-step launch', (kind) => {
+  it('queues an offline launch in the same snapshot and preserves cancellation and replay without a send', async () => {
+    const target = await book(kind); ordinary();
+    const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
+    const config = { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId = randomUUID();
+    // Connectivity is service context, outside the command's identity; retrying after reconnect returns the original wait.
+    const first = command(kind, target, config, clientCommandId, false, undefined, 'now', 'when-online')();
+    expect(first.ledger.currentRunState(first.runRecordId)).toBe('awaiting-connectivity');
+    expect(first.launchNotice).toBe('已记录任务，联网后开始。');
+    driveLaunchedLedgerRun(capture!.owner, first);
+    expect(capture!.requests).toHaveLength(0);
+    store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    const replay = command(kind, target, config, clientCommandId)();
+    expect(replay).toMatchObject({ repeated: true, runRecordId: first.runRecordId });
+    expect(replay.ledger.currentRunState(first.runRecordId)).toBe('awaiting-connectivity');
+    const waiting = store.waitingTaskRuns(target.bookId)[0]!;
+    expect(store.taskPreflightDrift(waiting)).toEqual([]);
+    expect(replay.ledger.loadExecutionPlan(first.runRecordId).productionBinding?.reasoningEffort).toBe('high');
+    if (waiting.kind === 'baseline-analysis') store.cancelWaitingBaselineAnalysis(target.bookId, waiting.ref);
+    else store.cancelWaitingTask({ bookId: target.bookId, kind: waiting.kind, ref: waiting.ref });
+    expect(replay.ledger.currentRunState(first.runRecordId)).toBe('cancelled');
+    driveLaunchedLedgerRun(capture!.owner, command(kind, target, config, clientCommandId)());
+    expect(capture!.requests).toHaveLength(0);
+  });
+
   it('freezes concurrent choices, launches no approval-only records and replays after settings change', async () => {
     const a = await book(kind), b = await book(kind), fallbackBook = await book(kind);
     ordinary();
@@ -184,11 +208,11 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
   });
 });
 
-it('drives a committed baseline launch after restart once and retains actual request, report and task attribution', async () => {
+it('reconnects a committed baseline launch after restart once and retains actual request, report and task attribution', async () => {
   const target = await book('baseline-analysis');
   ordinary();
   const clientCommandId = randomUUID();
-  const launch = command('baseline-analysis', target, { modelId: 'account-future-model', reasoningEffort: 'high' }, clientCommandId);
+  const launch = command('baseline-analysis', target, { modelId: 'account-future-model', reasoningEffort: 'high' }, clientCommandId, false, undefined, 'when-online');
   const committed = launch();
   const defaults = store.getConfiguredModelRoleBinding('main-editorial')!;
   store.selectMainRoleModel('opencode-go', defaults.model, 'off');
@@ -209,6 +233,12 @@ it('drives a committed baseline launch after restart once and retains actual req
   store.reconcileStoppedBaselineAnalysisRuns();
   const replay = launch();
   expect(replay).toMatchObject({ repeated: true, runRecordId: committed.runRecordId });
+  expect(replay.ledger.currentRunState(replay.runRecordId)).toBe('awaiting-connectivity');
+  const waiting = store.waitingTaskRuns(target.bookId)[0]!;
+  expect(waiting.kind).toBe('baseline-analysis');
+  expect(store.taskPreflightDrift(waiting)).toEqual([]);
+  if (waiting.kind === 'review-run') throw new Error('expected-ledger-wait');
+  capture!.owner.admitAndDispatch(replay.runRecordId, store.waitingRunLedger({ ...waiting, kind: waiting.kind }), { afterReconnectPreflight: true });
   driveLaunchedLedgerRun(capture!.owner, replay); driveLaunchedLedgerRun(capture!.owner, replay);
   await capture!.owner.whenIdle();
   const report = store.inspectBaselineAnalysis(target.bookId).taskOutcome!.report!;

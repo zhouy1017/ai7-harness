@@ -472,13 +472,15 @@ async function dispatch(
     case 'launchInitialEvaluation':
     case 'launchReadersReport':
     case 'launchEvaluationRewrite': {
-      const { ledger, repeated: _repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy)
-        : request.op === 'launchCustomAnalysis' ? store.launchCustomAnalysis(request.input, launchPolicy)
-        : request.op === 'launchWritingTask' ? store.launchWritingTask(request.input, launchPolicy)
-        : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy)
-        : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy)
-        : store.launchEvaluationRewrite(request.input, launchPolicy);
+      const startWhen = connectivity.planConnectivity.reading() === 'offline' ? 'when-online' : 'now';
+      const { ledger, repeated: _repeated, ...result } = request.op === 'launchBaselineAnalysis' ? store.launchBaselineAnalysis(request.input, launchPolicy, startWhen)
+        : request.op === 'launchCustomAnalysis' ? store.launchCustomAnalysis(request.input, launchPolicy, startWhen)
+        : request.op === 'launchWritingTask' ? store.launchWritingTask(request.input, launchPolicy, startWhen)
+        : request.op === 'launchInitialEvaluation' ? store.launchInitialEvaluation(request.input, launchPolicy, startWhen)
+        : request.op === 'launchReadersReport' ? store.launchReadersReport(request.input, launchPolicy, startWhen)
+        : store.launchEvaluationRewrite(request.input, launchPolicy, startWhen);
       driveLaunchedLedgerRun(analysisExecution, { ...result, ledger });
+      if (ledger.currentRunState(result.runRecordId) === 'awaiting-connectivity') queueMicrotask(() => void connectivity.preflight().catch(() => undefined));
       return { id: request.id, ok: true, op: request.op, result };
     }
     case 'prepareBaselineAnalysis':

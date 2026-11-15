@@ -462,7 +462,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'launchEvaluationRewrite': {
       if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
       const { clientCommandId, executionConfig, rememberedChoice, planEdits, startWhen, ...task } = value.input;
-      if (startWhen !== undefined && startWhen !== 'now' && startWhen !== 'idle') throw new ProtocolError(tentativeId);
+      if (startWhen !== undefined && startWhen !== 'now' && startWhen !== 'idle' && startWhen !== 'when-online') throw new ProtocolError(tentativeId);
       if (planEdits !== undefined && (!isRecord(planEdits) ||
           !Object.keys(planEdits).every(key => ['removedSteps', 'disallowedAdaptations', 'askFirstAdaptations', 'runBudgetCeiling', 'evidenceAssuranceLevel'].includes(key)) || canonicalPlanEdits({
             removedSteps: planEdits.removedSteps, disallowedAdaptations: planEdits.disallowedAdaptations, askFirstAdaptations: planEdits.askFirstAdaptations,

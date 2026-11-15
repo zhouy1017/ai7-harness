@@ -4076,7 +4076,8 @@ export class EditorialStore {
 
   #launchLedgerTask(kind: Exclude<import('./task-launch-snapshots.js').LaunchTaskKind, 'review-run' | 'scoped-ai-edit'>,
     input: import('../shared/protocol.js').LedgerTaskExecutionLaunchInput & { bookId: string }, launchPolicy: LaunchPolicyProjection,
-    create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>) {
+    create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>,
+    startWhen: 'now' | 'when-online' = 'now') {
     const { clientCommandId, ...request } = input;
     let execution: import('./analysis/baseline-analysis-store.js').LaunchBinding | null = null;
     try {
@@ -4085,58 +4086,60 @@ export class EditorialStore {
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
-          const projection = create({ snapshotId, execution, startWhen: input.startWhen ?? 'now', ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
+          const projection = create({ snapshotId, execution, startWhen: input.startWhen === 'idle' ? 'idle' : input.startWhen === 'when-online' ? 'when-online' : startWhen,
+            ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
           requireStore(projection.run !== null && projection.checkpoint !== null, 'TASK_LAUNCH_FAILED', '这次任务未能启动。');
           return { runId: projection.run.runRecordId, manuscript: projection.checkpoint };
         });
       const row = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(launched.runId) as SqlRow;
       const ledger = this.executionLedgerForRun(launched.runId);
+      const notice = launched.notice ?? (ledger.currentRunState(launched.runId) === 'awaiting-connectivity' ? '已记录任务，联网后开始。' : undefined);
       return { taskIntentId: asString(row.task_intent_id), runRecordId: launched.runId, repeated: launched.repeated,
         ledger: execution === null ? ledger : ledger.forkForLaunch(execution),
-        ...(launched.notice === undefined ? {} : { launchNotice: launched.notice }) };
+        ...(notice === undefined ? {} : { launchNotice: notice }) };
     } catch (error) {
       if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
       return this.#analysisCall(() => { throw error; });
     }
   }
 
-  launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection) {
+  launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
     return this.#launchLedgerTask('baseline-analysis', input, policy, (context, launchPolicy) => this.#baselineAnalysis.launchTask({
-      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits));
+      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now' }, context.snapshotId, context.execution, false, context.planEdits), startWhen);
   }
 
-  launchCustomAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchCustomAnalysis']['input'], policy: LaunchPolicyProjection) {
+  launchCustomAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchCustomAnalysis']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
     return this.#launchLedgerTask('custom-analysis', input, policy, (context, launchPolicy) => customAnalysisOperations.launchCustomAnalysisTask(
-      { ...this.#customAnalysisHost, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input, launchPolicy, context));
+      { ...this.#customAnalysisHost, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input, launchPolicy, context), startWhen);
   }
 
-  launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection) {
+  launchWritingTask(input: import('../shared/protocol.js').ServiceOperationMap['launchWritingTask']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
     return this.#launchLedgerTask('writing', input, policy, (context, launchPolicy) => writingTaskOperations.launchWritingTask(
-      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context));
+      { ...this.#writingTaskOperationsHost, transaction: transactLaunch, baselineAnalysis: this.#baselineAnalysis.forkForLaunch(context.execution) }, input.bookId, input, launchPolicy, null, null, context), startWhen);
   }
 
-  launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection) {
+  launchInitialEvaluation(input: import('../shared/protocol.js').ServiceOperationMap['launchInitialEvaluation']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
     return this.#launchLedgerTask('initial-evaluation', input, policy, (context, launchPolicy) => initialEvaluationOperations.launchInitialEvaluationTask(
-      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context));
+      this.#launchInitialHost(context.execution), input.bookId, launchPolicy, input.materialIds ?? [], null, input.seriesId ?? null, context), startWhen);
   }
 
-  launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection) {
+  launchReadersReport(input: import('../shared/protocol.js').ServiceOperationMap['launchReadersReport']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
     return this.#launchLedgerTask('readers-report', input, policy, (context, launchPolicy) => {
       const evaluation = this.#launchInitialHost(context.execution);
       return readersReportOperations.launchReadersReportTask({ ...this.#readersReportHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind),
         requireEvaluationMaterialScope: (has, kind) => initialEvaluationOperations.internalRequireEvaluationMaterialScope(evaluation, has, kind) },
         input.bookId, input.template, launchPolicy, input.materialIds ?? [], null, context);
-    });
+    }, startWhen);
   }
 
-  launchEvaluationRewrite(input: import('../shared/protocol.js').ServiceOperationMap['launchEvaluationRewrite']['input'], policy: LaunchPolicyProjection) {
+  launchEvaluationRewrite(input: import('../shared/protocol.js').ServiceOperationMap['launchEvaluationRewrite']['input'], policy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now') {
     return this.#launchLedgerTask('evaluation-rewrite', input, policy, (context, launchPolicy) => {
       const evaluation = this.#launchInitialHost(context.execution);
       return evaluationRewriteOperations.launchEvaluationRewriteTask({ ...this.#evaluationRewriteHost, transaction: transactLaunch, baselineAnalysis: evaluation.baselineAnalysis,
         evaluationLiveRefused: kind => initialEvaluationOperations.internalEvaluationLiveRefused(evaluation, kind) },
         input.bookId, input.recordId, launchPolicy, null, context);
-    });
+    }, startWhen);
   }
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,

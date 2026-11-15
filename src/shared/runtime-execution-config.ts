@@ -30,7 +30,7 @@ export interface TaskExecutionLaunchInput {
 export interface LedgerTaskExecutionLaunchInput extends TaskExecutionLaunchInput {
   /** Existing optional budget/retry controls, frozen in the first plan rather than a later plan revision. */
   readonly planEdits?: PlanEditsProjection;
-  readonly startWhen?: 'now' | 'idle';
+  readonly startWhen?: 'now' | 'idle' | 'when-online';
 }
 
 export interface TaskExecutionLaunchResult {

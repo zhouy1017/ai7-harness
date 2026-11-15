@@ -42,6 +42,7 @@ describe('one-step drawer launch frames (#1455)', () => {
     expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
     const options = { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } };
     expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, planEdits: options, startWhen: 'idle' } })))).toMatchObject({ input: { planEdits: options, startWhen: 'idle' } });
+    expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, startWhen: 'when-online' } })))).toMatchObject({ input: { startWhen: 'when-online' } });
     for (const invalid of [{ ...input, clientCommandId: 'broken' }, { ...input, executionConfig: { endpoint: 'private' } },
       { ...input, rememberedChoice: 'yes' }, { ...input, startWhen: 'later' }, { ...input, authorize: true },
       { ...input, planEdits: { ...options, endpoint: 'private' } }, { ...input, planEdits: { ...options, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 0 } } }]) {

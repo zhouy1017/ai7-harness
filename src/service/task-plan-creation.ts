@@ -8,7 +8,7 @@ export interface TaskLaunchContext {
   readonly snapshotId: string;
   readonly execution: LaunchBinding;
   readonly planEdits?: PlanEditsProjection;
-  readonly startWhen?: 'now' | 'idle';
+  readonly startWhen?: 'now' | 'idle' | 'when-online';
 }
 
 export function launchedTaskPlan(context: TaskLaunchContext): TaskPlanCreator {

@@ -3169,21 +3169,25 @@ export class BaselineAnalysisStore {
       if (deferred) return;
       const authorizationId = randomUUID(), runRecordId = randomUUID(), instant = new Date().toISOString();
       const startWhen = input.launchStartWhen ?? 'now';
+      // Connectivity Wait uses the existing immediate authority and a waiting Run state, as the retained start does.
+      const authorityStartWhen = startWhen === 'idle' ? 'idle' : 'now';
       const authorityKind = plan.planEnvelope.dispatchAllowed ? 'standard-direct-dispatch' : 'record-only-no-dispatch';
-      requireAnalysis(startWhen === 'now' || plan.planEnvelope.dispatchAllowed, 'ANALYSIS_START_WHEN_ONLINE_INVALID', '这份计划没有可执行的路由，不能空闲时开始。');
-      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen,
+      requireAnalysis(startWhen === 'now' || plan.planEnvelope.dispatchAllowed, 'ANALYSIS_START_WHEN_ONLINE_INVALID', '这份计划没有可执行的路由，不能等待网络或空闲时开始。');
+      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen: authorityStartWhen,
         planEnvelopeDigest: plan.planEnvelope.digest, planVersionId: plan.planVersion.planVersionId, planVersionOrdinal: 1,
         taskIntentId, authority: authorityKind, launchSnapshotId: snapshotId });
       const procedure = readProcedurePlanPin(this.#db, plan.planEnvelope.digest);
       const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant, ...(procedure === null ? {} : { procedure }) });
       this.#db.prepare('INSERT INTO analysis_run_authorizations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', authorityKind, instant, authority.json, authority.digest, startWhen);
+        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', authorityKind, instant, authority.json, authority.digest, authorityStartWhen);
       this.#db.prepare('INSERT INTO analysis_run_records VALUES (?, ?, ?, ?, ?, ?)')
         .run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
       this.#insertRunState(runRecordId, 1, 'authorized', { detail: '任务已启动，等待运行名额。' }, instant);
       if (!plan.planEnvelope.dispatchAllowed) {
         const reasons = blockedReasons(this.#liveReading());
         this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);
+      } else if (startWhen === 'when-online') {
+        this.#insertRunState(runRecordId, 2, 'awaiting-connectivity', { detail: CONNECTIVITY_WAIT_DETAIL }, instant);
       }
     };
     const work = this.#checkpointOwner.createManuscriptCheckpointWork(head.manuscriptId, head.branchId, TASK_INPUT_CHECKPOINT_PURPOSE);

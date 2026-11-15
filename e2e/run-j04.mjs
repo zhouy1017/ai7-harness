@@ -416,7 +416,7 @@ async function openAnalysisDestination(renderer, name) {
  * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
-async function startUpdate(renderer, mode, label, name) {
+async function startUpdate(renderer, mode, label, name, launch = true) {
   // The three modes live under 历史与更新, so the editor goes there first, as they would.
   await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
   // The mode's start and 先看计划 stand on its block at once (Issue #1410 item 15): no button only unfolds them.
@@ -432,6 +432,7 @@ async function startUpdate(renderer, mode, label, name) {
     plan.click();
     return true;
   })()`, name);
+  if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
   await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', `${name}-read-full-plan`);
 }
@@ -2427,7 +2428,39 @@ async function main() {
     await saveEditorSuffix(renderer, '，J-04 计划版本形成后的确认编辑', nextSequence, cancellation);
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.freshnessState==='stale'`, 'current-range-edited');
     at('sync-current-prepare');
+    at('connectivity-offline-bar');
+    await writeFile(connectivityPath, 'offline');
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'offline-sync-open', false);
+    // A new start has no prepared record; the optional timing choice and launch remain keyboard reachable.
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const drawer=document.querySelector('#task-drawer'),options=drawer.querySelector('.task-launch-options'),timing=drawer.querySelector('[data-task-start-when]');options.open=true;timing.scrollIntoView({block:'center',behavior:'instant'});timing.focus({preventScroll:true});const rect=timing.getBoundingClientRect();return document.activeElement===timing && rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight && Array.from(timing.options).some(option=>option.value==='when-online'&&option.textContent==='联网后开始任务');})()`, `offline-launch-timing-${width}`);
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    await assertRenderer(renderer, `(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]');timing.value='when-online';timing.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'offline-launch-choice');
+    at('connectivity-start-when-online');
+    const offlineIntent = await launchTaskFromBar(renderer, waitFor, 'offline-sync');
+    const waitingDrawer = await drawerShowing(renderer,offlineIntent,'waiting','offline-sync-waiting');
+    const waitingAnalysis = await readBaseline(renderer);
+    requireJourney(waitingDrawer.bar.status==='等待网络' && waitingAnalysis.run.state==='awaiting-connectivity' && waitingAnalysis.run.attempt===null && waitingAnalysis.taskOutcome===null,
+      'offline-launch-no-send',waitingDrawer.bar);
+    at('connectivity-cancel');
+    try {
+      for(const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const button=document.querySelector('#task-drawer [data-task-drawer-control="cancel-wait"]');button.scrollIntoView({block:'center',behavior:'instant'});button.focus({preventScroll:true});const rect=button.getBoundingClientRect();return !button.disabled && document.activeElement===button && rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight;})()`, `offline-launch-cancel-${width}`);
+      }
+    } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="cancel-wait"]','offline-launch-cancel');
+    const cancelledDrawer = await drawerShowing(renderer,offlineIntent,'cancelled','offline-launch-cancelled');
+    requireJourney(cancelledDrawer.bar.status==='已取消 · 未发送任何内容','offline-launch-cancelled-no-send',cancelledDrawer.bar);
+    await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','offline-launch-close');
+    at('connectivity-wait-again');
     await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'current-sync-launch');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='waiting'`,'current-sync-waits-offline');
+    at('connectivity-online-dispatch');
+    await writeFile(connectivityPath,'online');
     const onlineSettled = await settleLaunchedRun(renderer, 'current-sync');
     const againIntent = onlineSettled.taskIntent.taskIntentId;
     requireJourney(onlineSettled.resultSetRevision.ordinal===7 && onlineSettled.resultSetRevision.update.mode==='sync-current', 'current-sync-result');
