@@ -1955,7 +1955,7 @@ async function main() {
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-        await assertRenderer(renderer, `(() => {const panel=document.querySelector('.captured-procedure-stop'),button=panel.querySelector('[data-procedure-action="confirm-stop"]');button.scrollIntoView({block:'nearest'});button.focus();const box=button.getBoundingClientRect();return document.activeElement===button && box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight && panel.querySelector('.captured-procedure-stop-prepared [data-review-run-id="${legacyPrepared.reviewRunId}"]')!==null;})()`, `stop-preview-prepared-${width}`);
+        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const panel=document.querySelector('.captured-procedure-stop'),button=panel.querySelector('[data-procedure-action="confirm-stop"]');button.scrollIntoView({block:'center',behavior:'instant'});button.focus({preventScroll:true});const box=button.getBoundingClientRect();return document.activeElement===button && box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight && panel.querySelector('.captured-procedure-stop-prepared [data-review-run-id="${legacyPrepared.reviewRunId}"]')!==null;})()`, `stop-preview-prepared-${width}`);
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await clickSelector(renderer, '.captured-procedure-stop [data-procedure-action="confirm-stop"]', 'stop-confirm');
