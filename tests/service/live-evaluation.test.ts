@@ -595,7 +595,7 @@ describe('evaluation on the Go execution path (#429)', () => {
 });
 
 describe('developer-live procedure instruction admission', () => {
-  it.each(['evaluation', 'baseline-manuscript-analysis'] as const)('refuses %s instructions at preparation and live admission without sending', async kind => {
+  it.each(['evaluation', 'baseline-manuscript-analysis'] as const)('refuses %s instructions without sending while stock content remains admitted', async kind => {
     const original = store.procedureLibrary({ action: 'inspect' }).procedures.find(entry => entry.executorKind === kind)!;
     const pin = { procedureId: original.procedureId, version: original.version, digest: original.digest };
     const changed = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId, basedOn: pin,
@@ -603,9 +603,12 @@ describe('developer-live procedure instruction admission', () => {
     const selectedPin = { procedureId: changed.procedureId, version: changed.version, digest: changed.digest };
     store.procedureLibrary({ action: 'select', bookId, procedure: selectedPin });
     const base = kind === 'evaluation' ? store.initialEvaluationLedger.definition : store.baselineAnalysisLedger.definition;
-    expect(liveKindAdmission(selected, base, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();
-    const definition = withProcedureDefinition(base, changed.document, selectedPin);
-    expect(liveKindAdmission(selected, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
+    // Baseline has its own execution admission; 初评 also pins the shared non-baseline guard.
+    if (kind === 'evaluation') {
+      expect(liveKindAdmission(selected, base, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();
+      const definition = withProcedureDefinition(base, changed.document, selectedPin);
+      expect(liveKindAdmission(selected, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
+    }
     const prepare = () => kind === 'evaluation' ? store.createInitialEvaluationPreparationWork(bookId, selected)
       : store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, selected);
     expect(prepare).toThrowError(expect.objectContaining({ code: 'PROCEDURE_INSTRUCTION_NOT_ADMITTED' }));
