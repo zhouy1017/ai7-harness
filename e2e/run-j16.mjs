@@ -1025,6 +1025,8 @@ async function main() {
     at('panel-prepare');
     // The primary action prepares and starts in the panel, with no plan drawer.
     await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-direct-start');
+    await launchTaskFromBar(renderer, waitFor, 'panel-first-start');
+    await openPanel(renderer, 'panel-launched');
     at('panel-start');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'running').includes('analysis-running'), 'panel-direct-running', 120_000);
     await assertRenderer(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'`, 'panel-no-plan-wall');
@@ -1092,6 +1094,8 @@ async function main() {
     await waitForPanel(renderer, (panel) => panel.compose.prepare === 'enabled', 'panel-compose-ready');
     await writeHold(1);
     await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-compose-prepare');
+    await launchTaskFromBar(renderer, waitFor, 'panel-update-start');
+    await openPanel(renderer, 'panel-update-launched');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' && cardsOf(panel, 'running')[0].title === '基线分析 · 重新分析全书', 'panel-update-card', 180_000);
 
     at('panel-cancel');

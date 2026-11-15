@@ -82,8 +82,8 @@ async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
   ordinary(answer);
 }
 
-function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection) {
-  const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice, ...(planEdits === undefined ? {} : { planEdits }) };
+function command(kind: Kind, target: Awaited<ReturnType<typeof book>>, executionConfig: RuntimeExecutionConfig, clientCommandId = randomUUID(), rememberedChoice = false, planEdits?: PlanEditsProjection, startWhen: 'now' | 'idle' = 'now') {
+  const common = { bookId: target.bookId, clientCommandId, executionConfig, rememberedChoice, startWhen, ...(planEdits === undefined ? {} : { planEdits }) };
   switch (kind) {
     case 'baseline-analysis': return () => store.launchBaselineAnalysis({ ...common, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy);
     case 'custom-analysis': {
@@ -112,10 +112,12 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     const current = store.getManuscriptWindow(a.manuscriptId, a.branchId, null);
     const clientCommandId = randomUUID();
     const firstCommand = command(kind, a, { modelId: defaults.model, reasoningEffort: 'high' }, clientCommandId, false,
-      { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } });
+      { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } }, 'idle');
     const secondCommand = command(kind, b, { modelId: 'account-future-model', reasoningEffort: 'low' });
     const [first, second] = await Promise.all([Promise.resolve().then(firstCommand), Promise.resolve().then(secondCommand)]);
     expect(first.runRecordId).not.toBe(second.runRecordId);
+    expect(first.ledger.inspect(a.bookId).authorization?.startWhen).toBe('idle');
+    expect(second.ledger.inspect(b.bookId).authorization?.startWhen).toBe('now');
     expect(first.ledger.loadExecutionPlan(first.runRecordId).checkpoint.journalSequence).toBe(current.journalSequence);
     expect(first.ledger.loadExecutionPlan(first.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 50_000 });
     expect(first.ledger.loadExecutionPlan(first.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
@@ -210,4 +212,22 @@ it('drives a committed baseline launch after restart once and retains actual req
     .toThrowError(expect.objectContaining({ code: 'ANALYSIS_SELECTED_RANGE_INVALID', message: expect.stringContaining('请重新选择') }));
   expect(store.getManuscriptWindow(target.manuscriptId, target.branchId, null).workingDigest).toBe(moved.workingDigest);
   expect(capture!.wireRequests).toHaveLength(sent);
+});
+
+it('records a development-ci launch without a route and lets the existing admission owner explain the blocked run', async () => {
+  await setupOwner!.dispose();
+  store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  setupOwner = new BaselineAnalysisExecutionOwner({ requestGovernor: governor, ledger: store.baselineAnalysisLedger,
+    launchPolicy: policy, fixture: null, secretResolver: { resolve: async () => null } });
+  const target = await book('baseline-analysis');
+  const launched = store.launchBaselineAnalysis({ bookId: target.bookId, clientCommandId: randomUUID(),
+    goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, policy);
+  driveLaunchedLedgerRun(setupOwner, launched);
+  await setupOwner.whenIdle();
+  const result = store.inspectBaselineAnalysis(target.bookId);
+  expect(result.taskIntent?.taskIntentId).toBe(launched.taskIntentId);
+  expect(result.run?.state).toBe('blocked-before-dispatch');
+  expect(result.authorization).not.toBeNull();
+  expect(result.planRevisions).toHaveLength(0);
 });

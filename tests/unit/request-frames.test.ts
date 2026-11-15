@@ -41,9 +41,9 @@ describe('one-step drawer launch frames (#1455)', () => {
     const frame = { id: randomUUID(), op, input };
     expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
     const options = { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } };
-    expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, planEdits: options } })))).toMatchObject({ input: { planEdits: options } });
+    expect(decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: { ...input, planEdits: options, startWhen: 'idle' } })))).toMatchObject({ input: { planEdits: options, startWhen: 'idle' } });
     for (const invalid of [{ ...input, clientCommandId: 'broken' }, { ...input, executionConfig: { endpoint: 'private' } },
-      { ...input, rememberedChoice: 'yes' }, { ...input, authorize: true },
+      { ...input, rememberedChoice: 'yes' }, { ...input, startWhen: 'later' }, { ...input, authorize: true },
       { ...input, planEdits: { ...options, endpoint: 'private' } }, { ...input, planEdits: { ...options, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 0 } } }]) {
       expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
     }

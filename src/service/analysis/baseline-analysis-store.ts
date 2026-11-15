@@ -3162,7 +3162,7 @@ export class BaselineAnalysisStore {
         'ANALYSIS_PLAN_EDIT_INVALID', '这项任务暂不能把安全重试改成先问你。');
       this.#persistPrepared(taskIntentId, checkpoint, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy, edits);
       const plan = this.inspect(input.bookId);
-      requireAnalysis(plan.planEnvelope?.dispatchAllowed && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
+      requireAnalysis(plan.planEnvelope !== null && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
       if (deferred) return;
       const authorizationId = randomUUID(), runRecordId = randomUUID(), instant = new Date().toISOString();
       const startWhen = input.launchStartWhen ?? 'now';
