@@ -1,10 +1,12 @@
 # Current checkpoint
 
-The baseline is **0.7.0 Alpha**, delivered at `dev@2026a9ee952133e8927649419d3f537d6117d798` through PR #1468 (#1459), schema 113, protocol 202, Data Version 1. The fixed human-test folder `C:\Users\Chooo\Playground\AI7-human-test` was refreshed from that commit on 2026-11-14; the tester's data was preserved.
+The baseline is **0.7.1 Alpha**, delivered at `dev@1654f386342374e9b67b5fe51390dc8f0cb2c0e7` through [PR #1495](https://github.com/zhouy1017/ai7-harness/pull/1495) (#1472), protocol 203, schema 115, Data Version 1. Hosted Full Gate [43747897180](https://github.com/zhouy1017/ai7-harness/actions/runs/43747897180) passed 15 of 15 Journeys. The fixed human-test folder `C:\Users\Chooo\Playground\AI7-human-test` was refreshed from that commit on 2026-11-16 (0.7.1, portable self-check passed, `AI7\data` kept; the 0.7.0 data was copied aside first); #1472 and its slices are closed.
 
-R2 (#1472, plan board #1458) is candidate **0.7.1** Alpha on `codex/integration-0.7.1`: package 0.7.1, protocol 203, schema 115, Data Version 1. The final ladder, two unbound hosted runs, Commander dev merge and fixed human-test refresh remain pending; no tag or release is claimed. ADRs 0102, 0103 and 0104 own the policy retirement, role effort and task-start choice changes.
+Version: the [version ledger](docs/development/versioning.md) reads integrated **0.7.1** and `package.json` is 0.7.1. ADRs 0102, 0103 and 0104 own the policy retirement, role effort and task-start choice changes; no tag or release is claimed.
 
-What R2 newly lets the editor do:
+The current wave is R3 under [#1496](https://github.com/zhouy1017/ai7-harness/issues/1496) on `codex/integration-0.7.2`, targeting **0.7.2 Alpha**. Nothing of R3 is delivered to `dev`.
+
+What R2 (0.7.1 Alpha, delivered) newly lets the editor do:
 
 | Slice | What the editor can newly do | PRs / integration commits |
 | --- | --- | --- |
@@ -19,7 +21,7 @@ What R2 newly lets the editor do:
 
 Stage repairs #1482, #1484 and #1486 (`0089cc73`, `621cd767`, `5b4db618`) make J-16 and J-12 wait on durable state. #1490 / PR #1492 fixes J-04 `open-plan-revision`: the target was moving with the drawer-close transition, and the shared real-click helper now waits for a stable rectangle across animation frames; 31 of 31 slice-head Gate runs passed on ai7-testbed-02. R1's text-to-card selection, compact cards and one-row toolbar remain delivered; R2 adds occurrence hints and the overlay connector.
 
-Next is R3 → **0.7.2 Alpha** (#1433, #1434, #1147, #1152, #1074), after R2 delivery and human-test refresh. The development plan owns subsequent R4 and R5 order.
+Next: execute R3 [#1496](https://github.com/zhouy1017/ai7-harness/issues/1496) → **0.7.2 Alpha** (#1434, #1433, #1497, #1498), with the special-item dispositions for #1147, #1152 and #1074 in the development plan. The development plan owns subsequent R4 and R5 order.
 
 ## Delivered #1444 (0.6.5 Beta)
 
@@ -70,9 +72,9 @@ Design owners: [ADR 0096](docs/adr/0096-edit-manuscript-structure-recognize-stru
 | 4 | #1410, #1413 | [PR #1422](https://github.com/zhouy1017/ai7-harness/pull/1422) (incorporates [PR #1423](https://github.com/zhouy1017/ai7-harness/pull/1423)) | `1aaf79ba` | tested head `4f48a95e`: guest ladder, 4529 unit / 2142 service, all 15 Journeys + J-02 debug; hosted [42502552047](https://github.com/zhouy1017/ai7-harness/actions/runs/42502552047) |
 | 5 | #1414 | [PR #1424](https://github.com/zhouy1017/ai7-harness/pull/1424) | `b67e7501` | docs plus the ordinary-mode residue fixes: guest doctor/bootstrap/check/test (4531 unit, 2 skipped)/build with J-03, J-04, J-07; 44 writing service tests on the host; hosted five-Journey Gate [42513532519](https://github.com/zhouy1017/ai7-harness/actions/runs/42513532519) (J-08, J-12, J-15, J-03, J-04 — not all 15) |
 
-## Capabilities through this candidate
+## Delivered capabilities
 
-The rows below are delivered on `dev` through Wave 24b (0.6.1); the #1400 (0.6.2), #1426 (0.6.3) and #1444 (0.6.5) additions are listed under their Delivered sections above. The R1 (0.7.0) additions are listed in the checkpoint above; the R2 slices are candidates on `codex/integration-0.7.1` and are not in these rows.
+The rows below are delivered on `dev` through Wave 24b (0.6.1); the #1400 (0.6.2), #1426 (0.6.3) and #1444 (0.6.5) additions are listed under their Delivered sections above. The delivered R2 (0.7.1) additions are listed in the checkpoint above; these rows retain the earlier capability baseline.
 
 | Area | Available behavior and boundary |
 | --- | --- |
@@ -172,4 +174,4 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 
 ## Resume
 
-Read this checkpoint, the development plan, Orca dispatch and #1472. Continue the dispatched closure: verify the final closure head containing #1490 (`1cb2cf1d`) and #1491 (`6196f3ed`) with host checks, the full guest ladder and two unbound hosted runs, then open a draft PR into `codex/integration-0.7.1`. The Commander owns dev integration and the fixed human-test refresh; Owner human acceptance, tags, release and main promotion remain separate.
+Read this checkpoint, the development plan, Orca dispatch and #1496. Continue the assigned R3 slice on its slice branch targeting `codex/integration-0.7.2` from `dev@1654f386`; #1498 follows #1433, and #1074 awaits Owner authorization after #1433 and #1434. The Commander owns wave integration; Owner human acceptance, tags, release and main promotion remain separate.
