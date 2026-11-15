@@ -2882,10 +2882,12 @@ async function main() {
     const synthesisEvidence = reviewed.run.synthesis.evidence.find(evidence => evidence.blockId !== null &&
       reviewed.run.synthesis.summary.recurringProblems.some(problem => problem.evidenceRefs.includes(evidence.ref)));
     requireJourney(synthesisEvidence !== undefined, 'review-synthesis-linked-evidence');
+    const synthesisNativeViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
     try {
       for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
         at(`review-synthesis-${viewport}`);
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `review-synthesis-${viewport}-viewport`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-ready`);
         if (await renderer.evaluate(`document.querySelector('details.review-synthesis')?.open===true`)) {
           await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
@@ -2901,8 +2903,12 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${synthesisEvidence.blockId}"]')!==null`, `review-synthesis-${viewport}-passage`);
         await pointerClick(renderer, waitFor, SIDEBAR.section('review'), `review-synthesis-${viewport}-back`);
       }
-    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+      await waitFor(renderer, `innerWidth===${synthesisNativeViewport.width} && innerHeight===${synthesisNativeViewport.height}`, 'review-synthesis-native-viewport');
+    }
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
     await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
     await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
