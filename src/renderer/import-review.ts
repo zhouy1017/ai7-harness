@@ -1,4 +1,4 @@
-import { rendererApi } from './navigation-generation.js';
+import { rendererApi, navigation as shellNavigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { focusImportStep, importSteps } from './components/import-steps.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -356,6 +356,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const structureView = renderStructureReview(staged.structure);
       const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
       const confirm = button('导入', 'primary', async () => {
+        const follow = shellNavigation.route();
         if (wordControls !== null && !wordControls.allowed()) { setStatus(technicalWords('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', '请选择一种可用的 Word 修订导入方式。'), 'error'); return; }
         if (relationshipSelection === 'first-manuscript' && !structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = relationshipSelection === 'first-manuscript' ? structureView.choice() : undefined;
@@ -382,7 +383,7 @@ export function createImportReview(options: ImportReviewOptions) {
                 relationship: 'source-only',
               },
             });
-            if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
+            if (previewOnly) { if (follow.isCurrent()) renderSourceImportReview(review, recoveryNotice, recoveryReturn); } else await finishSourceImport(review, recoveryReturn, follow);
           } else {
             const review = await rendererApi.prepareNewBookReview({
               draftId: staged.draftId,
@@ -393,7 +394,7 @@ export function createImportReview(options: ImportReviewOptions) {
               ...(trackedChanges === undefined ? {} : { trackedChanges }),
               ...(structure === undefined ? {} : { structure }),
             });
-            if (previewOnly) renderReview(review, recoveryNotice, recoveryReturn); else await finishImport(review, recoveryReturn);
+            if (previewOnly) { if (follow.isCurrent()) renderReview(review, recoveryNotice, recoveryReturn); } else await finishImport(review, recoveryReturn, follow);
           }
         } catch (error) {
           wordControls?.setBusy(false);
@@ -418,6 +419,7 @@ export function createImportReview(options: ImportReviewOptions) {
       content.append(...wordControls.elements, ...fidelityView.elements, ...structureView.elements);
       const actions = element('div', 'button-row');
       const confirm = button('导入', 'primary', async () => {
+        const follow = shellNavigation.route();
         if (!wordControls.allowed()) { setStatus(technicalWords('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', '请选择一种可用的 Word 修订导入方式。'), 'error'); return; }
         if (!structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = structureView.choice();
@@ -435,7 +437,7 @@ export function createImportReview(options: ImportReviewOptions) {
             ...(trackedChanges === undefined ? {} : { trackedChanges }),
             ...(structure === undefined ? {} : { structure }),
           });
-          if (previewOnly) renderReview(review, recoveryNotice, recoveryReturn); else await finishImport(review, recoveryReturn);
+          if (previewOnly) { if (follow.isCurrent()) renderReview(review, recoveryNotice, recoveryReturn); } else await finishImport(review, recoveryReturn, follow);
         } catch (error) {
           confirm.disabled = false;
           wordControls.setBusy(false);
@@ -480,6 +482,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const actions = element('div', 'button-row');
       if (sameBookMatches.length === 0 || reuseSourceVersionId !== undefined) {
         const confirm = button('导入来源材料', 'primary', async () => {
+        const follow = shellNavigation.route();
           confirm.disabled = true;
           setStatus('正在重新校验图书与来源身份并准备复核…', 'busy');
           try {
@@ -493,7 +496,7 @@ export function createImportReview(options: ImportReviewOptions) {
                 reuseSourceVersionId: reuseSourceVersionId ?? null,
               },
             });
-            if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
+            if (previewOnly) { if (follow.isCurrent()) renderSourceImportReview(review, recoveryNotice, recoveryReturn); } else await finishSourceImport(review, recoveryReturn, follow);
           } catch (error) {
             previewOnly = false;
             confirm.disabled = false;
@@ -742,23 +745,25 @@ export function createImportReview(options: ImportReviewOptions) {
     });
   }
 
-  async function finishImport(review: ReviewBeforeImportProjection, recoveryReturn?: RecoveryReturnContext): Promise<void> {
-    if (review.reviewDigest === null) { renderReview(review, undefined, recoveryReturn); return; }
+  async function finishImport(review: ReviewBeforeImportProjection, recoveryReturn?: RecoveryReturnContext, follow: NavigationCheckpoint = shellNavigation.route()): Promise<void> {
+    if (review.reviewDigest === null) { if (follow.isCurrent()) renderReview(review, undefined, recoveryReturn); return; }
     try {
       const result = await rendererApi.commitNewBookImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
       void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'first-manuscript' }).catch(() => setStatus('未能记住导入设置。', 'error'));
-      renderImported(result, recoveryReturn); setStatus(result.completionLabel, 'success');
+      if (follow.isCurrent()) renderImported(result, recoveryReturn);
+    setStatus(result.completionLabel, 'success');
     } catch (error) {
-      if (['IMPORT_COMMIT_OUTCOME_UNCERTAIN', 'REVIEW_CHANGED', 'SNAPSHOT_RESELECTION_REQUIRED', 'DRAFT_VERSION_CHANGED'].some((code) => hasErrorCode(error, code))) { await initializeStartup(); return; }
+      if (['IMPORT_COMMIT_OUTCOME_UNCERTAIN', 'REVIEW_CHANGED', 'SNAPSHOT_RESELECTION_REQUIRED', 'DRAFT_VERSION_CHANGED'].some((code) => hasErrorCode(error, code))) { if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error'); return; }
       throw error;
     }
   }
-  async function finishSourceImport(review: ReviewBeforeSourceImportProjection, recoveryReturn?: RecoveryReturnContext): Promise<void> {
+  async function finishSourceImport(review: ReviewBeforeSourceImportProjection, recoveryReturn?: RecoveryReturnContext, follow: NavigationCheckpoint = shellNavigation.route()): Promise<void> {
     const result = await rendererApi.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
       reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
     void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'source-only' }).catch(() => setStatus('未能记住导入设置。', 'error'));
-    renderImported(result, recoveryReturn); setStatus(result.completionLabel, 'success');
+    if (follow.isCurrent()) renderImported(result, recoveryReturn);
+    setStatus(result.completionLabel, 'success');
   }
 
   function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
@@ -884,6 +889,7 @@ export function createImportReview(options: ImportReviewOptions) {
       review.target.kind === 'new-book' ? '新建图书并导入来源材料' : '导入来源材料到所选图书',
       'primary',
       async () => {
+        const follow = shellNavigation.route();
         commitButton.disabled = true;
         setStatus(technicalWords('正在原子提交来源材料记录…', '正在添加资料…'), 'busy');
         try {
@@ -894,7 +900,7 @@ export function createImportReview(options: ImportReviewOptions) {
             commitAttemptId: review.commitAttemptId,
           });
           setStatus(result.completionLabel, 'success');
-          renderImported(result, recoveryReturn);
+          if (follow.isCurrent()) renderImported(result, recoveryReturn);
         } catch (error) {
           if (
             hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
@@ -902,7 +908,7 @@ export function createImportReview(options: ImportReviewOptions) {
             hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') ||
             hasErrorCode(error, 'DRAFT_VERSION_CHANGED')
           ) {
-            await initializeStartup();
+            if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error');
             return;
           }
           commitButton.disabled = false;
@@ -1192,6 +1198,7 @@ export function createImportReview(options: ImportReviewOptions) {
       cancelCommit.dataset['cancelReimportCommit'] = 'true';
       cancelCommit.hidden = true;
       const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
+        const follow = shellNavigation.route();
         commit.disabled = true;
         abandon.disabled = true;
         setStatus('正在有界核对并提交稿件重新导入结果…', 'busy');
@@ -1225,12 +1232,12 @@ export function createImportReview(options: ImportReviewOptions) {
           if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
             throw new Error('重新导入提交任务未返回完成凭据。');
           }
-          renderImported(result, recoveryReturn);
+          if (follow.isCurrent()) renderImported(result, recoveryReturn);
           setStatus(result.completionLabel, 'success');
         } catch (error) {
           if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
             hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
-            await initializeStartup();
+            if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
             return;
           }
           commit.disabled = false;
@@ -1333,6 +1340,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const acceptedDegradation = review.degradationDecision.state === 'accepted-complete-set';
       const explanation = element('p', undefined, commitNote(acceptedDegradation));
       const commitButton = button(finalActionLabel, 'primary', async () => {
+        const follow = shellNavigation.route();
         commitButton.disabled = true;
         setStatus(technicalWords(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', '正在导入…'), 'busy');
         try {
@@ -1343,7 +1351,7 @@ export function createImportReview(options: ImportReviewOptions) {
             commitAttemptId: review.commitAttemptId,
           });
           setStatus(result.completionLabel, 'success');
-          renderImported(result, recoveryReturn);
+          if (follow.isCurrent()) renderImported(result, recoveryReturn);
         } catch (error) {
           if (
             hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
@@ -1351,7 +1359,7 @@ export function createImportReview(options: ImportReviewOptions) {
             hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') ||
             hasErrorCode(error, 'DRAFT_VERSION_CHANGED')
           ) {
-            await initializeStartup();
+            if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error');
             return;
           }
           commitButton.disabled = false;

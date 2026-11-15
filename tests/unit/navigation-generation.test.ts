@@ -8,13 +8,17 @@ import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue'];
+const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm'];
 const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
 const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let settingsLoader='';
 function findSettings(node:ts.Node):void {if(ts.isFunctionDeclaration(node)&&node.name?.text==='renderModelServiceSettings')settingsLoader=node.getText(settingsSource);ts.forEachChild(node,findSettings);}
 findSettings(settingsSource);
-const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const importSource = ts.createSourceFile('import-review.ts', readFileSync(new URL('../../src/renderer/import-review.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
+const importLoaders:string[]=[];
+function findImportLoaders(node:ts.Node):void {if(ts.isFunctionDeclaration(node)&&['finishImport','finishSourceImport'].includes(node.name?.text??''))importLoaders.push(node.getText(importSource));ts.forEachChild(node,findImportLoaders);}
+findImportLoaders(importSource);
+const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const procedureSource = ts.createSourceFile('procedure-library.ts', readFileSync(new URL('../../src/renderer/procedure-library.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 const selectionDeclarations: string[] = [];
 function visit(node: ts.Node): void {
@@ -31,6 +35,7 @@ function harness(api: object = {}) {
   const screen = document.createElement('main'); miniDocument.body.append(screen as unknown as MiniElement);
   Object.defineProperty(screen, 'firstElementChild', {get:()=>screen.children[0]??null});
   const setStatus = vi.fn(), focus = vi.fn();
+  const actions=new Map<string,()=>void|Promise<void>>();
   const element = (tag: string, className?: string, text?: string) => {
     const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text;
     node.focus = focus; return node;
@@ -44,7 +49,7 @@ function harness(api: object = {}) {
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
   const guardedApi = reconcileBookWorkbenchApi(api as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:vi.fn()},navigation);
-  context = createContext({ navigation, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+  context = createContext({ navigation, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     mountGlobalAgent: vi.fn(() => element('section')), renderBookOverview, renderBaselineAnalysis,
     HTMLElement, SETTINGS_HUB_GROUPS: [], settingsNavigation:()=>element('nav'), overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
     restoreCurrentScreen: vi.fn(), currentRecoveryReturn: () => undefined, recoveryReturnContexts: new WeakMap(),
@@ -62,7 +67,7 @@ function harness(api: object = {}) {
     paintModelServiceSettings:()=>replaceScreen('model-service'),focusSearchSettings:vi.fn(),
     KEYBOARD_SECTION_LABEL:'键盘',KEYBOARD_TITLE:'键盘与无障碍',USAGE_RETURN:'返回',
     mountKeyboardSettings:()=>vi.fn(),applyKeyboardBindings:vi.fn(),
-    button:(label:string,_class:string,run:()=>void)=>{const button=element('button','',label);button.addEventListener('click',run);return button;},
+    button:(label:string,_class:string,run:()=>void)=>{const button=element('button','',label);button.addEventListener('click',run);actions.set(label,run);return button;},
     renderEditorWindow: vi.fn((window:{bookId:string}) => {const node=element('section');node.dataset['bookId']=window.bookId;replaceScreen('editor',node);}),
     mountProposalConflict:vi.fn((options)=>{context['conflictOptions']=options;return {start:vi.fn(),destroy:vi.fn(),settle:async()=>true};}),
     conflictCompletionOn:(onDocument:boolean)=>onDocument?'文档结果':'修改已应用',documentContextOf:async()=>({}),technicalWords:(_technical:string,ordinary:string)=>ordinary,renderStartupProjection:vi.fn(),
@@ -72,7 +77,7 @@ function harness(api: object = {}) {
     renderTaskOverview: vi.fn(), openOverviewTask: vi.fn(), openOverviewResult: vi.fn(),
   });
   runInContext(program, context);
-  return { screen, setStatus, focus, shell, context, renderBookOverview, renderBaselineAnalysis, replaceScreen,
+  return { screen, setStatus, focus, shell, context, actions, renderBookOverview, renderBaselineAnalysis, replaceScreen,
     run: (expression: string) => runInContext(expression, context) as Promise<void> };
 }
 
@@ -344,4 +349,69 @@ it('conflict success keeps its document wording after its own destination commit
  const options=page.context['conflictOptions'] as {returnToManuscript(at:{blockId:string;markId:null},completion:string):Promise<void>};
  await options.returnToManuscript({blockId:'block',markId:null},'kept');
  expect(page.screen.dataset['screen']).toBe('editor');expect(page.setStatus).toHaveBeenLastCalledWith('文档结果','success');
+});
+
+it.each(['finishImport','finishSourceImport'])('an import acknowledgement preserves a later pending click (%s)', async (loader) => {
+ const write=Promise.withResolvers<object>();
+ const page=harness({commitNewBookImport:()=>write.promise,commitSourceImport:()=>write.promise});
+ page.replaceScreen('import-review');
+ const pending=page.run(`${loader}({reviewDigest:'digest',draftId:'draft',draftVersion:1,commitAttemptId:'attempt'})`);
+ const later=navigation.begin();
+ write.resolve({bookId:'book-a',completionLabel:'导入已完成'});await pending;
+ expect(page.context['renderImported']).not.toHaveBeenCalled();expect(later.isCurrent()).toBe(true);
+ expect(page.setStatus).toHaveBeenCalledWith('导入已完成','success');
+});
+
+it('a new Book acknowledgement preserves a later pending click', async () => {
+ const write=Promise.withResolvers<object>(),started=Promise.withResolvers<void>();
+ const page=harness({prepareBookCreation:async()=>({proposed:{},reviewDigest:'digest'}),commitBookCreation:()=>{started.resolve();return write.promise;}});
+ await page.run('renderBookCreationForm()');
+ page.screen.querySelector<HTMLInputElement>('[id="empty-book-title"]')!.value='图书';
+ page.screen.querySelector<HTMLInputElement>('[id="empty-book-number"]')!.value='';
+ const pending=page.actions.get('新建图书')!();await started.promise;
+ const later=navigation.begin();write.resolve({overview:{book:{bookId:'book-a'}},completionLabel:'图书已创建'});await pending;
+ expect(page.renderBookOverview).not.toHaveBeenCalled();expect(later.isCurrent()).toBe(true);
+ expect(page.setStatus).toHaveBeenCalledWith('图书已创建','success');
+});
+
+it('an import keeps the click checkpoint across preparation and commit', async () => {
+ const write=Promise.withResolvers<object>();const page=harness({commitNewBookImport:()=>write.promise});
+ page.replaceScreen('import-review');page.context['follow']=navigation.route();
+ const later=navigation.begin();
+ const pending=page.run("finishImport({reviewDigest:'digest',draftId:'draft',draftVersion:1,commitAttemptId:'attempt'},undefined,follow)");
+ write.resolve({bookId:'book-a',completionLabel:'导入已完成'});await pending;
+ expect(page.context['renderImported']).not.toHaveBeenCalled();expect(later.isCurrent()).toBe(true);
+ expect(page.setStatus).toHaveBeenCalledWith('导入已完成','success');
+});
+
+it('abandoning import preserves a later click while its destination is still pending', async () => {
+ const write=Promise.withResolvers<object>();const page=harness({abandonImportDraft:()=>write.promise});
+ page.replaceScreen('import-review');const pending=page.run("abandonAndContinue({draftId:'draft',draftVersion:1})");
+ const later=navigation.begin();write.resolve({state:'none'});await pending;
+ expect(page.context['renderStartupProjection']).not.toHaveBeenCalled();expect(later.isCurrent()).toBe(true);
+ expect(page.setStatus).toHaveBeenCalledWith('已放弃本次导入','success');
+});
+
+it('a pending leave gates Book calls while unrelated knowledge reads finish immediately', async () => {
+ const answer=Promise.withResolvers<void>();const scoped=vi.fn(async()=>({bookId:'book-a'})),knowledge=vi.fn(async()=>({profiles:[]}));
+ const page=harness({leaveBookWorkbench:()=>answer.promise,getManuscriptWindow:scoped,inspectEvaluationProfiles:knowledge});
+ const leaving=page.run('renderGlobalAgent()');
+ const waiting=page.run("api.getManuscriptWindow({manuscriptId:'manuscript',branchId:'branch',cursor:null})");
+ await page.run('api.inspectEvaluationProfiles()');
+ expect(knowledge).toHaveBeenCalledOnce();expect(scoped).not.toHaveBeenCalled();
+ answer.resolve();await Promise.all([leaving,waiting]);expect(scoped).toHaveBeenCalledOnce();
+});
+
+it('the real shell distinguishes the primary manuscript and derivative documents', () => {
+ const page=harness();const primary=document.createElement('section'),derivative=document.createElement('section');
+ primary.dataset['bookId']='book-a';derivative.dataset['bookId']='book-a';derivative.dataset['documentId']='document-a';
+ page.replaceScreen('editor',primary);const pending=navigation.route();page.replaceScreen('editor',derivative);
+ expect(pending.isCurrent()).toBe(false);
+});
+
+it('opening another conflict supersedes pending navigation without an explicit begin', async () => {
+ const page=harness();await page.run("renderProposalConflict({bookId:'book-a',manuscriptId:'manuscript',branchId:'branch',markId:'first'},'图书')");
+ const pending=navigation.route();
+ const options=page.context['conflictOptions'] as {openConflict(markId:string):void};options.openConflict('second');
+ expect(pending.isCurrent()).toBe(false);expect(page.screen.firstElementChild?.getAttribute('data-conflict-mark-id')).toBe('second');
 });

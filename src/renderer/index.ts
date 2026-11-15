@@ -235,7 +235,6 @@ const updateStatusSurface = createStatusSurface(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 
-
 /**
  * How each surface on screen that raises a Task reads it again, by the Task's kind: J-03's card on
  * 工作概览, ②A, ②B, and 工作概览's one-line summaries. The drawer's bar starts a Task or reconfirms its plan
@@ -702,7 +701,6 @@ async function settleScreen(): Promise<boolean> {
   }
 }
 
-
 async function guardNavigationRead<T>(current: NavigationCheckpoint, read: () => Promise<T>): Promise<T | undefined> {
   try { return await read(); } catch (error) { if (current.isCurrent()) throw error; }
 }
@@ -1116,8 +1114,9 @@ function restoreCurrentScreen(): () => void | Promise<void> {
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
   const bookId = content.dataset['bookId'] ?? place?.bookId ?? null;
   const tab = content.dataset['knowledgeTab'] ?? content.dataset['qualityTab'] ?? place?.section ?? null;
-  const object = content.dataset['manuscriptId'] ?? content.dataset['revisionId'] ?? content.dataset['seriesId'] ?? null;
-  navigation.commit(JSON.stringify([state, bookId, tab, object]), bookId);
+  const object = content.dataset['documentId'] ?? content.dataset['manuscriptId'] ?? content.dataset['revisionId'] ?? content.dataset['seriesId'] ?? null;
+  const conflict = content.dataset['conflictMarkId'] ?? null;
+  navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId);
   if (state !== 'task-overview') overviewDrawerBookId = null;
   screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;
@@ -2137,7 +2136,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   view.disabled = true;
   restore.disabled = true;
   const defer = button('稍后处理', 'quiet', async () => {
-    const origin = navigation.read(content);
+    const origin = navigation.route();
     view.disabled = true;
     restore.disabled = true;
     defer.disabled = true;
@@ -2156,8 +2155,8 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         attentionVersion: deferred.attentionVersion,
         bookTitle: recovery.bookTitle,
       } satisfies RecoveryReturnContext;
-      if (deferred.next.state === 'import') await renderStartupProjection(deferred.next.startup, recoveryReturn, navigation.route());
-      else await renderLandingFromAuthority(deferred.next.priorWork, recoveryReturn, navigation.route());
+      if (deferred.next.state === 'import') await renderStartupProjection(deferred.next.startup, recoveryReturn, origin);
+      else await renderLandingFromAuthority(deferred.next.priorWork, recoveryReturn, origin);
     } catch (error) {
       setStatus(rendererErrorMessage(error, '恢复待确认状态未能保留。'), 'error');
       view.disabled = selection === undefined;
@@ -2343,7 +2342,7 @@ async function abandonAndContinue(
   recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>,
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
-  const origin = navigation.read(screen.firstElementChild as HTMLElement);
+  const origin = navigation.route();
   setStatus(technicalWords('正在核对提交证据并放弃非权威草稿…', '正在放弃本次导入…'), 'busy');
   try {
     const startup = await api.abandonImportDraft({
@@ -2351,7 +2350,7 @@ async function abandonAndContinue(
       expectedDraftVersion: recovery.draftVersion,
     });
     setStatus(startup.state === 'none' ? technicalWords('已放弃导入草稿并安全清理暂存引用', '已放弃本次导入') : technicalWords('已核对导入状态', '已更新导入状态'), 'success');
-    if (origin.isCurrent()) await renderStartupProjection(startup, recoveryReturn, navigation.route());
+    if (origin.isCurrent()) await renderStartupProjection(startup, recoveryReturn, origin);
   } catch (error) {
     renderError(error, () => void initializeStartup());
   }
@@ -3024,6 +3023,7 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
 function renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void {
   const content = panel();
   content.classList.add('proposal-conflict-workspace');
+  content.dataset['conflictMarkId'] = target.markId;
   content.dataset['bookId'] = target.bookId;
   let origin: NavigationCheckpoint;
   const surface = mountProposalConflict({
@@ -3883,6 +3883,7 @@ function renderBookCreationForm(): void {
   // 新建图书 (Issue #1410 item 20): one click prepares and commits the empty Book and opens its 工作概览; the service's
   // review digest still binds the commit to what was prepared, with no separate review page in between.
   const create = button('新建图书', 'primary', async () => {
+    const follow = navigation.route();
     clearFieldError(title, titleError);
     clearFieldError(internalNumber, numberError);
     const normalizedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -3904,7 +3905,7 @@ function renderBookCreationForm(): void {
       });
       const result = await api.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
       setStatus(result.completionLabel, 'success');
-      renderBookOverview(result.overview);
+      if (follow.isCurrent()) renderBookOverview(result.overview);
     } catch (error) {
       create.disabled = false;
       if (hasErrorCode(error, 'TITLE_INVALID')) {

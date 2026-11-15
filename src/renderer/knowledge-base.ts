@@ -63,7 +63,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it; `materialId` is
    * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
    */
-  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null, current: NavigationCheckpoint = navigation.begin()): Promise<void> {
+  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null, current: NavigationCheckpoint = navigation.begin(), notice?: string): Promise<void> {
     if (tab === 'home') {
       const content = panel();
       content.classList.add('knowledge-base');
@@ -76,12 +76,11 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const page = navigation.read(content);
       options.rememberReturn(content, () => renderKnowledgeBase());
       await mountKnowledgeBaseHome(home, rendererApi, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
-      if (page.isCurrent()) setStatus('知识库已打开');
+      if (page.isCurrent()) setStatus(notice ?? '知识库已打开');
       return;
     }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
-      await renderKnowledgeBase('home', false, null, current);
-      if (current.isCurrent()) setStatus('该页在开发者模式下显示');
+      await renderKnowledgeBase('home', false, null, current, '该页在开发者模式下显示');
       return;
     }
     if (tab === 'rules') {
@@ -364,10 +363,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * A Book's 学习准入待处理 deep link still opens that exact Book in the developer eligibility view.
    */
   async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'preferences', bookId: string | null = null, tabFocused = false,
-    openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null, current: NavigationCheckpoint = navigation.begin()): Promise<void> {
+    openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null, current: NavigationCheckpoint = navigation.begin(), notice?: string): Promise<void> {
     if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
-      await renderQualityLearning('preferences', null, false, null, null, current);
-      if (current.isCurrent()) setStatus('该页在开发者模式下显示');
+      await renderQualityLearning('preferences', null, false, null, null, current, '该页在开发者模式下显示');
       return;
     }
     const qualityTabs = visibleQualityLearningTabs(technicalLayerVisible);
@@ -441,7 +439,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const metrics = element('div'); section.append(metrics);
         await mountEditQualitySignals(metrics, rendererApi);
       }
-      if (page.isCurrent()) setStatus(status.opened);
+      if (page.isCurrent()) setStatus(notice ?? status.opened);
     } catch (error) {
       if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, status.unavailable), 'error');
@@ -620,10 +618,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const off = button('停用', 'secondary', async () => {
           off.disabled = true;
           setStatus('正在停用默认执行规则…', 'busy');
-          const origin = navigation.read(content);
+          const origin = navigation.route();
           try {
             await rendererApi.deactivateDefaultExecutionRule({ ruleId: rule.ruleId });
-            if (origin.isCurrent()) await renderKnowledgeBase('rules', false, null, navigation.route());
+            if (origin.isCurrent()) await renderKnowledgeBase('rules', false, null, origin);
             setStatus(`已停用默认执行规则：${rule.name}；快速开始不再使用它。`, 'success');
           } catch (error) {
             off.disabled = false;

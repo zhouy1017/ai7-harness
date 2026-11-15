@@ -1456,7 +1456,7 @@ async function main() {
         while (!existsSync(`${navigationHoldPath}.held`) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
         requireJourney(existsSync(`${navigationHoldPath}.held`), 'navigation-answer-held');
         await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'navigation-open-knowledge');
-        await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, 'navigation-knowledge-open');
+        await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-open');
         await renderer.evaluate(`window.__j11NavigationSnapshot = {screen:document.querySelector('#screen').firstElementChild,focus:document.activeElement,status:document.querySelector('#persistence-status').textContent}`);
         requireJourney(!existsSync(`${navigationHoldPath}.released`), 'navigation-still-held');
         await writeFile(navigationHoldPath, 'release');

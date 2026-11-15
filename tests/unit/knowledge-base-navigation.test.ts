@@ -19,7 +19,7 @@ function navigation(returnToOrigin: KnowledgeBaseOptions['returnToOrigin'] = vi.
   const setStatus = vi.fn();
   const options: KnowledgeBaseOptions = {
     element, panel: () => element('section'), setStatus, rendererErrorMessage: (_error, fallback) => fallback,
-    replaceScreen: (_state, content) => root.replaceChildren(content), rememberReturn: vi.fn(),
+    replaceScreen: (state, content) => { shellNavigation.commit(JSON.stringify([state,content.dataset['knowledgeTab'],content.dataset['qualityTab']])); root.replaceChildren(content); }, rememberReturn: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
     technicalDetails: () => element('details'), leaveThen: async (open) => open(),
     openWordSourceVersion: vi.fn(), renderGlobalAgent: vi.fn(), returnToOrigin, initializeStartup: vi.fn(),
@@ -28,6 +28,14 @@ function navigation(returnToOrigin: KnowledgeBaseOptions['returnToOrigin'] = vi.
   };
   return { root, setStatus, ...createKnowledgeBase(options) };
 }
+
+it.each(['knowledge','quality'])('keeps the ordinary developer-only redirect notice after its own %s commit', async (surface) => {
+ setTechnicalLayerVisible(false);
+ vi.stubGlobal('window',{ai7:{inspectGlobalAgent:async()=>({categories:[],books:[],items:[]}),inspectEditorialLearning:async()=>({enabled:true,controlEntries:0,items:[],signals:[],excludedBooks:[],excludedMaterials:[],nextItemOffset:null}),inspectHouseReviewPreference:async()=>({current:null,history:[]})}});
+ const page=navigation();
+ if(surface==='knowledge')await page.renderKnowledgeBase('rules');else await page.renderQualityLearning('learning');
+ expect(page.setStatus).toHaveBeenLastCalledWith('该页在开发者模式下显示');
+});
 
 it.each(['guidelines', 'library'] as const)('returns a direct %s entry to its Book surface', async (tab) => {
   vi.stubGlobal('window', { ai7: {
