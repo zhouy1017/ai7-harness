@@ -2104,7 +2104,7 @@ async function main() {
     at('readers-report-drafted');
     // AI7's draft waits to be opened; the other template can still be drafted; the 定稿 version it drafted from is unchanged.
     const draftedReport = await readReport((page) => page.templates[0]?.[2] !== null, 'readers-report-drafted-read');
-    requireJourney(draftedReport.task === '审稿意见「给作者的修改意见」 · 已完成' && JSON.stringify(draftedReport.templates) === JSON.stringify([
+    requireJourney(draftedReport.task === '审稿意见「给作者的修改意见」 · 已完成 · AI7 本地检查' && JSON.stringify(draftedReport.templates) === JSON.stringify([
       ['author', '给作者的修改意见', 'AI7 已写出草稿 · 依据第 14 版定稿 · 打开后在稿件编辑面上修改', [['create-draft', '打开草稿', false], ['open-task', '查看任务', false]]],
       ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
     ]), 'readers-report-drafted-words', draftedReport);

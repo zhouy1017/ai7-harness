@@ -1861,7 +1861,7 @@ async function main() {
     // back byte for byte — its own digest included — after the product has been closed and reopened.
     const restartedReport = restarted.taskOutcome?.report;
     requireJourney(restartedReport !== undefined && restartedReport !== null &&
-      canonicalJson({ ...restartedReport, reportDigest: undefined }) === reportJson &&
+      canonicalJson({ ...restartedReport, reportDigest: undefined, modelLabel: undefined }) === reportJson && restartedReport.modelLabel === report.modelLabel &&
       restartedReport.reportDigest === reportDigest && restarted.taskOutcome?.reportAbsentReason === null,
       'restart-run-report-identical', { reportDigest: restartedReport?.reportDigest, expected: reportDigest });
     cancellation.throwIfRequested();
