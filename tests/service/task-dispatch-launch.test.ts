@@ -251,6 +251,8 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     const test = await launchedLifecycle(kind);
     try {
       await test.reached;
+      expect(capture!.wireRequests.length).toBeGreaterThan(0);
+      expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
       if (action === 'restart') {
         const stopping = capture!.owner.dispose(); test.release(); await stopping;
         await restart(test.schedule);
@@ -278,6 +280,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
         }
       }
       expect(capture!.owner.busy).toBe(false);
+      expect(capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
     } finally { test.release(); }
   });
 

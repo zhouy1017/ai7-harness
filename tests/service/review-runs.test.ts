@@ -2892,6 +2892,7 @@ it('reconnects an offline ordinary review with every category on its launched mo
     expect(eventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
     expect(session.capture!.wireRequests).toHaveLength(0);
     session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
+    const changedDefault = session.store.getConfiguredModelRoleBinding('main-editorial');
     const waiting = session.store.waitingTaskRuns(book.bookId).find(run=>run.kind==='review-run')!;
     expect(session.store.taskPreflightDrift(waiting)).toEqual([]);
     let driven = Promise.resolve();
@@ -2908,7 +2909,7 @@ it('reconnects an offline ordinary review with every category on its launched mo
     }
     expect(session.capture!.wireRequests.length).toBeGreaterThan(0);
     expect(session.capture!.wireRequests.every(request=>request.model==='account-future-model' && request.reasoning_effort==='high')).toBe(true);
-    expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: defaults.model, reasoningEffort: 'off' });
+    expect(session.store.getConfiguredModelRoleBinding('main-editorial')).toEqual(changedDefault);
   } finally { await close(session); }
 });
 

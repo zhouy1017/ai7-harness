@@ -1331,7 +1331,7 @@ export class BaselineAnalysisStore {
       resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       safeNextAction: asString(record.safeNextAction),
       stop,
-      report: report === null ? null : { ...runReportProjection(report), ...launchedRunModelLabels(this.#db, report.runRecordId) },
+      report: report === null ? null : { ...runReportProjection(report), ...launchedRunModelLabels(this.#db, report.runRecordId, true) },
       reportAbsentReason: report === null ? PRE_RUN_REPORT_REASON : null,
     };
   }
