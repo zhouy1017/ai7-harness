@@ -651,6 +651,7 @@ function buildReadersReportTask(host: ReadersReportStoreHost, bookId: string, te
   const input = host.readersReportCall(() => readersReportContractInput(template, basis, readings.exemplars));
   const ledger = readersReportLedger(host, input, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) });
   const latest = latestReadersReport(host, bookId);
+  requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(latest?.projection.run?.state ?? null, READERS_REPORT_KIND));
   const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
   // What this preparation skipped for damage, and the contract it is recorded under (Issue #792).
   const skippedExemplars = [
