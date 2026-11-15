@@ -1,4 +1,4 @@
-import { launchedRevisionModelLabels } from '../../src/service/editorial-mark-source.js';
+import { launchedRevisionModelLabels, markModelLabels } from '../../src/service/editorial-mark-source.js';
 import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTES } from '../../src/shared/protocol/model-service.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -425,7 +425,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
         test.release(); await capture!.owner.whenIdle();
         expect(controlled.ledger.currentRunState(controlled.runRecordId!)).toBe(action === 'cancel' ? 'cancelled' : 'paused');
         if (action === 'pause') {
-          const alternative = store.getModelServiceRouteConnection('deepseek-open-platform')!;
+          const alternative = store.getModelServiceRouteConnection('deepseek-open-platform') ?? store.saveModelServiceConnection('另一渠道', null, 'needs-attention', 'deepseek-open-platform');
           store.saveModelServiceConnection(alternative.connectionName, alternative.credentialReference, 'ready', 'deepseek-open-platform');
           store.selectMainRoleModel('deepseek-open-platform', alternative.binding.modelId, 'off');
           const sent = capture!.wireRequests.length;
@@ -517,6 +517,22 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(fallback.ledger.loadExecutionPlan(fallback.runRecordId).productionBinding).toMatchObject({ model: defaults.model });
     expect(capture!.requests).toHaveLength(0);
   });
+});
+
+it('labels a legacy prepared-and-authorized result from its producing plan without a launch snapshot', async () => {
+  const target = await book('baseline-analysis'), answer = await lifecycleAnswers('baseline-analysis');
+  ordinary(request=>answer(request, store.baselineAnalysisLedger.definition));
+  const ledger=store.baselineAnalysisLedger;
+  let prepared=ledger.prepare({ phase:'start', bookId:target.bookId, goal:BASELINE_ANALYSIS_TASK_GOAL, update:null, reconfirm:false, launchPolicy:capture!.policy });
+  while(!prepared.done) prepared=ledger.prepare({phase:'advance',workId:prepared.workId!});
+  const plan=prepared.projection!;
+  const authorized=ledger.authorize(target.bookId,plan.taskIntent!.taskIntentId,plan.planEnvelope!.digest);
+  capture!.owner.admitOrQueue(authorized.dispatchRunRecordId!,ledger);await capture!.owner.whenIdle();
+  const expected=markModelLabels(capture!.launch.live).modelLabel;
+  expect(expected).toEqual(expect.any(String));
+  expect(ledger.inspect(target.bookId).taskOutcome!.report!.modelLabel).toBe(expected);
+  const db=new DatabaseSync(join(roots.dataRoot,'store','ai7.sqlite'),{readOnly:true});
+  try {expect(db.prepare('SELECT count(*) n FROM task_launch_snapshots').get()?.n).toBe(0);expect(launchedRevisionModelLabels(db,ledger.inspect(target.bookId).resultSetRevision!.revisionId)).toEqual({modelLabel:expected});}finally{db.close();}
 });
 
 it('drives two different kinds on the same Book without crossing their launched bindings', async () => {

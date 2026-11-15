@@ -252,7 +252,10 @@ const taskDrawer = mountTaskDrawer({
   errorCode: (error) => rendererErrorData(error)?.code ?? null,
   setStatus,
   awaitServiceJob,
-  onOpen: () => manuscriptOnScreen?.closeSupportingPanel(),
+  onOpen: () => {
+    manuscriptOnScreen?.closeSupportingPanel();
+    if (taskDrawer.view()?.kind === 'launch') taskResultWindow?.close(false);
+  },
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
     taskOverviewSurface?.refresh();

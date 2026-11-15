@@ -34,8 +34,8 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
     if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');
     else await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
   }
-  const started = await renderer.evaluate(`(() => {const button=document.querySelector('#task-drawer [data-task-drawer-control="launch"]');if(!button||button.disabled)return false;button.click();return true;})()`);
-  if (started !== true) throw new Error('task-launch-button-unavailable');
+  await renderer.evaluate(`(async () => {const drawer=document.querySelector('#task-drawer');drawer.getBoundingClientRect();await Promise.all(drawer.getAnimations().map(animation=>animation.finished.catch(()=>undefined)));})()`);
+  await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="launch"]', `${name}-start`);
   await waitFor(renderer, `(document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef) || !!document.querySelector('#task-drawer .task-bar-refusal')?.textContent`, `${name}-launched`, 120_000);
   const refusal = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' ? '' : document.querySelector('#task-drawer .task-bar-refusal')?.textContent??''`);
   if (refusal) throw new Error(`task-launch-refused/${refusal}`);

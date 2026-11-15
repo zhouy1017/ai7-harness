@@ -3106,6 +3106,7 @@ export class BaselineAnalysisStore {
     const binding = this.#binding(input.bookId), head = this.#workingHead(binding.manuscriptId, input.bookId);
     const blocks = this.readWorkingBlocks(head.branchId), update = this.#resolveSelectedBlocks(input.bookId, input.update);
     const mode = update?.mode ?? this.#definition.initialMode, selectedRange = update?.selectedRange ?? null;
+    requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选方式不一致。');
     const manifest = deriveCoverageManifest({ bookId: input.bookId, manuscriptId: binding.manuscriptId, branchId: head.branchId,
       revisionId: head.currentRevisionId, revisionLabel: head.currentRevisionLabel, revisionDigest: head.currentWorkingDigest, blocks });
     const canonical = canonicalPlanEdits(edits);
@@ -3113,6 +3114,7 @@ export class BaselineAnalysisStore {
     let definition = this.#planDefinition(canonical, mode);
     const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
     if (selected !== null) definition = withProcedureDefinition(definition, resolveProcedureForKind(this.#db, selected, definition.kind).document, selected);
+    definition = withEditorialMemoryDefinition(definition, this.#currentEditorialMemory(input.bookId));
     const previous = this.#revisionRows(input.bookId).at(-1);
     const reuse = this.#carriesPlan(mode) ? this.#derivePlan(mode, selectedRange, manifest,
       previous === undefined ? null : this.#planPredecessor(previous), definition) : null;

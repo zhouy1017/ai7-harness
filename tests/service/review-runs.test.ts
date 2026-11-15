@@ -2940,10 +2940,13 @@ it('continues an ordinary launched review after its running ledger view is evict
       executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } }, launchPolicy).projection.run!;
     const driving = driver.drive(run.reviewRunId); await gated.reached;
     for (let index = 0; index < 33; index += 1) {
-      const other = await importBook(session);
+      const other = await importSample1Book(session.store, roots.codeRoot, 'L2 sample1 缓存中的审阅');
+      await pinEditorialWorkspaceProfileRevision2(session.store, other.bookId);
       const launched = session.store.launchReviewRun({ bookId: other.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
       session.store.inspectReviewWorkspace(other.bookId, launched.projection.run!.reviewRunId);
     }
+    const restored = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+    expect(restored.state).toBe('running'); expect(restored.modelLabel).toBe('account-future-model@high');
     const defaults = session.store.getConfiguredModelRoleBinding('main-editorial')!;
     session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
     gated.release(); await driving;

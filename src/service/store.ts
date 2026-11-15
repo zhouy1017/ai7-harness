@@ -4083,8 +4083,8 @@ export class EditorialStore {
       const choice = this.#launchChoice('main-editorial', input.executionConfig ?? {}, input.rememberedChoice);
       const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
         ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
-      create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
-        ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
+      this.#analysisCall(() => create({ snapshotId: randomUUID(), execution: this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch, preview,
+        ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy));
       throw new StoreError('TASK_PREVIEW_FAILED', '这次计划暂时无法读取。');
     }
     const { clientCommandId, ...request } = input;
@@ -4791,10 +4791,11 @@ export class EditorialStore {
 
   /** Restore the existing admission queue, using each committed launch's own contract, without a renderer replay. */
   pendingLaunchedLedgerRuns(): Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> {
-    return this.#authority.prepare(`SELECT r.run_record_id FROM task_launch_snapshots l
-      JOIN analysis_run_records r ON r.run_record_id = l.run_id
+    return this.#authority.prepare(`SELECT r.run_record_id, a.canonical_json authorization FROM analysis_run_records r
+      JOIN analysis_run_authorizations a USING(authorization_id)
       WHERE (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) = 'authorized'
-      ORDER BY r.recorded_at, r.rowid`).all().map(row => {
+      ORDER BY r.recorded_at, r.rowid`).all().filter(row => typeof JSON.parse(String(row.authorization)).launchSnapshotId === 'string' &&
+        !this.#reviewRuns.ownsCategoryRun(String(row.run_record_id))).map(row => {
         const runRecordId = String(row.run_record_id);
         return { runRecordId, ledger: this.executionLedgerForRun(runRecordId) };
       });

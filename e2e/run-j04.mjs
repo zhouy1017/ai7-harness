@@ -2637,7 +2637,7 @@ async function main() {
       await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-tab="history"]','legacy-plan-history');
       await pointerClick(renderer,waitFor,`.baseline-analysis-card #analysis-range-${unit}`,'legacy-plan-select-range');
       await pointerClick(renderer,waitFor,'.baseline-analysis-card [data-analysis-action="reanalyze-range"]','legacy-plan-read-range');
-      await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(legacyTask)} && ['ready','changed'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanStart) && window.ai7.inspectBaselineAnalysis().then(plan=>JSON.stringify(plan.planRevision?.proposed?.selectedRange??plan.update?.selectedRange)===${JSON.stringify(JSON.stringify(expected.selectedRange))})`,'legacy-plan-updated');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(legacyTask)} && ['ready','changed'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanStart) && window.ai7.inspectBaselineAnalysis().then(plan=>{const range=plan.planRevision?.proposed?.selectedRange??plan.update?.selectedRange;return range?.startPosition===${expected.selectedRange.startPosition}&&range.endPosition===${expected.selectedRange.endPosition};})`,'legacy-plan-updated');
     };
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
