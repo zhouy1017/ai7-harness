@@ -191,6 +191,8 @@ export interface TaskPlanRequest {
 
 export type TaskLaunchOperation = LedgerTaskLaunchOperation;
 export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; operation: K; title: string;
+  /** Surface behavior after the launch commits; never sent to the service. */
+  onStarted?: () => void;
   input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
 
 export interface TaskDrawerSurface {
@@ -2906,6 +2908,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
             case 'launchEvaluationRewrite': result = await api.launchEvaluationRewrite({ ...next.input, clientCommandId: commandId, executionConfig, rememberedChoice }); break;
           }
           const kind = next.operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kinds[next.operation] as TaskPlanKind;
+          next.onStarted?.();
           options.onRecorded(kind, next.bookId, result.taskIntentId);
           options.setStatus(result.launchNotice ?? '已开始任务', 'success');
           if (ticket === current) surface.open({ bookId: next.bookId, kind, ref: result.taskIntentId }, finder, result.launchNotice, { view: 'run' });

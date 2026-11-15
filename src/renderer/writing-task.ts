@@ -372,7 +372,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     }
     const row = el('div', 'button-row');
     const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null));
-    const start = action('开始写作', 'primary', 'start', () => void prepare(null));
+    const start = action('开始写作', 'primary', 'start', () => void prepare(null, true));
     plan.disabled = busy || page.unavailable !== null;
     start.disabled = plan.disabled;
     plan.setAttribute('aria-controls', 'task-drawer');
@@ -464,7 +464,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false): Promise<void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -483,10 +483,11 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
     else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
     if (rule === null) {
+      const typeId = state.typeId;
       options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {
         typeId: state.typeId, audience: state.audience, channel: state.channel,
         requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds],
-      } });
+      }, ...(openDraftOnStart ? { onStarted: () => awaitDraft(typeId) } : {}) });
       sheet = null; paint(null); return;
     }
     busy = true;
