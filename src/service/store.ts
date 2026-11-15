@@ -4928,6 +4928,8 @@ export class EditorialStore {
       // The Evidence Assurance Level is the 事实核查 Task's alone (Issue #901): only that category's Task is handed it, and a
       // Review Run without one refuses it. An edit of the level alone leaves every other category's plan as it is.
       const { evidenceAssuranceLevel, ...shared } = input;
+      const budgetMembers = this.#reviewRuns.planFacts(input.bookId, input.ref).composite === undefined
+        ? tasks.filter(task => task.categoryId !== 'run-synthesis').length : 1;
       requireStore(evidenceAssuranceLevel === undefined || tasks.some((task) => task.categoryId === 'factual-review'),
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
       this.#transaction(this.#authority, () => {
@@ -4935,7 +4937,9 @@ export class EditorialStore {
         for (const task of tasks) {
           const factual = task.categoryId === 'factual-review';
           try {
-            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+            const summaryCeiling = task.categoryId === 'run-synthesis' && shared.runBudgetCeiling != null
+              ? { runBudgetCeiling: { ...shared.runBudgetCeiling, maxTotalTokens: shared.runBudgetCeiling.maxTotalTokens * budgetMembers } } : {};
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...summaryCeiling, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
               taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
             changed += 1;
           } catch (error) {

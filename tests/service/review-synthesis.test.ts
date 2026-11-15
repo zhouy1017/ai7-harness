@@ -502,3 +502,36 @@ it('inherits the first factual category’s editorial memory through the same fr
     } finally { db.close(); }
   }, sample1SynthesisAnswer, {}, false, true);
 });
+
+it('keeps a prepared multi-category synthesis on the edited combined ceiling and permits clearing it (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    let work = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
+    while (!work.done) work = session.store.advanceReviewRunPreparationWork(work.workId!);
+    let run = work.projection!.run!;
+    for (const ceiling of [200_000, 300_000, 999_999_999_999, null]) {
+      const target = { bookId: book.bookId, kind: 'review-run' as const, ref: run.reviewRunId };
+      const plan = session.store.inspectTaskPlan(target);
+      session.store.editTaskPlan({ ...target, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: [],
+        runBudgetCeiling: ceiling === null ? null : { kind: 'tokens', maxTotalTokens: ceiling } });
+      const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+      try {
+        const rows = db.prepare(`SELECT t.kind,p.canonical_json FROM analysis_task_intents t JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id
+          AND p.plan_version=(SELECT max(v.ordinal) FROM analysis_plan_versions v WHERE v.task_intent_id=t.task_intent_id)
+          AND p.component='provider-resolution-plan' WHERE t.book_id=? AND t.task_intent_id IN (
+            SELECT json_extract(member.value,'$.task.taskIntentId') FROM review_runs r JOIN json_each(r.canonical_json,'$.categories') member WHERE r.review_run_id=?)`).all(book.bookId, run.reviewRunId);
+        expect(rows.map(row => [row.kind, JSON.parse(String(row.canonical_json)).runBudgetCeiling])).toEqual(expect.arrayContaining([
+          ['editorial-review/typos-and-usage', ceiling === null ? 'unset' : { kind: 'tokens', maxTotalTokens: ceiling }],
+          ['editorial-review/style-and-format', ceiling === null ? 'unset' : { kind: 'tokens', maxTotalTokens: ceiling }],
+          ['editorial-review/run-synthesis', ceiling === null ? 'unset' : { kind: 'tokens', maxTotalTokens: ceiling * 2 }],
+        ]));
+      } finally { db.close(); }
+      work = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
+      while (!work.done) work = session.store.advanceReviewRunPreparationWork(work.workId!);
+      run = work.projection!.run!;
+    }
+    const current = workspace(session, book, run.reviewRunId).run!;
+    session.store.authorizeReviewRun(book.bookId, run.reviewRunId, current.categories.map(category => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+    await session.driver.drive(run.reviewRunId);
+    expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
+  });
+});

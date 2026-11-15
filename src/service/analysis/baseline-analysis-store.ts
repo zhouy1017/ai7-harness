@@ -1896,7 +1896,7 @@ export class BaselineAnalysisStore {
     ).get(taskIntentId, ordinal) as SqlRow | undefined;
     if (row === undefined) return NO_PLAN_EDITS;
     try {
-      return planEditsOf(parseCanonicalJson(asString(row.canonical_json)));
+      return planEditsOf(parseCanonicalJson(asString(row.canonical_json)), this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     } catch {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }
@@ -1941,7 +1941,7 @@ export class BaselineAnalysisStore {
     // The Evidence Assurance Level is a factual-review Task's term alone (Issue #901); left out, the version keeps its own.
     requireAnalysis(input.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
       'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
-    const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel });
+    const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel }, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
     if (isRecord(intent.record.factualDecision)) requireAnalysis(planEditAssuranceLevel(next) === intent.record.factualDecision.level || planEditAssuranceLevel(next) === 'strict',
       'ANALYSIS_PLAN_EDIT_INVALID', '补充核查不能降低编辑决定要求的核查级别。');
@@ -3136,7 +3136,7 @@ export class BaselineAnalysisStore {
     const predecessor = modeDefinition.initial ? null : existing.resultSetRevision;
     requireAnalysis(modeDefinition.initial || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
     const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, blocks.length) : null;
-    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] });
+    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] }, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
     const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
     const instant = new Date().toISOString(), taskIntentId = randomUUID();
@@ -3207,7 +3207,7 @@ export class BaselineAnalysisStore {
       ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }) };
     const persist = (checkpoint: ManuscriptCheckpointBinding): void => {
       this.#insertIntent(intent);
-      const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits);
+      const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
       requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
       requireAnalysis(edits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
@@ -4795,7 +4795,7 @@ export class BaselineAnalysisStore {
     // editor withdrew is looked for — the split's words, and a class a later release adds, are not a plan's to answer.
     let editorEdits: PlanEdits;
     try {
-      editorEdits = planEditsOf(plan['execution-plan']);
+      editorEdits = planEditsOf(plan['execution-plan'], this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     } catch {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }

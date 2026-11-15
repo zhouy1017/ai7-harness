@@ -61,12 +61,12 @@ export function planEditCeiling(edits: PlanEdits): RunBudgetCeilingState {
 }
 
 /** A ceiling as the editor may set it: a whole count of tokens, at least one; `null` when it is not one. */
-function canonicalCeiling(value: unknown): PlanEditCeiling | null {
+function canonicalCeiling(value: unknown, maximum: number): PlanEditCeiling | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const tokens = record.maxTotalTokens;
   if (Object.keys(record).length !== 2 || record.kind !== 'tokens' || typeof tokens !== 'number' || !Number.isSafeInteger(tokens) ||
-      tokens < 1 || tokens > PLAN_EDIT_CEILING_MAX) return null;
+      tokens < 1 || tokens > maximum) return null;
   return { kind: 'tokens', maxTotalTokens: tokens };
 }
 
@@ -85,19 +85,20 @@ function known<T extends string>(values: ReadonlyArray<T>, value: unknown): valu
  * them reads back byte for byte; `null` — or no ceiling at all — sets none. `null` when anything in it is not an
  * editable item.
  */
+/** Internal parent aggregates may exceed the editor field's twelve digits; public callers keep that limit. */
 export function canonicalPlanEdits(input: {
   removedSteps: unknown;
   disallowedAdaptations: unknown;
   askFirstAdaptations?: unknown;
   runBudgetCeiling?: unknown;
   evidenceAssuranceLevel?: unknown;
-}): PlanEdits | null {
+}, ceilingMaximum = PLAN_EDIT_CEILING_MAX): PlanEdits | null {
   const { removedSteps, disallowedAdaptations } = input;
   // The level is named only when it is not the default (Issue #901), so a plan at 标准核查 reads back as it always did.
   const level = input.evidenceAssuranceLevel;
   if (level !== undefined && level !== 'quick' && level !== 'standard' && level !== 'strict') return null;
   const askFirst = input.askFirstAdaptations === undefined ? [] : input.askFirstAdaptations;
-  const ceiling = input.runBudgetCeiling === undefined || input.runBudgetCeiling === null ? null : canonicalCeiling(input.runBudgetCeiling);
+  const ceiling = input.runBudgetCeiling === undefined || input.runBudgetCeiling === null ? null : canonicalCeiling(input.runBudgetCeiling, ceilingMaximum);
   if (ceiling === null && input.runBudgetCeiling !== undefined && input.runBudgetCeiling !== null) return null;
   if (!Array.isArray(removedSteps) || !Array.isArray(disallowedAdaptations) || !Array.isArray(askFirst)) return null;
   if (!removedSteps.every((entry) => known(PLAN_EDITABLE_STEPS, entry))) return null;
@@ -117,11 +118,11 @@ export function canonicalPlanEdits(input: {
 }
 
 /** The edits a stored execution plan carries: none when it names none, and refused when what it names is not one. */
-export function planEditsOf(executionPlan: unknown): PlanEdits {
+export function planEditsOf(executionPlan: unknown, ceilingMaximum = PLAN_EDIT_CEILING_MAX): PlanEdits {
   const record = executionPlan !== null && typeof executionPlan === 'object' ? (executionPlan as Record<string, unknown>).editorEdits : undefined;
   if (record === undefined) return NO_PLAN_EDITS;
   const edits = record !== null && typeof record === 'object'
-    ? canonicalPlanEdits(record as { removedSteps: unknown; disallowedAdaptations: unknown; askFirstAdaptations?: unknown; runBudgetCeiling?: unknown; evidenceAssuranceLevel?: unknown })
+    ? canonicalPlanEdits(record as { removedSteps: unknown; disallowedAdaptations: unknown; askFirstAdaptations?: unknown; runBudgetCeiling?: unknown; evidenceAssuranceLevel?: unknown }, ceilingMaximum)
     : null;
   // A stored level is only ever the non-default one; a stored `standard` is not a record this ledger wrote.
   if (edits === null || planEditsAreEmpty(edits) || (record as { evidenceAssuranceLevel?: unknown }).evidenceAssuranceLevel === 'standard') throw new Error('PLAN_EDITS_INVALID');

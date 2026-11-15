@@ -1703,9 +1703,10 @@ export class ReviewRunStore {
         requireReview(projection.state === 'prepared' && projection.actions.canAuthorize && projection.taskIntent !== null && projection.planEnvelope !== null,
           'REVIEW_PLAN_UNAVAILABLE', `「${planned.entry.label}」的计划没有准备好。`);
         const ceiling = planned.entry.synthesisSource?.budgetCeiling;
-        if (ceiling !== undefined && ceiling !== 'unset' && (ledger.launch.live === null || ledger.launch.live.scope === 'ordinary-production')) {
+        if (ceiling !== undefined && (ledger.launch.live === null || ledger.launch.live.scope === 'ordinary-production') &&
+          canonicalJson(projection.providerResolutionPlan!.runBudgetCeiling) !== canonicalJson(ceiling)) {
           projection = ledger.editPlan(work.bookId, { taskIntentId: projection.taskIntent.taskIntentId,
-            planEnvelopeDigest: projection.planEnvelope.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling });
+            planEnvelopeDigest: projection.planEnvelope.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling === 'unset' ? null : ceiling });
         }
         work.prepared.push(this.#snapshotCategory(planned, projection));
         work.index += 1;
