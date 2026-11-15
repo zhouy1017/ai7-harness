@@ -2399,7 +2399,7 @@ export class ReviewRunStore {
       const { procedure, document } = record.composite;
       requireReview(isRecord(procedure) && isRecord(document) && document.id === procedure.procedureId && document.version === procedure.version &&
         sha256Hex(canonicalJson(document)) === procedure.digest && Array.isArray(document.members) &&
-        canonicalJson(document.members.map((member) => member.categoryId)) === canonicalJson(record.categories.map((category) => category.categoryId)),
+        canonicalJson(document.members.map((member) => member.categoryId)) === canonicalJson(record.categories.filter((category) => category.entry.synthesisKey === undefined).map((category) => category.categoryId)),
       'REVIEW_RECORD_INVALID', '组合工序记录无效。');
     }
     if (record.materialReferences !== undefined) {

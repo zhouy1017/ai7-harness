@@ -266,7 +266,7 @@ describe('revision 83 over earlier stores', () => {
       try {
         expect(Number(after.prepare('PRAGMA user_version').get()?.user_version)).toBe(LATEST_SCHEMA_VERSION);
         expect(IMPORTED_SKILL_UPDATE_SCHEMA_VERSION).toBe(83);
-        const added = new Set([...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)]);
+        const added = new Set(['review_run_synthesis', ...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)]);
         const rows = after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string }>;
         // At 81 the predecessor also traverses 7f's admitted Result Set rebuild; at 82 every pre-existing schema row is exact.
         expect((predecessor < 82 ? pre82SchemaRows(rows) : rows.map((row) => row.name === 'analysis_task_intents'

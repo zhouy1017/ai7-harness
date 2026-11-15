@@ -15,6 +15,7 @@ import { capturedOrdinaryExecution } from '../support/captured-ordinary-transpor
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 
 const TYPOS = 'typos-and-usage';
@@ -69,7 +70,7 @@ it('sends one structured synthesis request in ordinary production, preserves fin
     const first = session.store.launchReviewRun(input, launchPolicy);
     await driveLaunchedReviewRun(session.driver, first);
     const run = workspace(session, book).run!;
-    const outcome = JSON.stringify(run.eventTrail) + synthesisOutcome(session, book);
+    const outcome = synthesisOutcome(session, book);
     expect(run.synthesis?.state, outcome).toBe('completed');
     expect(run.findings.length).toBeGreaterThan(0);
     const requests = session.capture!.wireRequests.filter((request) => request.messages.some((message) => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')));
@@ -134,3 +135,44 @@ it.each(['pause', 'cancel'] as const)('preserves ordinary findings and launch bi
   } finally { release(); }
 });
 
+
+it('carries a completed synthesis and its frozen report through public export, Book merge and database replacement (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const run = session.store.generateReviewReport(book.bookId, workspace(session, book).run!.reviewRunId).run!;
+    expect(run.synthesis?.state).toBe('completed');
+    expect(run.report!.record.synthesis).toEqual(run.synthesis);
+    const destination = join(roots.inputRoot, 'synthesis.ai7db');
+    const prepared = await session.store.prepareDatabaseExport(destination, true);
+    expect((await session.store.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
+    for (const mode of ['merge', 'replacement'] as const) {
+      const dataRoot = join(roots.inputRoot, `${mode}-data`);
+      let target = await EditorialStore.open(dataRoot, roots.codeRoot);
+      try {
+        const preview = await target.inspectDatabaseImport(destination);
+        if (mode === 'merge') await target.prepareDatabaseMerge(preview.previewId, new Date());
+        else await target.prepareDatabaseReplacement(preview.previewId, new Date());
+      } finally { target.markCleanShutdown(); target.close(); }
+      target = await EditorialStore.open(dataRoot, roots.codeRoot);
+      try {
+        const carried = target.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+        expect(carried.synthesis).toEqual(run.synthesis);
+        expect(carried.report!.record).toEqual(run.report!.record);
+        expect(carried.report!.digest).toEqual(run.report!.digest);
+      } finally { target.markCleanShutdown(); target.close(); }
+    }
+  });
+});
+
+it('adds a cascade-owned synthesis relation without an immutable deletion barrier (#1433)', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('PRAGMA foreign_keys=ON; CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY) STRICT;');
+    db.exec(RUN_SYNTHESIS_SCHEMA_SQL.review_run_synthesis);
+    db.prepare('INSERT INTO review_runs VALUES (?)').run('sample1-run');
+    db.prepare('INSERT INTO review_run_synthesis(review_run_id,synthesis_key,summary_json,summary_digest) VALUES (?,?,?,?)').run('sample1-run', 'sample1-summary', '{}', '0'.repeat(64));
+    expect(db.prepare("SELECT name FROM sqlite_schema WHERE type='trigger' AND tbl_name='review_run_synthesis'").all()).toEqual([]);
+    db.prepare('DELETE FROM review_runs WHERE review_run_id=?').run('sample1-run');
+    expect(db.prepare('SELECT * FROM review_run_synthesis').all()).toEqual([]);
+  } finally { db.close(); }
+});

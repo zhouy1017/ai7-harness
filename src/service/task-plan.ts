@@ -2577,7 +2577,7 @@ export function reviewRunPlan(input: {
           needsModelConnection,
           planEnvelopeDigest: null,
           categoryDigests: [...(local === undefined ? [] : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }]),
-            ...tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
+            ...tasks.filter(category => category.categoryId !== 'run-synthesis').map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
           reconfirm: null,
         };
   return {

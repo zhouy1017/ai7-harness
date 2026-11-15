@@ -8,7 +8,7 @@ import { LOCAL_STAGE_SCHEMA_SQL, REVIEW_RUN_SCHEMA_SQL } from '../../src/service
  * with whatever else later revisions added: a store that old never held them.
  */
 // Revision 90's local stage is a child of review_runs too; a genuine predecessor never held it.
-export const REVIEW_RUN_RELATIONS_DROP_ORDER: ReadonlyArray<string> = ['review_run_synthesis', ...Object.keys(LOCAL_STAGE_SCHEMA_SQL).reverse(), ...Object.keys(REVIEW_RUN_SCHEMA_SQL).reverse()];
+export const REVIEW_RUN_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [...Object.keys(LOCAL_STAGE_SCHEMA_SQL).reverse(), ...Object.keys(REVIEW_RUN_SCHEMA_SQL).reverse()];
 
 function builtin(categoryId: string): ReviewCategoryContractInput {
   const entry = reviewCategoryEntry(categoryId);

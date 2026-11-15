@@ -1,3 +1,4 @@
+import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
 import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
@@ -32,7 +33,7 @@ export const PROPOSAL_REVIEW_RELATIONS = Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL)
 
 /** The exact schema before 8b: its added objects are absent and its predecessor CHECK still stands. */
 export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: readonly T[]): Array<T | { name: string; sql: unknown }> {
-  const added = new Set([...Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL), ...Object.keys(PROPOSAL_REVIEW_TRIGGER_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL)]);
+  const added = new Set(['review_run_synthesis', ...Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL), ...Object.keys(PROPOSAL_REVIEW_TRIGGER_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL)]);
   return rows.filter((row) => !added.has(row.name)).map((row) => row.name === 'proposal_item_decisions'
     ? { ...row, sql: PROPOSAL_ITEM_DECISIONS_PRE77_SQL } : row);
 }
@@ -116,6 +117,7 @@ export function execPre74Fixture(db: DatabaseSync, sql: string): void {
 export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]): Array<{ name: string; sql: unknown }> {
   const materialIndex = rows.some((row) => row.name === 'material_index_builds');
   return [
+    ...Object.entries(RUN_SYNTHESIS_SCHEMA_SQL).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...IMPORTED_SKILL_SCHEMA_SQL, ...IMPORTED_SKILL_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...IMPORTED_SKILL_UPDATE_SCHEMA_SQL, ...IMPORTED_SKILL_UPDATE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, ...HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
@@ -214,7 +216,7 @@ export function restoreTaskIntentDraftPredecessor(db: DatabaseSync, narrow = tru
 
 /** The exact schema before revision 80 (Issue #423, slice 7a): no draft relations, and the revision-79 Task Intents text. */
 export function pre80SchemaRows<T extends { name: string; sql: unknown }>(rows: readonly T[]): Array<T | { name: string; sql: unknown }> {
-  const added = new Set([...Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL), ...Object.keys(TASK_INTENT_DRAFT_TRIGGER_SQL)]);
+  const added = new Set(['review_run_synthesis', ...Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL), ...Object.keys(TASK_INTENT_DRAFT_TRIGGER_SQL)]);
   // Synchronized delta with Issue #922 (slice 7f): a store before revision 80 is before revision 82 too.
   return pre82SchemaRows(rows).filter((row) => !added.has(row.name)).map((row) => row.name === 'analysis_task_intents'
     ? { ...row, sql: ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents } : row);

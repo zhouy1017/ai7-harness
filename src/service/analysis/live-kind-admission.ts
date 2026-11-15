@@ -175,8 +175,10 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
 function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
   if (definition.kind === 'editorial-review/run-synthesis') {
     const rule = liveKindRule(policy, definition.kind);
+    const material = liveMaterialContract(definition);
+    const baseDigest = material?.basePromptContractDigest ?? definition.promptContractDigest;
     if (definition.structuredOnly !== true || rule === null || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
-      definition.systemPrompt !== RUN_SYNTHESIS_PROMPT || definition.promptContractDigest !== RUN_SYNTHESIS_PROMPT_DIGEST) return null;
+      (material === null && definition.systemPrompt !== RUN_SYNTHESIS_PROMPT) || baseDigest !== RUN_SYNTHESIS_PROMPT_DIGEST) return null;
     return { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, payloadCategories: ['public-or-synthetic'] };
   }
   if (definition.kind === FACTUAL_REVIEW_KIND) {

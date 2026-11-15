@@ -182,7 +182,7 @@ describe('the Book-less Global Agent', () => {
 
 describe('revision 87 (Issue #1083)', () => {
   const objects = (db: DatabaseSync): Array<{ name: string; sql: string }> =>
-    db.prepare("SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'dialogue_tasks%' AND name NOT LIKE 'learning_supervision_directives%' ORDER BY name").all() as Array<{ name: string; sql: string }>;
+    db.prepare("SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name <> 'review_run_synthesis' AND name NOT LIKE 'dialogue_tasks%' AND name NOT LIKE 'learning_supervision_directives%' ORDER BY name").all() as Array<{ name: string; sql: string }>;
 
   it('migrates an exact revision-86 store by adding the supervision ledger and widening dialogue metadata, moving nothing else, and refuses an 87 without the ledger', async () => {
     const subject = await open();
