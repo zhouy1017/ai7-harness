@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, CONFIDENCE_LEVELS, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, CONFIDENCE_LEVELS, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, modelInteger, modelNumber, sha256Hex } from './canonical.js';
 import type { AnalysisSourceRangeProjection } from '../../shared/protocol.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import { CONFIDENCE_ALIASES, salvageSourceRanges, type AnalysisConfidence, type BaselineUnitResult } from './contract.js';
@@ -256,10 +256,15 @@ export function citedBlocksByUnit(closed: ReadonlyArray<ClosedUnitResult>): Map<
   return cited;
 }
 
-/**
- * The exact user-role message for the cross-unit reduction: header, the frozen instruction text, the
- * four topic sections over the whole closed unit set, then each unit's cited block identities.
- */
+/** Identity wrappers must carry the baseline message form; missing metadata cannot choose old bytes. */
+export function buildBoundCrossUnitMessage(closed: ReadonlyArray<ClosedUnitResult>, totalUnits: number,
+  binding: { readonly baselineMessageFormat?: 'ranges' | 'rows' } | null): string {
+  const format = binding?.baselineMessageFormat;
+  if (format !== 'ranges' && format !== 'rows') throw new Error('BASELINE_CROSS_UNIT_MESSAGE_FORMAT_REQUIRED');
+  return buildCrossUnitMessage(closed, totalUnits, format === 'rows');
+}
+
+/** Frozen header and instructions followed by topic rows; only retained messages include block identities. */
 export function buildCrossUnitMessage(closed: ReadonlyArray<ClosedUnitResult>, totalUnits: number, indexed = true): string {
   const contract = indexed ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT : BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1;
   let rowOrdinal = 0;
@@ -405,7 +410,7 @@ export function parseCrossUnitResult(
     if (candidate.rowRefs !== undefined) {
       for (const [refIndex, ref] of reader.array(Array.isArray(candidate.rowRefs) ? candidate.rowRefs : [candidate.rowRefs], `findings.${index}.rowRefs`, MAX_SIDES).entries()) {
         const reference = typeof ref === 'string' ? ref.trim().replace(/^\[\s*(.*?)\s*\]$/u, '$1').replace(/^r/iu, '') : ref;
-        const ordinal = modelNumber(reference);
+        const ordinal = modelInteger(reference);
         const row = Number.isSafeInteger(ordinal) && ordinal > 0 ? expected.rows?.[ordinal - 1] : undefined;
         if (row === undefined) reader.drop(`findings.${index}.rowRefs`, refIndex, 'row-out-of-set');
         else addSide({ unitOrdinal: row.unitOrdinal, sourceRanges: row.sourceRanges });

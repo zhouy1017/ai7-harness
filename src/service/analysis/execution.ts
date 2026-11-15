@@ -85,7 +85,7 @@ import {
   type ClarificationFacts,
 } from './clarifications.js';
 import {
-  buildCrossUnitMessage,
+  buildBoundCrossUnitMessage,
   crossUnitRows,
   citedBlocksByUnit,
   crossUnitRequestDigest,
@@ -3525,7 +3525,7 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         } else {
-          const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit?.baselineMessageFormat === 'rows') : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
+          const message = step === null ? buildBoundCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
           if (production !== null && step !== null && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };

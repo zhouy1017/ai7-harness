@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, CONFIDENCE_LEVELS, ModelResultReader, NO_USABLE_MODEL_ENTRIES, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, isRecord, modelNumber, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, CONFIDENCE_LEVELS, ModelResultReader, NO_USABLE_MODEL_ENTRIES, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, isRecord, modelInteger, modelNumber, sha256Hex } from './canonical.js';
 import type {
   AnalysisConflictProjection,
   AnalysisEntityKind,
@@ -87,8 +87,8 @@ export function salvageSourceRanges(reader: ModelResultReader, value: unknown, b
   maximum = MAX_ITEMS, blockLengths?: ReadonlyMap<string, number>): AnalysisSourceRangeProjection[] {
   const values = typeof value === 'number' || typeof value === 'string' ? [value] : value;
   const ranges = reader.array(values, section, maximum).flatMap<AnalysisSourceRangeProjection>((range, index) => {
-    const ordinal = typeof range === 'number' || typeof range === 'string' ? modelNumber(range)
-      : isRecord(range) && range.blockOrdinal !== undefined ? modelNumber(range.blockOrdinal) : undefined;
+    const ordinal = typeof range === 'number' || typeof range === 'string' ? modelInteger(range)
+      : isRecord(range) && range.blockOrdinal !== undefined ? modelInteger(range.blockOrdinal) : undefined;
     if (ordinal !== undefined) {
       const blockId = Number.isSafeInteger(ordinal) && (ordinal as number) > 0 ? [...blockIds][(ordinal as number) - 1] : undefined;
       if (blockId !== undefined) return [{ blockId, fromGrapheme: null, toGrapheme: null }];

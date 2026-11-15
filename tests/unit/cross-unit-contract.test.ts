@@ -7,6 +7,7 @@ import {
   BASELINE_CROSS_UNIT_RESULT_SCHEMA,
   CROSS_UNIT_FINDING_KINDS,
   buildCrossUnitMessage,
+  buildBoundCrossUnitMessage,
   crossUnitRows,
   citedBlocksByUnit,
   crossUnitRequestDigest,
@@ -228,4 +229,20 @@ it('recovers bracketed, case-variant and numeric row refs and removes duplicates
   ] }] } });
   const repeated = parseCrossUnitResult(JSON.stringify({ findings: [{ kind: 'contradiction', description: '设定', rowRefs: ['r7', 'r8', 'r7'] }] }), { ...EXPECTED, rows: crossUnitRows(CLOSED) });
   expect(repeated.ok && repeated.result.findings[0]!.sides).toHaveLength(2);
+});
+
+it('refuses a missing baseline message form instead of falling back through a wrapper', () => {
+  expect(() => buildBoundCrossUnitMessage(CLOSED, 8, {})).toThrow('BASELINE_CROSS_UNIT_MESSAGE_FORMAT_REQUIRED');
+  expect(() => buildBoundCrossUnitMessage(CLOSED, 8, null)).toThrow('BASELINE_CROSS_UNIT_MESSAGE_FORMAT_REQUIRED');
+  expect(buildBoundCrossUnitMessage(CLOSED, 8, { baselineMessageFormat: 'rows' })).toBe(buildCrossUnitMessage(CLOSED, 8));
+  expect(buildBoundCrossUnitMessage(CLOSED, 8, { baselineMessageFormat: 'ranges' })).toBe(buildCrossUnitMessage(CLOSED, 8, false));
+});
+
+it('drops exponent, radix and fractional row strings without losing the finding', () => {
+  const parsed = parseCrossUnitResult(JSON.stringify({ findings: [{ kind: 'contradiction', description: '同一证据',
+    rowRefs: ['r1e0', '0x1', '[r1.0]', 'r1', 'r2'] }] }), { ...EXPECTED, rows: crossUnitRows(CLOSED) });
+  expect(parsed).toMatchObject({ ok: true, result: { findings: [{ sides: [
+    { unitOrdinal: 1, sourceRanges: [range(BLOCK_A, 0, 4)] }, { unitOrdinal: 3, sourceRanges: [range(BLOCK_C, 0, 4)] },
+  ] }] } });
+  expect(parsed.ok && parsed.result.salvaged?.filter((entry) => entry.reason === 'row-out-of-set')).toHaveLength(3);
 });

@@ -175,7 +175,7 @@ export type UnitResultParseOutcome =
 
 /** The cross-unit suboperation of a kind that declares one (ADR 0066); `null` for a kind that does not. */
 export interface CrossUnitContractBinding {
-  /** Message form is independent of identity wrappers applied to this binding. */
+  /** Required for the baseline message builder, which refuses an absent form even under identity wrappers. */
   readonly baselineMessageFormat?: 'ranges' | 'rows';
   readonly promptContractDigest: string;
   readonly resultSchema: string;

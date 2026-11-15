@@ -202,3 +202,11 @@ it.each([3, '3', ['3'], [3, 3, '3']])('recovers and deduplicates ordinal referen
   const parsed = parseUnitResult(JSON.stringify({ synopsis: '概述', entities: [{ name: '人物', blockOrdinals }] }), { unitOrdinal: 1, blockIds: [BLOCK_A, BLOCK_B, BLOCK_C] });
   expect(parsed).toMatchObject({ ok: true, result: { entities: [{ sourceRanges: [{ blockId: BLOCK_C, fromGrapheme: null, toGrapheme: null }] }] } });
 });
+
+it('drops exponent, radix and fractional ordinal strings without losing valid references', () => {
+  const parsed = parseUnitResult(JSON.stringify({ synopsis: '概述', entities: [{ name: '人物', blockOrdinals: ['1e0', '0x1', '1.0', '1', 2] }] }), expected);
+  expect(parsed).toMatchObject({ ok: true, result: { entities: [{ sourceRanges: [
+    { blockId: BLOCK_A, fromGrapheme: null, toGrapheme: null }, { blockId: BLOCK_B, fromGrapheme: null, toGrapheme: null },
+  ] }] } });
+  expect(parsed.ok && parsed.result.salvaged?.filter((entry) => entry.reason === 'range-out-of-unit')).toHaveLength(3);
+});
