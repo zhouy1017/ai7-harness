@@ -1536,14 +1536,17 @@ export class ReviewRunStore {
     // Eligibility is finalized at its turn, after the model-produced findings exist. Legacy snapshots
     // contain no member and therefore never acquire one while continuing an older Run.
     if ((scope.kind === 'whole' || scope.kind === 'chapters') && planned.some((category) => category.entry.executor !== 'baseline-leads')) {
+      const source = planned.find((category) => category.entry.executor !== 'baseline-leads')!;
+      const sourceKind = this.#ledgers.ledgerOf(source.entry).definition.kind;
       planned.push({ position: planned.length + (local === null ? 1 : 2),
-        entry: { ...RUN_SYNTHESIS_ENTRY, synthesisKey: randomUUID() },
+        entry: { ...RUN_SYNTHESIS_ENTRY, synthesisKey: randomUUID(), synthesisSource: { categoryId: source.entry.categoryId,
+          kind: sourceKind, procedure: selectedProcedureForBook(this.#db, bookId, sourceKind) } },
         plan: { kind: 'task', mode: 'review-first', selectedRange: null } });
     }
     // 本社审阅偏好 (Issue #911): each model-backed category reads its own lines when its rule names the outbound category.
     const offeredPreferences = planned.filter((category) => category.entry.executor === 'review-category-contract').map((category) => {
       const kind = this.#ledgers.ledgerOf(category.entry).definition.kind;
-      return [kind, this.#ledgers.housePreference?.(bookId, category.entry.categoryId, kind, input.launchPolicy) ?? null] as const;
+      return [kind, this.#ledgers.housePreference?.(bookId, category.entry.synthesisSource?.categoryId ?? category.entry.categoryId, kind, input.launchPolicy) ?? null] as const;
     });
     const usedPreferences = offeredPreferences.flatMap(([kind, offer]) => offer === null || offer === 'closed' ? [] : [[kind, offer] as const]);
     const housePreferences = usedPreferences.length > 0 ? Object.fromEntries(usedPreferences)
@@ -1801,7 +1804,7 @@ export class ReviewRunStore {
         // not name this Run, so the preparation ends here and the editor chooses again.
         requireReview(!capturedVersionStopped(this.#db, work.procedure.pin.versionId), 'REVIEW_PROCEDURE_STALE',
           `可复用工序《${work.procedure.pin.title}》第 ${work.procedure.pin.version} 版在准备期间已停用；请重新选择它。`);
-        recordReviewRunProcedurePin(this.#db, reviewRunId, work.procedure.pin, work.prepared.map((category) => category.categoryId),
+        recordReviewRunProcedurePin(this.#db, reviewRunId, work.procedure.pin, work.prepared.filter((category) => category.entry.synthesisKey === undefined).map((category) => category.categoryId),
           work.procedure.leftOut, createdAt);
       }
       // The Task Intent Draft the Run was prepared from (Issue #423, slice 7a): promoted with the Run, once.
@@ -2081,7 +2084,7 @@ export class ReviewRunStore {
     const scope: ReviewRunScopeRequest = { kind: snapshot.scope.kind,
       fromChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.[0] ?? null : from,
       toChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.at(-1) ?? null : to };
-    return { categoryIds: snapshot.categories.map((category) => category.categoryId), scope,
+    return { categoryIds: snapshot.categories.filter((category) => category.entry.synthesisKey === undefined).map((category) => category.categoryId), scope,
       seriesId: snapshot.categories.find((category) => category.entry.seriesKnowledge === undefined && category.entry.seriesScopes?.length === 1)?.entry.seriesScopes?.[0]?.seriesId ?? null,
       capturedProcedure: captured === null ? null : { versionId: captured.versionId, documentSha256: captured.documentSha256 },
       procedureDefinition: snapshot.composite?.procedure ?? null, ...(snapshot.localPlan === undefined ? {} : { localCheck: snapshot.localPlan.options }),
@@ -4862,7 +4865,7 @@ export class ReviewRunStore {
     const { state, canContinue } = reviewRunState({
       authorized: authorization !== null,
       driving,
-      categories: categories.map((view) => ({ pending: view.pending, materialized: view.materialized !== null,
+      categories: categories.map((view) => ({ pending: view.pending, materialized: view.materialized !== null || view.category.entry.synthesisKey !== undefined && !view.pending,
         retained: typeof view.retained?.record.findingCount === 'number' && view.retained.record.findingCount > 0 })),
       stop,
       waiting,

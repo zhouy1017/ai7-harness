@@ -135,6 +135,7 @@ export function completedProcedureRuns(db: DatabaseSync, runId?: string): Proced
 
 export function readProcedureLibrary(db: DatabaseSync): ProcedureLibraryProjection {
   return { procedures: db.prepare('SELECT procedure_id FROM procedure_definitions ORDER BY pre_installed DESC, rowid').all()
+    .filter((row) => row.procedure_id !== 'ai7-procedure/review-run-synthesis')
     .map((row) => inspectProcedureDefinition(db, String(row.procedure_id))), completedRuns: completedProcedureRuns(db) };
 }
 

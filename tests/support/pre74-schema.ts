@@ -40,6 +40,7 @@ export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: 
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
+  if (version !== undefined && Number(version) < 116) db.exec('DROP TABLE IF EXISTS review_run_synthesis');
   if (Number(version) === LEARNING_CURATION_SCHEMA_VERSION && Number(db.prepare('PRAGMA user_version').get()?.user_version) === FACTUAL_CLAIM_SCHEMA_VERSION) {
     const enforced = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
     if (enforced) db.exec('PRAGMA foreign_keys = OFF');

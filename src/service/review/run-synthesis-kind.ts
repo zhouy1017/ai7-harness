@@ -1,4 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { REVIEW_SYNTHESIS_PLAN_LINE } from '../../shared/review-synthesis-wording.js';
+import { withProcedureDefinition } from '../procedures/execution.js';
+import { resolveProcedureForKind } from '../procedures/composite.js';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './category-configuration.js';
@@ -14,7 +17,7 @@ export const RUN_SYNTHESIS_ENTRY: ReviewCategoryConfigurationEntry = {
 };
 
 /** A book-level member of the existing review driver; its only model turn is cross-unit reduction. */
-export function runSynthesisKind(db: DatabaseSync, key: string): AnalysisKindDefinition {
+export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewCategoryConfigurationEntry['synthesisSource']): AnalysisKindDefinition {
   const { contractIdentity: _identity, ...base } = reviewCategoryKindDefinition(reviewCategoryContractInput(RUN_SYNTHESIS_ENTRY));
   const input = (): SynthesisInput => {
     const row = db.prepare('SELECT input_json, input_digest FROM review_run_synthesis WHERE synthesis_key = ?').get(key);
@@ -23,14 +26,14 @@ export function runSynthesisKind(db: DatabaseSync, key: string): AnalysisKindDef
   };
   const message = (): string => synthesisMessage(input());
   const digest = sha256Hex(canonicalJson({ prompt: RUN_SYNTHESIS_PROMPT_DIGEST, structuredOnly: true }));
-  return { ...base, structuredOnly: true, structuredInputKey: key, systemPrompt: RUN_SYNTHESIS_PROMPT,
+  const definition: AnalysisKindDefinition = { ...base, structuredOnly: true, structuredInputKey: key, systemPrompt: RUN_SYNTHESIS_PROMPT,
     priorBudgetUsage: () => {
       const row = db.prepare('SELECT prior_input_tokens, prior_output_tokens FROM review_run_synthesis WHERE synthesis_key = ?').get(key);
       return { inputTokens: Number(row?.prior_input_tokens ?? 0), outputTokens: Number(row?.prior_output_tokens ?? 0) };
     },
     promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, livePromptContractDigest: () => RUN_SYNTHESIS_PROMPT_DIGEST,
     schemaDigest: digest, reducerDigest: digest,
-    executionSteps: ['读取各章已形成的结构化发现与证据索引', '一次全书审阅统合总结'],
+    executionSteps: [REVIEW_SYNTHESIS_PLAN_LINE],
     updateExecutionSteps: [], assurance: null, assuranceAbsentReason: '统合总结保留原发现，由编辑判断。',
     crossUnit: { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, resultSchema: RUN_SYNTHESIS_SCHEMA,
       step: { label: '全书审阅统合总结', minimumClosedUnits: 0, notEnoughReason: '', requiredForCompletion: true,
@@ -46,4 +49,7 @@ export function runSynthesisKind(db: DatabaseSync, key: string): AnalysisKindDef
     },
     revisionComponents: (body) => ({ ...base.revisionComponents(body), runSynthesis: isRecord(body.runSynthesis) ? body.runSynthesis : null }),
   };
+  if (source?.procedure == null) return definition;
+  const member = resolveProcedureForKind(db, source.procedure, source.kind);
+  return withProcedureDefinition(definition, member.document, source.procedure);
 }

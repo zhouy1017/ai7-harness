@@ -157,7 +157,7 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
 export function preinstalledProcedureDefinitions(version: 1 | 2 | 3 = 3): readonly ProcedureDefinitionDocument[] {
   return [...(version === 3 ? BUILTIN_REVIEW_CATEGORY_CONFIGURATION : HISTORICAL_REVIEW_CATEGORY_CONFIGURATION).categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition(),
     ...(version >= 2 ? [localCheckProcedureDefinition()] : []),
-    ...(version === 3 ? [factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition(), runSynthesisProcedureDefinition()] : [])];
+    ...(version === 3 ? [factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition()] : [])];
 }
 
 export function runSynthesisProcedureDefinition(): ProcedureDefinitionDocument {
@@ -171,7 +171,7 @@ export function runSynthesisProcedureDefinition(): ProcedureDefinitionDocument {
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
   return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3(),
     ...preinstalledProcedureDefinitions(3).filter((document) => document.id === reviewProcedureId('style-and-format') || document.id === reviewProcedureId('plot-consistency')),
-    factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), fullReviewProcedureDefinition(), runSynthesisProcedureDefinition()];
+    factualClaimProcedureDefinition(), ...editorialProcedureDefinitions(), runSynthesisProcedureDefinition(), fullReviewProcedureDefinition()];
 }
 
 /** Kind identity selects the behavior-preserving pre-installed procedure. */

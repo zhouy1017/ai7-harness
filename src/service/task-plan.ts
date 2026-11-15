@@ -1,4 +1,5 @@
 import { markModelLabels } from './editorial-mark-source.js';
+import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
@@ -2626,8 +2627,8 @@ export function reviewRunPlan(input: {
     steps: [
       ...categories.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
-        label: isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
-        result: `${category.label}的发现（稿件上的标记）`,
+        label: category.categoryId === 'run-synthesis' ? '全书审阅统合总结' : isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
+        result: category.categoryId === 'run-synthesis' ? REVIEW_SYNTHESIS_PLAN_LINE : `${category.label}的发现（稿件上的标记）`,
         removable: false,
         removed: false,
       })),

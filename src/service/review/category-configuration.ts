@@ -64,6 +64,7 @@ export interface ReviewGuidelineDocument {
 export interface ReviewCategoryConfigurationEntry {
   /** Internal final member, pinned only on new Review Runs. */
   readonly synthesisKey?: string;
+  readonly synthesisSource?: { categoryId: string; kind: import('../../shared/protocol.js').AnalysisKindId; procedure: import('../../shared/protocol.js').ProcedureDefinitionPin | null };
   readonly crossChapter?: { readonly baseline: ReviewBaselineSource | null };
   readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;
   readonly researchDeclaration?: ResearchDeclaration;
