@@ -413,9 +413,8 @@ async function openAnalysisDestination(renderer, name) {
 }
 
 /**
- * Synchronized delta (#406): a mode's own button opens the two ways to begin. 先看计划 prepares the Task
- * and shows its plan; the quick start is a Default Execution Rule's to give (S75), so until one exists
- * it is shown disabled with the reason, and no Run starts behind a plan nobody has seen.
+ * Each ordinary update opens the execution chooser and starts from its bar. Its optional estimate is read-only;
+ * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
 async function startUpdate(renderer, mode, label, name) {
   // The three modes live under 历史与更新, so the editor goes there first, as they would.
@@ -1949,7 +1948,7 @@ async function main() {
       syncManifest.digest !== manifest.digest && syncManifest.units[0].digest !== manifest.units[0].digest &&
       syncManifest.units.slice(1).every((unit, index) => unit.digest === manifest.units[index + 1].digest && sameRange(unit, SAMPLE1_UNIT_RANGES[index + 1])) &&
       sameRecord(syncExpected.counts, { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 }) &&
-      preparedSync.update?.mode === 'sync-current' && preparedSync.update.modeLabel === '同步到当前稿件' && preparedSync.update.predecessorCurrent === true && preparedSync.update.selectedRange === null &&
+      preparedSync.update?.mode === 'sync-current' && preparedSync.update.modeLabel === '同步到当前稿件' && preparedSync.update.predecessorCurrent === false && preparedSync.update.selectedRange === null &&
       preparedSync.update.predecessor?.revisionId === revision.revisionId && preparedSync.update.predecessor.ordinal === 1 && preparedSync.update.predecessor.digest === revision.digest &&
       preparedSync.update.predecessor.manuscriptPin?.revisionId === revision.manuscriptPin.revisionId &&
       DIGEST_PATTERN.test(preparedSync.update.reusePlanDigest) && syncPlan?.schema === REUSE_PLAN_SCHEMA && syncPlan.mode === 'sync-current' &&
@@ -1968,12 +1967,12 @@ async function main() {
       preparedSync.providerResolutionPlan?.executionRoute?.fixtureIdentity === FIXTURE_IDENTITY && preparedSync.providerResolutionPlan?.executionRoute?.fixtureSha256 === fixtureDigest &&
       preparedSync.providerResolutionPlan?.remoteBinding?.providerProcessing?.decision === 'deny' &&
       preparedSync.update.predecessor.revisionId === revision.revisionId && preparedSync.authorization !== null && preparedSync.run !== null && preparedSync.taskOutcome !== null &&
-      preparedSync.actions?.canPrepare === false && preparedSync.actions?.canAuthorize === true,
+      preparedSync.actions?.canPrepare === false && preparedSync.actions?.canAuthorize === false,
     'sync-prepared-plan', { syncExpected, update: preparedSync?.update, unitScope: preparedSync?.runSourceScope?.unitScope, executionPlan: preparedSync?.executionPlan, actions: preparedSync?.actions });
     // Synchronized delta with Issue #418 (S72 D4): the card keeps the reuse plan's counts and digests as its
     // own data and names the plan in one line; the plan unit by unit, the goal and the predecessor it names
     // read in the Task Drawer, which opened in 完整 — the mode chosen before the restart (PLAN-010).
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
     const syncDrawer = await drawerShowing(renderer, preparedSync.taskIntent.taskIntentId, 'settled', 'sync-drawer');
     requireJourney(syncDrawer?.mode === 'full' && syncDrawer.stored === 'full' && syncDrawer.chips.position === '全书' &&
       syncDrawer.chips.revision === `任务输入修订版 ${preparedSync.checkpoint.revisionLabel}` &&
@@ -2079,7 +2078,7 @@ async function main() {
     requireJourney(preparedRange?.state === 'settled' && preparedRange.taskIntent?.mode === 'reanalyze-range' && preparedRange.taskIntent?.goal === RANGE_GOAL &&
       rangeManifest?.digest === syncManifest.digest && preparedRange.checkpoint?.revisionId === preparedSync.checkpoint.revisionId &&
       sameRecord(preparedRange.update?.selectedRange, selectedRange) && preparedRange.update.predecessor?.revisionId === revision2.revisionId &&
-      preparedRange.update.predecessor.ordinal === 2 && preparedRange.update.predecessor.digest === revision2.digest && preparedRange.update.predecessorCurrent === true &&
+      preparedRange.update.predecessor.ordinal === 2 && preparedRange.update.predecessor.digest === revision2.digest && preparedRange.update.predecessorCurrent === false &&
       sameRecord(rangeExpected.counts, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) && JSON.stringify(rangeExpected.closure) === JSON.stringify([3, 4]) &&
       rangePlan?.mode === 'reanalyze-range' && sameRecord(rangePlan.selectedRange, selectedRange) && JSON.stringify(rangePlan.recomputeClosure) === JSON.stringify(rangeExpected.closure) &&
       sameRecord(rangePlan.counts, rangeExpected.counts) && sameRecord(rangePlan.counts, rangeOption.expected) &&
@@ -2089,11 +2088,11 @@ async function main() {
       JSON.stringify(rangePlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['reused', 'invalidated', 'bypassed', 'bypassed', 'reused', 'reused', 'reused', 'reused']) &&
       JSON.stringify(preparedRange.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify(rangeExpected.recomputed) &&
       preparedRange.executionPlan?.recomputedUnitCount === 3 && preparedRange.executionPlan?.reusedUnitCount === 5 &&
-      preparedRange.planEnvelope?.digest !== preparedSync.planEnvelope.digest && preparedRange.actions?.canAuthorize === true,
+      preparedRange.planEnvelope?.digest !== preparedSync.planEnvelope.digest && preparedRange.actions?.canAuthorize === false,
     'range-prepared-plan', { rangeExpected, update: preparedRange?.update, unitScope: preparedRange?.runSourceScope?.unitScope });
     // Synchronized delta with Issue #418 (S72 D4, D5): the plan names the range as the paragraphs it holds;
     // the exact block range and the plan unit by unit read in the drawer's 查看技术详情.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'range-plan-preview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'range-plan-preview');
     const rangeDrawer = await drawerShowing(renderer, preparedRange.taskIntent.taskIntentId, 'settled', 'range-drawer');
     const rangeSpans = readSpansLabel(rangePlan, rangeManifest);
     requireJourney(rangeDrawer?.chips.position === `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段` && /^已选 [\d,]+ 字$/u.test(rangeDrawer.chips.selected ?? '') &&
@@ -2142,7 +2141,7 @@ async function main() {
       bookPlan.units.every((unit) => unit.disposition === 'recomputed' && unit.reason === 'bypassed-whole-book' && unit.reusedFrom === null) &&
       JSON.stringify(bookPlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['bypassed', 'invalidated', 'bypassed', 'bypassed', 'bypassed', 'bypassed', 'bypassed', 'bypassed']) &&
       JSON.stringify(preparedBook.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
-      preparedBook.executionPlan?.recomputedUnitCount === 8 && preparedBook.executionPlan?.reusedUnitCount === 0 && preparedBook.actions?.canAuthorize === true,
+      preparedBook.executionPlan?.recomputedUnitCount === 8 && preparedBook.executionPlan?.reusedUnitCount === 0 && preparedBook.actions?.canAuthorize === false,
     'book-prepared-plan', { bookExpected, update: preparedBook?.update });
     // Synchronized delta with Issue #418 (S72 D4): the plan unit by unit reads in the drawer.
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-book' && card.dataset.planReused==='0' && card.dataset.planRecomputed==='8' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='7' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析全书 · 全书 · 重新分析 8 个阅读范围，沿用 0 个 · 任务输入修订版 ${preparedBook.checkpoint.revisionLabel} · 计划版本 1`)}; })()`, 'book-plan-preview');
@@ -3395,7 +3394,7 @@ async function main() {
     const rangeRecordedPlan = rangeRecordedPrepared?.update?.reusePlan;
     requireJourney(rangeRecordedPrepared?.state === 'settled' && rangeRecordedPrepared.taskIntent?.mode === 'reanalyze-range' &&
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
-      rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
+      rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === false &&
       JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
       sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }) &&
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
@@ -3403,7 +3402,7 @@ async function main() {
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&
       rangeRecordedPrepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
       rangeRecordedPrepared.executionPlan?.assurancePromptContractDigest === SAMPLING_CONTRACT_DIGEST &&
-      rangeRecordedPrepared.actions?.canAuthorize === true, 'range-recorded-prepared-plan');
+      rangeRecordedPrepared.actions?.canAuthorize === false, 'range-recorded-prepared-plan');
 
     at('reanalyze-range-dispatch');
     const rangeRecorded = await settleLaunchedRun(renderer, 'range-recorded');
