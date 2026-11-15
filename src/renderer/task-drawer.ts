@@ -2842,6 +2842,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         runOptions.append(retryLabel, samplingLabel);
       }
       for (const event of ['input', 'change']) runOptions.addEventListener(event, () => { commandId = crypto.randomUUID(); });
+      const timing = el('select'); timing.dataset['taskStartWhen'] = ''; timing.setAttribute('aria-label', '开始时间');
+      for (const [value, label] of [['now', '立即'], ['idle', '空闲时处理']]) {
+        const option = el('option', undefined, label); option.value = value!; timing.append(option);
+      }
+      timing.value = next.input.startWhen ?? 'now';
+      timing.addEventListener('change', () => { commandId = crypto.randomUUID(); });
+      const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing); runOptions.append(timingLabel);
       body.append(runOptions);
       const references = el('div', 'task-launch-references');
       body.append(references);
@@ -2887,7 +2894,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
             ...(baselineOptions && retry.value === 'ask-first' ? { askFirstAdaptations: ['safe-retry'] as const } : {}),
             ...(tokens === null ? {} : { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: tokens } }),
           };
-          next.input = { ...next.input, planEdits };
+          next.input = { ...next.input, planEdits, startWhen: timing.value === 'idle' ? 'idle' : 'now' };
           if (!(await options.settle())) { restore(); start.disabled = false; return; }
           let result: TaskExecutionLaunchResult;
           switch (next.operation) {

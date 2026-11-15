@@ -1,3 +1,4 @@
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -482,12 +483,8 @@ async function openAnalysisOf(renderer, bookId, name) {
  */
 async function startFirstBaseline(renderer, readiness, name, from = 'available') {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState===${JSON.stringify(from)}`, `${name}-${from}`);
-  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
-  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`, 120_000);
-  const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
-  if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='baseline-analysis' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart===${JSON.stringify(readiness)} && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
+  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-open`);
+  await launchTaskFromBar(renderer, waitFor, name);
 }
 
 /**

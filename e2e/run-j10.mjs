@@ -1,3 +1,4 @@
+import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -390,11 +391,7 @@ async function holdReanalysis(renderer, bookId, name) {
   await openAnalysisOf(renderer, bookId, name);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="reanalyze-book"]', `${name}-prepare`);
-  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`);
-  const showing = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId`);
-  if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-ready`);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
+  await launchTaskFromBar(renderer, waitFor, name);
   await waitFor(renderer, runningWith(0), `${name}-held`);
   const held = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
   requireJourney(held?.bookId === bookId && held.taskIntent?.mode === 'reanalyze-book' && held.run?.state === 'executing' &&
@@ -409,16 +406,13 @@ async function holdReanalysis(renderer, bookId, name) {
  */
 async function startFirstBaseline(renderer, readiness, name) {
   await prepareFirstBaseline(renderer, readiness, name);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
+  await launchTaskFromBar(renderer, waitFor, name);
 }
-/** The first baseline prepared and its plan open in the drawer, ready to start or to change first. */
+/** Open the one-step start bar; no task exists before its start button. */
 async function prepareFirstBaseline(renderer, readiness, name) {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
-  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-prepare`);
-  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`, 120_000);
-  const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
-  if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='baseline-analysis' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart===${JSON.stringify(readiness)} && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-bar-ready`);
+  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-open`);
+  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
 }
 
 /**
@@ -1273,28 +1267,17 @@ async function main() {
     // that version 2, whose plan says where the editor may be asked (PLAN-005).
     await openAnalysisOf(renderer, fourthBookId, 'fourth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fourth-baseline');
-    const fourthIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
-    requireJourney(UUID_PATTERN.test(fourthIntentId), 'fourth-task');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'fourth-revise');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.querySelector('#task-drawer [data-task-plan-boundary="adaptable"] [data-task-plan-item="safe-retry"] [data-task-plan-edit="ask-first"]')?.disabled===false`, 'ask-first-offered', 10_000);
-    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="ask-first"]')?.getAttribute('aria-label')==='改成先问你：模型服务暂时出错时，同一个阅读范围安全地再试一次'`, 'ask-first-named');
-    await clickSelector(renderer, '#task-drawer [data-task-plan-item="safe-retry"] [data-task-plan-edit="ask-first"]', 'ask-first-move');
-    await waitFor(renderer, `(() => { const item=document.querySelector('#task-drawer [data-task-plan-boundary="ask-first"] [data-task-plan-item="safe-retry"]'); return item!==null && item.querySelector('.task-plan-edit-tag')?.textContent==='你改的 · 先问你' && document.activeElement===item.querySelector('[data-task-plan-edit="restore"]') && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'; })()`, 'ask-first-moved', 10_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'ask-first-update');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'ask-first-version-2', 60_000);
-    const askedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(askedPlan?.taskIntent?.taskIntentId === fourthIntentId && askedPlan.planVersion?.ordinal === 2 &&
-      JSON.stringify(askedPlan.planVersion.edits?.askFirstAdaptations) === JSON.stringify(['safe-retry']) &&
-      JSON.stringify(askedPlan.planEnvelope?.boundary?.askFirst?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry']) &&
-      JSON.stringify(askedPlan.planEnvelope.boundary.adaptable.map((entry) => entry.adaptationClass)) === JSON.stringify(['contract-retry']) && askedPlan.planEnvelope.boundary.participation?.expected === true,
-    'ask-first-version', { edits: askedPlan?.planVersion?.edits ?? null, boundary: askedPlan?.planEnvelope?.boundary ?? null });
-    await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-participation li')?.textContent===${JSON.stringify(ASK_FIRST_STATEMENT)} && document.querySelector('#task-drawer [data-task-plan-boundary="ask-first"] [data-task-plan-item="safe-retry"] .task-plan-edit-tag')?.textContent==='你改的 · 先问你'`, 'ask-first-plan-words');
+    await assertRenderer(renderer, `(() => { const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const retry=options.querySelector('[data-task-launch-option="retry"]');retry.value='ask-first';retry.dispatchEvent(new Event('change',{bubbles:true}));return retry.value==='ask-first';})()`, 'ask-first-selected');
 
     at('clarification-raised');
     // 开始任务 with five ranges allowed to settle: unit 5 fails retry-safe and, asked first, asks instead of retrying; 6 is
     // read and 7 held in flight. The card says only that step waits, its choices unchosen, 推荐 on 再试一次.
     await writeFile(holdPath, String(QUESTION_HOLD), 'utf8');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'fourth-start');
+    const fourthIntentId = await launchTaskFromBar(renderer, waitFor, 'fourth-start');
+    const askedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(askedPlan?.taskIntent?.taskIntentId === fourthIntentId && askedPlan.planVersion?.ordinal === 1 &&
+      JSON.stringify(askedPlan.planVersion.edits?.askFirstAdaptations) === JSON.stringify(['safe-retry']) &&
+      askedPlan.planRevisions.length === 0 && askedPlan.planEnvelope.boundary.participation?.expected === true, 'ask-first-first-plan');
     await waitFor(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivityProgress==='5/8' && activity.dataset.taskPlanActivityUnit==='7' && document.querySelector('#task-drawer .task-drawer-questions [data-clarification-state="open"]')!==null; })()`, 'question-raised', 180_000);
     const raised = await renderer.evaluate(READ_QUESTIONS);
     requireJourney(JSON.stringify(raised) === JSON.stringify([{
@@ -1481,36 +1464,17 @@ async function main() {
     // 更新计划 makes version 2 — the ceiling frozen into the plan, which can still start.
     await openAnalysisOf(renderer, fifthBookId, 'fifth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fifth-baseline');
-    const fifthIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
-    requireJourney(UUID_PATTERN.test(fifthIntentId), 'fifth-task');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'fifth-revise');
-    await waitFor(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='未设置任务预算上限' && section.querySelector('.task-plan-budget-note')?.textContent===${JSON.stringify(BUDGET_NOTE)} && section.querySelector('[data-task-plan-edit="budget"]')?.textContent==='设置上限…' && section.querySelector('[data-task-plan-edit="budget-remove"]')===null; })()`, 'budget-offered', 10_000);
-    await clickSelector(renderer, '#task-drawer [data-task-plan-edit="budget"]', 'budget-open');
-    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && document.querySelector('#task-drawer label[for="'+input.id+'"]')?.textContent==='预算上限 · 词元 · 这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。' && document.querySelector('#task-drawer [data-task-plan-edit="budget"]')?.getAttribute('aria-expanded')==='true'; })()`, 'budget-input-focused', 10_000);
-    await renderer.send('Input.insertText', { text: '五千' });
-    await pressEnter(renderer);
-    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && input.value==='五千' && input.getAttribute('aria-invalid')==='true' && document.querySelector('#task-drawer .task-plan-budget-error')?.textContent===${JSON.stringify(BUDGET_INVALID)} && document.querySelector('#task-drawer .task-plan-budget-edited')===null; })()`, 'budget-refused', 10_000);
-    await assertRenderer(renderer, `(() => { const input=document.activeElement; if(!(input instanceof HTMLInputElement))return false; input.select(); return true; })()`, 'budget-select');
-    await renderer.send('Input.insertText', { text: '5,000' });
-    await pressEnter(renderer);
-    await waitFor(renderer, `(() => { const block=document.querySelector('#task-drawer .task-plan-budget'); return block?.querySelector('.task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 5,000 tokens' && block.querySelector('.task-plan-budget-form')===null && document.activeElement?.dataset?.taskPlanEdit==='budget' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'; })()`, 'budget-pending', 10_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'budget-update');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'budget-version-2', 60_000);
-    const budgetPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(budgetPlan?.taskIntent?.taskIntentId === fifthIntentId && budgetPlan.planVersion?.ordinal === 2 &&
-      JSON.stringify(budgetPlan.planVersion.edits?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
-      JSON.stringify(budgetPlan.planVersion.materialInputs?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
-      JSON.stringify(budgetPlan.providerResolutionPlan?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
-      (budgetPlan.planRevision ?? null) === null && budgetPlan.planRevisions?.at(-1)?.trigger === 'plan-edit',
-    'budget-version', { edits: budgetPlan?.planVersion?.edits ?? null, ceiling: budgetPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, revision: budgetPlan?.planRevision ?? null });
-    await assertRenderer(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens' && section.querySelector('dd[data-task-plan-term="用量上限"]')?.textContent==='达到 5,000 tokens 后不再发送新的请求（8 个阅读范围） · 上限，不是预测' && section.querySelector('[data-task-plan-edit="budget-remove"]')?.textContent==='去掉上限' && document.querySelector('#task-drawer .task-plan-edit-record')?.textContent?.endsWith('：预算上限：未设置任务预算上限 → 任务运行预算上限：5,000 tokens')===true; })()`, 'budget-plan-words');
+    await assertRenderer(renderer, `(() => {const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const input=options.querySelector('[data-task-launch-option="budget"]');input.value='5,000';input.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`, 'budget-first-plan-option');
 
     at('budget-reached');
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
     // 已停止 · 预算已达上限 with what it read and used — 调整预算并重做 and 查看部分结果, never 续行 or 重试 — its partial revision
     // kept, and 待我处理 holds it as an exception whose next step is 调整预算并重做.
     await assertRenderer(renderer, `(() => { const timing=document.querySelector('#task-drawer select[data-task-start-when]'); if(!(timing instanceof HTMLSelectElement)||timing.value!=='now')return false; timing.value='idle'; timing.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'budget-deferred-start-choice');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'fifth-start');
+    const fifthIntentId = await launchTaskFromBar(renderer, waitFor, 'fifth-start');
+    const budgetPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(budgetPlan?.planVersion?.ordinal === 1 && budgetPlan.planRevisions.length === 0 &&
+      budgetPlan.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === BUDGET.maxTotalTokens, 'budget-first-plan-frozen');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(fifthIntentId)} && analysis.run?.state==='interrupted')`, 'budget-run-stopped', 180_000);
     const idleBudgetRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
     requireJourney(idleBudgetRun.authorization?.startWhen === 'idle' && idleBudgetRun.planVersion?.materialInputs.runBudgetCeiling.maxTotalTokens === BUDGET.maxTotalTokens, 'deferred-budget-still-frozen');

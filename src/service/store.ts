@@ -4075,7 +4075,7 @@ export class EditorialStore {
   }
 
   #launchLedgerTask(kind: Exclude<import('./task-launch-snapshots.js').LaunchTaskKind, 'review-run' | 'scoped-ai-edit'>,
-    input: import('../shared/protocol.js').TaskExecutionLaunchInput & { bookId: string }, launchPolicy: LaunchPolicyProjection,
+    input: import('../shared/protocol.js').LedgerTaskExecutionLaunchInput & { bookId: string }, launchPolicy: LaunchPolicyProjection,
     create: (context: import('./task-plan-creation.js').TaskLaunchContext, policy: LaunchPolicyProjection) => ReturnType<BaselineAnalysisStore['launchTask']>) {
     const { clientCommandId, ...request } = input;
     let execution: import('./analysis/baseline-analysis-store.js').LaunchBinding | null = null;
@@ -4085,7 +4085,7 @@ export class EditorialStore {
           const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
             ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
           execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
-          const projection = create({ snapshotId, execution, ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
+          const projection = create({ snapshotId, execution, startWhen: input.startWhen ?? 'now', ...(input.planEdits === undefined ? {} : { planEdits: input.planEdits }) }, policy);
           requireStore(projection.run !== null && projection.checkpoint !== null, 'TASK_LAUNCH_FAILED', '这次任务未能启动。');
           return { runId: projection.run.runRecordId, manuscript: projection.checkpoint };
         });
@@ -4102,7 +4102,7 @@ export class EditorialStore {
 
   launchBaselineAnalysis(input: import('../shared/protocol.js').ServiceOperationMap['launchBaselineAnalysis']['input'], policy: LaunchPolicyProjection) {
     return this.#launchLedgerTask('baseline-analysis', input, policy, (context, launchPolicy) => this.#baselineAnalysis.launchTask({
-      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy,
+      phase: 'start', bookId: input.bookId, goal: input.goal, update: input.update ?? null, redoOf: input.redoOf ?? null, reconfirm: false, launchPolicy, launchStartWhen: context.startWhen ?? 'now',
       ...(context.planEdits === undefined ? {} : { launchEdits: context.planEdits }) }, context.snapshotId, context.execution));
   }
 

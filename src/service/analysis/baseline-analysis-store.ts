@@ -3165,13 +3165,14 @@ export class BaselineAnalysisStore {
       requireAnalysis(plan.planEnvelope?.dispatchAllowed && plan.planVersion !== null, 'ANALYSIS_ROUTE_ABSENT', '当前没有可执行的模型路线。');
       if (deferred) return;
       const authorizationId = randomUUID(), runRecordId = randomUUID(), instant = new Date().toISOString();
-      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen: 'now',
+      const startWhen = input.launchStartWhen ?? 'now';
+      const authority = canonicalRecord({ authorizationId, origin: 'standard-direct', startWhen,
         planEnvelopeDigest: plan.planEnvelope.digest, planVersionId: plan.planVersion.planVersionId, planVersionOrdinal: 1,
         taskIntentId, authority: 'standard-direct-dispatch', launchSnapshotId: snapshotId });
       const procedure = readProcedurePlanPin(this.#db, plan.planEnvelope.digest);
       const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant, ...(procedure === null ? {} : { procedure }) });
       this.#db.prepare('INSERT INTO analysis_run_authorizations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', 'standard-direct-dispatch', instant, authority.json, authority.digest, 'now');
+        .run(authorizationId, taskIntentId, plan.planEnvelope.digest, 'standard-direct', 'standard-direct-dispatch', instant, authority.json, authority.digest, startWhen);
       this.#db.prepare('INSERT INTO analysis_run_records VALUES (?, ?, ?, ?, ?, ?)')
         .run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
       this.#insertRunState(runRecordId, 1, 'authorized', { detail: '任务已启动，等待运行名额。' }, instant);

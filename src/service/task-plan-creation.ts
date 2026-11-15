@@ -8,9 +8,10 @@ export interface TaskLaunchContext {
   readonly snapshotId: string;
   readonly execution: LaunchBinding;
   readonly planEdits?: PlanEditsProjection;
+  readonly startWhen?: 'now' | 'idle';
 }
 
 export function launchedTaskPlan(context: TaskLaunchContext): TaskPlanCreator {
   return (ledger, input) => ({ done: true, workId: null, completed: 1, total: 1,
-    projection: ledger.launchTask({ ...input, ...(context.planEdits === undefined ? {} : { launchEdits: context.planEdits }) }, context.snapshotId, context.execution) });
+    projection: ledger.launchTask({ ...input, launchStartWhen: context.startWhen ?? 'now', ...(context.planEdits === undefined ? {} : { launchEdits: context.planEdits }) }, context.snapshotId, context.execution) });
 }

@@ -1,5 +1,5 @@
-import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
-export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
+import type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
+export type { RuntimeExecutionConfig, TaskExecutionLaunchInput, LedgerTaskExecutionLaunchInput, TaskExecutionLaunchResult } from './runtime-execution-config.js';
 import type { EditorialMarkCategoryKey } from './editorial-mark-category.js';
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
@@ -5907,7 +5907,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   inspectBookFindings: { input: { bookId: string; offset: number }; output: BookFindingsProjection };
   inspectParagraphAnalysis: { input: { bookId: string; manuscriptId: string; blockId: string; radius: number }; output: ParagraphAnalysisProjection };
-  launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & TaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  launchBaselineAnalysis: { input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'reconfirm'> & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareBaselineAnalysis: {
     /**
      * `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead
@@ -6188,7 +6188,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   /** `停用`: final for the version; Runs prepared under it keep naming it. */
   stopCustomAnalysisDimension: { input: { versionId: string }; output: CustomAnalysisDimensionsProjection };
   /** ②A 自定义 › 运行: the dimension's enabled version prepared as a Task on the Book; its plan opens in the Task Drawer. */
-  launchCustomAnalysis: { input: ServiceOperationMap['prepareCustomAnalysis']['input'] & TaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  launchCustomAnalysis: { input: ServiceOperationMap['prepareCustomAnalysis']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareCustomAnalysis: { input: PrepareCustomAnalysisInput; output: { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
@@ -6307,7 +6307,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 准备 AI7 初评 (Issue #429, S81b1): the evaluation kind's Task prepared as one cooperative job — the first 初评, or 重新初评
    * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
    */
-  launchInitialEvaluation: { input: ServiceOperationMap['prepareInitialEvaluation']['input'] & TaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  launchInitialEvaluation: { input: ServiceOperationMap['prepareInitialEvaluation']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareInitialEvaluation: {
     input: { bookId: string; materialIds?: ReadonlyArray<string>; seriesId?: string | null };
     output: ServiceJobProjection;
@@ -6321,7 +6321,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one
    * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
    */
-  launchReadersReport: { input: ServiceOperationMap['prepareReadersReport']['input'] & TaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  launchReadersReport: { input: ServiceOperationMap['prepareReadersReport']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareReadersReport: {
     input: { bookId: string; template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> };
     output: ServiceJobProjection;
@@ -6340,7 +6340,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 按我的评分重写评语 (Issue #429, S81b2; EVAL-008): the evaluation rewrite kind's Task over one version's latest saved entry,
    * prepared as one cooperative job. The completed job's result is 评估 with that version on show and the prepared Task named.
    */
-  launchEvaluationRewrite: { input: ServiceOperationMap['prepareEvaluationRewrite']['input'] & TaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  launchEvaluationRewrite: { input: ServiceOperationMap['prepareEvaluationRewrite']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareEvaluationRewrite: {
     input: { bookId: string; recordId: string };
     output: ServiceJobProjection;
@@ -6367,7 +6367,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * 先看计划 of a writing Task: one house type and the editor's audience, channel and requirements, prepared as one cooperative
    * job. The completed job's result is 新建文档 · 写作任务 with the prepared Task named, whose plan the Task Drawer opens.
    */
-  launchWritingTask: { input: ServiceOperationMap['prepareWritingTask']['input'] & TaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
+  launchWritingTask: { input: ServiceOperationMap['prepareWritingTask']['input'] & LedgerTaskExecutionLaunchInput; output: TaskExecutionLaunchResult };
   prepareWritingTask: {
     /** `materialIds` (Issue #428): the 资料库 items the editor ticked under 允许参考, in the order offered; none when absent. */
     input: { bookId: string; typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> };

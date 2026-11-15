@@ -29,6 +29,10 @@ export interface TaskExecutionLaunchInput {
   readonly planEdits?: PlanEditsProjection;
 }
 
+export interface LedgerTaskExecutionLaunchInput extends TaskExecutionLaunchInput {
+  readonly startWhen?: 'now' | 'idle';
+}
+
 export interface TaskExecutionLaunchResult {
   readonly taskIntentId: string;
   readonly runRecordId: string;

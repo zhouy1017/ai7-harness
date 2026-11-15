@@ -102,6 +102,25 @@ it('offers only the unlocked ranges with nothing selected, and sends the chosen 
   expect(started?.scope).toEqual({ mode: 'unlocked-only', range: { kind: 'section', headingBlockId: 'blk_h' } });
 });
 
+it('retries a lost launch response with the original pin and command after the visible window moves', async () => {
+  const startScopedAiEdit = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue(projection('unchanged'));
+  const { value, statuses } = host({ startScopedAiEdit });
+  let current = window0;
+  value.current = () => current;
+  const settled = new Promise(resolve => openScopedAiEditComposer(value, { selection: span,
+    mount: miniDocument.body as unknown as HTMLElement, onSettled: resolve }));
+  miniDocument.querySelector('[data-scoped-ai-edit="instruction"]')!.value = '保留原意';
+  const form = miniDocument.querySelector('[data-scoped-ai-edit="composer"]')!;
+  form.dispatchEvent({ type: 'submit' });
+  await vi.waitFor(() => expect(statuses.at(-1)?.[1]).toBe('error'));
+  current = { ...window0, revisionId: 'next-revision', journalSequence: 8 };
+  form.dispatchEvent({ type: 'submit' });
+  await settled;
+  expect(startScopedAiEdit).toHaveBeenCalledTimes(2);
+  expect(startScopedAiEdit.mock.calls[1]![0]).toEqual(startScopedAiEdit.mock.calls[0]![0]);
+  expect(startScopedAiEdit.mock.calls[1]![0]).toMatchObject({ baseRevisionId: 'rev', expectedJournalSequence: 7 });
+});
+
 it('locks a selection against the lock set on screen, reloads, and the badge unlocks', async () => {
   const setAiEditLocks = vi.fn(async () => ({ manuscriptId: 'doc', branchId: 'branch', blockIds: ['blk_a', 'blk_b'], sectionHeadingBlockIds: [], digest: 'b'.repeat(64), label: '' }));
   const { value, refreshed, statuses } = host({ setAiEditLocks });
