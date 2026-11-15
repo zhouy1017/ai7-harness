@@ -3148,7 +3148,7 @@ export function registerRendererHandlers(
           ...(input.rememberedChoice === undefined ? {} : { rememberedChoice: input.rememberedChoice }) });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', 'AI 局部修改不属于当前图书工作台。');
-        rememberDispatchChoice('scoped-ai-edit', input.executionConfig, result.launchNotice);
+        if (input.executionConfig !== undefined) rememberDispatchChoice('scoped-ai-edit', input.executionConfig, result.launchNotice);
         return result;
       });
     }),

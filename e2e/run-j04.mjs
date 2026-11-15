@@ -73,7 +73,6 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
 /** Every button on screen and in the drawer whose words name 授权: AUTH-002 keeps the word off every start (ADR 0077). */
 const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen button, #task-drawer button')).filter((button)=>/授权/u.test(button.textContent??'')).length`;
 /** The words the authorization bar says before every start (AUTH-003 as ADR 0077 revised it). */
-const BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
@@ -109,7 +108,6 @@ const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorize
   'recordReviewFindingDisposition', 'generateReviewReport', 'inspectReviewFindingOfMark'];
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
-const ANALYSIS_DESTINATION_ACTIONS = ['打开稿件', '工作概览'];
 /** ②A's tabs in the specification's order (editor-surfaces §3); 自定义 since Issue #922 (slice 7f; ADR 0090 item 4). */
 const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '自定义', '历史与更新'];
 /** The four sentences' headings in the order V2-UX-ANALYSIS-025 fixes. */
@@ -629,12 +627,6 @@ function predecessorUnitsReading(plan) {
 
 /** The editor's words for the one adaptation class the analysis envelopes declare, and the three locked groups. */
 const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范围安全地再试一次';
-// The editable plan (Issue #419, S73): its two notes (`src/renderer/task-drawer-labels.ts`) and what a Run that
-// leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
-const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
-// Issue #422 (S76d): the move into 先问你 is offered, and the note says what it means for the Run.
-const PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
-const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
 async function clickSelector(renderer, selector, name) {

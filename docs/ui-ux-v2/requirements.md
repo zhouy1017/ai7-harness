@@ -10,6 +10,8 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 
 Start sends one launch request. Inside one store transaction the service pins the manuscript current at launch and resolves one execution snapshot for the run; there is no prepared record awaiting editor approval. Changed selected block identities or scoped-edit locks retain their existing refusal guidance, and apply-time drift checks remain. Every category and unit uses the frozen binding; cards, reports and task rows retain producing attribution after role settings change. A repeated command returns the original run; changed inputs under that identity are refused.
 
+The optional launch controls retain immediate/idle timing, a run budget, and baseline retry/sampling choices in the first plan, without creating a plan revision. They are not remembered as model preferences.
+
 The last choice is remembered per task kind in this instance's `preferences.json`, beside favourite models; it is absent from Book data, exports and synchronization. An unavailable remembered connection or model falls back to the role default with one line of notice and does not block start. Choosing, starting and restoring defaults never edit role defaults in 设置 › 模型服务. 快速开始、快速修订、润色这段 and global dialogue retain their role-default owners; reconnect, resume, queued starts and captured procedures retain their existing control paths.
 
 ## Supported-platform product contract

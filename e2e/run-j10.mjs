@@ -82,8 +82,6 @@ const FIFTH_BOOK = Object.freeze({ title: '预算上限旅程' });
 /** The fifth Book's ceilings (Issue #51, S16a): four ranges spend 6,620 tokens under 5,000; the redo reads the rest under 20,000. */
 const BUDGET = Object.freeze({ kind: 'tokens', maxTotalTokens: 5000 });
 const RAISED = Object.freeze({ kind: 'tokens', maxTotalTokens: 20000 });
-const BUDGET_NOTE = '用量和费用仍受所选模型服务的账户控制与计费条款约束。';
-const BUDGET_INVALID = '请填一个大于 0 的整数，单位是 tokens。';
 const BUDGET_STOP_NOTE = '已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens';
 const BUDGET_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果';
 const BUDGET_REDO_GOAL = '改计划重做：沿用已读完的 4 个阅读范围，接着读其余 4 个';
@@ -104,7 +102,6 @@ const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，缺口�
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
 const QUESTION_HOLD = 5;
-const ASK_FIRST_STATEMENT = '模型服务暂时出错时，先问你要不要把这个阅读范围安全地再试一次；只有等你回答的这一步会停下。';
 const QUESTION = '第 5 个阅读范围：模型服务暂时出错，这一次没有读成。要安全地再试一次吗？';
 const SCOPE_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
 const SCOPE_WAITING = '任务等待你的说明';
@@ -1263,8 +1260,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'fourth-return-library');
 
     at('ask-first-edit');
-    // In 完整 the safe retry offers × (不允许) and 先问你. 先问你 moves it into the right column with 恢复, and 更新计划 makes
-    // that version 2, whose plan says where the editor may be asked (PLAN-005).
+    // Ask-first retry is an optional launch choice, frozen in the first plan.
     await openAnalysisOf(renderer, fourthBookId, 'fourth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fourth-baseline');
     await assertRenderer(renderer, `(() => { const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const retry=options.querySelector('[data-task-launch-option="retry"]');retry.value='ask-first';retry.dispatchEvent(new Event('change',{bubbles:true}));return retry.value==='ask-first';})()`, 'ask-first-selected');
