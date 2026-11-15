@@ -37,6 +37,7 @@ export interface TaskExecutionLaunchResult {
   readonly taskIntentId: string;
   readonly runRecordId: string;
   readonly launchNotice?: string;
+  readonly waitingForNetwork?: boolean;
 }
 
 export function validReasoningEffort(value: unknown): value is string {

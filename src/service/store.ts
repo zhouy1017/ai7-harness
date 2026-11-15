@@ -4093,10 +4093,10 @@ export class EditorialStore {
         });
       const row = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(launched.runId) as SqlRow;
       const ledger = this.executionLedgerForRun(launched.runId);
-      const notice = launched.notice ?? (ledger.currentRunState(launched.runId) === 'awaiting-connectivity' ? '已记录任务，联网后开始。' : undefined);
       return { taskIntentId: asString(row.task_intent_id), runRecordId: launched.runId, repeated: launched.repeated,
         ledger: execution === null ? ledger : ledger.forkForLaunch(execution),
-        ...(notice === undefined ? {} : { launchNotice: notice }) };
+        ...(ledger.currentRunState(launched.runId) === 'awaiting-connectivity' ? { waitingForNetwork: true } : {}),
+        ...(launched.notice === undefined ? {} : { launchNotice: launched.notice }) };
     } catch (error) {
       if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
       return this.#analysisCall(() => { throw error; });

@@ -2911,7 +2911,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           const kind = next.operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kinds[next.operation] as TaskPlanKind;
           next.onStarted?.();
           options.onRecorded(kind, next.bookId, result.taskIntentId);
-          options.setStatus(result.launchNotice ?? '已开始任务', 'success');
+          options.setStatus(result.launchNotice ?? (result.waitingForNetwork ? '已记录任务，联网后开始。' : '已开始任务'), 'success');
           if (ticket === current) surface.open({ bookId: next.bookId, kind, ref: result.taskIntentId }, finder, result.launchNotice, { view: 'run' });
         } catch (error) { if (ticket === current) { restore(); start.disabled = false; problem.textContent = options.errorMessage(error, '无法开始任务。'); } }
       })(); });

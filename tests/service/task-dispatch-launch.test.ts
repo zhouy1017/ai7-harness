@@ -211,7 +211,8 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     // Connectivity is service context, outside the command's identity; retrying after reconnect returns the original wait.
     const first = command(kind, target, config, clientCommandId, false, undefined, 'now', 'when-online')();
     expect(first.ledger.currentRunState(first.runRecordId)).toBe('awaiting-connectivity');
-    expect(first.launchNotice).toBe('已记录任务，联网后开始。');
+    expect(first.waitingForNetwork).toBe(true);
+    expect(first.launchNotice).toBeUndefined();
     driveLaunchedLedgerRun(capture!.owner, first);
     expect(capture!.requests).toHaveLength(0);
     store.selectMainRoleModel('opencode-go', defaults.model, 'off');
