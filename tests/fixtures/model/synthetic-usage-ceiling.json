@@ -8,7 +8,7 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "81e7c8bb7277f905f37fc5344ed4b27ed89a306a1ce9ad1044baefe5cfce6eaa",
+      "requestDigest": "3af87190d859fb9cd1edc21d61ff15f0850eba085a3b94a75d9b2c3c7a98db04",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":1,\"synopsis\":\"合成用量夹具：本单元结构概述为占位文本。\",\"entities\":[],\"events\":[],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"medium\"}",
