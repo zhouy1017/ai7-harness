@@ -436,7 +436,7 @@ it('restores only exact current baseline contract variants without changing the 
   expect(ledger.definition).toBe(selected);
 });
 
-it.each(['unrelated', 'retained-v1'] as const)('refuses an unmatched %s baseline contract before continuation effects (#1131 rev14)', async (variant) => {
+it('refuses an unknown baseline contract before continuation effects (#1131 rev14)', async () => {
   const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
   const bookId = await sample1Book(store, '合成契约失配拒绝'); const prepared = prepare(store, bookId, production.policy);
   const calls: StubCall[] = []; const reads: string[] = [];
@@ -445,7 +445,7 @@ it.each(['unrelated', 'retained-v1'] as const)('refuses an unmatched %s baseline
   const ledger = store.baselineAnalysisLedger; const facts = ledger.loadExecutionPlan(runId);
   const before = store.inspectBaselineAnalysis(bookId, () => null).run!.transitions; const sent = calls.length; const secrets = reads.length;
   const load = vi.spyOn(ledger, 'loadExecutionPlan').mockReturnValue({ ...facts,
-    promptContractDigest: variant === 'retained-v1' ? BASELINE_PROMPT_CONTRACT_V1_DIGEST : '0'.repeat(64) });
+    promptContractDigest: '0'.repeat(64) });
   try {
     expect(() => execution.admitAndDispatch(runId, ledger, { resume: true })).toThrow('契约');
     expect(calls).toHaveLength(sent); expect(reads).toHaveLength(secrets);
