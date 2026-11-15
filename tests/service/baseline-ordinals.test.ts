@@ -9,7 +9,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
-import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, BASELINE_ANALYSIS_MODE_GOALS } from '../../src/shared/protocol.js';
 let governor: ModelRequestGovernor;
 beforeEach(() => { governor = new ModelRequestGovernor(); });
 afterEach(async () => { governor.close(); await governor.whenIdle(); });
@@ -70,5 +70,10 @@ it('executes a task frozen under /2 after reopening with the new default', async
     expect(units).toHaveLength(8);
     expect(units.every((wire) => wire.messages.some((m) => m.role === 'system' && m.content.includes('fromGrapheme')))).toBe(true);
     expect(units.every((wire) => wire.messages.some((m) => m.role === 'user' && /^\[blk_/mu.test(m.content)))).toBe(true);
+    let next = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
+      { mode: 'reanalyze-range', selectedRange: { startPosition: 1, endPosition: 15 } }, captured.policy);
+    while (!next.done) next = store.advanceBaselineAnalysisPreparationWork(next.workId!);
+    expect(next.projection!.update!.reusePlan!.counts).toMatchObject({ reused: 6, recomputed: 2 });
+
   } finally { await captured.owner.dispose(); store.close(); await roots.dispose(); }
 }, 300_000);

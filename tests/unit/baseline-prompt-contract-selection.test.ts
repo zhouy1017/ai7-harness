@@ -4,6 +4,7 @@ import {
   BASELINE_PROMPT_CONTRACT_DIGEST,
   BASELINE_PROMPT_CONTRACT_V1,
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
+  BASELINE_PROMPT_CONTRACT_V2_DIGEST,
   unitRequestDigest,
 } from '../../src/service/analysis/contract.js';
 import {
@@ -230,4 +231,15 @@ describe('the sampling contract a frozen plan names (Issue #826 stage pin)', () 
     expect(assuranceContractMoved(factualReviewKindDefinition(), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST)).toBe(false);
     expect(assuranceContractMoved({ assurance: null }, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST)).toBe(false);
   });
+});
+
+it('retains /2 only for the J-04 range recording with its original provenance', () => {
+  const identity = 'sample1-recorded-v41-range';
+  const fixture = { identity, lineage: [{ identity, sha256: SYNTHETIC_SHA }], entries: new Map([['unit', entry(1, capture({
+    taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_V2_DIGEST, promptContractDigest: BASELINE_PROMPT_CONTRACT_V2_DIGEST,
+  }))]]) };
+  expect(baselinePromptContractForLaunch({ operationalScope: 'development-ci', journey: 'J-04', fixture })).toBe('retained-v2');
+  expect(() => baselinePromptContractForLaunch({ operationalScope: 'ordinary-production', journey: 'J-04', fixture })).toThrow();
+  expect(() => baselinePromptContractForLaunch({ operationalScope: 'development-ci', journey: 'J-09', fixture })).toThrow();
+  expect(() => baselinePromptContractForLaunch({ operationalScope: 'development-ci', journey: 'J-04', fixture: { ...fixture, entries: new Map([['unit', entry(1, capture())]]) } })).toThrow();
 });

@@ -431,6 +431,7 @@ const BASELINE_PROMPT_CONTRACTS = {
  * The recorded fixture of the one /1 Run AI7 keeps replaying (Issues #807, #387): the DeepSeek V4.1 Flash first baseline of
  * exact `sample1`, whose unit 1 answered its notes as bare strings. Its every entry was captured inside a /1 baseline Task.
  */
+export const RETAINED_V2_RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-range' as const;
 export const RETAINED_V1_RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-baseline' as const;
 /** The only Journey that replays it (ADR 0044 §Replay: inside a complete Journey, never a service or unit suite). */
 export const RETAINED_V1_JOURNEY = 'J-04' as const;
@@ -455,6 +456,19 @@ export function baselinePromptContractForLaunch(launch: {
     throw new ModelFixtureError('MODEL_FIXTURE_REFUSED', `夹具 ${fixture.identity} ${detail}`);
   };
   const entries = [...fixture.entries.values()];
+  if (fixture.identity === RETAINED_V2_RECORDED_FIXTURE_IDENTITY) {
+    if (launch.operationalScope !== 'development-ci' || launch.journey !== RETAINED_V1_JOURNEY ||
+      fixture.lineage.length !== 1 || fixture.lineage[0]!.identity !== fixture.identity || entries.length === 0 ||
+      !entries.every(({ capture }) => capture !== undefined && capture.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_V2_DIGEST &&
+        capture.model === RETAINED_V1_RECORDED_MODEL && (
+          capture.subject === 'unit' && capture.promptContractDigest === BASELINE_PROMPT_CONTRACT_V2_DIGEST ||
+          capture.subject === 'reduction' && capture.promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST ||
+          capture.subject === 'sampling' && capture.promptContractDigest === ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST ||
+          capture.subject === 'reflection' && capture.promptContractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST))) {
+      refuse('只能在 development-ci 的 J-04 中按原契约 v2 重放完整来源的历史范围录制。');
+    }
+    return 'retained-v2';
+  }
   const carriesV1 = entries.some((entry) => entry.capture?.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST);
   const historical = fixture.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY;
   if (!historical && !carriesV1) return 'current';
