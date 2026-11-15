@@ -3598,7 +3598,7 @@ async function main() {
       JSON.stringify(rangeFixture.entries.map((entry) => entry.capture.subject)) === JSON.stringify(['unit', 'unit', 'reduction', 'sampling', 'sampling', 'sampling']) &&
       rangeFixture.entries.every((entry) => entry.capture.model === 'deepseek-v4.1-flash' && entry.capture.route === 'opencode-go' &&
         entry.capture.evidenceScope === 'namespaced' && entry.capture.capturedAt.startsWith('2026-10-13') &&
-        entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
+        entry.capture.taskPromptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST) &&
       rangeFixture.entries.filter((entry) => entry.capture.subject === 'sampling').every((entry) => entry.capture.promptContractDigest === SAMPLING_CONTRACT_DIGEST),
     'range-recorded-source-provenance');
 
