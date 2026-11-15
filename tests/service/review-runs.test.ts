@@ -2910,8 +2910,11 @@ it('replays a shutdown-interrupted ordinary review from its checkpoint and keeps
     executionConfig: { modelId: 'account-future-model', reasoningEffort: 'high' } };
   const run = first.store.launchReviewRun(input, launchPolicy).projection.run!;
   const loop = first.driver.driveLaunch(run.reviewRunId);
-  await held;
-  const closing = close(first); release(); await closing; await loop;
+  try {
+    await Promise.race([held, loop.then(() => { throw new Error('review-ended-before-checkpoint-hold'); })]);
+  } finally {
+    const closing = close(first); release(); await closing; await loop;
+  }
   const earlierRequests = [...first.capture!.requests], earlierWire = [...first.capture!.wireRequests];
   const second = await openLayeredSelection();
   try {
