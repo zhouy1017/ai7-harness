@@ -432,6 +432,7 @@ async function main() {
   let tempParent;
   let journeyCompleted = false;
   let fastCredentialSaved = false;
+  let fastCredentialReference;
   let fastDataRoot;
   let fastExecutable;
   const closeOwnedBrowser = async () => {
@@ -442,7 +443,8 @@ async function main() {
   const cancellation = installJourneyCancellationCleanup(async () => {
     await closeOwnedBrowser();
     if (fastCredentialSaved && fastDataRoot !== undefined && runRoot !== undefined) {
-      const recovered = await recoverSyntheticCredentialCleanupState('J-05', fastDataRoot, runRoot);
+      const recovered = fastCredentialReference === undefined ? await recoverSyntheticCredentialCleanupState('J-05', fastDataRoot, runRoot)
+        : { kind: 'reference', credentialReference: fastCredentialReference };
       if (recovered.kind === 'reference') await removeSyntheticCredentialWithElectron('J-05', fastExecutable, productEnvironment(fastExecutable), recovered.credentialReference);
     }
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
@@ -518,7 +520,8 @@ async function main() {
     at('selected-fast-text-scope-refusal');
     const fastSecret = randomBytes(48).toString('base64url');
     fastCredentialSaved = true;
-    await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
+    fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
+    requireJourney(typeof fastCredentialReference==='string','dispatch-placeholder-reference');
     await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     // Reuse J-12's product-authored catalogue choice; the placeholder credential remains the existing cleanup owner's.
     await markTechnicalMode(renderer, true, 'dispatch-catalogue');
@@ -1214,7 +1217,8 @@ async function main() {
     at('ai-locks');
     // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
     // is still refused before execution, so this stage sends no model request.
-    await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
+    fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
+    requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
     // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
     // offers 解锁; 就选中部分让 AI 修改… on only locked words is refused before any model is asked; the badge unlocks it again.
     const lockBlock = await renderer.evaluate(`(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && node.dataset.blockId!==window.__j05RevBlock && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return null; window.__j05LockOriginal=window.__j05.text(block.dataset.blockId); return block.dataset.blockId; })()`);
