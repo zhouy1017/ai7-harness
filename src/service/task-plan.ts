@@ -2583,8 +2583,8 @@ export function reviewRunPlan(input: {
       ...(preferences.length === 0 ? {} : {
         scopeSend: [facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始'
           : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取'
-            : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}，以及本社审阅偏好的摘录`],
-        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录，发往为审阅配置的模型服务` : NOTHING_SENT],
+            : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}，以及本社审阅偏好的摘录${instructionSent}`],
+        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录${instructionSent}，发往为审阅配置的模型服务` : NOTHING_SENT],
       }),
     },
     state: reviewState(facts),
