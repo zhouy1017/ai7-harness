@@ -457,14 +457,11 @@ async function prepareSelectionTask(
   returnFocus: () => HTMLElement | null,
 ): Promise<boolean> {
   if (choice.kind === 'reanalyze') {
-    // Named by block identity, as 审阅这段 names it (Issue #423 review, P3-3): the service finds where it stands as it prepares.
-    const next = await startWholeBookTask(bookId, {
+    if (!(await settleScreen())) return false;
+    taskDrawer.openLaunch({ bookId, operation: 'launchBaselineAnalysis', title: '分析', input: {
       goal: choice.goal,
       update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: anchor.blockId, toBlockId: anchor.blockId } },
-      quick: null,
-    });
-    if (next === null) return false;
-    if (next.started !== true) taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
+    } }, returnFocus);
     return true;
   }
   if (choice.kind === 'procedure') {
