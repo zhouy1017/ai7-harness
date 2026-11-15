@@ -1056,6 +1056,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-start-when-online',
     'review-online-dispatch',
     'review-authorize',
+    'review-synthesis-wide',
+    'review-synthesis-gate',
     // Issue #952: 发现 lists the settled Run's findings, opens one, and drops the one 审阅 disposed.
     'book-findings-center',
     'review-marks-on-manuscript',
