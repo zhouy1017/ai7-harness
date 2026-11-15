@@ -44,7 +44,7 @@ function harness(api: object = {}) {
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
   const guardedApi = reconcileBookWorkbenchApi(api as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:vi.fn()},navigation);
-  context = createContext({ navigation, api: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+  context = createContext({ navigation, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     mountGlobalAgent: vi.fn(() => element('section')), renderBookOverview, renderBaselineAnalysis,
     HTMLElement, SETTINGS_HUB_GROUPS: [], settingsNavigation:()=>element('nav'), overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
     restoreCurrentScreen: vi.fn(), currentRecoveryReturn: () => undefined, recoveryReturnContexts: new WeakMap(),

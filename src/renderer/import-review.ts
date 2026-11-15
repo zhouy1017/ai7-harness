@@ -1,3 +1,4 @@
+import { rendererApi } from './navigation-generation.js';
 import { focusImportStep, importSteps } from './components/import-steps.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -174,7 +175,7 @@ export function createImportReview(options: ImportReviewOptions) {
         const preferred = currentBookId ?? defaults.importBookId;
         let offered = staged;
         while (preferred && !offered.targetChoices.some((choice) => choice.kind === 'existing-book' && choice.bookId === preferred) && offered.nextBookCursor) {
-          const page = await window.ai7.listBooks({ after: offered.nextBookCursor });
+          const page = await rendererApi.listBooks({ after: offered.nextBookCursor });
           offered = { ...offered, nextBookCursor: page.nextCursor, targetChoices: [...offered.targetChoices, ...page.items.map((book) => ({
             kind: 'existing-book' as const, id: `existing-book:${book.bookId}`, bookId: book.bookId, label: book.title, internalNumber: book.internalNumber,
             manuscriptState: book.manuscriptState, reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
@@ -246,7 +247,7 @@ export function createImportReview(options: ImportReviewOptions) {
         moreTargets.disabled = true;
         setStatus('正在读取下一页图书目标…', 'busy');
         try {
-          const page = await window.ai7.listBooks({ after: staged.nextBookCursor });
+          const page = await rendererApi.listBooks({ after: staged.nextBookCursor });
           const knownBookIds = new Set(staged.targetChoices.flatMap((choice) =>
             choice.kind === 'existing-book' ? [choice.bookId] : []));
           const additional = page.items.filter((book) => !knownBookIds.has(book.bookId)).map((book) => ({
@@ -371,7 +372,7 @@ export function createImportReview(options: ImportReviewOptions) {
         setStatus('正在准备导入前复核…', 'busy');
         try {
           if (relationshipSelection === 'source-only') {
-            const review = await window.ai7.prepareSourceImportReview({
+            const review = await rendererApi.prepareSourceImportReview({
               draftId: staged.draftId,
               expectedDraftVersion: staged.draftVersion,
               target: {
@@ -383,7 +384,7 @@ export function createImportReview(options: ImportReviewOptions) {
             });
             if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
           } else {
-            const review = await window.ai7.prepareNewBookReview({
+            const review = await rendererApi.prepareNewBookReview({
               draftId: staged.draftId,
               expectedDraftVersion: staged.draftVersion,
               target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
@@ -425,7 +426,7 @@ export function createImportReview(options: ImportReviewOptions) {
         wordControls.setBusy(true);
         setStatus('正在重新校验所选图书并准备导入前复核…', 'busy');
         try {
-          const review = await window.ai7.prepareNewBookReview({
+          const review = await rendererApi.prepareNewBookReview({
             draftId: staged.draftId,
             expectedDraftVersion: staged.draftVersion,
             target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
@@ -482,7 +483,7 @@ export function createImportReview(options: ImportReviewOptions) {
           confirm.disabled = true;
           setStatus('正在重新校验图书与来源身份并准备复核…', 'busy');
           try {
-            const review = await window.ai7.prepareSourceImportReview({
+            const review = await rendererApi.prepareSourceImportReview({
               draftId: staged.draftId,
               expectedDraftVersion: staged.draftVersion,
               target: {
@@ -549,7 +550,7 @@ export function createImportReview(options: ImportReviewOptions) {
         control.disabled = true;
         setStatus(technicalWords('正在读取来源关系版本页…', '正在读取更多文件…'), 'busy');
         try {
-          const page = await window.ai7.getReimportLineageSourceVersionPage({
+          const page = await rendererApi.getReimportLineageSourceVersionPage({
             bookId: selectedChoice.bookId,
             after,
           });
@@ -629,7 +630,7 @@ export function createImportReview(options: ImportReviewOptions) {
           if (activePreparationJob === null) return;
           cancelPreparation.disabled = true;
           try {
-            activePreparationJob = await window.ai7.cancelServiceJob({ jobId: activePreparationJob.jobId });
+            activePreparationJob = await rendererApi.cancelServiceJob({ jobId: activePreparationJob.jobId });
             setStatus(activePreparationJob.progress.label, 'success');
           } catch (error) {
             setStatus(rendererErrorMessage(error, '无法取消重新导入比较准备。'), 'error');
@@ -641,7 +642,7 @@ export function createImportReview(options: ImportReviewOptions) {
           prepare.disabled = true;
           setStatus(technicalWords('正在保存当前修订版并准备逐段比较…', '正在准备比较…'), 'busy');
           try {
-            activePreparationJob = await window.ai7.prepareManuscriptReimport({
+            activePreparationJob = await rendererApi.prepareManuscriptReimport({
               draftId: staged.draftId,
               expectedDraftVersion: staged.draftVersion,
               target: {
@@ -744,7 +745,7 @@ export function createImportReview(options: ImportReviewOptions) {
   async function finishImport(review: ReviewBeforeImportProjection, recoveryReturn?: RecoveryReturnContext): Promise<void> {
     if (review.reviewDigest === null) { renderReview(review, undefined, recoveryReturn); return; }
     try {
-      const result = await window.ai7.commitNewBookImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+      const result = await rendererApi.commitNewBookImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
       void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'first-manuscript' }).catch(() => setStatus('未能记住导入设置。', 'error'));
       renderImported(result, recoveryReturn); setStatus(result.completionLabel, 'success');
@@ -754,7 +755,7 @@ export function createImportReview(options: ImportReviewOptions) {
     }
   }
   async function finishSourceImport(review: ReviewBeforeSourceImportProjection, recoveryReturn?: RecoveryReturnContext): Promise<void> {
-    const result = await window.ai7.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+    const result = await rendererApi.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
       reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
     void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'source-only' }).catch(() => setStatus('未能记住导入设置。', 'error'));
     renderImported(result, recoveryReturn); setStatus(result.completionLabel, 'success');
@@ -886,7 +887,7 @@ export function createImportReview(options: ImportReviewOptions) {
         commitButton.disabled = true;
         setStatus(technicalWords('正在原子提交来源材料记录…', '正在添加资料…'), 'busy');
         try {
-          const result = await window.ai7.commitSourceImport({
+          const result = await rendererApi.commitSourceImport({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
             reviewDigest: review.reviewDigest,
@@ -1023,7 +1024,7 @@ export function createImportReview(options: ImportReviewOptions) {
         accept.disabled = true;
         setStatus('正在持久化重新导入降级接受…', 'busy');
         try {
-          const refreshed = await window.ai7.acceptReimportDegradation({
+          const refreshed = await rendererApi.acceptReimportDegradation({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
           });
@@ -1049,7 +1050,7 @@ export function createImportReview(options: ImportReviewOptions) {
     content.append(mappingsHost);
     void Promise.resolve().then(async () => {
       try {
-        const page = await window.ai7.getReimportMappingPage({
+        const page = await rendererApi.getReimportMappingPage({
           draftId: review.draftId,
           expectedDraftVersion: review.draftVersion,
           after: mappingAfter,
@@ -1059,7 +1060,7 @@ export function createImportReview(options: ImportReviewOptions) {
         const resolve = async (group: ReimportGroupProjection, verb: ReimportGroupProjection['verbs'][number], control: HTMLButtonElement) => {
           for (const choice of list.querySelectorAll<HTMLButtonElement>('[data-reimport-verb-choice]')) choice.disabled = true;
           try {
-            const initial = await window.ai7.resolveReimportMapping({
+            const initial = await rendererApi.resolveReimportMapping({
               draftId: review.draftId,
               expectedDraftVersion: review.draftVersion,
               groupId: group.groupId,
@@ -1067,7 +1068,7 @@ export function createImportReview(options: ImportReviewOptions) {
             });
             const cancelResolution = button('取消当前操作', 'quiet', async () => {
               cancelResolution.disabled = true;
-              await window.ai7.cancelServiceJob({ jobId: initial.jobId });
+              await rendererApi.cancelServiceJob({ jobId: initial.jobId });
             });
             cancelResolution.dataset['cancelReimportResolution'] = initial.jobId;
             cancelResolution.dataset['jobProgressCompleted'] = String(initial.progress.completed);
@@ -1182,7 +1183,7 @@ export function createImportReview(options: ImportReviewOptions) {
         if (activeCommitJob === null) return;
         cancelCommit.disabled = true;
         try {
-          activeCommitJob = await window.ai7.cancelServiceJob({ jobId: activeCommitJob.jobId });
+          activeCommitJob = await rendererApi.cancelServiceJob({ jobId: activeCommitJob.jobId });
           setStatus(activeCommitJob.progress.label, 'success');
         } catch (error) {
           setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
@@ -1195,7 +1196,7 @@ export function createImportReview(options: ImportReviewOptions) {
         abandon.disabled = true;
         setStatus('正在有界核对并提交稿件重新导入结果…', 'busy');
         try {
-          activeCommitJob = await window.ai7.commitManuscriptReimport({
+          activeCommitJob = await rendererApi.commitManuscriptReimport({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
             reviewDigest: review.reviewDigest,
@@ -1335,7 +1336,7 @@ export function createImportReview(options: ImportReviewOptions) {
         commitButton.disabled = true;
         setStatus(technicalWords(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', '正在导入…'), 'busy');
         try {
-          const result = await window.ai7.commitNewBookImport({
+          const result = await rendererApi.commitNewBookImport({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
             reviewDigest: review.reviewDigest!,

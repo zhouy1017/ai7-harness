@@ -1,4 +1,4 @@
-import { navigation, reconcileBookWorkbenchApi, type NavigationCheckpoint } from './navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi, bindRendererApi, type NavigationCheckpoint } from './navigation-generation.js';
 import { importSteps } from './components/import-steps.js';
 import { icon } from './components/icon-sprite.js';
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
@@ -225,6 +225,7 @@ const api = reconcileBookWorkbenchApi(window.ai7, {
   left: () => shell.leaveBook(),
   failed: (error) => renderError(error, () => void initializeStartup()),
 });
+bindRendererApi(api);
 const unmountSelectControls = mountSelectControls(document.body);
 window.addEventListener('pagehide', unmountSelectControls, { once: true });
 const unmountMenuControls = mountMenuControls(document.body);

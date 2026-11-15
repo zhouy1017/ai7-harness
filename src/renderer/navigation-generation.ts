@@ -90,3 +90,17 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
     },
   });
 }
+
+// All renderer surfaces share this client, including modules that historically read
+// the preload API directly. The shell installs the one ownership boundary at bootstrap.
+let boundApi: typeof window.ai7 | undefined;
+export function bindRendererApi(api: typeof window.ai7): void { boundApi = api; }
+const sourceApi = (): typeof window.ai7 => boundApi ?? window.ai7;
+export const rendererApi = new Proxy({} as typeof window.ai7, {
+  get: (_target, key) => Reflect.get(sourceApi(), key),
+  ownKeys: () => Reflect.ownKeys(sourceApi()),
+  getOwnPropertyDescriptor: (_target, key) => {
+    const descriptor = Reflect.getOwnPropertyDescriptor(sourceApi(), key);
+    return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
+  },
+});

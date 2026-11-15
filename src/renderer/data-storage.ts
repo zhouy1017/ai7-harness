@@ -1,3 +1,4 @@
+import { rendererApi } from './navigation-generation.js';
 import { navigation } from './navigation-generation.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
@@ -33,7 +34,7 @@ export function createDataStorage(options: DataStorageOptions) {
     const route = navigation.begin();
     setStatus('正在读取本机数据位置…', 'busy');
     try {
-      const projection = await window.ai7.getProductDataLocation();
+      const projection = await rendererApi.getProductDataLocation();
       if (!route.isCurrent()) return;
       const content = panel();
       content.classList.add('data-storage-summary');
@@ -78,7 +79,7 @@ export function createDataStorage(options: DataStorageOptions) {
       const reveal = button('查看数据位置', 'secondary', async () => {
         reveal.disabled = true;
         try {
-          const result = await window.ai7.revealProductDataLocation();
+          const result = await rendererApi.revealProductDataLocation();
           content.dataset['revealRequested'] = result.state;
           content.dataset['nativeRevealSuppressedForE2e'] = String(result.nativeRevealSuppressedForE2e);
           setStatus('已请求系统显示当前产品数据位置。', 'success');
@@ -106,10 +107,10 @@ export function createDataStorage(options: DataStorageOptions) {
       // 定期自动备份 (Issue #434, S86b; DSTO-018): the switch, off by default, and the backups kept beside the data.
       const scheduledBackup = element('section', 'source-card');
       content.append(summary, credentials, ...(technicalLayerVisible ? [versions] : []), databaseExport, databaseImport, scheduledBackup, actions);
-      mountDatabaseExport({ root: databaseExport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
-      mountDatabaseImport({ root: databaseImport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
-      mountScheduledBackup({ root: scheduledBackup, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
-      void window.ai7.inspectDataVersion().then((version) => {
+      mountDatabaseExport({ root: databaseExport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
+      mountDatabaseImport({ root: databaseImport, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
+      mountScheduledBackup({ root: scheduledBackup, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
+      void rendererApi.inspectDataVersion().then((version) => {
         if (!versions.isConnected) return;
         const identity = currentBuildIdentity();
         requireMatchingVersions(identity, version);
