@@ -23,6 +23,8 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
   }
   const started = await renderer.evaluate(`(() => {const button=document.querySelector('#task-drawer [data-task-drawer-control="launch"]');if(!button||button.disabled)return false;button.click();return true;})()`);
   if (started !== true) throw new Error('task-launch-button-unavailable');
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef`, `${name}-launched`, 120_000);
+  await waitFor(renderer, `(document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef) || !!document.querySelector('#task-drawer .task-bar-refusal')?.textContent`, `${name}-launched`, 120_000);
+  const refusal = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' ? '' : document.querySelector('#task-drawer .task-bar-refusal')?.textContent??''`);
+  if (refusal) throw new Error(`task-launch-refused/${refusal}`);
   return renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);
 }
