@@ -1,4 +1,5 @@
 import { launchedRevisionModelLabels } from '../../src/service/editorial-mark-source.js';
+import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTES } from '../../src/shared/protocol/model-service.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -84,12 +85,14 @@ async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
 }
 
 /** Instance preferences can outlive a database replacement; this is a real connection from the previous database. */
-async function previousConnectionId(): Promise<string> {
+async function previousConnectionId(currentIds: ReadonlyArray<string>): Promise<string> {
   const previousRoots = await createServiceTestRoots('ai7-previous-dispatch-');
   const previous = await EditorialStore.open(previousRoots.dataRoot, previousRoots.codeRoot);
   try {
-    const connection = previous.saveModelServiceConnection('旧实例选择', null, 'needs-attention', 'opencode-go');
-    return previous.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'opencode-go').connectionId;
+    const route = MODEL_SERVICE_ROUTES.find(route => !currentIds.includes(MODEL_SERVICE_CONNECTION_IDS[route]));
+    if (route === undefined) throw new Error('expected-an-unenrolled-channel');
+    const connection = previous.saveModelServiceConnection('旧实例选择', null, 'needs-attention', route);
+    return previous.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', route).connectionId;
   } finally { previous.markCleanShutdown(); previous.close(); await previousRoots.dispose(); }
 }
 
@@ -199,7 +202,7 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
     expect(recovered).toMatchObject({ repeated: true, runRecordId: first.runRecordId });
     expect(recovered.ledger.currentRunState(recovered.runRecordId)).toBe('authorized');
     expect(recovered.ledger.loadExecutionPlan(recovered.runRecordId).productionBinding).toMatchObject({ model: defaults.model, reasoningEffort: 'high' });
-    const goneConnection = await previousConnectionId();
+    const goneConnection = await previousConnectionId(store.getModelServiceConnections().map(connection => connection.connectionId));
     expect(store.getModelServiceConnections().some(connection => connection.connectionId === goneConnection)).toBe(false);
     const fallback = command(kind, fallbackBook, { modelConnectionId: goneConnection, modelId: defaults.model }, randomUUID(), true)();
     expect(fallback.launchNotice).toBe('上次选择的模型已不可用，本次已使用角色默认模型。');
