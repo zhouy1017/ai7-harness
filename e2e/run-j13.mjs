@@ -2044,7 +2044,7 @@ async function main() {
         const rows=database.prepare("SELECT component,canonical_json FROM analysis_plan_records WHERE task_intent_id=? AND plan_version=1").all(taskId);
         const parts=new Map(rows.map(row=>[row.component,JSON.parse(row.canonical_json)]));
         const envelope=parts.get('plan-envelope'), manifest=parts.get('coverage-manifest');
-        process.stderr.write(`J13_SERIES_REQUEST_KEYS/${JSON.stringify({contract:envelope.promptContractDigest,identity:envelope.contractIdentity,
+        process.stderr.write(`J13_SERIES_REQUEST_KEYS/${JSON.stringify({contract:envelope.promptContractDigest,base:envelope.basePromptContractDigest,memoryBase:envelope.editorialMemoryBasePromptContractDigest,clarificationBase:parts.get('execution-plan').clarificationBasePromptContractDigest,unitDigest:manifest.units[0].digest,
           entries:manifest.units.map(unit=>({unitOrdinal:unit.ordinal,requestDigest:createHash('sha256').update(JSON.stringify({categoryId:'series-consistency',promptContractDigest:envelope.promptContractDigest,unitDigest:unit.digest,unitOrdinal:unit.ordinal})).digest('hex')}))})}\n`);
       } finally { database.close(); }
     }
