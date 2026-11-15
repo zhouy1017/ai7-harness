@@ -8,6 +8,7 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport) {
         await Promise.all(drawer.getAnimations().map(animation=>animation.finished.catch(()=>undefined))); })()`);
       const reachable = await renderer.evaluate(`(() => {
         const drawer=document.querySelector('#task-drawer'), button=drawer.querySelector('[data-task-drawer-control="launch"]'), chooser=drawer.querySelector('.dispatch-chooser');
+        if(getComputedStyle(drawer.querySelector('.task-drawer-modes')).display!=='none'||getComputedStyle(drawer.querySelector('.task-drawer-pill')).display!=='none'||!drawer.querySelector('.task-drawer-footer').hidden)return false;
         const bounds=button.getBoundingClientRect();
         if(bounds.left<0||bounds.top<0||bounds.right>innerWidth||bounds.bottom>innerHeight||!chooser)return false;
         chooser.querySelector('summary').focus();

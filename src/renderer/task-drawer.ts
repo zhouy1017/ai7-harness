@@ -645,6 +645,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : view === 'composer' ? TASK_COMPOSER_TITLES.draft : TASK_DRAWER_TITLE;
     modes.hidden = view !== 'plan';
     foot.hidden = view !== 'plan' && view !== 'launch';
+    footer.hidden = view === 'launch';
     // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
     if (view !== 'dialogue') dialogueSurface.stop();
     if (view !== 'plan') {
