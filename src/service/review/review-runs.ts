@@ -1552,7 +1552,8 @@ export class ReviewRunStore {
         entry: synthesisEntry, plan: { kind: 'task', mode: hasSynthesis ? 'review-again' : 'review-first', selectedRange: null } });
     }
     // 本社审阅偏好 (Issue #911): each model-backed category reads its own lines when its rule names the outbound category.
-    const offeredPreferences = planned.filter((category) => category.entry.executor === 'review-category-contract').map((category) => {
+    const offeredPreferences = planned.filter((category) => category.entry.executor === 'review-category-contract' &&
+      (category.entry.synthesisSource === undefined || category.entry.synthesisSource.kind.startsWith('editorial-review/'))).map((category) => {
       const kind = this.#ledgers.ledgerOf(category.entry).definition.kind;
       return [kind, this.#ledgers.housePreference?.(bookId, category.entry.synthesisSource?.categoryId ?? category.entry.categoryId, kind, input.launchPolicy) ?? null] as const;
     });

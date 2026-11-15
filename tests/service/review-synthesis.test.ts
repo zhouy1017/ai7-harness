@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { driveLaunchedReviewRun, ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
@@ -24,7 +25,7 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
-import { TYPOS_AND_USAGE, STYLE_AND_FORMAT } from '../support/review-categories.js';
+import { TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION } from '../support/review-categories.js';
 
 const TYPOS = 'typos-and-usage', STYLE = 'style-and-format';
 const WHOLE: ReviewRunScopeRequest = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
@@ -38,10 +39,10 @@ beforeEach(async () => { roots = await createServiceTestRoots('ai7-review-synthe
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); await roots.dispose(); });
 
 async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false): Promise<Session> {
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false): Promise<Session> {
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-cross-chapter-controls');
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
-  const bases = new Map([[TYPOS, reviewCategoryKindDefinition(TYPOS_AND_USAGE)], [STYLE, reviewCategoryKindDefinition(STYLE_AND_FORMAT)]]);
+  const bases = new Map([[TYPOS, reviewCategoryKindDefinition(TYPOS_AND_USAGE)], [STYLE, reviewCategoryKindDefinition(STYLE_AND_FORMAT)], ...(literary ? [['literary-expression', reviewCategoryKindDefinition(LITERARY_EXPRESSION)] as const] : [])]);
   const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
     if (sample1SynthesisAnswer(message) !== undefined) return synthesisAnswer(message);
     const header = parseReviewCategoryUnitMessageHeader(message);
@@ -50,6 +51,7 @@ async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
       return !emptyFindings ? response : { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     }
     if (parseReviewCrossChapterMessage(message) !== null) return { kind: 'unit-result', text: JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+    if (parseFactualReviewUnitMessageHeader(message) !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
     const baseline = parseUnitMessageHeader(message);
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
     if (request.stage === 'units' && header !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
@@ -67,8 +69,8 @@ async function closeCapturedSession(session: Session): Promise<void> {
   try { session.capture.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
 async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>, synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false): Promise<void> {
-  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings);
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false): Promise<void> {
+  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary);
   try {
     const book = await importSample1Book(session.store, roots.codeRoot, 'sample1 全书审阅统合');
     await pinEditorialWorkspaceProfileRevision2(session.store, book.bookId);
@@ -380,7 +382,10 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
     expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
     const contentDigest = reportContentDigest(original.report!.record);
     const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
-    expect(repeated.reportId).toBe(original.report!.reportId);
+    const differences = (a: unknown, b: unknown, path = ''): string[] => JSON.stringify(a) === JSON.stringify(b) ? []
+      : a !== null && b !== null && typeof a === 'object' && typeof b === 'object'
+        ? [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(key => !['version', 'generatedAt'].includes(key)).flatMap(key => differences((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], `${path}.${key}`)) : [path];
+    expect(repeated.reportId, JSON.stringify(differences(original.report!.record, repeated.record))).toBe(original.report!.reportId);
     expect(repeated.digest).toBe(archivedDigest); expect(reportContentDigest(repeated.record)).toBe(contentDigest);
     const pending = session.store.inspectReviewWorkspace(paused.bookId, null).run!;
     expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
@@ -469,4 +474,26 @@ it('freezes inherited procedure instructions for synthesis and accepts the next 
       }
     }
   });
+});
+
+it('inherits the first factual category’s editorial memory through the same frozen wrapper (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    const instruction = '核对历史年代时保留叙述的保留措辞。';
+    session.store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'factual-review', text: instruction, effect: 'guide' });
+    expect(session.store.editorialMemory(book.bookId, 'factual-review')?.block).toContain(instruction);
+    const search = session.store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    session.store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); session.store.selectSearchBackend('search-tinyfish');
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: ['factual-review', 'literary-expression'], evidenceAssuranceLevel: 'quick', scope: WHOLE }, launchPolicy);
+    await driveLaunchedReviewRun(session.driver, launched);
+    const run = workspace(session, book).run!;
+    expect(run.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
+    const request = session.capture.wireRequests.findLast(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
+    expect(request.messages.find(message => message.role === 'system')!.content).toContain(instruction);
+    const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+    try {
+      const envelopes = db.prepare(`SELECT t.kind,p.canonical_json FROM analysis_task_intents t JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id AND p.component='plan-envelope' WHERE t.book_id=?`).all(book.bookId);
+      const memory = (kind: string) => JSON.parse(String(envelopes.find(row => row.kind === kind)!.canonical_json)).editorialMemory;
+      expect(memory('editorial-review/run-synthesis')).toEqual(memory('factual-review'));
+    } finally { db.close(); }
+  }, sample1SynthesisAnswer, {}, false, true);
 });

@@ -607,6 +607,8 @@ export class BaselineAnalysisStore {
       const original = pinnedReviewDefinition(this.#originalDefinition, promptContractDigest);
       if (original.promptContractDigest === promptContractDigest) return original;
     }
+    const historical = this.#originalDefinition.historicalDefinitionForDigest?.(promptContractDigest);
+    if (historical?.promptContractDigest === promptContractDigest) return historical;
     const current = this.definition;
     if (current.kind === BASELINE_ANALYSIS_KIND) {
       const base = current.clarificationBase ?? current;
@@ -2045,8 +2047,9 @@ export class BaselineAnalysisStore {
    */
   #currentEditorialMemory(bookId: string): EditorialMemorySnapshot | null {
     // Category review keeps its existing exact preference pins, assembled by the same memory builder.
-    return this.#definition.kind.startsWith('editorial-review/') || this.#launch.operationalScope !== 'ordinary-production' ||
-      this.#launch.policy?.providerProcessing.version !== 'v35' ? null : this.#launch.editorialMemory?.(bookId, this.#definition.kind) ?? null;
+    const kind = this.#definition.editorialMemorySourceKind ?? this.#definition.kind;
+    return kind.startsWith('editorial-review/') || this.#launch.operationalScope !== 'ordinary-production' ||
+      this.#launch.policy?.providerProcessing.version !== 'v35' ? null : this.#launch.editorialMemory?.(bookId, kind) ?? null;
   }
 
   #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
@@ -3878,7 +3881,8 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
-      ...(memory === null ? {} : { editorialMemory: memory, editorialMemoryBasePromptContractDigest: unwrappedDefinition.promptContractDigest }),
+      ...(memory === null ? {} : { editorialMemory: memory, editorialMemoryBasePromptContractDigest: unwrappedDefinition.promptContractDigest,
+        ...(baseDefinition.editorialMemorySourceKind === undefined ? {} : { editorialMemorySourceKind: baseDefinition.editorialMemorySourceKind }) }),
       ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest,
         ...(baseDefinition.inheritedProcedureInstruction === undefined ? {} : { inheritedProcedureInstruction: baseDefinition.inheritedProcedureInstruction }) }),
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),

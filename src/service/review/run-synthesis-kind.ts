@@ -26,7 +26,7 @@ export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewC
   };
   const message = (): string => synthesisMessage(input());
   const digest = sha256Hex(canonicalJson({ prompt: RUN_SYNTHESIS_PROMPT_DIGEST, structuredOnly: true }));
-  const definition: AnalysisKindDefinition = { ...base, structuredOnly: true, structuredInputKey: key, ...(source?.budgetCeiling === undefined ? {} : { inheritedBudgetCeiling: source.budgetCeiling }), systemPrompt: RUN_SYNTHESIS_PROMPT,
+  const definition: AnalysisKindDefinition = { ...base, structuredOnly: true, structuredInputKey: key, ...(source === undefined ? {} : { editorialMemorySourceKind: source.kind }), ...(source?.budgetCeiling === undefined ? {} : { inheritedBudgetCeiling: source.budgetCeiling }), systemPrompt: RUN_SYNTHESIS_PROMPT,
     priorBudgetUsage: () => {
       const row = db.prepare('SELECT prior_input_tokens, prior_output_tokens FROM review_run_synthesis WHERE synthesis_key = ?').get(key);
       return { inputTokens: Number(row?.prior_input_tokens ?? 0), outputTokens: Number(row?.prior_output_tokens ?? 0) };

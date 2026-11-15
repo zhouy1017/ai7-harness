@@ -3778,6 +3778,25 @@ export class EditorialStore {
     requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
     if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
+    Object.assign(definition, { historicalDefinitionForDigest: (digest: string): AnalysisKindDefinition | null => {
+      const row = this.#authority.prepare(`SELECT r.canonical_json, r.sha256, member.value category, t.contract_version,
+        p.canonical_json envelope_json, p.sha256 envelope_digest FROM review_runs r
+        JOIN json_each(r.canonical_json, '$.categories') member
+        JOIN analysis_task_intents t ON t.task_intent_id=json_extract(member.value, '$.task.taskIntentId')
+        JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id AND p.component='plan-envelope'
+        WHERE t.kind=? AND COALESCE(json_extract(p.canonical_json, '$.basePromptContractDigest'),
+          json_extract(p.canonical_json, '$.editorialMemoryBasePromptContractDigest'),json_extract(p.canonical_json, '$.promptContractDigest'))=?
+        ORDER BY r.ordinal DESC LIMIT 1`).get(definition.kind, digest);
+      if (row === undefined) return null;
+      requireStore(sha256(String(row.canonical_json)) === row.sha256 && sha256(String(row.envelope_json)) === row.envelope_digest,
+        'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
+      const snapshot = JSON.parse(String(row.canonical_json)) as { materialReferences?: TaskMaterialBoundary };
+      const category = JSON.parse(String(row.category)) as { entry: ReviewCategoryConfigurationEntry; task: { taskIntentId: string } };
+      if (category.entry.executor !== 'review-category-contract') return null;
+      const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(category.task.taskIntentId);
+      return this.#reviewLedgerOf(category.entry, snapshot.materialReferences, digest, undefined, use,
+        row.contract_version === 'ai7.editorial-review/1' ? 1 : 2).definition;
+    } });
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
     return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
@@ -14231,8 +14250,9 @@ export class EditorialStore {
       JOIN analysis_plan_records p ON p.sha256 = a.plan_envelope_sha256 AND p.component = 'plan-envelope'
       WHERE r.run_record_id = ?`).get(runRecordId);
     if (row !== undefined) {
-      const frozen = (JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown }).editorialMemory;
-      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), String(row.kind))))
+      const plan = JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown; editorialMemorySourceKind?: string };
+      const frozen = plan.editorialMemory;
+      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), plan.editorialMemorySourceKind ?? String(row.kind))))
         return '本社与本书编辑偏好已变化，请重新准备任务。';
     }
     return this.#reviewRuns.learningReadGuard(runRecordId) ?? this.#preferenceGovernanceGuard(runRecordId);

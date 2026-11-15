@@ -256,6 +256,9 @@ export interface AnalysisKindDefinition {
   /** A review-run summary consumes stored editorial outputs only, with no manuscript unit turns. */
   readonly structuredOnly?: boolean;
   readonly structuredInputKey?: string;
+  readonly editorialMemorySourceKind?: string;
+  /** The owning review ledger reconstructs a previous run's frozen material and preference wrappers. */
+  readonly historicalDefinitionForDigest?: (digest: string) => AnalysisKindDefinition | null;
   /** A structured final member inherits its parent Run's frozen ceiling. */
   readonly inheritedBudgetCeiling?: import('../../shared/protocol.js').RunBudgetCeilingState;
   readonly priorBudgetUsage?: () => { inputTokens: number; outputTokens: number };
