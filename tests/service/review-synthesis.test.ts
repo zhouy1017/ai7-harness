@@ -10,12 +10,15 @@ import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/ass
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
 import type { LaunchPolicyProjection, ReviewRunScopeRequest } from '../../src/shared/protocol.js';
+import { REVIEW_SYNTHESIS_PLAN_LINE } from '../../src/shared/review-synthesis-wording.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 
@@ -40,7 +43,7 @@ async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
     const header = parseReviewCategoryUnitMessageHeader(message);
     if (request.stage === 'units' && header?.categoryId === TYPOS) {
       const response = resolveFixtureEntry(fixture.entries, header.ordinal, base.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
-      return !emptyFindings || response?.kind !== 'unit-result' ? response : { ...response, text: JSON.stringify({ ...JSON.parse(response.text), findings: [] }) };
+      return !emptyFindings ? response : { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     }
     const baseline = parseUnitMessageHeader(message);
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
@@ -340,4 +343,57 @@ it('continues a shutdown-interrupted ordinary synthesis from its retained respon
     expect(second.capture.requests).toHaveLength(0);
     expect(first.capture.requests.filter(request => request.stage === 'cross-unit-reduction')).toHaveLength(1);
   } finally { await closeCapturedSession(second); }
+});
+
+it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a paused 0.7.1 run without synthesis, and merges that legacy Book (#1433)', async () => {
+  const source = join(roots.codeRoot, 'tests/fixtures/database/sample1-review-071.ai7db');
+  let target = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try { await target.prepareDatabaseReplacement((await target.inspectDatabaseImport(source)).previewId, new Date()); }
+  finally { target.markCleanShutdown(); target.close(); }
+  const session = await openCapturedSession();
+  let archivedId!: string, archivedRunId!: string, archivedDigest!: string;
+  try {
+    const books = session.store.listBooks(null).items;
+    const archived = books.find(book => book.title === 'sample1 · 0.7.1 已归档审阅')!;
+    const paused = books.find(book => book.title === 'sample1 · 0.7.1 暂停审阅')!;
+    archivedId = archived.bookId;
+    const original = session.store.inspectReviewWorkspace(archived.bookId, null).run!;
+    archivedRunId = original.reviewRunId; archivedDigest = original.report!.digest;
+    expect(original.synthesis).toBeUndefined(); expect(original.categories).toHaveLength(1);
+    expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
+    const contentDigest = reportContentDigest(original.report!.record);
+    const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
+    expect(repeated.reportId).toBe(original.report!.reportId);
+    expect(repeated.digest).toBe(archivedDigest); expect(reportContentDigest(repeated.record)).toBe(contentDigest);
+    const pending = session.store.inspectReviewWorkspace(paused.bookId, null).run!;
+    expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
+    await session.driver.continue(pending.reviewRunId);
+    const completed = session.store.inspectReviewWorkspace(paused.bookId, pending.reviewRunId).run!;
+    expect(completed.state).toBe('settled'); expect(completed.synthesis).toBeUndefined();
+    expect(completed.categories).toHaveLength(1);
+    expect(session.capture.requests.every(request => request.stage !== 'cross-unit-reduction')).toBe(true);
+  } finally { await closeCapturedSession(session); }
+  const mergedRoot = join(roots.inputRoot, 'legacy-merge-data');
+  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
+  try { await target.prepareDatabaseMerge((await target.inspectDatabaseImport(source)).previewId, new Date()); }
+  finally { target.markCleanShutdown(); target.close(); }
+  target = await EditorialStore.open(mergedRoot, roots.codeRoot);
+  try {
+    const merged = target.inspectReviewWorkspace(archivedId, archivedRunId).run!;
+    expect(merged.synthesis).toBeUndefined(); expect(merged.report!.digest).toBe(archivedDigest);
+    expect(canonicalRecord(merged.report!.record).digest).toBe(archivedDigest);
+  } finally { target.markCleanShutdown(); target.close(); }
+});
+
+it('uses identical synthesis wording in the pre-start plan and the frozen launched plan (#1433)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    let work = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy);
+    while (!work.done) work = session.store.advanceReviewRunPreparationWork(work.workId!);
+    const prepared = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: work.projection!.run!.reviewRunId });
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
+    const frozen = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: launched.projection.run!.reviewRunId });
+    expect(frozen.steps).toEqual(prepared.steps);
+    expect(frozen.steps.find(step => step.id === 'category:run-synthesis')?.result).toBe(REVIEW_SYNTHESIS_PLAN_LINE);
+    expect(session.capture.requests).toEqual([]);
+  });
 });

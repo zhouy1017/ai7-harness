@@ -1032,7 +1032,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('cancels a preparation without writing a Run and permits only one preparation per Book', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const pending = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
-      expect(pending).toMatchObject({ done: false, completed: 1, total: 3, projection: null });
+      expect(pending).toMatchObject({ done: false, completed: 1, total: 4, projection: null });
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_RUN_PREPARING');
       expect(session.store.cancelReviewRunPreparationWork(pending.workId!)).toBe(true);
       expect(workspace(session, book).runs).toEqual([]);
@@ -2100,17 +2100,17 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
 
         // Cancelled while queued: the store abandons the preparation, so the Book can be prepared again.
         const cancelled = jobs.startReviewRunPreparation(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
-        expect(cancelled).toMatchObject({ kind: 'review-run-preparation', state: 'queued', progress: { completed: 0, total: 3 }, result: null, failure: null });
+        expect(cancelled).toMatchObject({ kind: 'review-run-preparation', state: 'queued', progress: { completed: 0, total: 4 }, result: null, failure: null });
         expect(jobs.cancel(cancelled.jobId)).toMatchObject({ state: 'cancelled', result: null, progress: { label: '审阅计划准备已取消' } });
         expect(workspace(session, book).runs).toEqual([]);
 
         // One category's plan per step, then the Run; the progress never goes back and ends at its total.
         const trail = await settleJob(jobs, jobs.startReviewRunPreparation(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy));
         const completed = trail.map((job) => job.progress.completed);
-        expect(trail.every((job) => job.kind === 'review-run-preparation' && job.progress.total === 3)).toBe(true);
+        expect(trail.every((job) => job.kind === 'review-run-preparation' && job.progress.total === 4)).toBe(true);
         expect(completed).toEqual([...completed].sort((left, right) => left - right));
         const done = trail.at(-1)!;
-        expect(done).toMatchObject({ state: 'completed', progress: { completed: 3, total: 3, label: '审阅计划准备完成' }, failure: null });
+        expect(done).toMatchObject({ state: 'completed', progress: { completed: 4, total: 4, label: '审阅计划准备完成' }, failure: null });
         const prepared = done.result as ReviewWorkspaceProjection;
         expect(prepared.bookId).toBe(book.bookId);
         expect(prepared.run).toMatchObject({ ordinal: 1, state: 'prepared' });
@@ -2121,7 +2121,7 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
         // Plot review prepares its model plan through the same cooperative job.
         await runBaseline(session, book);
         const leads = (await settleJob(jobs, jobs.startReviewRunPreparation(book.bookId, [PLOT], WHOLE, launchPolicy))).at(-1)!;
-        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 2, total: 2, label: '审阅计划准备完成' } });
+        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 3, total: 3, label: '审阅计划准备完成' } });
         expect((leads.result as ReviewWorkspaceProjection).run).toMatchObject({ ordinal: 2, state: 'prepared', categories: [{ categoryId: PLOT, planEnvelopeDigest: expect.any(String) }] });
       } finally {
         jobs.dispose();

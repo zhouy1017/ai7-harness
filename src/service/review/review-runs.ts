@@ -5348,7 +5348,7 @@ export class ReviewRunStore {
         influence: this.#influenceProjection(snapshot),
         scopeStop: view.scopeStop,
         procedure: readReviewRunProcedurePin(this.#db, snapshot.reviewRunId),
-        preinstalledProcedures: snapshot.preinstalledProcedures ?? [],
+        preinstalledProcedures: (snapshot.preinstalledProcedures ?? []).filter(procedure => procedure.categoryId !== RUN_SYNTHESIS_CATEGORY),
         capture: (() => {
           const reason = this.#captureOf(view).unavailableReason;
           return { available: reason === null, unavailableReason: reason };
