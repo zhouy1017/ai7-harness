@@ -1,3 +1,4 @@
+import { launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -751,6 +752,7 @@ export function readersReportWorkspace(host: ReadersReportStoreHost, bookId: str
     const stored = drafts.find((draft) => draft.template === template);
     const row = stored === undefined ? undefined : host.documentCall(() => host.productionDocuments.documentById(bookId, stored.documentId));
     const draft = stored === undefined || row === undefined ? null : {
+      ...launchedRevisionModelLabels(host.authority, stored.analysisRevisionId),
       typeId,
       typeLabel: readersReportDocumentType(typeId)!.label,
       recordOrdinal: host.evaluationRecordOrdinal(stored.recordId),

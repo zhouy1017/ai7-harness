@@ -3092,3 +3092,5 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .dispatch-chooser-panel { position: absolute; z-index: 20; bottom: 100%; left: 0; width: min(320px, 80vw); padding: 12px; background: var(--surface); border: 1px solid currentColor; border-radius: 8px; box-shadow: 0 4px 16px var(--shadow); display: grid; gap: 8px; }
 .dispatch-chooser-panel label { display: grid; gap: 4px; }
 .dispatch-chooser-panel select { max-width: 100%; min-width: 0; }
+
+.evaluation-report-model, .evaluation-task-model, .evaluation-initial-task, .readers-report-task, .writing-task-line, .writing-drafted-model { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }

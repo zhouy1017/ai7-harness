@@ -1,3 +1,4 @@
+import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import {
@@ -144,6 +145,12 @@ export function startEvaluation(host: InitialEvaluationOperationsHost, bookId: s
 }
 
 export function internalWithEvaluationMaterials(host: InitialEvaluationOperationsHost, page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {
+  const task = <T extends { taskIntentId: string }>(value: T | null): T | null => value === null ? null : { ...value, ...launchedTaskModelLabels(host.authority, value.taskIntentId) };
+  const revision = <T extends { revisionId: string }>(value: T | null): T | null => value === null ? null : { ...value, ...launchedRevisionModelLabels(host.authority, value.revisionId) };
+  page = { ...page, initial: { ...page.initial, task: task(page.initial.task), latest: revision(page.initial.latest) },
+    record: page.record === null ? null : { ...page.record, initial: revision(page.record.initial) },
+    rewrite: { ...page.rewrite, task: task(page.rewrite.task), proposal: revision(page.rewrite.proposal) },
+    readersReport: { ...page.readersReport, task: task(page.readersReport.task), templates: page.readersReport.templates.map(template => ({ ...template, drafted: revision(template.drafted) })) } };
   // Only a plan not yet started can be refused for a reference that went away; a started one read it as it was.
   const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean; materialIds: string[] } => {
     const frozen = task === null ? null : internalEvaluationMaterialPlan(host, task.taskIntentId);

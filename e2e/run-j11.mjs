@@ -1930,6 +1930,12 @@ async function main() {
       JSON.stringify(reportPage.initial.actions) === JSON.stringify([['start-initial', '重新生成评估报告', false], ['prepare-initial', '先看计划', false], ['open-initial-task', '查看任务', false]]) &&
       reportPage.versions[0].startsWith('第 13 版 · 编辑评分中'),
     'initial-evaluation-report-words', reportPage);
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+        await assertRenderer(renderer, `(() => {const mark=document.querySelector('.evaluation-report-model');return mark?.textContent==='模型 AI7 本地检查' && mark.clientWidth>0 && mark.scrollWidth<=mark.clientWidth && document.documentElement.scrollWidth<=document.documentElement.clientWidth+2;})()`, 'initial-report-producing-model');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     // The same report in ordinary mode (technicalLayerVisible=false): no technical identity, the revision named in words only.
     const evaluationMode = async (developer, name) => {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);

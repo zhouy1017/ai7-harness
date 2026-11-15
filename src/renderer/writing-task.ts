@@ -200,6 +200,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const task = page.task;
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
+      if (task.modelLabel) line.append(` · ${task.modelLabel}`);
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
       if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', task.refusal));
@@ -220,6 +221,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         item.dataset['writingTypeId'] = type.typeId;
         item.dataset['revisionId'] = type.drafted.revisionId;
         item.append(el('p', 'writing-drafted-line', writingDraftedLine(type.label, localInstantLabel(type.drafted.createdAt))));
+        if (type.drafted.modelLabel) item.append(el('p', 'writing-drafted-model', `模型 ${type.drafted.modelLabel}`));
         const title = el('input');
         title.setAttribute('aria-label', '草稿题目');
         title.dataset['writingField'] = `draft-title-${type.drafted.revisionId}`;

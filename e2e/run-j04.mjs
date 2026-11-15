@@ -1309,7 +1309,7 @@ async function main() {
     const wholeCount = groupedCount(manifest.totalGraphemes);
     const firstDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-opened');
     requireJourney(firstDrawer?.hidden === false && firstDrawer.kind === 'baseline-analysis' && firstDrawer.version === '1' && firstDrawer.mode === 'compact' &&
-      firstDrawer.stored === null && firstDrawer.pill === '已完成' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
+      firstDrawer.stored === null && firstDrawer.pill === '已完成 · 1/8 个单元未读成' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
       JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
       firstDrawer.saved === null && firstDrawer.drift === null &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({

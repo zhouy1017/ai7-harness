@@ -1,3 +1,4 @@
+import { launchedRevisionModelLabels } from '../../src/service/editorial-mark-source.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -127,6 +128,10 @@ describe.each(KINDS)('%s one-step launch', (kind) => {
       const task = store.inspectBookTasks(target.bookId, () => null).groups.flatMap(group => group.items)
         .find(entry => entry.item.technical.some(line => line.key === 'run-record' && line.value.includes(launched.runRecordId)));
       expect(task?.item.modelLabel).toContain(`@${effort}`);
+      if (kind === 'writing') expect(store.inspectWritingTask(target.bookId).task?.modelLabel).toBe(task?.item.modelLabel);
+      else if (kind === 'initial-evaluation') expect(store.inspectEvaluation(target.bookId, null).initial.task?.modelLabel).toBe(task?.item.modelLabel);
+      else if (kind === 'readers-report') expect(store.inspectEvaluation(target.bookId, null).readersReport.task?.modelLabel).toBe(task?.item.modelLabel);
+      else if (kind === 'evaluation-rewrite') expect(store.inspectEvaluation(target.bookId, target.recordId).rewrite.task?.modelLabel).toBe(task?.item.modelLabel);
       if (kind === 'custom-analysis') expect(task?.item.object).toMatchObject({ kind: 'analysis', customTitle: CUSTOM_DIMENSION_TITLE });
     }
     store.selectMainRoleModel('opencode-go', defaults.model, 'off');
@@ -188,6 +193,9 @@ it('drives a committed baseline launch after restart once and retains actual req
   await capture!.owner.whenIdle();
   const report = store.inspectBaselineAnalysis(target.bookId).taskOutcome!.report!;
   expect(report.modelLabel).toBe('account-future-model@high');
+  const attributionDb = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { expect(launchedRevisionModelLabels(attributionDb, store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId)).toEqual({ modelLabel: report.modelLabel }); }
+  finally { attributionDb.close(); }
   expect(capture!.wireRequests.length).toBeGreaterThan(0);
   expect(capture!.wireRequests.every(request => request.model === 'account-future-model' && request.reasoning_effort === 'high')).toBe(true);
   const sent = capture!.wireRequests.length;

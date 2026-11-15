@@ -1695,7 +1695,9 @@ async function main() {
     at('selection-task-reanalyze');
     // 重新分析这段 starts the exact paragraph update and closes the composer; the recorded outcome retains any fixture gaps.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
-    await waitFor(renderer, `window.__j16.composer() === null && window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.state==='settled')`, 'selection-task-reanalyze-direct', 120_000);
+    await waitFor(renderer, `window.__j16.composer() === null && document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, 'selection-task-reanalyze-bar');
+    await launchTaskFromBar(renderer, waitFor, 'selection-task-reanalyze-start');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.state==='settled')`, 'selection-task-reanalyze-direct', 120_000);
     const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, outcome: analysis.taskOutcome, resultRevisionId: analysis.resultSetRevision?.revisionId, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
     requireJourney(rangeTask?.mode === 'reanalyze-range' && ['completed', 'completed-with-gaps'].includes(rangeTask.run?.state) &&
       rangeTask.outcome?.classification === rangeTask.run.state && rangeTask.outcome.resultSetRevisionId === rangeTask.resultRevisionId && UUID_PATTERN.test(rangeTask.resultRevisionId ?? '') &&

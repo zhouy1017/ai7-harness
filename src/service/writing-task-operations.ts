@@ -1,3 +1,4 @@
+import { launchedTaskModelLabels, launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { taskDeliverableStale } from './task-deliverable-target.js';
 import { TASK_MATERIAL_OFFER_DAMAGED, type TaskMaterialSource } from './task-material-references.js';
@@ -700,11 +701,12 @@ export function inspectWritingTask(host: WritingTaskOperationsHost, bookId: stri
         label: type.label,
         prepare,
         exemplars: { count: exemplars.length, statement: writingExemplarStatement(writingExemplarLine(type.label, exemplars), exemplars.length, unread) },
-        drafted: drafted.get(type.typeId) ?? null,
+        drafted: drafted.has(type.typeId) ? { ...drafted.get(type.typeId)!, ...launchedRevisionModelLabels(host.authority, drafted.get(type.typeId)!.revisionId) } : null,
         quickStart: internalWritingQuickStart(host, bookId, type.typeId, prepare, facts),
       };
     }),
     task: latest === null || latest.projection.taskIntent === null ? null : {
+      ...launchedTaskModelLabels(host.authority, latest.projection.taskIntent.taskIntentId),
       taskIntentId: latest.projection.taskIntent.taskIntentId,
       typeId: latest.task.typeId,
       typeLabel: latest.task.input.type.label,

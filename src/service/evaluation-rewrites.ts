@@ -1,3 +1,4 @@
+import { launchedTaskModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { editorialMemoryBasePromptDigest } from './learning/editorial-memory.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -855,7 +856,7 @@ export function evaluationRewriteWorkspace(host: EvaluationRewriteStoreHost, boo
       const last = host.evaluationRewriteCall(() => host.evaluationRewrites.latestDecision(version.recordId));
       // Every 采用 of the version, read under the same guard: a damaged one makes the rewrite unavailable (Issue #702 review).
       host.evaluationRewriteCall(() => host.evaluationRewrites.adoptionsOf(version.recordId));
-      decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
+      decided = last === null ? null : { ...launchedTaskModelLabels(host.authority, last.taskIntentId, true), decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
     }
   } catch (error) {
     if (!(error instanceof StoreError)) throw error;

@@ -550,6 +550,7 @@ export interface EvaluationInitialEvidenceProjection {
  * when it began, so AI7's score stands beside the editor's for as long as the version does.
  */
 export interface EvaluationInitialDraftProjection {
+  readonly modelLabel?: string;
   /** The Result Set Revision of AI7's 初评, its number, and the manuscript revision it read. */
   readonly revisionId: string;
   readonly ordinal: number;
@@ -591,6 +592,7 @@ export interface EvaluationInitialDraftProjection {
 export interface EvaluationInitialProjection {
   /** The Book's latest 初评 Task, which the Task Drawer opens; `null` before the first is prepared. */
   readonly task: null | {
+    readonly modelLabel?: string;
     readonly historicalMarker?: string;
     readonly taskIntentId: string;
     readonly state: BaselineAnalysisProjection['state'];
@@ -812,6 +814,7 @@ export interface EvaluationRewriteWorkspaceProjection {
   readonly prepare: { readonly allowed: true; readonly mode: EvaluationRewriteTaskMode } | { readonly allowed: false; readonly reason: string };
   /** The Book's latest rewrite Task, which the Task Drawer opens, and the version and entry it rewrites. */
   readonly task: null | {
+    readonly modelLabel?: string;
     readonly taskIntentId: string;
     readonly recordId: string;
     readonly recordOrdinal: number;
@@ -821,6 +824,7 @@ export interface EvaluationRewriteWorkspaceProjection {
   };
   /** The newest rewrite of the version on show that the editor has not decided; `null` when none waits. */
   readonly proposal: null | {
+    readonly modelLabel?: string;
     readonly revisionId: string;
     readonly createdAt: string;
     /** The saved entry it rewrote, and whether that is still the version's latest — only then can it be 采用. */
@@ -846,7 +850,7 @@ export interface EvaluationRewriteWorkspaceProjection {
     readonly withheld: ReadonlyArray<string>;
   };
   /** The version's latest decision on a rewrite; `null` before the first. */
-  readonly decided: null | { readonly decision: 'accepted' | 'discarded'; readonly entryOrdinal: number | null; readonly decidedAt: string };
+  readonly decided: null | { readonly modelLabel?: string; readonly decision: 'accepted' | 'discarded'; readonly entryOrdinal: number | null; readonly decidedAt: string };
 }
 
 /** One template's 审稿意见 on ②C (Issue #429, S81c; EVAL-013): whether it can be drafted, its result, and its draft. */
@@ -856,9 +860,10 @@ export interface EvaluationReadersReportTemplateProjection {
   /** 起草, or why it cannot be drafted now. */
   readonly prepare: { readonly allowed: true; readonly mode: ReadersReportTaskMode } | { readonly allowed: false; readonly reason: string };
   /** The latest result of this template whose draft has not been opened yet: 打开草稿 makes it the draft document. */
-  readonly drafted: null | { readonly revisionId: string; readonly recordOrdinal: number; readonly createdAt: string };
+  readonly drafted: null | { readonly modelLabel?: string; readonly revisionId: string; readonly recordOrdinal: number; readonly createdAt: string };
   /** The template's draft, once made: an Editorial Artifact edited on the manuscript surface, a draft and never a delivery. */
   readonly draft: null | {
+    readonly modelLabel?: string;
     readonly typeId: string;
     readonly typeLabel: string;
     /** The 定稿 version it was drafted from. */
@@ -875,6 +880,7 @@ export interface EvaluationReadersReportProjection {
   readonly exemplars: { readonly count: number; readonly statement: string };
   /** The Book's latest 审稿意见 Task, which the Task Drawer opens; `null` before the first is prepared. */
   readonly task: null | {
+    readonly modelLabel?: string;
     readonly taskIntentId: string;
     readonly template: ReadersReportTemplate;
     readonly state: BaselineAnalysisProjection['state'];
