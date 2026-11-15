@@ -2864,8 +2864,14 @@ async function main() {
       'review-drawer-settled-plan', settledReviewDrawer);
 
     // #1433: the compact book summary leaves the first actionable finding visible and its evidence opens the passage.
+    const synthesisDatabase = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    let synthesisDiagnostics;
+    try { synthesisDiagnostics = {
+      events: synthesisDatabase.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id=? AND category_id='run-synthesis' ORDER BY sequence").all(reviewed.run.reviewRunId),
+      input: synthesisDatabase.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id=?').get(reviewed.run.reviewRunId),
+    }; } finally { synthesisDatabase.close(); }
     requireJourney(reviewed.run.synthesis?.state === 'completed' && reviewed.run.synthesis.summary.recurringProblems.length > 0,
-      'review-synthesis-produced', { synthesis: reviewed.run.synthesis });
+      'review-synthesis-produced', synthesisDiagnostics);
     if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
       await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');

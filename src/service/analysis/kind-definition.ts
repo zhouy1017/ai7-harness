@@ -260,6 +260,8 @@ export interface AnalysisKindDefinition {
   readonly inheritedBudgetCeiling?: import('../../shared/protocol.js').RunBudgetCeilingState;
   readonly priorBudgetUsage?: () => { inputTokens: number; outputTokens: number };
   readonly manuscriptTarget?: { readonly manuscriptId: string; readonly branchId: string };
+  /** A structured final member sends its source member's frozen instructions through the ordinary procedure wrapper. */
+  readonly inheritedProcedureInstruction?: Pick<import('../procedures/execution.js').ProcedureKindBinding, 'document' | 'pin'>;
   readonly procedureBinding?: import('../procedures/execution.js').ProcedureKindBinding;
   readonly factualClaims?: { readonly level: 'standard' | 'strict'; readonly verificationPrompt: string; readonly verificationPromptDigest: string };
   readonly reviewCrossChapter?: { readonly baseline: import('../../shared/protocol.js').ReviewBaselineSource | null };

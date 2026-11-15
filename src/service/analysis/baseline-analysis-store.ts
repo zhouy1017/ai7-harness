@@ -589,10 +589,10 @@ export class BaselineAnalysisStore {
     if (row !== undefined) {
       const json = asString(row.canonical_json);
       requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '计划记录已损坏。');
-      const plan = parseCanonicalJson(json) as { basePromptContractDigest?: string; editorialMemoryBasePromptContractDigest?: string; editorialMemory?: EditorialMemorySnapshot };
+      const plan = parseCanonicalJson(json) as { basePromptContractDigest?: string; editorialMemoryBasePromptContractDigest?: string; editorialMemory?: EditorialMemorySnapshot; inheritedProcedureInstruction?: AnalysisKindDefinition['inheritedProcedureInstruction'] };
       let definition = this.#baseDefinitionForDigest(plan.basePromptContractDigest ?? plan.editorialMemoryBasePromptContractDigest!);
       if (plan.basePromptContractDigest !== undefined) {
-        const member = readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
+        const member = plan.inheritedProcedureInstruction ?? readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
         definition = withProcedureDefinition(definition, member.document, member.pin);
       }
       definition = withEditorialMemoryDefinition(definition, plan.editorialMemory ?? null);
@@ -1019,7 +1019,8 @@ export class BaselineAnalysisStore {
         providerStatus: envelope.providerStatus as 'remote-denied-local-deterministic' | 'remote-denied-no-route',
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
-        procedureContent: procedureContent(readProcedurePlanView(this.#db, asString(digests['plan-envelope']), this.#definition.kind)?.document),
+        procedureContent: procedureContent((envelope.inheritedProcedureInstruction as AnalysisKindDefinition['inheritedProcedureInstruction'])?.document
+          ?? readProcedurePlanView(this.#db, asString(digests['plan-envelope']), this.#definition.kind)?.document),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
         ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 || envelope.compositionVersion === 4 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
@@ -1578,7 +1579,9 @@ export class BaselineAnalysisStore {
    * developer-live and the launch's under it.
    */
   #planCeiling(unitCount: number, editorCeiling: RunBudgetCeilingState, background: BackgroundRunBudgetCeiling | null): RunBudgetCeilingState {
-    const inherited = this.#definition.structuredOnly === true ? this.#definition.inheritedBudgetCeiling : undefined;
+    // Developer launches own their immutable ceiling. Ordinary plans keep the editor's editable ceiling.
+    const inherited = this.#launch.live !== null && this.#launch.live.scope !== 'ordinary-production' && this.#definition.structuredOnly === true
+      ? this.#definition.inheritedBudgetCeiling : undefined;
     if (inherited !== undefined) return inherited === 'unset' ? editorCeiling : editorCeiling === 'unset' ? inherited
       : { kind: 'tokens', maxTotalTokens: Math.min(inherited.maxTotalTokens, editorCeiling.maxTotalTokens) };
     const live = this.#launch.live;
@@ -2048,7 +2051,8 @@ export class BaselineAnalysisStore {
 
   #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
     const pin = selectedProcedureForBook(this.#db, bookId, base.kind);
-    return withEditorialMemoryDefinition(pin === null ? base : ((member) => withProcedureDefinition(base, member.document, member.pin))(resolveProcedureForKind(this.#db, pin, base.kind)),
+    const instruction = base.inheritedProcedureInstruction ?? (pin === null ? null : resolveProcedureForKind(this.#db, pin, base.kind));
+    return withEditorialMemoryDefinition(instruction === null ? base : withProcedureDefinition(base, instruction.document, instruction.pin),
       this.#currentEditorialMemory(bookId));
   }
 
@@ -3651,7 +3655,8 @@ export class BaselineAnalysisStore {
       if (currentId !== null) validateProcedureEdit(resolveProcedureDefinition(this.#db, currentId, currentPreinstalledVersion(currentId)).document,
         { procedureId: null, basedOn: selected, title: document.title, editorInstruction: document.editorInstruction, stages: document.stages });
     }
-    const unwrappedDefinition = selected === undefined || document === null ? baseDefinition : withProcedureDefinition(baseDefinition, document, selected);
+    const instruction = baseDefinition.inheritedProcedureInstruction ?? (selected === undefined || document === null ? null : { document, pin: selected });
+    const unwrappedDefinition = instruction === null ? baseDefinition : withProcedureDefinition(baseDefinition, instruction.document, instruction.pin);
     // Plan edits keep their original memory; a newly initiated task selects current enabled rules.
     const firstEnvelope = ordinal === 1 ? undefined : this.#db.prepare(
       "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'plan-envelope'",
@@ -3660,7 +3665,7 @@ export class BaselineAnalysisStore {
       : firstEnvelope === undefined ? null : (parseCanonicalJson(asString(firstEnvelope.canonical_json)) as { editorialMemory?: EditorialMemorySnapshot }).editorialMemory ?? null;
     const definition = withEditorialMemoryDefinition(unwrappedDefinition, memory);
     if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
-    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null && live.scope !== 'ordinary-production') {
+    if (selected !== undefined && document !== null && instruction !== null && procedureInstruction(instruction.document, instruction.pin) !== '' && live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
         'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '这项任务暂不支持带编辑指令的工序。');
     }
@@ -3874,7 +3879,8 @@ export class BaselineAnalysisStore {
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
       ...(memory === null ? {} : { editorialMemory: memory, editorialMemoryBasePromptContractDigest: unwrappedDefinition.promptContractDigest }),
-      ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest }),
+      ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest,
+        ...(baseDefinition.inheritedProcedureInstruction === undefined ? {} : { inheritedProcedureInstruction: baseDefinition.inheritedProcedureInstruction }) }),
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       compositionVersion: composition.version,
@@ -3910,7 +3916,7 @@ export class BaselineAnalysisStore {
         runSourceScope: components['run-source-scope'] as BaselineAnalysisProjection['runSourceScope'],
         coverageManifest: manifest, providerResolutionPlan: components['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'],
         executionPlan: components['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
-        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null, procedureContent: procedureContent(document),
+        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null, procedureContent: procedureContent(instruction?.document),
           providerStatus: envelopeBase.providerStatus as NonNullable<BaselineAnalysisProjection['planEnvelope']>['providerStatus'],
           boundary: envelopeBase.boundary, ...(composition.version === 1 ? {} : { compositionVersion: composition.version }) },
         planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],

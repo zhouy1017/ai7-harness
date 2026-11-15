@@ -1,6 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { REVIEW_SYNTHESIS_PLAN_LINE } from '../../shared/review-synthesis-wording.js';
-import { withProcedureDefinition } from '../procedures/execution.js';
 import { resolveProcedureForKind } from '../procedures/composite.js';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { AnalysisKindDefinition } from '../analysis/kind-definition.js';
@@ -52,5 +51,5 @@ export function runSynthesisKind(db: DatabaseSync, key: string, source?: ReviewC
   };
   if (source?.procedure == null) return definition;
   const document = source.document ?? resolveProcedureForKind(db, source.procedure, source.kind).document;
-  return withProcedureDefinition(definition, document, source.procedure);
+  return { ...definition, inheritedProcedureInstruction: { document, pin: source.procedure } };
 }

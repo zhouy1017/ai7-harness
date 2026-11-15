@@ -1453,10 +1453,13 @@ export class ReviewRunStore {
         if (planned.plan.kind === 'leads') { work.prepared.push(this.#snapshotCategory(planned, null)); continue; }
         const ledger = this.#preparationLedger(work, planned);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
+        const level = planned.entry.executor === 'factual-review-kind' ? options.evidenceAssuranceLevel : undefined;
+        const ceiling = planned.entry.synthesisSource?.budgetCeiling;
+        const edits = (level !== undefined && level !== 'standard') || (ceiling !== undefined && ceiling !== 'unset')
+          ? { removedSteps: [], disallowedAdaptations: [], ...(level === undefined || level === 'standard' ? {} : { evidenceAssuranceLevel: level }),
+            ...(ceiling === undefined || ceiling === 'unset' ? {} : { runBudgetCeiling: ceiling }) } : undefined;
         const projection = ledger.launchTask({ ...request, reconfirm: false,
-          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution, true,
-          planned.entry.executor === 'factual-review-kind' && options.evidenceAssuranceLevel !== undefined && options.evidenceAssuranceLevel !== 'standard'
-            ? { removedSteps: [], disallowedAdaptations: [], evidenceAssuranceLevel: options.evidenceAssuranceLevel } : undefined);
+          ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) }, snapshotId, execution, true, edits);
         work.prepared.push(this.#snapshotCategory(planned, projection));
       }
       reviewRunId = this.#writeRun(work);
@@ -1698,6 +1701,11 @@ export class ReviewRunStore {
         }
         requireReview(projection.state === 'prepared' && projection.actions.canAuthorize && projection.taskIntent !== null && projection.planEnvelope !== null,
           'REVIEW_PLAN_UNAVAILABLE', `「${planned.entry.label}」的计划没有准备好。`);
+        const ceiling = planned.entry.synthesisSource?.budgetCeiling;
+        if (ceiling !== undefined && ceiling !== 'unset' && (ledger.launch.live === null || ledger.launch.live.scope === 'ordinary-production')) {
+          projection = ledger.editPlan(work.bookId, { taskIntentId: projection.taskIntent.taskIntentId,
+            planEnvelopeDigest: projection.planEnvelope.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling });
+        }
         work.prepared.push(this.#snapshotCategory(planned, projection));
         work.index += 1;
         // One category's plan per step keeps the job cooperative; the next step takes the next one.
