@@ -2,7 +2,7 @@ import { markModelLabels } from './editorial-mark-source.js';
 import { baselineSynopsisSent, baselineSynopsisTechnical } from '../shared/baseline-synopsis-wording.js';
 import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
-import { housePreferenceLabel } from './house-review-preference.js';
+import { housePreferenceLabel } from './learning/memory-facade.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';

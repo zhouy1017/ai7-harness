@@ -1,3 +1,4 @@
+import { fastRoleMemoryContext } from '../learning/memory-facade.js';
 import { randomUUID } from 'node:crypto';
 import { UUID_PATTERN } from '../analysis/canonical.js';
 import type { ScopedEditWorkingBlock } from '../ai-edit-locks.js';
@@ -216,7 +217,7 @@ export async function finishScopedEdit(owner: FastRoleExecutionOwner, store: Sco
   const settle = (state: ScopedAiEditProjection['state'], label: string, extra: Partial<ScopedAiEditProjection> = {}): ScopedAiEditProjection =>
     scopedEditProjection(prepared, state, label, extra);
   const answer = await owner.ask(EDITORIAL_POLISH_KIND, buildScopedEditMessage(prepared.message), 'scoped-edit',
-    () => store.editorialMemory?.(prepared.bookId, 'editorial-dialogue') ?? null,
+    () => store.editorialMemory?.(...fastRoleMemoryContext(prepared.bookId)) ?? null,
     { label: SCOPED_EDIT_LABEL, systemPrompt: SCOPED_EDIT_PROMPT_CONTRACT.systemPrompt, promptContractDigest: SCOPED_EDIT_PROMPT_CONTRACT_DIGEST });
   if (answer.kind === 'failed') return settle('failed', answer.message.replaceAll('润色这段', SCOPED_EDIT_LABEL), { outcomeUnknown: answer.outcomeUnknown });
   const reading = readScopedEditAnswer(answer.text, prepared.message);

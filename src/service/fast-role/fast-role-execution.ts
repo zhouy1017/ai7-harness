@@ -1,4 +1,5 @@
-import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
+import { bindEditorialMemory, editorialMemoryDigest } from '../learning/memory-facade.js';
+import type { EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
@@ -333,8 +334,7 @@ export class FastRoleExecutionOwner {
     const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
     const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
     const effortConfig = route?.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort };
-    const promptContractDigest = editorialMemoryDigest(kind.promptContractDigest, memory);
-    const systemPrompt = editorialMemoryPrompt(kind.systemPrompt, memory);
+    const { promptContractDigest, systemPrompt } = bindEditorialMemory({ systemPrompt: kind.systemPrompt, promptContractDigest: kind.promptContractDigest }, memory);
     const sessionId = randomUUID();
     const composition = describeComposition(executionRoute, model, promptContractDigest);
     const localRuntime = live === null ? this.#deps.localFixtureRuntime?.() : null;

@@ -1,3 +1,4 @@
+import { dialogueMemoryContext } from '../learning/memory-facade.js';
 import type { AskGlobalAgentInput, GlobalAgentAttemptInput, GlobalAgentDialogueProjection, GlobalAgentDisclosure, GlobalAgentProcedurePin, GlobalAgentProjection, GlobalAgentScope, GlobalAgentSourceCandidate, GlobalAgentSupervisionProposal, GlobalAgentToolCall, GlobalMemoryPin, LaunchPolicyProjection, OrdinaryProductionRouteId, PrepareGlobalAgentTurnInput, RecordLearningSupervisionInput } from '../../shared/protocol.js';
 import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../../shared/protocol/procedures.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
@@ -258,7 +259,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
     throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本或保留回答的来源已经变化；未发送任何内容。');
   const messageSha256 = sha256Hex(buildDialogueMessage(message));
   // One closed descriptor: every field and ordering below is part of the local identity, never prompt content.
-  const memory = store.editorialMemory?.(null, 'global-agent') ?? null;
+  const memory = store.editorialMemory?.(...dialogueMemoryContext(null)) ?? null;
   const descriptor = { ...(memory === null ? {} : { editorialMemory: memory }), selectedPolicyIdentity: selected, policyRuleId: route.ruleId, route: route.profile.route,
     model: route.modelProfile.model, modelRole: route.modelRole, credentialSlot: route.profile.credentialSlot,
     credentialReference: connection.binding.credentialReference, credentialUpdatedAt: connection.credentialUpdatedAt,

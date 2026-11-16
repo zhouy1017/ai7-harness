@@ -34,12 +34,6 @@ export type EditorialMemoryGovernanceRevision = Pick<GlobalEditorialMemoryVersio
   'itemId' | 'versionId' | 'title' | 'editorialDimension' | 'signalIds' | 'supervisionDirectiveRefs'> & (
   Pick<EditorialMemoryVersion, 'schema' | 'state' | 'applicability' | 'parentVersions'> |
   Pick<LegacyEditorialMemoryVersion, 'schema' | 'activation'>);
-export interface EditorialMemoryGovernanceHooks {
-  /** Must page EditorialLearningLedger.inspect and use its current `usable` decision, including exclusions. */
-  revisions(): ReadonlyArray<{ readonly current: EditorialMemoryGovernanceRevision; readonly usable: boolean }>;
-  /** Must append through global_editorial_memory_item_versions, retain signal lineage and add the directive reference. */
-  govern(directive: LearningSupervisionDirective, expected: ReadonlyArray<GlobalMemoryPin>): void;
-}
 export function editorialMemoryGovernanceItem(
   entry: { readonly current: EditorialMemoryGovernanceRevision; readonly usable: boolean }, categoryId: string,
 ): GlobalMemoryItem {
@@ -96,6 +90,13 @@ export function validSupervisionInput(value: unknown): value is RecordLearningSu
 }
 
 export class SupervisionDirectives {
+  #hasMemoryItem(itemId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(itemId) !== undefined;
+  }
+  memoryTargets(targets: readonly GlobalMemoryPin[]): GlobalMemoryPin[] { return targets.filter(pin => this.#hasMemoryItem(pin.itemId)); }
+  legacyDirectives(directives: readonly LearningSupervisionDirective[]): LearningSupervisionDirective[] {
+    return directives.filter(directive => !directive.targets.some(pin => this.#hasMemoryItem(pin.itemId)));
+  }
   constructor(readonly db: DatabaseSync) {}
 
   history(scope: TrustedOperationalScope): LearningSupervisionDirective[] {

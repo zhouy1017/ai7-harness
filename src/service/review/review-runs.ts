@@ -22,7 +22,7 @@ import { HouseWordLists } from './house-word-list.js';
 import { HouseWordListError } from '../../shared/protocol/house-word-list.js';
 import { LOCAL_REVIEW_CATEGORY, LOCAL_REVIEW_CATEGORY_V3, REVIEW_CATEGORY_CONFIGURATION_SCHEMA } from './category-configuration.js';
 import type { LocalCheckOptions } from '../../shared/protocol/procedures.js';
-import { HouseReviewPreferenceLedger, housePreferenceLabel } from '../house-review-preference.js';
+import { type EditorialMemoryFacade, housePreferenceLabel } from '../learning/memory-facade.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 import type { ReferencedRuleVersion } from '../../shared/protocol/learning.js';
 import type { HouseReviewPreferenceUse, LearningLedgerMaterialKind, ReviewRunInfluenceProjection } from '../../shared/protocol.js';
@@ -768,7 +768,7 @@ function boundedTitle(title: string): string {
  */
 export interface ReviewRunLedgers {
   executionFor?(binding: import('../launch-policy.js').ConfiguredProviderBinding): LaunchBinding;
-  learningLedger?: () => import('../learning/ledger.js').EditorialLearningLedger;
+  memoryFacade: () => EditorialMemoryFacade;
   ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null, contractVersion?: 1 | 2): BaselineAnalysisStore;
   /**
    * The house's 本社审阅偏好 for one category of one Book (Issue #911): its use when the category has lines and the kind's one rule
@@ -1825,7 +1825,7 @@ export class ReviewRunStore {
       const synthesis = work.prepared.find((category) => category.entry.synthesisKey !== undefined);
       if (synthesis !== undefined) this.#db.prepare('INSERT INTO review_run_synthesis(review_run_id, synthesis_key) VALUES (?, ?)')
         .run(reviewRunId, synthesis.entry.synthesisKey!);
-      const preferences = new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger);
+      const preferences = this.#memoryFacade();
       for (const category of work.prepared) {
         if (category.task === null) continue;
         const preference = work.housePreferences?.[category.task.kind];
@@ -2397,7 +2397,7 @@ export class ReviewRunStore {
     const contractVersion = category.entry.synthesisKey === undefined
       ? isRecord(envelope.contractIdentity) && envelope.contractIdentity.version === 2 ? 2 : 1
       : this.#db.prepare('SELECT contract_version FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId)?.contract_version === 'ai7.editorial-review/1' ? 1 : 2;
-    const preference = new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger).pinned(category.task.taskIntentId);
+    const preference = this.#memoryFacade().pinned(category.task.taskIntentId);
     const materialPromptDigest = clarificationPlanBaseDigest(execution, envelope);
     requireReview(materialPromptDigest !== null, 'REVIEW_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
     if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, materialPromptDigest, undefined, preference, contractVersion);
@@ -2764,10 +2764,9 @@ export class ReviewRunStore {
   #unitPreferenceReferences(runRecordId: string): ReadonlyArray<{ unitOrdinal: number; referencedRuleVersions: ReadonlyArray<ReferencedRuleVersion> }> | undefined {
     const run = this.#db.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId);
     if (run === undefined) return undefined;
-    const preference = new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger).pinned(String(run.task_intent_id));
+    const preference = this.#memoryFacade().pinned(String(run.task_intent_id));
     if (preference?.selection === undefined) return undefined;
-    const referencedRuleVersions = preference.lines.map((text, index) => ({ versionId: preference.versionId, ordinal: preference.ordinal,
-      lineIndex: preference.selection!.lineIndexes[index]!, text }));
+    const referencedRuleVersions = this.#memoryFacade().referencedRules(preference);
     const ordinals = new Set<number>();
     for (const row of this.#db.prepare(`SELECT s.* FROM analysis_harness_spans s JOIN analysis_execution_attempts a ON a.attempt_id = s.attempt_id
       WHERE a.run_record_id = ? AND s.unit_ordinal IS NOT NULL ORDER BY s.unit_ordinal, s.ordinal`).iterate(runRecordId) as IterableIterator<SqlRow>) {
@@ -4421,9 +4420,11 @@ export class ReviewRunStore {
     });
   }
 
+  #memoryFacade(): EditorialMemoryFacade { return this.#ledgers.memoryFacade(); }
+
   /** The 本社审阅偏好 version a category's Task pinned and the materials behind what it read (Issue #912); `null` for none. */
-  #influenceOf(category: SnapshotCategory): ReturnType<HouseReviewPreferenceLedger['pinnedInfluence']> {
-    return category.task === null ? null : new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger).pinnedInfluence(category.task.taskIntentId);
+  #influenceOf(category: SnapshotCategory): ReturnType<EditorialMemoryFacade['pinnedInfluence']> {
+    return category.task === null ? null : this.#memoryFacade().pinnedInfluence(category.task.taskIntentId);
   }
 
   /**
@@ -4479,7 +4480,7 @@ export class ReviewRunStore {
     const task = this.#db.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (task === undefined) return null;
     try {
-      const influence = new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger).pinnedInfluence(text(task.task_intent_id));
+      const influence = this.#memoryFacade().pinnedInfluence(text(task.task_intent_id));
       if (influence === null || influence.sources.every((source) => source.withdrawnAt === null)) return null;
       return `本社审阅偏好 v${influence.version.ordinal}`;
     } catch (error) {
@@ -4541,9 +4542,9 @@ export class ReviewRunStore {
   #influenceProjection(snapshot: RunSnapshot): ReviewRunInfluenceProjection[] {
     return snapshot.categories.flatMap((category) => {
       if (category.task === null || !this.#preferenceConsumed(category.task.taskIntentId)) return [];
-      let influence: ReturnType<HouseReviewPreferenceLedger['pinnedInfluence']>;
+      let influence: ReturnType<EditorialMemoryFacade['pinnedInfluence']>;
       try {
-        influence = new HouseReviewPreferenceLedger(this.#db, this.#ledgers.learningLedger).pinnedInfluence(category.task.taskIntentId, { historical: true });
+        influence = this.#memoryFacade().pinnedInfluence(category.task.taskIntentId, { historical: true });
       } catch (error) {
         if (!(error instanceof LearningEligibilityError)) throw error;
         return [];
