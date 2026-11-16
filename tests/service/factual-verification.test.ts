@@ -949,6 +949,9 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(store.factualReviewLedger.inspect(book.bookId).run?.state).toBe('interrupted');
     expect(sends.model).toBe(3);
     expect(run.categories[0]?.state).toBe('interrupted');
+    const coverage = store.factualReviewLedger.inspect(book.bookId).resultSetRevision!.coverage;
+    expect(coverage.unitsTotal).toBeGreaterThan(1);
+    expect(run.synthesis?.missingCategories.some(label => label.includes(`${coverage.unitsClosed}/${coverage.unitsTotal}`))).toBe(true);
     expect(run.categories[0]?.findingsCount).toBeGreaterThan(0);
     expect(results.length).toBe(run.categories[0]?.findingsCount);
     expect(run.state).toBe('partial');

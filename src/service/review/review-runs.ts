@@ -2845,14 +2845,19 @@ export class ReviewRunStore {
       });
     const coverage = modelCategories.map(entry => {
       const units = this.#synthesisUnits(snapshot, [entry]);
-      const revisionId = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized')?.resultSetRevisionId;
+      const revisionId = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized' || this.#retained(event))?.resultSetRevisionId;
       const closed = new Set(revisionId == null ? [] : this.#db.prepare("SELECT unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed'").all(revisionId).map(row => integer(row.unit_ordinal)));
       return { categoryId: entry.categoryId, label: entry.entry.label, unitsRead: units.filter(unit => closed.has(unit.ordinal)).length,
         unitsTotal: units.length, missingUnitOrdinals: units.filter(unit => !closed.has(unit.ordinal)).map(unit => unit.ordinal) };
     });
     const baselineUnits = baseline === undefined ? [] : this.#db.prepare('SELECT unit_ordinal, state FROM analysis_unit_results WHERE revision_id = ? ORDER BY unit_ordinal').all(text(baseline.revision_id));
     const baselineMissing = baselineUnits.filter(unit => unit.state !== 'closed').map(unit => integer(unit.unit_ordinal));
-    const missingCategories = coverage.filter(entry => entry.unitsRead < entry.unitsTotal).map(entry => `${entry.label}（已读 ${entry.unitsRead}/${entry.unitsTotal} 个阅读范围；未读第 ${entry.missingUnitOrdinals.join('、')} 范围）`);
+    const completeCategories = new Set(modelCategories.filter(entry => {
+      const event = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized');
+      return event?.runRecordId != null && this.#categoryLedger(entry, snapshot).currentRunState(event.runRecordId) === 'completed';
+    }).map(entry => entry.categoryId));
+    const missingCategories = coverage.filter(entry => entry.unitsRead < entry.unitsTotal || !completeCategories.has(entry.categoryId)).map(entry =>
+      `${entry.label}（已读 ${entry.unitsRead}/${entry.unitsTotal} 个阅读范围；${entry.missingUnitOrdinals.length ? `未读第 ${entry.missingUnitOrdinals.join('、')} 范围` : '部分检查未完成'}）`);
     if (baselineMissing.length > 0) missingCategories.push(`基线概述（缺少第 ${baselineMissing.join('、')} 阅读范围）`);
     const synthesisLedger = this.#categoryLedger(category, snapshot);
     const synthesisPlan = synthesisLedger.frozenPlan(category.task!.taskIntentId, category.task!.planEnvelopeDigest);

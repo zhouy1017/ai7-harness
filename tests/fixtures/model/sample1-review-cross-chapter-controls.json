@@ -537,18 +537,6 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "78538ea73252b00e0326acc327b185db5f3333e63b9513a849fcd89d39275dc3",
-      "response": {
-        "kind": "unit-result",
-        "text": "{\"schema\":\"ai7.review.run-synthesis-result/1\",\"overallAssessment\":\"各章的发现应放回全书脉络逐条核对。建议先统一用字、数字与章题体例，再复核叙述表达和梦境与现场的衔接。\",\"recurringProblems\":[{\"title\":\"优先统一各章的编辑处理\",\"explanation\":\"以下发现提供了核对入口；同类问题应采用一致的编辑尺度，具体修改仍须逐条判断。\",\"evidenceRefs\":[\"e1\",\"e2\",\"e3\"],\"priority\":\"先处理必须核对的发现。\"}],\"contextualExplanations\":[],\"priorities\":[\"先核对用字与数字体例。\",\"再结合全书脉络处理表达与情节衔接。\"]}",
-        "usage": {
-          "inputTokens": 900,
-          "outputTokens": 180
-        }
-      }
-    },
-    {
-      "unitOrdinal": 0,
       "requestDigest": "78df14ccb730f4da90d43e3c75833d7dbf42f9ff3892ce66ef51ad9ad291e0a1",
       "response": {
         "kind": "unit-result",
@@ -688,6 +676,18 @@
         "usage": {
           "inputTokens": 1630,
           "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "93fd6d89003e14086e0c87bd4b036f6438d3c639ee7c36ae42390fa6e348702a",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.review.run-synthesis-result/1\",\"overallAssessment\":\"各章的发现应放回全书脉络逐条核对。建议先统一用字、数字与章题体例，再复核叙述表达和梦境与现场的衔接。\",\"recurringProblems\":[{\"title\":\"优先统一各章的编辑处理\",\"explanation\":\"以下发现提供了核对入口；同类问题应采用一致的编辑尺度，具体修改仍须逐条判断。\",\"evidenceRefs\":[\"e1\",\"e2\",\"e3\"],\"priority\":\"先处理必须核对的发现。\"}],\"contextualExplanations\":[],\"priorities\":[\"先核对用字与数字体例。\",\"再结合全书脉络处理表达与情节衔接。\"]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
         }
       }
     },
