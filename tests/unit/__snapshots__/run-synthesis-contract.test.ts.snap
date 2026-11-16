@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`preserves the integration-tip review synthesis request at 1024 bytes (#1500) 1`] = `
+{
+  "input": "99e9e22ed0c71562e6559ee422ae87e8c0275fc41ab60bb2909a5e7a100557c8",
+  "prompt": "2360dd7d5d1078dc8d2354ce9f05b523c33d6af7eaffcfe283a8af6fa7ba863c",
+  "reducer": "aa7600ad79b541259a6c7f54682aa9bf5aab893353b2d88112419167571c15bb",
+  "request": "5dd602ea9ab904270dbf4580b58ddda0160df9e453467c524f7d558303a1fbc8",
+  "schema": "aa7600ad79b541259a6c7f54682aa9bf5aab893353b2d88112419167571c15bb",
+}
+`;
+
+exports[`preserves the integration-tip review synthesis request at 24576 bytes (#1500) 1`] = `
+{
+  "input": "8a7b924bffec04062a1459c8b0da9821d8970908075ea51915ba05b5cedff14c",
+  "prompt": "2360dd7d5d1078dc8d2354ce9f05b523c33d6af7eaffcfe283a8af6fa7ba863c",
+  "reducer": "aa7600ad79b541259a6c7f54682aa9bf5aab893353b2d88112419167571c15bb",
+  "request": "58f162cf56d14bc539f746772e68cfc5cd4f825182632ce989fdc3ab37d5348b",
+  "schema": "aa7600ad79b541259a6c7f54682aa9bf5aab893353b2d88112419167571c15bb",
+}
+`;
+
+exports[`preserves the integration-tip review synthesis request at 98304 bytes (#1500) 1`] = `
+{
+  "input": "4a35dca97d63f71cc9d0871bd16ae34f0d2071c04fd9d028ac8225ac08d5139b",
+  "prompt": "2360dd7d5d1078dc8d2354ce9f05b523c33d6af7eaffcfe283a8af6fa7ba863c",
+  "reducer": "aa7600ad79b541259a6c7f54682aa9bf5aab893353b2d88112419167571c15bb",
+  "request": "760fb8a80695df761cf847012ec563392faf6ea41252452457cc6d3fd2d230b7",
+  "schema": "aa7600ad79b541259a6c7f54682aa9bf5aab893353b2d88112419167571c15bb",
+}
+`;

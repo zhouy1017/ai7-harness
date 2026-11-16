@@ -1,3 +1,5 @@
+import { seedSynopsisBaselineAnswers, runSynopsisBaseline } from '../support/synopsis-reuse.js';
+import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-writing-authored` (Issue #432, plan slice S84a). The passages and the draft below
@@ -89,6 +91,7 @@ function add(entry: ModelFixtureEntry, order: string): void {
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-s84-generate-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+  await seedSynopsisBaselineAnswers(fixture.entries, roots.codeRoot);
 });
 afterEach(async () => { await roots.dispose(); });
 
@@ -117,7 +120,7 @@ function answerUnits(prepared: WritingProjection, draft: unknown, order: string)
   }));
   add({
     unitOrdinal: 0,
-    requestDigest: writingSynthesisRequestDigest(contract, writingPassageSetDigest(closed)),
+    requestDigest: taskSynopsisRequestDigest(writingSynthesisRequestDigest(contract, writingPassageSetDigest(closed)), prepared.executionPlan?.baselineSynopsisContext),
     attempt: null,
     contentDigest: null,
     response: { kind: 'unit-result', text: JSON.stringify(draft), usage: { inputTokens: 2600, outputTokens: 720 } },
@@ -125,7 +128,7 @@ function answerUnits(prepared: WritingProjection, draft: unknown, order: string)
 }
 
 /** One pass of J-07's 写作任务: a fresh import of exact sample1, the Task prepared, and the draft run to its end. */
-async function pass(layout: boolean): Promise<boolean> {
+async function pass(layout: boolean, withBaseline = false): Promise<boolean> {
   const scenario = await createServiceTestRoots('ai7-s84-generate-pass-');
   const store = await EditorialStore.open(scenario.dataRoot, scenario.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -140,6 +143,7 @@ async function pass(layout: boolean): Promise<boolean> {
     const { bookId } = await importSample1Book(store, scenario.codeRoot, WRITING_BOOK_TITLE);
     await pinEditorialWorkspaceProfileRevision2(store, bookId);
     recordMissingCredentialConnection(store, 'S84 主编辑连接');
+    if (withBaseline) await runSynopsisBaseline(store, owner, bookId, launchPolicy);
     let progress = store.createWritingPreparationWork(bookId, WRITING_REQUEST, launchPolicy);
     while (!progress.done) progress = store.advanceWritingPreparationWork(progress.workId!);
     const prepared = progress.projection!;
@@ -173,7 +177,7 @@ async function pass(layout: boolean): Promise<boolean> {
     }));
     add({
       unitOrdinal: 0,
-      requestDigest: writingSynthesisRequestDigest(contract, writingPassageSetDigest(closed)),
+      requestDigest: taskSynopsisRequestDigest(writingSynthesisRequestDigest(contract, writingPassageSetDigest(closed)), prepared.executionPlan?.baselineSynopsisContext),
       attempt: null,
       contentDigest: null,
       response: { kind: 'unit-result', text: JSON.stringify(AUTHORED_WRITING_DRAFT), usage: { inputTokens: 2600, outputTokens: 720 } },
@@ -237,7 +241,7 @@ it.runIf(process.env['AI7_REGENERATE_WRITING_FIXTURE'] === '1')('generates the a
   let closed = false;
   for (let index = 0; index < 4 && !closed; index += 1) {
     additions = 0;
-    closed = await pass(false);
+    closed = (await pass(false)) && (await pass(false, true));
     // eslint-disable-next-line no-console
     console.log(`pass ${index + 1}: +${additions} entries, closed: ${closed}`);
     if (additions > 0) closed = false;
@@ -247,8 +251,8 @@ it.runIf(process.env['AI7_REGENERATE_WRITING_FIXTURE'] === '1')('generates the a
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: WRITING_FIXTURE_IDENTITY,
-    description: '写作契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答 J-07 为第二本书「写作旅程乙」起草宣传文章时发出的单元请求与一次全书综合。受众「喜欢历史与悬疑小说的读者」，渠道「出版社微信公众号」，没有其他要求；这本书没有基线分析、没有定稿的评估、没有作者与书系信息，本社也没有宣传文章范例，契约逐项写明本次不参考。每处段落都按其在单元消息中的位置引用它所依据的内容块，分为看点、人物与主题三类；全书综合只依据这些段落与参考信息写出文档的标题与各部分。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。Issue #428 加上 J-07 最后一项任务：为同一本书起草评论文章（受众「关注历史题材小说的读者」，渠道「读书网站书评栏目」），在「允许参考」里列一份旅程自己写的资料库资料「青铜器保护笔记」（契约 /3）；单元请求用同样的段落回答，全书综合取用资料里的信息而不照抄。',
-    basedOn: null,
+    description: '写作契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答 J-07 为第二本书「写作旅程乙」起草宣传文章时发出的单元请求与一次全书综合。受众「喜欢历史与悬疑小说的读者」，渠道「出版社微信公众号」，没有其他要求；这本书没有基线分析、没有定稿的评估、没有作者与书系信息，本社也没有宣传文章范例，契约逐项写明本次不参考。每处段落都按其在单元消息中的位置引用它所依据的内容块，分为看点、人物与主题三类；全书综合只依据这些段落与参考信息写出文档的标题与各部分。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。Issue #428 加上 J-07 最后一项任务：为同一本书起草评论文章（受众「关注历史题材小说的读者」，渠道「读书网站书评栏目」），在「允许参考」里列一份旅程自己写的资料库资料「青铜器保护笔记」（契约 /3）；单元请求用同样的段落回答，全书综合取用资料里的信息而不照抄。 #1500 另覆盖有匹配基线的任务：分章概述在计划中冻结，只交给最后的全书综合，保留无匹配基线的原请求；写作原有的全书梗概与人物输入保持不变。',
+    basedOn: 'sample1-baseline-happy',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',

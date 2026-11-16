@@ -124,6 +124,7 @@ export interface WritingProjection extends Omit<
     modeLabel: string;
   };
   executionPlan: null | {
+    baselineSynopsisContext?: import('./baseline-synopsis.js').FrozenBaselineSynopsisContext;
     steps: ReadonlyArray<string>;
     effects: readonly [];
     unitCount: number;

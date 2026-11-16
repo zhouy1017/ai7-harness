@@ -59,6 +59,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   store.factualReviewLedger.bindLaunch(launch);
   const unmatched: string[] = [];
   const requests: AnalysisRequestIdentity[] = [];
+  const runRecordIds = new Map<string, string>();
   const wireRequests: Array<{ model: string; reasoning_effort?: string; messages: Array<{ role: string; content: string }> }> = [];
   const nativeFetch: typeof fetch = async (url, init) => {
     const refuse = (reason = 'unmatched-request'): never => { unmatched.push(reason); throw new Error('CAPTURED_ORDINARY_UNMATCHED_REQUEST'); };
@@ -66,6 +67,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const sessionId = new Headers(init.headers).get(OPENCODE_GO_SESSION_HEADER);
     const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     let request: AnalysisRequestIdentity | undefined;
+    let runRecordId: string | undefined;
     let frozenModel: string | undefined;
     try {
       const row = db.prepare(`SELECT run_record_id, canonical_json FROM analysis_run_states
@@ -74,6 +76,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
       if (typeof row?.canonical_json === 'string') request = (JSON.parse(row.canonical_json) as {
         requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request;
       if (row !== undefined) {
+        runRecordId = String(row.run_record_id);
         const plan = db.prepare(`SELECT p.canonical_json FROM analysis_run_records r
           JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
           JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
@@ -86,6 +89,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const message = body.messages.findLast((entry) => entry.role === 'user')?.content;
     if (request === undefined || body.model !== frozenModel || typeof message !== 'string') return refuse();
     requests.push(request);
+    runRecordIds.set(request.requestId, runRecordId!);
     wireRequests.push(body);
     if (transportHold !== undefined) {
       const signal = init.signal ?? new AbortController().signal;
@@ -117,6 +121,6 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     currentLaunchPolicy: () => policy, productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', frozen),
     fixture: null, production: { scope: 'ordinary-production', nativeFetch },
     secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...executionControls });
-  return { owner, policy, launch, nativeFetch, requests, wireRequests, abortedRequests, assertMatched: () => strictEqual(unmatched.length, 0,
+  return { owner, policy, launch, nativeFetch, requests, runRecordIds, wireRequests, abortedRequests, assertMatched: () => strictEqual(unmatched.length, 0,
     `CAPTURED_ORDINARY_UNMATCHED_REQUEST ${unmatched.join(', ')}`) };
 }

@@ -1,4 +1,5 @@
 import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
+import { readClosedBaselineSynopses, reviewSynthesisRequestBytes } from '../analysis/baseline-synopsis.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
 import { RUN_SYNTHESIS_CATEGORY, RUN_SYNTHESIS_ENTRY } from './run-synthesis-kind.js';
 import { buildSynthesisInput, parseSynthesisSummary, type SynthesisInput } from './run-synthesis-contract.js';
@@ -2836,14 +2837,7 @@ export class ReviewRunStore {
       this.#recordEvent(snapshot.reviewRunId, category.categoryId, 'refused', '本次无需全书统合。', { extra: { synthesisNotNeeded: true } });
       return false;
     }
-    const baseline = this.#db.prepare(`SELECT r.revision_id FROM analysis_result_set_revisions r
-      JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id WHERE s.book_id = ? AND s.kind = 'baseline-manuscript-analysis'
-      AND r.manuscript_revision_id = ? ORDER BY r.ordinal DESC LIMIT 1`).get(snapshot.bookId, snapshot.manuscript.revisionId);
-    const synopses = baseline === undefined ? [] : this.#db.prepare("SELECT unit_ordinal, canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal")
-      .all(text(baseline.revision_id)).flatMap((row) => {
-        const unit = recordOf(text(row.canonical_json), text(row.sha256));
-        return typeof unit.synopsis === 'string' ? [{ unitOrdinal: integer(row.unit_ordinal), synopsis: unit.synopsis }] : [];
-      });
+    const baseline = readClosedBaselineSynopses(this.#db, snapshot.bookId, snapshot.manuscript.revisionId);
     const coverage = modelCategories.map(entry => {
       const units = this.#synthesisUnits(snapshot, [entry]);
       const revisionId = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized' || this.#retained(event))?.resultSetRevisionId;
@@ -2851,8 +2845,7 @@ export class ReviewRunStore {
       return { categoryId: entry.categoryId, label: entry.entry.label, unitsRead: units.filter(unit => closed.has(unit.ordinal)).length,
         unitsTotal: units.length, missingUnitOrdinals: units.filter(unit => !closed.has(unit.ordinal)).map(unit => unit.ordinal) };
     });
-    const baselineUnits = baseline === undefined ? [] : this.#db.prepare('SELECT unit_ordinal, state FROM analysis_unit_results WHERE revision_id = ? ORDER BY unit_ordinal').all(text(baseline.revision_id));
-    const baselineMissing = baselineUnits.filter(unit => unit.state !== 'closed').map(unit => integer(unit.unit_ordinal));
+    const baselineMissing = baseline?.missingUnitOrdinals ?? [];
     const completeCategories = new Set(modelCategories.filter(entry => {
       const event = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized');
       return event?.runRecordId != null && this.#categoryLedger(entry, snapshot).currentRunState(event.runRecordId) === 'completed';
@@ -2865,15 +2858,13 @@ export class ReviewRunStore {
     const route = (synthesisPlan.components['provider-resolution-plan'] as { executionRoute: { kind: string; model?: string } }).executionRoute;
     const contextTokens = route.model === undefined ? null : modelProfileFor(route.kind as RemoteExecutionRoute, route.model)?.context.tokens ?? null;
     const envelope = synthesisPlan.components['plan-envelope'] as { promptContractDigest: string };
-    const overheadBytes = Buffer.byteLength(synthesisLedger.definitionForDigest(envelope.promptContractDigest).systemPrompt, 'utf8') + 4096;
-    // UTF-8 bytes conservatively bound token count. Leave room for the frozen wrappers and answer.
-    const requestBytes = contextTokens === null ? 96 * 1024 : Math.max(1024, contextTokens - overheadBytes);
+    const requestBytes = reviewSynthesisRequestBytes(contextTokens, synthesisLedger.definitionForDigest(envelope.promptContractDigest).systemPrompt);
     const input = buildSynthesisInput({ findings: findings.map((finding) => {
       const unit = manifestUnits.find((candidate) => finding.blockPosition !== null && finding.blockPosition >= candidate.startPosition && finding.blockPosition <= candidate.endPosition);
       const chapterOrdinal = unit?.sectionOrdinal ?? 1;
       return { findingId: finding.findingId, categoryId: finding.categoryId, clauseId: finding.clauseRef ?? '', severity: finding.severity,
         note: finding.note, quote: finding.quote, blockId: finding.blockId, chapterOrdinal, chapterLabel: unit?.headingText ?? (unit === undefined ? '全书' : `第 ${unit.ordinal} 部分 · 段落 ${unit.startPosition}–${unit.endPosition}`) };
-    }), missingCategories, coverage, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), missingUnitOrdinals: baselineMissing, synopses } }, requestBytes);
+    }), missingCategories, coverage, baseline }, requestBytes);
     const record = canonicalRecord(input);
     const priorUsage = { inputTokens: 0, outputTokens: 0 };
     for (const member of modelCategories) {

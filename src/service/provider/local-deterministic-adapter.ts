@@ -1,5 +1,6 @@
 import type { CallId, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { isRecord, canonicalJson } from '../analysis/canonical.js';
+import { taskSynopsisMessageRequestDigest } from '../analysis/baseline-synopsis.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, dialogueQuestionDigest, type DialogueMessageInput } from '../dialogue/contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
@@ -550,7 +551,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const toolResults = options.messages.slice(Math.max(lastUserIndex, lastAssistantIndex) + 1).flatMap((message) => {
       const result = message.source?.kind === 'tool' ? toolResultOf(message) : null; return result === null ? [] : [result];
     });
-    const expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
+    let expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
       ? crossUnitRequestDigest(this.#crossUnitPromptContractDigest, crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
@@ -577,13 +578,17 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
                       : writing !== null
                         ? writingRequestDigest(this.#promptContractDigest, writing.ordinal, writing.unitDigest)
                         : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest));
+    const originalDigest = expectedDigest;
+    if (text !== null && (synthesis !== null || report !== null || rewrite !== null || drafting !== null))
+      expectedDigest = taskSynopsisMessageRequestDigest(expectedDigest, text);
+    const hasSynopsisContext = originalDigest !== expectedDigest;
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
     const stageContractDigest = crossUnit !== null ? this.#crossUnitPromptContractDigest : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
-    const compatible = exact === undefined && stage !== null && this.#sourceDigest !== null
+    const compatible = exact === undefined && !hasSynopsisContext && stage !== null && this.#sourceDigest !== null
       ? resolveReplayCompatibleFixtureEntry(this.#fixture, stage, fixtureReplayContentKey(this.#sourceDigest, this.#promptContractDigest, { stageContractDigest }), attempt)
       : undefined;
     const entry = this.#answering(exact ?? compatible);

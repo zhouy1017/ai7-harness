@@ -1,4 +1,5 @@
 import { markModelLabels } from './editorial-mark-source.js';
+import { baselineSynopsisSent, baselineSynopsisTechnical } from '../shared/baseline-synopsis-wording.js';
 import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
 import { housePreferenceLabel } from './house-review-preference.js';
@@ -1274,7 +1275,7 @@ export function initialEvaluationPlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${profile.title}（第 ${profile.version} 版）：${items}`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1326,6 +1327,7 @@ export function initialEvaluationPlan(input: {
       resolution: '请在「评估」里重新准备 AI7 初评。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -1432,7 +1434,7 @@ export function readersReportPlan(input: {
         `评估记录${basis}（${task.profile.title} 第 ${task.profile.version} 版）：各项得分与评语、主要优点与问题、风险与结论`,
         task.exemplars,
       ],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1488,6 +1490,7 @@ export function readersReportPlan(input: {
       resolution: '请在「评估」里重新起草审稿意见。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -1717,7 +1720,7 @@ export function writingPlan(input: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: writingReferenceLines(task, exemplarsHere, materials, projection.authorization !== null),
       send: live
-        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}`
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext)}`
         : '不发送任何内容',
       notRead: NOT_READ,
     },
@@ -1778,6 +1781,7 @@ export function writingPlan(input: {
       resolution: '请在「交付物」的新建文档 · 写作任务里重新起草。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -1887,7 +1891,7 @@ export function evaluationRewritePlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${basis}：你的评分（${scored}）、调分原因、现在的评语、优点、问题、总评、风险与结论，以及 AI7 原报告`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1943,6 +1947,7 @@ export function evaluationRewritePlan(input: {
       resolution: '请在「评估」里再次按你的评分重写评语。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
