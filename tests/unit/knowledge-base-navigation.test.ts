@@ -1,3 +1,4 @@
+import { navigation as shellNavigation } from '../../src/renderer/navigation-generation.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createKnowledgeBase, type KnowledgeBaseOptions } from '../../src/renderer/knowledge-base.js';
 import type { DefaultExecutionRulesProjection, ExemplarBookProjection, ExemplarProjection } from '../../src/shared/protocol.js';
@@ -18,7 +19,7 @@ function navigation(returnToOrigin: KnowledgeBaseOptions['returnToOrigin'] = vi.
   const setStatus = vi.fn();
   const options: KnowledgeBaseOptions = {
     element, panel: () => element('section'), setStatus, rendererErrorMessage: (_error, fallback) => fallback,
-    replaceScreen: (_state, content) => root.replaceChildren(content), rememberReturn: vi.fn(),
+    replaceScreen: (state, content) => { shellNavigation.commit(JSON.stringify([state,content.dataset['knowledgeTab'],content.dataset['qualityTab']])); root.replaceChildren(content); }, rememberReturn: vi.fn(),
     button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
     technicalDetails: () => element('details'), leaveThen: async (open) => open(),
     openWordSourceVersion: vi.fn(), renderGlobalAgent: vi.fn(), returnToOrigin, initializeStartup: vi.fn(),
@@ -27,6 +28,14 @@ function navigation(returnToOrigin: KnowledgeBaseOptions['returnToOrigin'] = vi.
   };
   return { root, setStatus, ...createKnowledgeBase(options) };
 }
+
+it.each(['knowledge','quality'])('keeps the ordinary developer-only redirect notice after its own %s commit', async (surface) => {
+ setTechnicalLayerVisible(false);
+ vi.stubGlobal('window',{ai7:{inspectGlobalAgent:async()=>({categories:[],books:[],items:[]}),inspectEditorialLearning:async()=>({enabled:true,controlEntries:0,items:[],signals:[],excludedBooks:[],excludedMaterials:[],nextItemOffset:null}),inspectHouseReviewPreference:async()=>({current:null,history:[]})}});
+ const page=navigation();
+ if(surface==='knowledge')await page.renderKnowledgeBase('rules');else await page.renderQualityLearning('learning');
+ expect(page.setStatus).toHaveBeenLastCalledWith('该页在开发者模式下显示');
+});
 
 it.each(['guidelines', 'library'] as const)('returns a direct %s entry to its Book surface', async (tab) => {
   vi.stubGlobal('window', { ai7: {
@@ -80,6 +89,23 @@ it('ignores a late rules response when mode changes while the rules loading page
   expect(page.root.querySelector('.knowledge-procedures')).toBeNull();
   expect(page.root.querySelector('[data-rule-count]')).toBeNull();
   expect(page.setStatus).not.toHaveBeenCalledWith('工序与规则已打开');
+});
+
+it('does not report a late knowledge load error on the next page', async () => {
+  let fail!: (reason: Error) => void;
+  const response = new Promise<never>((_resolve, reject) => { fail = reject; });
+  vi.stubGlobal('window', { ai7: { inspectEvaluationProfiles: vi.fn(() => response) } });
+  const page = navigation();
+  const pending = page.renderKnowledgeBase('evaluation');
+  const old = page.root.children[0]!;
+  const help = document.createElement('section'); help.textContent = '帮助';
+  page.root.replaceChildren(help);
+  shellNavigation.commit(); miniDocument.body.append(old as unknown as MiniElement);
+  page.setStatus.mockClear();
+  fail(new Error('delayed load failure'));
+  await pending;
+  expect(page.root.textContent).toBe('帮助');
+  expect(page.setStatus).not.toHaveBeenCalled();
 });
 
 const sampleExemplar: ExemplarProjection = {
@@ -191,4 +217,19 @@ it('defaults ordinary quality to preferences and shares its controls with the kn
   expect(page.root.querySelector('[data-learning-enabled]')).not.toBeNull();
   expect(page.root.textContent).toContain('本社审阅偏好');
   expect(inspectEditorialLearning).toHaveBeenCalledTimes(2);
+});
+
+
+it('announces a rule mutation without reopening its origin after navigation', async () => {
+  const write=Promise.withResolvers<void>();
+  const inspect=vi.fn(async()=>({rules:[{ruleId:'rule',bookTitle:'图书',name:'规则',state:'active',stateLabel:'可用',ordinal:1,
+    binds:[],setBy:'编辑',setAt:'2026-11-16T00:00:00Z',does:'执行规则',taskKind:'baseline-analysis',pattern:'whole',ruleVersionId:'version',
+    sourceTaskIntentId:'task',sourcePlanEnvelopeDigest:'digest'}]}));
+  vi.stubGlobal('window',{ai7:{inspectDefaultExecutionRules:inspect,inspectKnowledgeProcedures:async()=>null,deactivateDefaultExecutionRule:()=>write.promise}});
+  const page=navigation();await page.renderKnowledgeBase('rules');
+  page.root.querySelector<HTMLButtonElement>('[data-rule-action="deactivate"]')!.click();
+  const old=page.root.children[0]!;page.root.replaceChildren(document.createElement('section'));shellNavigation.commit();miniDocument.body.append(old as unknown as MiniElement);
+  write.resolve();for(let i=0;i<10;i+=1)await Promise.resolve();
+  expect(inspect).toHaveBeenCalledOnce();
+  expect(page.setStatus).toHaveBeenCalledWith('已停用默认执行规则：规则；快速开始不再使用它。','success');
 });

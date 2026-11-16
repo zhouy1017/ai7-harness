@@ -276,8 +276,11 @@ export function mountGlobalAgent(options: {
         if (question.value === input.question) question.value = '';
       }
       foreground = dialogue.dialogueId; latestDialogue = dialogue;
-      render(await options.api.inspectGlobalAgent());
+      const projection = await options.api.inspectGlobalAgent();
+      if (!root.isConnected) return;
+      render(projection);
       await showDialogue();
+      if (!root.isConnected) return;
       options.setStatus('问题已发送。', 'success'); question.focus();
     } catch (error) {
       if (root.isConnected) options.setStatus(options.errorMessage(error, '对话未能开始。'), 'error');

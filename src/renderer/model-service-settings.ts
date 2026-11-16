@@ -1,3 +1,5 @@
+import { rendererApi } from './navigation-generation.js';
+import { navigation } from './navigation-generation.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalDisclosure, technicalLayerVisible, technicalWords, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
@@ -81,7 +83,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         }
         save.disabled = true;
         setStatus('正在保存并探测网络代理…', 'busy');
-        const saved = await window.ai7.saveModelServiceProxy({ ...setting, ...(setting.mode === 'proxy' && modelServiceChannel !== null ? { probeRoute: modelServiceChannel } : {}) });
+        const saved = await rendererApi.saveModelServiceProxy({ ...setting, ...(setting.mode === 'proxy' && modelServiceChannel !== null ? { probeRoute: modelServiceChannel } : {}) });
         renderModelServiceSettingsProjection(saved);
         const probe = saved.lastProxyProbe;
         setStatus(setting.mode === 'proxy' && probe ? proxyProbeMessages[probe.status] : '网络代理已保存；下一次请求生效。',
@@ -146,7 +148,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       element('h2', undefined, '模型服务'),
       element('p', 'lede', technicalLayerVisible ? '选择渠道，保存凭据并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
-    content.append(modelServiceFlow(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
+    content.append(modelServiceFlow(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
       effortDraft: (channel, role) => effortDrafts.get(`${channel}/${role}`),
       setEffortDraft: (channel, role, value) => { const key = `${channel}/${role}`; if (value === undefined) effortDrafts.delete(key); else effortDrafts.set(key, value); },
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
@@ -156,10 +158,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       chooseFilter: (filter) => { if (modelServiceChannel !== null) modelFilters.set(modelServiceChannel, filter); },
       get favourites() { return favourites; },
       toggleFavourite: async (channel, modelId) => {
-        const latest = (await window.ai7.getPreferences()).values['model.favourites'];
+        const latest = (await rendererApi.getPreferences()).values['model.favourites'];
         const models = latest[channel] ?? [];
         const value = { ...latest, [channel]: models.includes(modelId) ? models.filter((id) => id !== modelId) : [...models, modelId] };
-        favourites = (await window.ai7.savePreference({ key: 'model.favourites', value })).values['model.favourites'];
+        favourites = (await rendererApi.savePreference({ key: 'model.favourites', value })).values['model.favourites'];
         return favourites;
       } }));
     const currentRoles = element('section', 'model-service-current-roles');
@@ -222,7 +224,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     }
     const actions = element('div', 'button-row');
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
-    content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }),
+    content.append(renderSearchBackendSettings(projection, { api: rendererApi, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }),
       renderModelServiceProxyBlock(projection));
     // Ordinary mode says only what the connection state means for the editor (Issue #1431 item 99): a denial or that nothing is sent
     // yet. The policy-boundary sentence and the authority statement are the developer layer's.
@@ -245,10 +247,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       if (reading || document.visibilityState !== 'visible') return;
       reading = true;
       try {
-        const next = await window.ai7.getModelServiceSettings();
+        const next = await rendererApi.getModelServiceSettings();
         const channel = next.channels.find((item) => item.channelId === modelServiceChannel) ?? next.channels.find((item) => item.route !== null && next.routeChoice.routes.some((route) => route.route === item.route && route.connection?.credentialOperationState === 'ready'));
         // A passive settings read carries no discovery outcome; keep the last outcome until another discovery replaces it.
-        const result = discover && channel?.route ? await window.ai7.refreshModelServiceModels({ route: channel.route })
+        const result = discover && channel?.route ? await rendererApi.refreshModelServiceModels({ route: channel.route })
           : { ...next, ...(projection.modelDiscovery === undefined ? {} : { modelDiscovery: projection.modelDiscovery }) };
         const changed = catalogueKey(result) !== signature;
         if (content.isConnected && changed) content.dataset['changedCataloguePolls'] = String(++changedCataloguePolls);
@@ -266,17 +268,20 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   }
 
   async function renderModelServiceSettings(focus?: 'search'): Promise<void> {
+    const route = navigation.begin();
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
     modelFilters.clear();
     try {
-      const [projection, preferences] = await Promise.all([window.ai7.getModelServiceSettings(), window.ai7.getPreferences()]);
+      const [projection, preferences] = await Promise.all([rendererApi.getModelServiceSettings(), rendererApi.getPreferences()]);
+      if (!route.isCurrent()) return;
       favourites = preferences.values['model.favourites'];
       paintModelServiceSettings(projection);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {
+      if (!route.isCurrent()) return;
       setStatus(rendererErrorMessage(error, '无法读取模型服务设置。'), 'error');
     }
   }
