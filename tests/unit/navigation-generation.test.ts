@@ -8,7 +8,7 @@ import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'withConflictCompletion', 'renderBookFilter'];
+const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
 const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
 const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let settingsLoader='';
@@ -78,11 +78,11 @@ function harness(api: object = {}) {
     technicalDetails: vi.fn(), awaitServiceJob: vi.fn(), openTaskPlan: vi.fn(),
     EVALUATION_STATUS: {loading:'正在读取评估',opened:'评估已打开',unavailable:'无法读取评估'},
     renderTaskOverview: vi.fn(), openOverviewTask: vi.fn(), openOverviewResult: vi.fn(),
-    renderLanding:vi.fn(),renderError:vi.fn(),
+    renderLanding:vi.fn(),renderError:vi.fn(),leaveReturnChip:async()=>undefined,
     BOOK_FILTER_LEGEND:'筛选',BOOK_FILTER_FIELD_LABEL:'字段',BOOK_FILTER_FIELDS:{all:'全部',title:'书名'},BOOK_FILTER_TEXT_LABEL:'词语',MAX_BOOK_SUMMARY_FILTER_CHARACTERS:100,
     BOOK_FILTER_ACTIONS:{find:'查找',clear:'显示全部图书'},BOOK_FILTER_STATUS_LINES:{finding:'查找中',found:'查找完成'},BOOK_FILTER_NONE:'没有匹配的图书',
     bookCardPeopleLine:()=>null,bookCardRelatedLine:()=>null,bookFilterLine:(filter:{text:string})=>filter.text,
-    bookCardOpen:(title:string,_state:string,open:()=>void)=>{const card=element('button','',title);card.addEventListener('click',open);return card;},
+    bookCardOpen:(title:string,_state:string,open:()=>void)=>{const card=element('button','',title);card.addEventListener('click',open);actions.set(title,open);return card;},
     bookCardAction:()=>element('span'),bookIdentityDisclosure:()=>element('details'),appendRecoveryReturnAction:vi.fn(),
   });
   runInContext(program, context);
@@ -451,6 +451,25 @@ it('does not let an older library page overwrite a newer filter result', async (
  await Promise.resolve();await Promise.resolve();
  more.resolve({items:[{bookId:'book-c',title:'旧的下一页',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'}],nextCursor:null});await pending;
  expect(page.screen.textContent).toContain('筛选图书');expect(page.screen.textContent).not.toContain('旧的下一页');
+});
+
+it('reports a library-card error after its requested Book committed', async () => {
+ const page=harness({openBookWorkbench:async()=>({target:'requesting-window',route:{kind:'book',bookId:'book-a',bookTitle:'图书'}}),getBookOverview:async()=>({book:{bookId:'book-a'},manuscriptAnchor:null})});
+ const declaration=source.statements.find((node)=>ts.isFunctionDeclaration(node)&&node.name?.text==='renderLanding')!;
+ runInContext(ts.transpileModule(declaration.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ page.context['book']={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
+ await page.run("renderLanding([],undefined,{items:[book],nextCursor:null})");
+ page.context['renderBookOverview']=()=>{page.replaceScreen('book-overview');throw new Error('paint failed');};
+ await page.actions.get('原有图书')!();
+ expect(page.setStatus).toHaveBeenLastCalledWith('无法打开图书。','error');
+});
+
+it('reports a jump error after its editor committed instead of rejecting its own page identity', async () => {
+ const page=harness({getBookOverview:async()=>({book:{bookId:'book-a',title:'图书'},manuscriptAnchor:{manuscriptId:'manuscript',branchId:'branch'}}),getManuscriptWindowAt:async()=>({bookId:'book-a'})});
+ page.replaceScreen('book-review');
+ page.context['renderEditorWindow']=()=>{page.replaceScreen('editor');throw new Error('paint failed');};
+ const opened=await page.run("jumpToManuscript('book-a',{manuscriptId:'manuscript',blockId:'block',markId:null})");
+ expect(opened).toBe(false);expect(page.setStatus).toHaveBeenLastCalledWith('无法打开对应稿件位置。','error');
 });
 
 it('a new Book acknowledgement preserves a later pending click', async () => {
