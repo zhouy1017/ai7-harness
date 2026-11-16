@@ -50,6 +50,10 @@ export class NavigationGeneration {
 
 export const navigation = new NavigationGeneration();
 
+export class BookHeldElsewhereError extends Error {
+  constructor() { super('这本书已在另一个窗口打开。'); }
+}
+
 // These calls require or establish the window's Book route/capabilities in main.
 // Unrelated house-wide reads and settings must remain available during a leave.
 const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
@@ -111,14 +115,18 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
   bookOnScreen(): string | null;
   left(): void;
   editorOnScreen?(): { manuscriptId: string; branchId: string } | null;
-  failed(error: unknown): void;
+  failed(error: unknown, retry: () => Promise<void>): void;
+  recovered?(): void;
 }, owner: NavigationGeneration = navigation): Api {
   let pending: Promise<unknown> | null = null;
+  let retryRequired = false;
+  let held: string | null = null;
   const wrappers = new Map<PropertyKey, unknown>();
-  const settled = async (): Promise<void> => { while (pending !== null) await pending.then(() => undefined, () => undefined); };
-  const reconcile = async (leave: NavigationCheckpoint): Promise<void> => {
-    if (leave.isCurrent()) { shell.left(); return; }
-    let held: string | null = null;
+  const settled = async (): Promise<void> => {
+    while (pending !== null) try { await pending; } catch (error) { if (retryRequired) throw error; }
+  };
+  const reconcile = async (leave?: NavigationCheckpoint): Promise<void> => {
+    if (leave?.isCurrent()) { shell.left(); return; }
     for (;;) {
       const wanted = shell.bookOnScreen();
       if (wanted === held) {
@@ -129,11 +137,25 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
         if (shell.bookOnScreen() === held && now?.manuscriptId === editor?.manuscriptId && now?.branchId === editor?.branchId) return;
         continue;
       }
-      if (wanted === null) { await raw.leaveBookWorkbench(); held = null; continue; }
-      const opened = await raw.openBookWorkbench({ kind: 'book', bookId: wanted });
-      if (opened.target !== 'requesting-window') throw new Error('AI7_EDITOR_ROUTE_INVALID');
+      if (held !== null) { await raw.leaveBookWorkbench(); held = null; continue; }
+      const opened = await raw.openBookWorkbench({ kind: 'book', bookId: wanted!, activation: 'non-activating' });
+      if (opened.target !== 'requesting-window') throw new BookHeldElsewhereError();
       held = wanted;
     }
+  };
+  const tracked = <T>(attempt: Promise<T>): Promise<T> => {
+    pending = attempt;
+    void attempt.finally(() => { if (pending === attempt) pending = null; }).catch(() => undefined);
+    return attempt;
+  };
+  const recover = async (leave?: NavigationCheckpoint): Promise<void> => {
+    try { await reconcile(leave); retryRequired = false; shell.recovered?.(); }
+    catch (error) { retryRequired = true; shell.failed(error, retry); throw error; }
+  };
+  const retry = (): Promise<void> => {
+    if (pending !== null) return settled();
+    if (!retryRequired) return Promise.resolve();
+    return tracked(recover());
   };
   return new Proxy({ ...raw }, {
     get(target, key, receiver) {
@@ -141,19 +163,21 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
       if (typeof value !== 'function' || String(key).startsWith('on')) return value;
       if (!wrappers.has(key)) wrappers.set(key, (...args: unknown[]) => {
         const invoke = (): unknown => Reflect.apply(value, raw, args);
-        if (key !== 'leaveBookWorkbench') return pending === null || !BOOK_OWNERSHIP_CALLS.has(key as keyof RendererApi) ? invoke() : settled().then(invoke);
+        if (key !== 'leaveBookWorkbench') {
+          if (!BOOK_OWNERSHIP_CALLS.has(key as keyof RendererApi)) return invoke();
+          return pending === null && !retryRequired ? invoke() : retry().then(invoke);
+        }
         const previous = pending;
         const leave = owner.route();
         const leaving = (async () => {
           if (previous !== null) await previous.then(() => undefined, () => undefined);
           const answer = await raw.leaveBookWorkbench();
-          try { await reconcile(leave); } catch (error) { shell.failed(error); throw error; }
+          held = null;
+          await recover(leave);
           return answer;
         })();
         // Register before yielding; reconciliation calls raw directly and cannot wait on itself.
-        pending = leaving;
-        void leaving.finally(() => { if (pending === leaving) pending = null; }).catch(() => undefined);
-        return leaving;
+        return tracked(leaving);
       });
       return wrappers.get(key);
     },
