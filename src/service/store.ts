@@ -1,4 +1,7 @@
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
+import { withModelClarification } from './provider/clarification-contract.js';
+import { RUN_SYNTHESIS_ENTRY, runSynthesisKind } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
 import { TaskLaunchPreview } from './task-plan-creation.js';
@@ -3637,7 +3640,7 @@ export class EditorialStore {
       return ledger;
     };
     const seriesRule = definition.seriesScopes === undefined ? '' : sha256(canonicalJson(this.#baselineAnalysis.launch.policy?.providerProcessing.admittedRules ?? []));
-    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}`, make) : make();
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}\n${definition.structuredInputKey ?? ''}\n${canonicalJson(definition.inheritedBudgetCeiling ?? null)}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -3712,7 +3715,9 @@ export class EditorialStore {
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
-    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const base = entry.synthesisKey === undefined
+      ? this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)))
+      : runSynthesisKind(this.#authority, entry.synthesisKey, entry.synthesisSource, contractVersion);
     const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
@@ -3762,7 +3767,7 @@ export class EditorialStore {
       prior = toolBase.promptContractDigest === base.promptContractDigest ? definition : wrap(base);
     } else {
       const candidates: AnalysisKindDefinition[] = [];
-      for (const historical of historicalReviewCategoryDefinitions(input, contractVersion)) {
+      for (const historical of entry.synthesisKey === undefined ? historicalReviewCategoryDefinitions(input, contractVersion) : [base]) {
         try { candidates.push(wrap(historical)); }
         catch (error) {
           // Series consistency accepts only its own supported base; another historical form gains no proof.
@@ -3778,6 +3783,29 @@ export class EditorialStore {
     requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
     if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
+    Object.assign(definition, { historicalDefinitionForDigest: (digest: string): AnalysisKindDefinition | null => {
+      const row = this.#authority.prepare(`SELECT r.canonical_json, r.sha256, member.value category, t.contract_version,
+        p.canonical_json envelope_json, p.sha256 envelope_digest, x.canonical_json execution_json, x.sha256 execution_digest FROM review_runs r
+        JOIN json_each(r.canonical_json, '$.categories') member
+        JOIN analysis_task_intents t ON t.task_intent_id=json_extract(member.value, '$.task.taskIntentId')
+        JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id AND p.component='plan-envelope'
+        JOIN analysis_plan_records x ON x.task_intent_id=t.task_intent_id AND x.plan_version=p.plan_version AND x.component='execution-plan'
+        WHERE t.kind=? AND COALESCE(json_extract(p.canonical_json, '$.basePromptContractDigest'),
+          json_extract(p.canonical_json, '$.editorialMemoryBasePromptContractDigest'),json_extract(p.canonical_json, '$.promptContractDigest'))=?
+        ORDER BY r.ordinal DESC LIMIT 1`).get(definition.kind, digest);
+      if (row === undefined) return null;
+      requireStore(sha256(String(row.canonical_json)) === row.sha256 && sha256(String(row.envelope_json)) === row.envelope_digest && sha256(String(row.execution_json)) === row.execution_digest,
+        'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
+      const snapshot = JSON.parse(String(row.canonical_json)) as { materialReferences?: TaskMaterialBoundary };
+      const category = JSON.parse(String(row.category)) as { entry: ReviewCategoryConfigurationEntry; task: { taskIntentId: string } };
+      if (category.entry.executor !== 'review-category-contract') return null;
+      const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(category.task.taskIntentId);
+      const baseDigest = unwrappedPlanPromptDigest(JSON.parse(String(row.execution_json)), JSON.parse(String(row.envelope_json)));
+      const historical = this.#reviewLedgerOf(category.entry, snapshot.materialReferences, baseDigest, undefined, use,
+        row.contract_version === 'ai7.editorial-review/1' ? 1 : 2).definition;
+      const base = historical.clarificationBase ?? historical;
+      return [historical, base, withModelClarification(base)].find(candidate => candidate.promptContractDigest === digest) ?? null;
+    } });
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
     return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
@@ -4904,6 +4932,8 @@ export class EditorialStore {
       // The Evidence Assurance Level is the 事实核查 Task's alone (Issue #901): only that category's Task is handed it, and a
       // Review Run without one refuses it. An edit of the level alone leaves every other category's plan as it is.
       const { evidenceAssuranceLevel, ...shared } = input;
+      const budgetMembers = this.#reviewRuns.planFacts(input.bookId, input.ref).composite === undefined
+        ? tasks.filter(task => task.categoryId !== 'run-synthesis').length : 1;
       requireStore(evidenceAssuranceLevel === undefined || tasks.some((task) => task.categoryId === 'factual-review'),
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
       this.#transaction(this.#authority, () => {
@@ -4911,7 +4941,9 @@ export class EditorialStore {
         for (const task of tasks) {
           const factual = task.categoryId === 'factual-review';
           try {
-            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+            const summaryCeiling = task.categoryId === 'run-synthesis' && shared.runBudgetCeiling != null
+              ? { runBudgetCeiling: { ...shared.runBudgetCeiling, maxTotalTokens: shared.runBudgetCeiling.maxTotalTokens * budgetMembers } } : {};
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...summaryCeiling, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
               taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
             changed += 1;
           } catch (error) {
@@ -5467,7 +5499,7 @@ export class EditorialStore {
       FROM analysis_clarification_requests q JOIN analysis_run_records r ON r.run_record_id = q.run_record_id
       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN books b ON b.book_id = i.book_id
       LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
-      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
+      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> 'editorial-review/run-synthesis' AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
       AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
         IN ('admitted','executing','pausing','paused','resumable','awaiting-clarification') LIMIT ?`).all(BASELINE_ANALYSIS_KIND, bookId, bookId, limit) as SqlRow[];
     // A Task the control readings above already carry shows its open question there, as the baseline's does (#870).
@@ -9358,7 +9390,7 @@ export class EditorialStore {
         signalId: asString(row.signal_id),
         reviewRunId: asString(row.review_run_id),
         findingId: asString(row.finding_id),
-        categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        categoryLabel: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
         reason: asString(row.reason),
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
@@ -14231,8 +14263,9 @@ export class EditorialStore {
       JOIN analysis_plan_records p ON p.sha256 = a.plan_envelope_sha256 AND p.component = 'plan-envelope'
       WHERE r.run_record_id = ?`).get(runRecordId);
     if (row !== undefined) {
-      const frozen = (JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown }).editorialMemory;
-      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), String(row.kind))))
+      const plan = JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown; editorialMemorySourceKind?: string };
+      const frozen = plan.editorialMemory;
+      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), plan.editorialMemorySourceKind ?? String(row.kind))))
         return '本社与本书编辑偏好已变化，请重新准备任务。';
     }
     return this.#reviewRuns.learningReadGuard(runRecordId) ?? this.#preferenceGovernanceGuard(runRecordId);
@@ -15258,12 +15291,13 @@ export class EditorialStore {
 
   /** The category a review kind names, in the house's built-in configuration's words; `null` for any other kind. */
   #unconfirmedCategory(kind: string): string | null {
+    if (kind === 'editorial-review/run-synthesis') return RUN_SYNTHESIS_ENTRY.label;
     if (kind === FACTUAL_REVIEW_KIND) {
       return BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.executor === 'factual-review-kind')?.label ?? kind;
     }
     if (!isReviewCategoryKindId(kind)) return null;
     const categoryId = kind.slice(kind.indexOf('/') + 1);
-    return reviewCategoryEntry(categoryId)?.label ?? categoryId;
+    return reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label);
   }
 
   /** The drawer's list of 结果待确认 a completed Run of this kind left on the Book (Issue #757); `null` when there is none. */

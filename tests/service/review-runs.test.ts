@@ -1,4 +1,5 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
+import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { startQuickTasks } from '../support/quick-tasks.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
@@ -163,7 +164,8 @@ async function withBook(fixtureIdentity: string, body: (session: Session, book: 
 }
 
 /** Dynamic retry stimuli are ordinary transport bytes, never mutations under an admitted fixture hash. */
-async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>): Promise<void> {
+async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>, synthesisAnswer = sample1SynthesisAnswer,
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): Promise<void> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-contract-v2-controls');
   const responseEntries = new Map(fixture.entries);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
@@ -171,6 +173,8 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   const base = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
   const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const synthesis = sample1SynthesisAnswer(message) === undefined ? undefined : synthesisAnswer(message);
+    if (synthesis !== undefined) return synthesis;
     const header = parseReviewCategoryUnitMessageHeader(message);
     if (request.stage === 'units' && header?.categoryId === TYPOS) return resolveFixtureEntry(responseEntries, header.ordinal,
       base.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
@@ -178,7 +182,7 @@ async function withCapturedReviewBook(body: (session: Session, book: Book) => Pr
       .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
       : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
-  });
+  }, controls);
   launchPolicy = capture.policy;
   const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries };
   try { await body(session, await importBook(session)); } finally { await close(session); }
@@ -397,9 +401,9 @@ class PlacesTakenOwner implements ReviewRunExecutionOwner {
   }
 }
 
-function eventTrail(reviewRunId: string): Array<[string, string]> {
+function categoryEventTrail(reviewRunId: string): Array<[string, string]> {
   return withDatabase((db) => {
-    return (db.prepare('SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid').all(reviewRunId) as Array<{ category_id: string; state: string }>)
+    return (db.prepare("SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? AND category_id <> 'run-synthesis' ORDER BY rowid").all(reviewRunId) as Array<{ category_id: string; state: string }>)
       .map((row) => [row.category_id, row.state]);
   });
 }
@@ -1028,7 +1032,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('cancels a preparation without writing a Run and permits only one preparation per Book', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const pending = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
-      expect(pending).toMatchObject({ done: false, completed: 1, total: 3, projection: null });
+      expect(pending).toMatchObject({ done: false, completed: 1, total: 4, projection: null });
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_RUN_PREPARING');
       expect(session.store.cancelReviewRunPreparationWork(pending.workId!)).toBe(true);
       expect(workspace(session, book).runs).toEqual([]);
@@ -1060,7 +1064,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE));
       expect(settled).toMatchObject({ state: 'settled', stateLabel: '已完成', canContinue: false });
       expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
-      expect(eventTrail(settled.reviewRunId)).toEqual([
+      expect(categoryEventTrail(settled.reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
         [PLOT, 'dispatched'], [PLOT, 'settled'], [PLOT, 'materialized'],
@@ -1792,7 +1796,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(run).toMatchObject({ state: 'failed', canContinue: false });
       expect(run.categories.map((category) => category.state)).toEqual(['refused', 'refused']);
       expect(run.categories.every((category) => category.detail!.includes('plan-revision-required'))).toBe(true);
-      expect(eventTrail(fresh.reviewRunId)).toEqual([[TYPOS, 'refused'], [STYLE, 'refused']]);
+      expect(categoryEventTrail(fresh.reviewRunId)).toEqual([[TYPOS, 'refused'], [STYLE, 'refused']]);
       // No Run was recorded on either ledger: a refused approval never leaves a category authorized.
       expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run).toBeNull();
       expect(run.findings).toEqual([]);
@@ -1841,13 +1845,13 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(workRecords()).toMatchObject({ met: true, stateLabel: '审阅报告 1 份', route: null });
       expect(second.store.inspectBookDeliveryPackage(book.bookId).content.included.filter((item) => item.kind === 'review-report').map((item) => item.label))
         .toEqual(['审阅报告 · 第 1 次审阅 · 第 2 版']);
-      expect(eventTrail(reviewRunId)).toEqual([
+      expect(categoryEventTrail(reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
       ]);
       // Continuing a finished Run does nothing.
       await second.driver.continue(reviewRunId);
-      expect(eventTrail(reviewRunId)).toHaveLength(6);
+      expect(categoryEventTrail(reviewRunId)).toHaveLength(6);
     });
   }, 300_000);
 
@@ -1901,7 +1905,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       gated!.release();
       await stopped;
       await loop;
-      expect(eventTrail(reviewRunId)).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'interrupted']]);
+      expect(categoryEventTrail(reviewRunId)).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'interrupted']]);
     } finally {
       await close(first);
     }
@@ -2096,17 +2100,17 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
 
         // Cancelled while queued: the store abandons the preparation, so the Book can be prepared again.
         const cancelled = jobs.startReviewRunPreparation(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
-        expect(cancelled).toMatchObject({ kind: 'review-run-preparation', state: 'queued', progress: { completed: 0, total: 3 }, result: null, failure: null });
+        expect(cancelled).toMatchObject({ kind: 'review-run-preparation', state: 'queued', progress: { completed: 0, total: 4 }, result: null, failure: null });
         expect(jobs.cancel(cancelled.jobId)).toMatchObject({ state: 'cancelled', result: null, progress: { label: '审阅计划准备已取消' } });
         expect(workspace(session, book).runs).toEqual([]);
 
         // One category's plan per step, then the Run; the progress never goes back and ends at its total.
         const trail = await settleJob(jobs, jobs.startReviewRunPreparation(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy));
         const completed = trail.map((job) => job.progress.completed);
-        expect(trail.every((job) => job.kind === 'review-run-preparation' && job.progress.total === 3)).toBe(true);
+        expect(trail.every((job) => job.kind === 'review-run-preparation' && job.progress.total === 4)).toBe(true);
         expect(completed).toEqual([...completed].sort((left, right) => left - right));
         const done = trail.at(-1)!;
-        expect(done).toMatchObject({ state: 'completed', progress: { completed: 3, total: 3, label: '审阅计划准备完成' }, failure: null });
+        expect(done).toMatchObject({ state: 'completed', progress: { completed: 4, total: 4, label: '审阅计划准备完成' }, failure: null });
         const prepared = done.result as ReviewWorkspaceProjection;
         expect(prepared.bookId).toBe(book.bookId);
         expect(prepared.run).toMatchObject({ ordinal: 1, state: 'prepared' });
@@ -2117,7 +2121,7 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
         // Plot review prepares its model plan through the same cooperative job.
         await runBaseline(session, book);
         const leads = (await settleJob(jobs, jobs.startReviewRunPreparation(book.bookId, [PLOT], WHOLE, launchPolicy))).at(-1)!;
-        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 2, total: 2, label: '审阅计划准备完成' } });
+        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 3, total: 3, label: '审阅计划准备完成' } });
         expect((leads.result as ReviewWorkspaceProjection).run).toMatchObject({ ordinal: 2, state: 'prepared', categories: [{ categoryId: PLOT, planEnvelopeDigest: expect.any(String) }] });
       } finally {
         jobs.dispose();
@@ -2387,6 +2391,7 @@ async function openLayeredSelection(controls: Parameters<typeof capturedOrdinary
   const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
   store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
   const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const summary = sample1SynthesisAnswer(message); if (summary !== undefined) return summary;
     const baseline = parseUnitMessageHeader(message), review = parseReviewCategoryUnitMessageHeader(message), factual = parseFactualReviewUnitMessageHeader(message);
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal,
       unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
@@ -2813,9 +2818,9 @@ describe.each(['development-ci', 'ordinary-production'] as const)('%s launched r
       if (action === 'cancel') session.owner.cancelRun(stopped.runRecordId!, stopped.ledger);
       else session.owner.pauseRun(stopped.runRecordId!, stopped.ledger);
       gated!.release(); await loop;
-      const beforeReplay = eventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
+      const beforeReplay = categoryEventTrail(run.reviewRunId), sent = session.capture?.wireRequests.length;
       await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
-      expect(eventTrail(run.reviewRunId)).toEqual(beforeReplay);
+      expect(categoryEventTrail(run.reviewRunId)).toEqual(beforeReplay);
       if (session.capture !== undefined) expect(session.capture.wireRequests).toHaveLength(sent!);
       expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(STYLE_AND_FORMAT)).run).toBeNull();
       if (action === 'cancel') {
@@ -2889,7 +2894,7 @@ it('reconnects an offline ordinary review with every category on its launched mo
     const repeated = session.store.launchReviewRun(input, launchPolicy);
     expect(repeated).toMatchObject({ repeated: true, projection: { run: { reviewRunId: launched.projection.run!.reviewRunId, state: 'waiting' } } });
     await driveLaunchedReviewRun(session.driver, repeated);
-    expect(eventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
+    expect(categoryEventTrail(launched.projection.run!.reviewRunId)).toEqual([]);
     expect(session.capture!.wireRequests).toHaveLength(0);
     session.store.selectMainRoleModel('opencode-go', defaults.model, 'off');
     const changedDefault = session.store.getConfiguredModelRoleBinding('main-editorial');
@@ -2973,11 +2978,11 @@ it('replays a committed launch after restart and drives it once without a second
     expect(repeated.repeated).toBe(true);
     expect(repeated.projection.run!.reviewRunId).toBe(reviewRunId);
     await Promise.all([driveLaunchedReviewRun(session.driver, repeated), driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy))]);
-    const events = eventTrail(reviewRunId);
+    const events = categoryEventTrail(reviewRunId);
     expect(events.filter(([, state]) => state === 'dispatched')).toHaveLength(2);
     expect(workspace(session, book, reviewRunId).run!.state).toBe('settled');
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
-    expect(eventTrail(reviewRunId)).toEqual(events);
+    expect(categoryEventTrail(reviewRunId)).toEqual(events);
   });
 });
 

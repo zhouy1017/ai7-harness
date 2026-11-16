@@ -1,3 +1,4 @@
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
 import { composeEditorialMemoryBlock, type EditorialMemorySnapshot } from './learning/editorial-memory.js';
 import { EDITORIAL_MEMORY_LIBRARY_LINES, EDITORIAL_MEMORY_LIBRARY_GRAPHEMES, type EditorialMemoryContext, selectPreferenceLines, type PreferenceLineCandidate } from './learning/retrieval.js';
@@ -274,7 +275,7 @@ export class HouseReviewPreferenceLedger {
       JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
       const preference = this.pinned(String(row.task_intent_id)); valid(preference !== null);
       const version = this.pinnedVersion(String(row.task_intent_id), preference);
-      if (version !== null) linesOfUse(version, preference, String(row.book_id), String(row.kind));
+      if (version !== null) linesOfUse(version, preference, String(row.book_id), preferenceSourceKind(this.db, String(row.task_intent_id), String(row.kind)));
     }
   }
 
@@ -638,13 +639,14 @@ export class HouseReviewPreferenceLedger {
     valid(version !== null);
     const task = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
     valid(task !== undefined && String(task.kind).startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
-    const categoryId = String(task.kind).slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+    const consumingKind = preferenceSourceKind(this.db, taskIntentId, String(task.kind));
+    const categoryId = consumingKind.slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
     const controls = learningControlsOf(this.db);
     // Learning authority stands over a prepared pin of either schema: disabled learning, an excluded Book or an excluded source stops it.
     if (controls !== null && (!controls.enabled || controls.excludedBooks.has(String(task.book_id)) ||
-      linesOfUse(version, preference, String(task.book_id), String(task.kind)).some((line) => line.sources.some((source) => controls.excludedBooks.has(source.bookId))))) return true;
+      linesOfUse(version, preference, String(task.book_id), consumingKind).some((line) => line.sources.some((source) => controls.excludedBooks.has(source.bookId))))) return true;
     if (version.schema === 'ai7.house-review-preference/2') {
-      const pinnedLines = linesOfUse(version, preference, String(task.book_id), String(task.kind));
+      const pinnedLines = linesOfUse(version, preference, String(task.book_id), consumingKind);
       if (pinnedLines.some((line) => !this.#lineCurrent(line))) return true;
       const now = this.#publication(version.operationalScope, version.legacyBasis?.lines ?? [],
         version.legacyBasis?.materialSetDigest ?? sha256Hex(canonicalJson([])), names());
@@ -658,7 +660,7 @@ export class HouseReviewPreferenceLedger {
     }
     const { lines, at } = this.#dated(version.operationalScope, version.governance?.baseLines ?? version.lines, names());
     const now = selectPreferenceLines(preferenceCandidates(version, lines, at, controls?.excludedBooks), { bookId: String(task.book_id), categoryId,
-      ...(preference.editorialMemory === undefined ? {} : { taskKind: String(task.kind) }) }, preference.editorialMemory === undefined ? { lines: 5, graphemes: 200 } : undefined);
+      ...(preference.editorialMemory === undefined ? {} : { taskKind: consumingKind }) }, preference.editorialMemory === undefined ? { lines: 5, graphemes: 200 } : undefined);
     return canonicalJson(now.map((line) => line.text)) !== canonicalJson(preference.lines);
   }
 
@@ -792,7 +794,7 @@ export class HouseReviewPreferenceLedger {
     valid(version !== null);
     const book = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
     valid(book !== undefined);
-    const lines = linesOfUse(version, preference, String(book.book_id), String(book.kind));
+    const lines = linesOfUse(version, preference, String(book.book_id), preferenceSourceKind(this.db, taskIntentId, String(book.kind)));
     const sources = new Map<string, PinnedInfluence['sources'][number]>();
     for (const line of lines) {
       for (const source of line.sources) {
@@ -827,6 +829,18 @@ export interface PinnedInfluence {
     readonly materialKey: string | null;
     readonly withdrawnAt: string | null;
   }>;
+}
+
+/** The final member reuses the launched category's exact preference selection and its lineage guards. */
+function preferenceSourceKind(db: DatabaseSync, taskIntentId: string, kind: string): string {
+  if (kind !== 'editorial-review/run-synthesis') return kind;
+  const row = db.prepare(`SELECT r.canonical_json, r.sha256 FROM review_runs r
+    JOIN review_run_preference_pins p ON p.review_run_id = r.review_run_id WHERE p.task_intent_id = ?`).get(taskIntentId);
+  valid(row !== undefined && sha256Hex(String(row.canonical_json)) === row.sha256);
+  const snapshot = JSON.parse(String(row.canonical_json)) as { categories: Array<{ task: null | { taskIntentId: string }; entry: { synthesisSource?: { kind: string } } }> };
+  const source = snapshot.categories.find((category) => category.task?.taskIntentId === taskIntentId)?.entry.synthesisSource;
+  valid(source !== undefined && source.kind.startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
+  return source.kind;
 }
 
 /** Resolve by the consuming Task's category and Book; identical text is never a causal identity. */
@@ -913,7 +927,7 @@ export class HousePreferenceInfluence {
       valid(preference !== null);
       const version = local ?? ledger.pinnedVersion(String(row.task_intent_id), preference);
       if (version === null || version.operationalScope !== scope) continue;
-      const sources = linesOfUse(version, preference, String(row.book_id), String(row.kind)).flatMap((line) => line.sources);
+      const sources = linesOfUse(version, preference, String(row.book_id), preferenceSourceKind(db, String(row.task_intent_id), String(row.kind))).flatMap((line) => line.sources);
       pins.push({ reviewRunId: String(row.review_run_id), taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), version,
         sources, sourceIdentities: new Set(sources.map(preferenceSourceIdentity)) });
     }
@@ -1074,7 +1088,7 @@ export function rebuildStoredHouseReviewPreference(host: LearningSupervisionStor
   for (const book of host.authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
     const bookId = asString(book.book_id);
     sources.push(...housePreferenceSources(host.authority, scope, { bookId, title: asString(book.title) }, standingMaterials(host, bookId),
-      (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
+      (categoryId) => reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label)));
   }
   new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger()).rebuild(scope, sources, names);
 }
@@ -1421,7 +1435,7 @@ export function readFeedbackHistory(host: LearningSupervisionStoreHost, input: F
         entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
         origin: 'review-disposition',
         bookId,
-        dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        dimension: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
         signal: '忽略',
         reason: feedbackReasonExcerpt(asString(row.reason)),
         reasonState: 'given',

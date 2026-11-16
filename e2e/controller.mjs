@@ -1,3 +1,4 @@
+import { pointerFailureDetail } from './dispatch-chooser.mjs';
 import { spawn } from 'node:child_process';
 import { appendFileSync, createWriteStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -1056,6 +1057,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-start-when-online',
     'review-online-dispatch',
     'review-authorize',
+    'review-synthesis-wide',
+    'review-synthesis-gate',
     // Issue #952: 发现 lists the settled Run's findings, opens one, and drops the one 审阅 disposed.
     'book-findings-center',
     'review-marks-on-manuscript',
@@ -1939,6 +1942,8 @@ export function reportJourneyFailure(journey, location, error) {
   console.error(`${journey}/${admitted}`);
   const checkLine = formatJourneyCheckLine(journey, admitted, error);
   if (checkLine !== null) console.error(checkLine);
+  const pointer = pointerFailureDetail(error?.pointerFailure);
+  if (pointer !== null) console.error(`${journey}/${admitted}/pointer/${JSON.stringify(pointer)}`);
   process.exitCode = 1;
   if (!localDebugEnabled()) return undefined;
   return writeDebugFailure(journey, location, error);
@@ -2349,6 +2354,8 @@ function describeError(error, depth = 0) {
       }
       lines.push(`${prefix}.detail: ${detail}`);
     }
+    const pointer = pointerFailureDetail(error.pointerFailure);
+    if (pointer !== null) lines.push(`${prefix}.pointer: ${JSON.stringify(pointer)}`);
     lines.push(...describeError(error.cause, depth + 1));
   } else {
     let rendered;
@@ -2398,6 +2405,16 @@ export function collectJourneyCheck(result, journey, failure) {
     .filter((line) => line.startsWith(prefix))
     .map((line) => line.slice(prefix.length));
   return labels.length === 1 && isContentFreeCheckLabel(labels[0]) ? labels[0] : null;
+}
+
+/** Only the shared helper's bounded metadata shape may cross the child-output boundary. */
+export function collectJourneyPointerFailure(result, journey, failure) {
+  if (failure?.errorClass !== 'journey-failure') return null;
+  const prefix = `${journey}/${failure.location}/pointer/`;
+  const lines = result.stderr.split(/\r?\n/u).filter(line => line.startsWith(prefix));
+  if (lines.length !== 1 || lines[0].length - prefix.length > 4096) return null;
+  try { const detail = pointerFailureDetail(JSON.parse(lines[0].slice(prefix.length))); return detail === null ? null : JSON.stringify(detail); }
+  catch { return null; }
 }
 
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */

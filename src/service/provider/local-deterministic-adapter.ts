@@ -498,6 +498,14 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // be read as another kind's, as the reduction's, or as a sampling turn's. Which kind a request
     // belongs to is decided by its header alone; its request digest is then keyed by that kind's
     // contract digest, which the adapter was constructed with.
+    if (text !== null) {
+      let input: unknown;
+      try { input = JSON.parse(text); } catch { input = null; }
+      if (isRecord(input) && input.schema === 'ai7.review.run-synthesis-input/1') {
+        yield* this.#fastRole(sha256Hex(text), '全书审阅统合总结', failure);
+        return;
+      }
+    }
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
     const reviewSynthesis = text === null ? null : parseReviewCrossChapterMessage(text);
     // AI7 初评's book-level synthesis (Issue #429, S81b1) is answered as the reduction is, under ordinal `0`, keyed by the

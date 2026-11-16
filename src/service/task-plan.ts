@@ -1,4 +1,5 @@
 import { markModelLabels } from './editorial-mark-source.js';
+import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
@@ -2521,7 +2522,9 @@ export function reviewRunPlan(input: {
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
-  const categories = facts.categories;
+  const members = facts.synthesis === undefined ? facts.categories : [...facts.categories, facts.synthesis];
+  const categories = members.filter(category => category.categoryId !== 'run-synthesis');
+  const synthesis = members.find(category => category.categoryId === 'run-synthesis');
   const materials = facts.materials ?? [];
   // 本社审阅偏好 (Issue #911): each category that reads it names the version; a closed rule says so once.
   const preferences = facts.housePreferences ?? [];
@@ -2529,10 +2532,11 @@ export function reviewRunPlan(input: {
     : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
   const instructionSent = tasksWithInstruction(facts);
   const preferenceSent = preferences.length === 0 ? instructionSent : instructionSent + `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
-  const tasks = categories.filter((category) => category.task !== null);
+  const tasks = members.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
-  const ceilings = tasks.map((category) => frozenCeiling(category.task!.components));
+  const budgetTasks = tasks.filter(category => category.categoryId !== 'run-synthesis');
+  const ceilings = budgetTasks.map((category) => frozenCeiling(category.task!.components));
   const route = tasks.length === 0 ? null : frozenRoute(tasks[0]!.task!.components);
   const destinations = [...new Set(tasks.map(category => frozenRoute(category.task!.components))
     .filter(value => MODEL_SERVICE_ROUTES.some(remote => remote === value.kind)).map(planModelDestination))].join('、');
@@ -2574,7 +2578,7 @@ export function reviewRunPlan(input: {
           needsModelConnection,
           planEnvelopeDigest: null,
           categoryDigests: [...(local === undefined ? [] : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }]),
-            ...tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
+            ...tasks.filter(category => category.categoryId !== 'run-synthesis').map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
           reconfirm: null,
         };
   return {
@@ -2624,10 +2628,10 @@ export function reviewRunPlan(input: {
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
-      ...categories.map((category): TaskPlanStepProjection => ({
+      ...members.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
-        label: isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
-        result: `${category.label}的发现（稿件上的标记）`,
+        label: category.categoryId === 'run-synthesis' ? '全书审阅统合总结' : isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
+        result: category.categoryId === 'run-synthesis' ? REVIEW_SYNTHESIS_PLAN_LINE : `${category.label}的发现（稿件上的标记）`,
         removable: false,
         removed: false,
       })),
@@ -2649,10 +2653,10 @@ export function reviewRunPlan(input: {
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
       send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往 ${destinations}` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
+      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${budgetTasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
-      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）`
+      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${budgetTasks.length} 类合计）`
         : `任务运行预算上限：${groupedCount(sharedCeiling)} tokens；各成员的模型阶段按工序份额分用`,
       accountLimit: ACCOUNT_LIMIT_UNKNOWN,
     },
@@ -2660,6 +2664,7 @@ export function reviewRunPlan(input: {
       ...categories.map((category) => category.riskPointsOnly
         ? `${category.label}：需人工复核的风险点（批注）`
         : `${category.label}：${category.output === 'change-suggestion' ? '修改建议' : '批注'}，标在稿件上，由你逐条处理`),
+      ...(synthesis === undefined ? [] : ['全书审阅统合总结：总体评价、共性问题与处理先后，保留逐条发现供你判断']),
       '审阅报告：在审阅里生成，按版本保存',
     ],
     notDo: {

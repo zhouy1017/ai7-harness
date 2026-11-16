@@ -1,10 +1,11 @@
-import { rendererApi } from './navigation-generation.js';
+import { navigation, rendererApi } from './navigation-generation.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
   EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, type EvidenceAssuranceLevel } from '../shared/protocol/factual-verification.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
+import { reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -656,6 +657,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
   let excludedPages = 1;
   let excludedOpen = false;
+  let synthesisDisclosure: { runId: string; open: boolean } | null = null;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
     if (first.bookId !== bookId) {
@@ -1072,6 +1074,37 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     heading.append(meta);
     section.append(heading);
+    if (run.synthesis !== undefined) {
+      const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
+        if (destroyed || evidence.blockId === null) return;
+        const origin = navigation.read(host);
+        let current = navigation.begin();
+        options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
+        void (async () => {
+          try {
+            let finding = run.findings.find(entry => entry.findingId === evidence.findingId);
+            let after: number | null = null;
+            while (finding === undefined) {
+              const page = await api.inspectReviewWorkspace({ reviewRunId: run.reviewRunId, findingsAfterOrdinal: after,
+                categoryId: null, severity: null, status: null, chapterBlockId: null });
+              if (!current.isCurrent() || !origin.isCurrent()) return;
+              finding = page.run?.findings.find(entry => entry.findingId === evidence.findingId);
+              const next = page.run?.findings.at(-1)?.ordinal;
+              if (finding !== undefined || !page.run?.findingsTruncated || next == null || after !== null && next <= after) break;
+              after = next;
+            }
+            const jumping = options.goToText({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
+              blockId: evidence.blockId!, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null });
+            current = navigation.route();
+            await jumping;
+          } catch (error) { if (current.isCurrent() && origin.isCurrent()) options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error'); }
+        })();
+      }) as HTMLDetailsElement;
+      if (run.usage !== undefined) summary.append(el('p', 'review-run-usage', `本次共进行了 ${run.usage.requests} 次模型调用。`));
+      summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
+      summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
+      section.append(summary);
+    }
     const leading = runHasResults(run);
     if (leading) section.append(renderResults(next, run));
     if (run.localCheck !== undefined) {
@@ -2015,6 +2048,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const overview = part('overview', record.overview.title, table);
     if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
+      ...(record.run.usage === undefined ? [] : [el('p', 'review-report-usage', `本次共进行了 ${record.run.usage.requests} 次模型调用。`)]),
+      ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.run.modelLabel)]),
       overview,
       part('must-items', record.mustItems.title, must),
       ...derived,

@@ -1,3 +1,4 @@
+import { REVIEW_SYNTHESIS_PLAN_LINE } from '../../src/shared/review-synthesis-wording.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -493,6 +494,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(drawer.steps).toEqual([
         { id: `category:${TYPOS_AND_USAGE.categoryId}`, label: `逐章审读：${TYPOS_AND_USAGE.label}`, result: `${TYPOS_AND_USAGE.label}的发现（稿件上的标记）`, removable: false, removed: false },
         { id: 'category:plot-consistency', label: '逐章审读：情节逻辑与前后一致', result: '情节逻辑与前后一致的发现（稿件上的标记）', removable: false, removed: false },
+        { id: 'category:run-synthesis', label: '全书审阅统合总结', result: REVIEW_SYNTHESIS_PLAN_LINE, removable: false, removed: false },
         { id: 'report', label: '汇总', result: '审阅报告', removable: false, removed: false },
       ]);
       // Review edits revise its category plans under their existing version ledgers.

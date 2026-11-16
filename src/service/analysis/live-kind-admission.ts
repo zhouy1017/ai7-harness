@@ -1,4 +1,5 @@
 import { editorialMemoryDefinition, editorialMemoryDigest, editorialMemoryPrompt } from '../learning/editorial-memory.js';
+import { RUN_SYNTHESIS_PROMPT, RUN_SYNTHESIS_PROMPT_DIGEST } from '../review/run-synthesis-contract.js';
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
 import { withProcedureDefinition } from '../procedures/execution.js';
 import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
@@ -51,6 +52,7 @@ export interface LiveKindBinding {
 
 /** The parts of an analysis kind definition admission reads. */
 export interface LiveKindDefinition {
+  readonly structuredOnly?: boolean;
   readonly procedureBinding?: AnalysisKindDefinition['procedureBinding'];
   readonly reviewCrossChapter?: AnalysisKindDefinition['reviewCrossChapter'];
   readonly kind: string;
@@ -160,6 +162,7 @@ function isCustomAnalysisKind(kind: string): boolean {
 function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[] | undefined {
   // The dimension's manuscript units and its editor-authored per-unit question template.
   if (isCustomAnalysisKind(kind)) return ['public-or-synthetic', EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY];
+  if (kind === 'editorial-review/run-synthesis') return ['public-or-synthetic', 'book-metadata-and-synopsis'];
   if (kind === reviewCategoryKindId('cross-deliverable-consistency')) return ['public-or-synthetic', 'editorial-deliverable-excerpt'];
   return kind === WRITING_KIND ? WRITING_PAYLOAD_CATEGORIES : EVALUATION_PAYLOAD_CATEGORIES[kind];
 }
@@ -171,6 +174,15 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
+  if (definition.kind === 'editorial-review/run-synthesis') {
+    const rule = liveKindRule(policy, definition.kind);
+    const material = liveMaterialContract(definition);
+    const baseDigest = material?.basePromptContractDigest ?? definition.promptContractDigest;
+    if (definition.structuredOnly !== true || rule === null || rule.crossUnitSynthesisAllowed !== true || rule.plusOneCrossUnitSynthesisTurn !== true ||
+      rule.clarificationQuestionAllowed === true || rule.plusDeclaredContractRetryAdaptations === true || rule.webSearchToolAllowed === true || rule.localTools != null || rule.platformTools != null ||
+      (material === null && definition.systemPrompt !== RUN_SYNTHESIS_PROMPT) || baseDigest !== RUN_SYNTHESIS_PROMPT_DIGEST) return null;
+    return { promptContractDigest: RUN_SYNTHESIS_PROMPT_DIGEST, payloadCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] };
+  }
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
     const stages = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;

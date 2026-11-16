@@ -220,6 +220,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   default_execution_rule_states: 'owned',
   house_word_list_versions: 'house', // House settings stay local; a Book carries its frozen Run snapshot.
   review_runs: 'owned',
+  review_run_synthesis: 'owned',
   review_run_authorizations: 'owned',
   review_run_category_events: 'owned',
   review_local_stage_artifacts: 'owned',

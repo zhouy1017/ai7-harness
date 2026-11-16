@@ -1,3 +1,4 @@
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
 import { sha256Hex } from './analysis/canonical.js';
 import { EditorialLearningLedger } from './learning/ledger.js';
@@ -124,7 +125,7 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
       books: host.authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
       items: [...items, ...mutableMemories], sourceCandidates: [
         ...items.filter((item) => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
-          title: `本社审阅偏好 · ${reviewCategoryEntry(item.categoryId)?.label ?? item.categoryId}`, text: item.text })),
+          title: `本社审阅偏好 · ${reviewCategoryDisplayLabel(item.categoryId, reviewCategoryEntry(item.categoryId)?.label)}`, text: item.text })),
         ...memories, ...supervisionSourceCandidates(directives).map((entry) => ({ ...entry, text: withoutNames(entry.text, names) })),
       ], directives, history: internalGlobalAgentHistory(host, live) };
   });

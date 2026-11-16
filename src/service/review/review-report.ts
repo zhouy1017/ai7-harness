@@ -84,6 +84,7 @@ export interface ReportChapter {
 }
 
 export interface ReviewReportInput {
+  readonly synthesis?: ReviewReportRecord['synthesis'];
   readonly reviewRunId: string;
   readonly version: number;
   readonly generatedAt: string;
@@ -230,6 +231,7 @@ export function buildReviewReport(input: ReviewReportInput): ReviewReportRecord 
     input.findings.filter((finding) => finding.categoryId === categoryId);
   return {
     schema: REVIEW_REPORT_SCHEMA,
+    ...(input.synthesis === undefined ? {} : { synthesis: input.synthesis }),
     reviewRunId: input.reviewRunId,
     version: input.version,
     generatedAt: input.generatedAt,

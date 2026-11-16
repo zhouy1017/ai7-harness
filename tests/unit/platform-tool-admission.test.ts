@@ -19,6 +19,11 @@ describe('platform tool registration admission', () => {
     const rules = policy.providerProcessing.admittedRules;
     for (const rule of rules) {
       // The test helper states exactly the terms the launch verified; only background, material translation and custom analysis refuse retrieval.
+      if (rule.taskKinds.includes('editorial-review/run-synthesis')) {
+        expect(rule.localTools).toBeNull();
+        expect(rule.platformTools).toBeNull();
+        continue;
+      }
       expect(rule.localTools).toEqual(localRetrievalRule(rule.localTools.targetedRetrieval.allowed));
       expect(rule.localTools.targetedRetrieval.allowed).toBe(!rule.backgroundOrigin && !rule.taskKinds.includes('material-translation') && !rule.taskKinds.includes('custom-analysis/*'));
       for (const kind of rule.taskKinds) {
@@ -33,7 +38,7 @@ describe('platform tool registration admission', () => {
     // A custom analysis dimension runs with no tools (ADR 0090 §4): its rule states retrieval not allowed, so no member of the family registers any.
     expect(kindLocalTools(policy, 'custom-analysis/any-dimension')).toBeNull();
     const runKinds = rules.filter((rule) => !rule.backgroundOrigin).flatMap((rule) => rule.taskKinds)
-      .filter((kind) => !['baseline-manuscript-analysis', 'editorial-dialogue', 'editorial-polish', 'conflict-regenerate', 'material-translation', 'custom-analysis/*'].includes(kind));
+      .filter((kind) => !['baseline-manuscript-analysis', 'editorial-dialogue', 'editorial-polish', 'conflict-regenerate', 'material-translation', 'custom-analysis/*', 'editorial-review/run-synthesis'].includes(kind));
     expect(runKinds).toEqual(expect.arrayContaining(['editorial-review/typos-and-usage', 'writing', 'evaluation', 'readers-report', 'evaluation-rewrite']));
     for (const kind of runKinds) expect(kindLocalTools(policy, kind)).toEqual(localRetrievalRule());
     // The fast interaction routes read the admission; only the dialogue has a contract that registers the tools (rev 8).

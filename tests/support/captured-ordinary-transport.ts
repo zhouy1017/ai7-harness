@@ -41,7 +41,9 @@ export function capturedMapAnswer(entries: ReadonlyMap<string, ModelFixtureEntry
  */
 export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: string, dataRoot: string, requestGovernor: ModelRequestGovernor,
   answer: CapturedOrdinaryAnswer,
-  controls: Pick<ExecutionOwnerDependencies, 'capacity' | 'unitHold' | 'stageHold' | 'materialGuard' | 'influenceGuard' | 'seriesScopeGuard'> = {}) {
+  controls: Pick<ExecutionOwnerDependencies, 'capacity' | 'unitHold' | 'stageHold' | 'materialGuard' | 'influenceGuard' | 'seriesScopeGuard'> & { transportHold?: (request: AnalysisRequestIdentity, message: string, signal: AbortSignal) => Promise<void> } = {}) {
+  const { transportHold, ...executionControls } = controls;
+  const abortedRequests: AnalysisRequestIdentity[] = [];
   const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'opencode-go')!;
   let connection = store.getModelServiceRouteConnection('opencode-go');
   if (connection === null) connection = store.saveModelServiceConnection('Captured ordinary response schedule', null, 'needs-attention', 'opencode-go');
@@ -85,6 +87,15 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     if (request === undefined || body.model !== frozenModel || typeof message !== 'string') return refuse();
     requests.push(request);
     wireRequests.push(body);
+    if (transportHold !== undefined) {
+      const signal = init.signal ?? new AbortController().signal;
+      await new Promise<void>((done, fail) => {
+        const abort = (): void => { abortedRequests.push(request!); fail(new DOMException('Captured request aborted', 'AbortError')); };
+        if (signal.aborted) { abort(); return; }
+        signal.addEventListener('abort', abort, { once: true });
+        void transportHold(request!, message, signal).then(done, fail).finally(() => signal.removeEventListener('abort', abort));
+      });
+    }
     let response: ModelFixtureResponse | undefined;
     try { response = answer(request, message); } catch (error) { unmatched.push('invalid-response-schedule'); throw error; }
     if (response === undefined) return refuse(`${request.stage}:${request.unitOrdinal ?? 'none'}:response-missing`);
@@ -105,7 +116,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy,
     currentLaunchPolicy: () => policy, productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', frozen),
     fixture: null, production: { scope: 'ordinary-production', nativeFetch },
-    secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...controls });
-  return { owner, policy, launch, nativeFetch, requests, wireRequests, assertMatched: () => strictEqual(unmatched.length, 0,
+    secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...executionControls });
+  return { owner, policy, launch, nativeFetch, requests, wireRequests, abortedRequests, assertMatched: () => strictEqual(unmatched.length, 0,
     `CAPTURED_ORDINARY_UNMATCHED_REQUEST ${unmatched.join(', ')}`) };
 }

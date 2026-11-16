@@ -1770,7 +1770,7 @@ export class BaselineAnalysisExecutionOwner {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
       await cache.open();
     }
-    const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
+    const blocks = definition.structuredOnly === true ? [] : ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
     const childProfile = facts.compositionOptions?.version === 3 || facts.compositionOptions?.version === 4;
     if (childProfile) {
@@ -1783,10 +1783,10 @@ export class BaselineAnalysisExecutionOwner {
       } else if (production === null || policy.providerProcessing.subAgents === undefined) {
         throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '当前策略未声明父尝试子代理。');
       }
-    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE) {
+    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE && definition.structuredOnly !== true) {
       throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '子代理夹具不得回退到父代理执行配置。');
     }
-    const admittedLocalRule = childProfile ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : live === null || definition.evidenceAssuranceLevel === 'quick' || definition.factualClaims !== undefined ? null
+    const admittedLocalRule = childProfile ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : definition.structuredOnly === true || live === null || definition.evidenceAssuranceLevel === 'quick' || definition.factualClaims !== undefined ? null
       : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     const localRule = (facts.compositionOptions?.version ?? 1) >= 2 || admittedLocalRule === null ? admittedLocalRule :
       { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
@@ -1797,9 +1797,12 @@ export class BaselineAnalysisExecutionOwner {
     const update = facts.update;
     // The plan's units in one shape: the baseline's reuse plan knows two dispositions and a scope plan
     // a third, `unreviewed`, which the owner neither submits nor copies.
-    const planUnits: ReadonlyArray<AnalysisReusePlanUnitProjection | ReviewScopePlanUnitProjection> = update === null ? [] : update.reusePlan.units;
+    const planUnits: ReadonlyArray<AnalysisReusePlanUnitProjection | ReviewScopePlanUnitProjection> = definition.structuredOnly === true
+      ? manifest.units.map((unit) => ({ unitOrdinal: unit.ordinal, startPosition: unit.startPosition, endPosition: unit.endPosition,
+        contentKey: unit.digest, disposition: 'unreviewed', reason: 'out-of-scope', reusedFrom: null }))
+      : update === null ? [] : update.reusePlan.units;
     // Only recomputed units form unit messages; the Run Source Scope admits exactly those.
-    const recomputedOrdinals = new Set(update === null
+    const recomputedOrdinals = new Set(definition.structuredOnly === true ? [] : update === null
       ? manifest.units.map((unit) => unit.ordinal)
       : planUnits.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const submittedUnits = manifest.units.filter((unit) => recomputedOrdinals.has(unit.ordinal));
@@ -1821,6 +1824,7 @@ export class BaselineAnalysisExecutionOwner {
     // Usage accumulated so far, in the shape the ceiling evaluator reads. Every attempt counts, so the
     // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
     const accumulated: UsageFacts[] = [];
+    if (definition.structuredOnly === true && definition.priorBudgetUsage !== undefined) accumulated.push(definition.priorBudgetUsage());
     const stageUsage: Record<RunReportRevisionUsageStageId, { requests: number; inputTokens: number; outputTokens: number }> = {
       units: { requests: 0, inputTokens: 0, outputTokens: 0 },
       'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
@@ -3528,7 +3532,7 @@ export class BaselineAnalysisExecutionOwner {
           const message = step === null ? buildBoundCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
-          if (production !== null && step !== null && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
+          if (production !== null && step !== null && definition.structuredOnly !== true && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
           // The same set the gate reads: exactly one further user message becomes admissible, and every
           // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
           admittedUserMessages.add(message);
@@ -3811,7 +3815,7 @@ export class BaselineAnalysisExecutionOwner {
           beginTurn: context.beginTurn,
           validationStep: (step) => { context.validationStep = step; },
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
-          stopped: terminalClassification === 'failed' || definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
+          stopped: definition.structuredOnly === true || terminalClassification === 'failed' || definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && (this.#deps.seriesScopeGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });

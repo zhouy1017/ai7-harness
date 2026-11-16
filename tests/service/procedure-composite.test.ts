@@ -132,7 +132,7 @@ describe('composite procedures and 全文审校 (#1173)', () => {
       const envelopes = db.prepare(`SELECT json_extract(p.canonical_json, '$.procedure.procedureId') pinned, json_extract(e.canonical_json, '$.compositionOptions.procedure.procedureId') executor
         FROM procedure_plan_pins p JOIN analysis_plan_records e ON e.sha256 = p.plan_envelope_sha256 AND e.component = 'plan-envelope' ORDER BY p.rowid`).all();
       expect(envelopes).toEqual(['review-typos-and-usage', 'review-style-and-format', 'review-plot-consistency', 'factual-claim-check']
-        .map((executor) => ({ pinned: FULL_REVIEW, executor: `ai7-procedure/${executor}` })));
+        .map((executor) => ({ pinned: FULL_REVIEW, executor: `ai7-procedure/${executor}` })).concat([{ pinned: 'ai7-procedure/review-run-synthesis', executor: 'ai7-procedure/review-run-synthesis' }]));
     } finally { db.close(); }
     const order: string[] = [];
     const driver = new ReviewRunDriver(target.reviewRunDriveSteps, {

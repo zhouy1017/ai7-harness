@@ -155,9 +155,9 @@ function attempts(taskIntentId: string): number {
   ).get(taskIntentId) as { count: number }).count);
 }
 
-function reviewEvents(reviewRunId: string): Array<[string, string, string | undefined]> {
+function selectedReviewEvents(reviewRunId: string): Array<[string, string, string | undefined]> {
   return withDatabase((database) => (database.prepare(
-    'SELECT category_id, state, canonical_json FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid',
+    "SELECT category_id, state, canonical_json FROM review_run_category_events WHERE review_run_id = ? AND category_id <> 'run-synthesis' ORDER BY rowid",
   ).all(reviewRunId) as Array<{ category_id: string; state: string; canonical_json: string }>)
     .map((row) => [row.category_id, row.state, (JSON.parse(row.canonical_json) as { code?: string }).code]));
 }
@@ -574,7 +574,7 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
       const run = store.inspectReviewWorkspace(bookId, reviewRunId).run!;
       expect(run).toMatchObject({ state: 'waiting', stateLabel: '等待网络 · 未启动', canContinue: false });
       expect(run.categories.map((category) => [category.state, category.detail])).toEqual([['waiting', '联网后开始：恢复联网后，AI7 先核对计划再开始这次审阅；在此之前什么都没有发送。']]);
-      expect(reviewEvents(reviewRunId)).toEqual([]);
+      expect(selectedReviewEvents(reviewRunId)).toEqual([]);
       expect((await planOf(store, bookId, 'review-run', reviewRunId, 'offline')).state).toEqual({ key: 'waiting', label: '等待网络' });
       expect(store.waitingTaskRuns(bookId)).toEqual([expect.objectContaining({ kind: 'review-run', ref: reviewRunId, runRecordId: reviewRunId })]);
       // 继续审阅 never starts it, and no new 审阅 is prepared over it.
@@ -585,12 +585,12 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
       expect(attentionItem(store, `review:${reviewRunId}`)).toMatchObject(expected);
       expect(panelItem(store, bookId, `review:${reviewRunId}`)).toMatchObject(expected);
       expect(await preflight(session, 'offline')).toEqual({ admitted: 0, blocked: 0, waiting: 1 });
-      expect(reviewEvents(reviewRunId)).toEqual([]);
+      expect(selectedReviewEvents(reviewRunId)).toEqual([]);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
       await driver.drive(reviewRunId);
       const reviewed = store.inspectReviewWorkspace(bookId, reviewRunId).run!;
       expect(reviewed).toMatchObject({ state: 'settled', canContinue: false });
-      expect(reviewEvents(reviewRunId).map(([categoryId, state]) => [categoryId, state])).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized']]);
+      expect(selectedReviewEvents(reviewRunId).map(([categoryId, state]) => [categoryId, state])).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized']]);
       expect(store.waitingTaskRuns(null)).toEqual([]);
     });
   }, 300_000);
@@ -613,10 +613,10 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
       expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([waitingRunId]);
       store.cancelWaitingTask({ bookId, kind: 'review-run', ref: waitingRunId });
       expect(store.inspectReviewWorkspace(bookId, waitingRunId).run).toMatchObject({ state: 'cancelled', stateLabel: '已取消', canContinue: false });
-      expect(reviewEvents(waitingRunId)).toEqual([[TYPOS, 'refused', 'REVIEW_RUN_CANCELLED']]);
+      expect(selectedReviewEvents(waitingRunId)).toEqual([[TYPOS, 'refused', 'REVIEW_RUN_CANCELLED']]);
       // Cancelling twice answers the same; a prepared Run never waited.
       store.cancelWaitingTask({ bookId, kind: 'review-run', ref: waitingRunId });
-      expect(reviewEvents(waitingRunId)).toHaveLength(1);
+      expect(selectedReviewEvents(waitingRunId)).toHaveLength(1);
       expect(await code(() => driver.drive(waitingRunId))).toBe('REVIEW_RUN_STOPPED');
       const next = prepareReview(store, bookId);
       expect(await code(() => store.cancelWaitingTask({ bookId, kind: 'review-run', ref: next.reviewRunId }))).toBe('REVIEW_RUN_NOT_WAITING');
@@ -628,11 +628,11 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
       const moved = store.inspectReviewWorkspace(bookId, next.reviewRunId).run!;
       expect(moved).toMatchObject({ state: 'plan-moved', stateLabel: PLAN_MOVED_LABEL, canContinue: false });
       expect(moved.categories.map((category) => [category.state, category.stateLabel, category.detail]))
-        .toEqual([['refused', PLAN_MOVED_LABEL, `需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划已经变化，这次授权不再对应当前的情况。`]]);
-      expect(reviewEvents(next.reviewRunId)).toEqual([[TYPOS, 'refused', 'REVIEW_RUN_PLAN_MOVED']]);
+        .toEqual([['refused', PLAN_MOVED_LABEL, `需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划、「全书审阅统合总结」的计划已经变化，这次授权不再对应当前的情况。`]]);
+      expect(selectedReviewEvents(next.reviewRunId)).toEqual([[TYPOS, 'refused', 'REVIEW_RUN_PLAN_MOVED']]);
       const plan = await planOf(store, bookId, 'review-run', next.reviewRunId, 'online');
       expect(plan.state).toEqual({ key: 'plan-moved', label: PLAN_MOVED_LABEL });
-      expect(plan.planMovedReason).toBe(`需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划已经变化，这次授权不再对应当前的情况。`);
+      expect(plan.planMovedReason).toBe(`需要重新确认计划：「${TYPOS_AND_USAGE.label}」的计划、「全书审阅统合总结」的计划已经变化，这次授权不再对应当前的情况。`);
       expect(attentionItem(store, `review:${next.reviewRunId}`)).toMatchObject({ group: 'decisions', state: 'analysis-plan-moved', blocked: true, nextStep: 'view-review' });
       expect(await code(() => driver.drive(next.reviewRunId))).toBe('REVIEW_RUN_STOPPED');
       // A new 审阅 is the way on.

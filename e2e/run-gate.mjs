@@ -2,6 +2,7 @@ import {
   GATE_JOURNEYS,
   classifyJourneyResult,
   collectJourneyCheck,
+  collectJourneyPointerFailure,
   collectReadinessTrace,
   collectJourneyDisclosures,
   normalizePnpmArgs,
@@ -39,6 +40,8 @@ if (args.length !== 0) {
       console.error(`GATE_COMPLETION/${journey}/fail/${failure.location}/${failure.errorClass}`);
       const check = collectJourneyCheck(result, journey, failure);
       if (check !== null) console.error(`GATE_COMPLETION/${journey}/fail/${failure.location}/check/${check}`);
+      const pointer = collectJourneyPointerFailure(result, journey, failure);
+      if (pointer !== null) console.error(`POINTER_FAILURE/${journey}/${failure.location}/${pointer}`);
       const readiness = collectReadinessTrace(result, journey);
       if (readiness !== null) console.error(`GATE_COMPLETION/${journey}/readiness/${readiness}`);
       process.exitCode = result.code || 1;

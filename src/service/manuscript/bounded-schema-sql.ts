@@ -1,6 +1,7 @@
 import { EDITABLE_PROCEDURE_FOREIGN_KEYS } from '../procedures/editable-schema.js';
 import { HOUSE_WORD_LIST_FOREIGN_KEYS } from '../review/house-word-list.js';
 import { LOCAL_STAGE_FOREIGN_KEYS, REVIEW_RUN_FOREIGN_KEYS } from '../review/review-runs.js';
+import { RUN_SYNTHESIS_FOREIGN_KEYS } from '../review/run-synthesis-storage.js';
 import { PROCEDURE_DEFINITION_FOREIGN_KEYS } from '../procedures/definition-store.js';
 import { EDITORIAL_LEARNING_FOREIGN_KEYS } from '../learning/ledger.js';
 import { SUPERVISION_FOREIGN_KEYS } from '../learning/supervision-directives.js';
@@ -1651,6 +1652,7 @@ export const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>
   // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
   ...REVIEW_RUN_FOREIGN_KEYS,
   ...LOCAL_STAGE_FOREIGN_KEYS,
+  ...RUN_SYNTHESIS_FOREIGN_KEYS,
   ...HOUSE_WORD_LIST_FOREIGN_KEYS,
   // Revision 25 (Issue #414): the Publication Version relations, owned and spelled by `publication-versions.ts`.
   ...PUBLICATION_VERSION_FOREIGN_KEYS,

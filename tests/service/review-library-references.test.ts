@@ -228,7 +228,7 @@ describe('review categories reference exact library versions over ordinary captu
     expect(pins[0]?.materialId).toBe(id);
     const executionPins = database((db) => db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component = 'execution-plan' AND task_intent_id IN (SELECT json_extract(value, '$.task.taskIntentId') FROM review_runs, json_each(review_runs.canonical_json, '$.categories') WHERE review_run_id = ?)").all(run.reviewRunId));
     expect(executionPins.every((row) => JSON.stringify(JSON.parse(String(row.canonical_json)).materialReferences) === JSON.stringify(pins))).toBe(true);
-    expect(executionPins.length).toBe(2);
+    expect(executionPins.length).toBe(3);
     expect(executionPins.some((row) => String(row.canonical_json).includes(TEXT))).toBe(false);
     expect(indexRows()).toBe(before);
     await close();

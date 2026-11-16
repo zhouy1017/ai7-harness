@@ -2864,6 +2864,86 @@ async function main() {
       settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
+    // #1433: the compact book summary leaves the first actionable finding visible and its evidence opens the passage.
+    const synthesisDatabase = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    let synthesisDiagnostics;
+    try { synthesisDiagnostics = {
+      events: synthesisDatabase.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id=? AND category_id='run-synthesis' ORDER BY sequence").all(reviewed.run.reviewRunId),
+      input: synthesisDatabase.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id=?').get(reviewed.run.reviewRunId),
+    }; } finally { synthesisDatabase.close(); }
+    requireJourney(reviewed.run.synthesis?.state === 'completed' && reviewed.run.synthesis.summary.recurringProblems.length > 0,
+      'review-synthesis-produced', synthesisDiagnostics);
+    if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
+      await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
+    await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-mode-ready');
+    await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-ordinary');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-synthesis-ordinary-ready');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'review-synthesis-return');
+    const synthesisEvidence = reviewed.run.synthesis.evidence.find(evidence => evidence.blockId !== null &&
+      reviewed.run.synthesis.summary.recurringProblems.some(problem => problem.evidenceRefs.includes(evidence.ref)));
+    requireJourney(synthesisEvidence !== undefined, 'review-synthesis-linked-evidence');
+    const synthesisLayouts = [];
+    const synthesisNativeViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
+    try {
+      for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+        at(`review-synthesis-${viewport}`);
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `review-synthesis-${viewport}-viewport`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-ready`);
+        if (await renderer.evaluate(`document.querySelector('details.review-synthesis')?.open===true`)) {
+          await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
+          await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
+        }
+        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),header=root?.querySelector('summary'),line=header?parseFloat(getComputedStyle(header).lineHeight):0,previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,oneLine:!!header&&header.getBoundingClientRect().height<=line,ok:!!(root&&!root.open&&header.textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        synthesisLayouts.push(synthesisLayout);
+        requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
+        requireJourney(synthesisLayout.oneLine && synthesisLayout.headerCost > 0 && synthesisLayout.headerCost <= 48, `review-synthesis-${viewport}-header-bound`, synthesisLayout);
+        await assertRenderer(renderer, `(() => {const meta=document.querySelector('.review-run > .review-run-heading > .review-run-meta'),basis=document.querySelector('article.review-finding .review-finding-basis');return !!(meta&&meta.getClientRects().length&&meta.firstChild.textContent.includes(${JSON.stringify(reviewed.run.scope.label.replaceAll('内容块', '段落'))})&&meta.firstChild.textContent.includes('创建于')&&!meta.closest('details')&&basis&&basis.getClientRects().length&&!basis.closest('details:not([open])'));})()`, `review-synthesis-${viewport}-base-metadata-basis`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-expand`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-access-expanded`);
+        await pressTab(renderer);
+        await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-access-evidence`);
+        for (const type of ['keyDown', 'keyUp']) await renderer.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
+        await assertRenderer(renderer, `document.activeElement?.matches('details.review-synthesis > summary')===true`, `review-synthesis-${viewport}-keyboard-header`);
+        const findingScroll = await renderer.evaluate(`(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return {x:Math.min(innerWidth-24,r.left+r.width/2),y:innerHeight-48,deltaY:Math.max(0,r.bottom-innerHeight+24)};})()`);
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', deltaX: 0, ...findingScroll });
+        await waitFor(renderer, `(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-scroll-card`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`);
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
+        for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.querySelector('article.review-finding').contains(document.activeElement)`)); tab += 1) await pressTab(renderer);
+        await assertRenderer(renderer, `(() => {const card=document.querySelector('article.review-finding'),active=document.activeElement,r=active?.getBoundingClientRect();return card.contains(active)&&r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-keyboard-card`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-reset`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
+        const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
+        const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
+        await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${synthesisEvidence.findingId}"]')===null`, `review-synthesis-${viewport}-filtered-citation`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+        await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-keyboard-evidence`);
+        await pointerClick(renderer, waitFor, `[data-synthesis-evidence="${synthesisEvidence.ref}"]`, `review-synthesis-${viewport}-citation`);
+        await waitFor(renderer, `(() => { const selection=getSelection(), anchor=selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement; return anchor?.closest('[data-block-id]')?.dataset.blockId===${JSON.stringify(synthesisEvidence.blockId)}; })()`, `review-synthesis-${viewport}-passage`);
+        const synthesisMarkId = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId)?.markId;
+        if (synthesisMarkId != null) await waitFor(renderer, `document.querySelector('[data-mark-card="${synthesisMarkId}"]')!==null`, `review-synthesis-${viewport}-finding-card`);
+        await pointerClick(renderer, waitFor, SIDEBAR.section('review'), `review-synthesis-${viewport}-back`);
+        await waitFor(renderer, `document.querySelector('[data-screen="book-review"] details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-returned`);
+      }
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+      await waitFor(renderer, `innerWidth===${synthesisNativeViewport.width} && innerHeight===${synthesisNativeViewport.height}`, 'review-synthesis-native-viewport');
+    }
+    requireJourney(synthesisLayouts.every(layout => layout.oneLine && layout.headerCost > 0 && layout.headerCost <= 48), 'review-synthesis-base-layout-geometry', synthesisLayouts);
+    await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
+    await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'review-synthesis-restore-review');
+
     at('book-findings-center');
     const centerBeforeDisposition = await renderer.evaluate(`window.ai7.inspectBookFindings()`);
     const centerReview = centerBeforeDisposition?.items?.find((item) => item.target.kind === 'review');
@@ -2985,6 +3065,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
     await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && report.querySelector('[data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
 
+    await assertRenderer(renderer, `(() => {const summary=document.querySelector('section.review-report .review-synthesis');return summary?.dataset.synthesisState==='completed' && summary.textContent.includes('总体评价：') && summary.textContent.includes('[e1]') && summary.textContent.includes('「');})()`, 'review-report-synthesis-evidence');
+
     at('review-report-export');
     // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
     // its parts, all kept, with no mark to include — and the Markdown 备用格式 chosen reviews again, its table 降级导出.
@@ -3009,7 +3091,7 @@ async function main() {
     const findingHeadings = reportBlocks.slice(reportBlocks.indexOf('## 发现详单') + 1, reportBlocks.indexOf('## 各类别摘要')).filter((block) => block.startsWith('### '));
     requireJourney(reportMarkdown.endsWith('\n') && reportBlocks[0] === `# ${J04_BOOK_TITLE} · 审阅报告` && (reportBlocks[1] ?? '').startsWith(`${runHeading} · `) &&
       (reportBlocks[1] ?? '').includes(' · 报告第 1 版 · 生成于 ') &&
-      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 概览表', '## 必须处理的事项', '## 章节与类别统计', '## 发现详单', '## 各类别摘要', '## 附录']) &&
+      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 全书审阅统合总结', '## 概览表', '## 必须处理的事项', '## 章节与类别统计', '## 发现详单', '## 各类别摘要', '## 附录']) &&
       table.startsWith('| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n') && table.split('\n').length === 2 + overviewRows && overviewRows > 0 &&
       statistics.startsWith('| 章节 | ') && statistics.split('\n').length === 2 + statisticsRows && statistics.split('\n').at(-1).startsWith('| 合计 | ') &&
       findingHeadings.length === listedFindings && listedFindings > 0 && findingHeadings.every((block, index) => block.startsWith(`### 第 ${index + 1} 条 · `)),
@@ -3748,8 +3830,11 @@ async function main() {
       leafReviewed.categories[0].excludedCount === 0, 'stock-leaf-validated-findings');
     const leafUsage = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book'})`);
     const leafRuns = leafUsage.rows.find((row) => row.key === leafBook.bookId).runs;
-    requireJourney(leafRuns.length === 1 && leafRuns[0].taskIntentId === leafPrepared.categories[0].taskIntentId, 'stock-leaf-one-business-run');
-    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafRuns[0].runRecordId)}})`);
+    const leafSourceRun = leafRuns.find(run => run.taskIntentId === leafPrepared.categories[0].taskIntentId);
+    requireJourney(leafRuns.length === 1 && leafSourceRun !== undefined &&
+      leafRuns.every(run => run.reviewRunId === leafPrepared.reviewRunId) && leafReviewed.synthesis?.state === 'completed',
+    'stock-leaf-category-and-final-summary', leafRuns);
+    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafSourceRun.runRecordId)}})`);
     const leafReport = leafDetail.detail.report;
     requireJourney(leafReport.units.submitted === SAMPLE1_UNITS && leafReport.units.gaps === 0 && leafReport.units.retried === 0 &&
       leafReport.usagePerStage.units.requests === SAMPLE1_UNITS + 1 && leafReport.usagePerStage['assurance-sampling'].requests === 2 &&

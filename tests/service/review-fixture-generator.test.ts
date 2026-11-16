@@ -1,7 +1,11 @@
 import { LOCAL_TOOL_DECLARATION_NAMES } from '../../src/service/provider/local-tools.js';
 import { spawnSync } from 'node:child_process';
 import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
-import { canonicalJson, graphemeCount } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, graphemeCount, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
+import { synthesisMessage, type SynthesisInput } from '../../src/service/review/run-synthesis-contract.js';
+import { sample1SynthesisAnswer } from '../support/review-synthesis-answer.js';
 import { factualReviewKindDefinition, factualReviewLevelDefinition } from '../../src/service/analysis/kind-definition.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of `sample1-review-cross-chapter-authored`, using the original #417 authored fixture as input. The findings below are
@@ -13,7 +17,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //
 // Ordinary service tests derive and compare the current fixture without writing. After a clause, label or 工序
 // changes, explicitly write the provider-free derivation with
-//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|regeneration preserves'
+//   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|authors the stock|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
@@ -331,10 +335,12 @@ beforeEach(async () => {
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
-  const routedFixture = baselineFixture === undefined ? fixture : inheritGeneratedEntries
-    ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
+  const stockAnswers = [...entries.values()].filter(({ order }) => order === 'synthesis-leaf').map(({ entry }) => ({ ...entry, attempt: 1 }));
+  const routedFixture = baselineFixture === undefined ? fixture : ownProfile
+    ? { ...baselineFixture, entries: new Map([...baselineFixture.entries, ...stockAnswers.map(entry => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, 1), entry] as const)]) }
+    : inheritGeneratedEntries ? { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) } : baselineFixture;
   const store = await EditorialStore.open(scenarioRoots.dataRoot, scenarioRoots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -349,7 +355,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
     recordMissingCredentialConnection(store, 'S69 主编辑连接');
-    const result = await body({ store, owner, ...imported });
+    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...imported });
     store.markCleanShutdown();
     return result;
   } finally {
@@ -539,7 +545,49 @@ async function pass(): Promise<boolean> {
     appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J16_EDIT_SUFFIX);
     note(await runJ16Selection(context));
   }, workspace);
+  // The final member reads only materialized SampleBook findings; exercise every supported category
+  // combination both with and without the already-closed chapter synopsis chain.
+  const categories = ['typos-and-usage', 'style-and-format', 'literary-expression', 'plot-consistency'];
+  for (const withBaseline of [false, true]) for (let mask = 1; mask < 16; mask += 1) await withBook(async (context) => {
+    if (withBaseline) await baseline(context);
+    const categoryIds = categories.filter((_category, index) => (mask & (1 << index)) !== 0);
+    note(await runReviewSynthesis(context, categoryIds, `synthesis-${withBaseline}-${mask}`));
+  });
+  const controls = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-review-contract-v2-controls');
+  for (const variant of ['plain', 'baseline', 'j04', 'j04-closed-chain']) await withBook(async (context) => {
+    if (variant.startsWith('j04')) appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+    if (variant !== 'plain') await baseline(context);
+    if (variant.startsWith('j04')) appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    // J-04 also retains a later matching baseline with recomputation gaps in the edited units.
+    if (variant === 'j04-closed-chain') await baseline(context);
+    note(await runReviewSynthesis(context, ['typos-and-usage', 'style-and-format', 'plot-consistency'], `synthesis-controls-${variant}`));
+  }, controls);
   return allClosed;
+}
+
+
+async function runReviewSynthesis(context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string }, categoryIds: string[], label: string): Promise<boolean> {
+    let work = context.store.createReviewRunPreparationWork(context.bookId, categoryIds,
+      { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy);
+    while (!work.done) work = context.store.advanceReviewRunPreparationWork(work.workId!);
+    const run = work.projection!.run!;
+    context.store.authorizeReviewRun(context.bookId, run.reviewRunId, run.categories.filter((category) => category.planEnvelopeDigest !== null)
+      .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+    const driver = new ReviewRunDriver(context.store.reviewRunDriveSteps, context.owner);
+    try { await driver.drive(run.reviewRunId); } finally { await driver.dispose(); }
+    if (label === 'synthesis-leaf') {
+      const settled = context.store.inspectReviewWorkspace(context.bookId, run.reviewRunId).run!;
+      expect(settled.findings.length, JSON.stringify(settled.categories)).toBeGreaterThan(0);
+    }
+    const db = new DatabaseSync(join(context.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const row = db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(run.reviewRunId);
+      if (typeof row?.input_json !== 'string') return true;
+      const message = synthesisMessage(JSON.parse(row.input_json) as SynthesisInput);
+      const response = sample1SynthesisAnswer(message)!;
+      add({ unitOrdinal: 0, requestDigest: sha256Hex(message), attempt: null, contentDigest: null, response }, 90, label);
+      return context.store.inspectReviewWorkspace(context.bookId, run.reviewRunId).run?.synthesis?.state === 'completed';
+    } finally { db.close(); }
 }
 
 it('generates the authored review fixture without unreachable committed entries', async () => {
@@ -640,6 +688,25 @@ it('generates the authored review fixture without unreachable committed entries'
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);
 
+
+it('authors the stock review synthesis through its independent native-child fixture', async () => {
+  const leafPath = resolve(FIXTURE_PATH, '..', 'sample1-stock-typos-leaf-authored.json');
+  const leaf = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-stock-typos-leaf-authored');
+  let closed = false;
+  // The first pass authors the missing response; the second proves it closes through the same exact profile.
+  for (let pass = 0; pass < 2 && !closed; pass += 1) await withBook(async context => {
+    closed = await runReviewSynthesis(context, ['typos-and-usage'], 'synthesis-leaf');
+  }, leaf, true, true);
+  expect(closed).toBe(true);
+  const body = JSON.parse(await readFixture(leafPath, 'utf8'));
+  const answers = [...entries.values()].filter(({ order }) => order === 'synthesis-leaf').map(({ entry }) =>
+    ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, attempt: 1, response: entry.response }));
+  expect(answers).toHaveLength(1);
+  const combined = new Map([...body.entries, ...answers].map((entry: ModelFixtureEntry) => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry]));
+  const content = `${JSON.stringify({ ...body, entries: [...combined.values()] }, null, 2)}\n`;
+  await emitFixture(leafPath, content, 'utf8');
+  if (!regenerating) expect(await readFile(leafPath, 'utf8')).toBe(content);
+}, 120_000);
 
 it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('refreshes the overlap fixture derived requests', async () => {
   const path = resolve(FIXTURE_PATH, '..', 'review-overlap-authored.json');

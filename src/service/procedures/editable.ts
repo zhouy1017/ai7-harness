@@ -112,7 +112,7 @@ export function completedProcedureRuns(db: DatabaseSync, runId?: string): Proced
   const analysis = db.prepare(`SELECT r.run_record_id, t.book_id, t.kind, b.title, a.plan_envelope_sha256 FROM analysis_run_records r
     JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id JOIN books b ON b.book_id = t.book_id
     JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
-    WHERE (? IS NULL OR r.run_record_id = ?) AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
+    WHERE t.kind <> 'editorial-review/run-synthesis' AND (? IS NULL OR r.run_record_id = ?) AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
       IN ('completed','completed-with-gaps') ORDER BY r.rowid DESC LIMIT 50`).all(runId ?? null, runId ?? null).flatMap((row) => {
     const pin = readProcedurePlanPin(db, String(row.plan_envelope_sha256));
     // A composite's member Run is one part of its Review Run, never a whole run of the composite to capture.
@@ -135,11 +135,13 @@ export function completedProcedureRuns(db: DatabaseSync, runId?: string): Proced
 
 export function readProcedureLibrary(db: DatabaseSync): ProcedureLibraryProjection {
   return { procedures: db.prepare('SELECT procedure_id FROM procedure_definitions ORDER BY pre_installed DESC, rowid').all()
+    .filter((row) => row.procedure_id !== 'ai7-procedure/review-run-synthesis')
     .map((row) => inspectProcedureDefinition(db, String(row.procedure_id))), completedRuns: completedProcedureRuns(db) };
 }
 
 /** A composite is chosen for its own 审阅 and for each model member's kind; the deterministic member always runs its own version. */
 export function selectProcedureForBook(db: DatabaseSync, bookId: string, pin: ProcedureDefinitionPin): void {
+  requireAnalysis(pin.procedureId !== 'ai7-procedure/review-run-synthesis', 'PROCEDURE_INTERNAL_MEMBER', '统合总结随审阅运行，不能单独选择。');
   const document = resolveProcedurePin(db, pin);
   requireAnalysis(!procedureStopped(db, pin), 'PROCEDURE_STOPPED', '这个工序版本已停用，请选择另一个版本。');
   const kinds = document.members === undefined ? [procedureExecutorKind(db, pin)]

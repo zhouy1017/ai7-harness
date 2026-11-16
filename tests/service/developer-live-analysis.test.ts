@@ -1,3 +1,5 @@
+import { DatabaseSync } from 'node:sqlite';
+import { runSynthesisKind } from '../../src/service/review/run-synthesis-kind.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -1371,6 +1373,12 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // it also owns and ahead of the developer-live transmittable-set check in the execution owner.
     expect(refusalCode(() => store.createBaselineAnalysisPreparationWork(commit.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy)))
       .toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    const summaryDb = new DatabaseSync(':memory:');
+    try {
+      const summary = runSynthesisKind(summaryDb, 'non-public-samplebook');
+      expect(refusalCode(() => store.createReviewCategoryPreparationWork(commit.bookId, summary,
+        { mode: 'review-first', selectedRange: null }, launchPolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    } finally { summaryDb.close(); }
     await store.close();
   });
 });
