@@ -5498,7 +5498,7 @@ export class EditorialStore {
       FROM analysis_clarification_requests q JOIN analysis_run_records r ON r.run_record_id = q.run_record_id
       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN books b ON b.book_id = i.book_id
       LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
-      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
+      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> 'editorial-review/run-synthesis' AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
       AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
         IN ('admitted','executing','pausing','paused','resumable','awaiting-clarification') LIMIT ?`).all(BASELINE_ANALYSIS_KIND, bookId, bookId, limit) as SqlRow[];
     // A Task the control readings above already carry shows its open question there, as the baseline's does (#870).

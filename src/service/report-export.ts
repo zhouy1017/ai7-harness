@@ -82,7 +82,7 @@ function layoutOf(input: ReportExportInput): ReportLayout {
   const stateLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.stateLabel] as const));
   return {
     title: `${input.bookTitle} · ${REVIEW_REPORT_HEADING}`,
-    synthesis: record.synthesis?.summary == null ? [] : ['全书审阅统合总结', ...reviewSynthesisLines(record.synthesis)],
+    synthesis: record.synthesis === undefined ? [] : ['全书审阅统合总结', ...reviewSynthesisLines(record.synthesis)],
     meta: `${record.run.label}审阅 · ${record.run.scopeLabel} · 稿件修订版 ${record.run.manuscript.revisionLabel} · 报告${reviewReportVersionLine(input.version, localInstantLabel(input.generatedAt))}${record.run.modelLabel ? ` · ${record.run.modelLabel}` : ''}`,
     overview: {
       title: record.overview.title,

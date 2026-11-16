@@ -3788,7 +3788,7 @@ export class ReviewRunStore {
         version,
         generatedAt,
         run: {
-          usage: this.#runUsage(snapshot),
+          ...(snapshot.categories.some(entry => entry.entry.synthesisKey !== undefined) ? { usage: this.#runUsage(snapshot) } : {}),
           ...(models.length === 0 ? {} : { modelLabel: models.join('、') }),
           ordinal: snapshot.ordinal,
           label: `第 ${snapshot.ordinal} 次`,

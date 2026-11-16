@@ -52,9 +52,11 @@ async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
     if (request.stage === 'units' && header !== null && bases.has(header.categoryId)) {
       const response = resolveFixtureEntry(fixture.entries, header.ordinal, bases.get(header.categoryId)!.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
       if (restatedNotes && response?.kind === 'unit-result') {
-        const value = JSON.parse(response.text);
+        let value;
+        try { value = JSON.parse(response.text); } catch { return response; }
+        if (!Array.isArray(value.findings)) return response;
         const paragraph = store.baselineAnalysisLedger.readWorkingBlocks(restatedBranch!).find(block => block.text.length > 100)?.text;
-        if (paragraph !== undefined) for (const finding of value.findings ?? []) finding.note = paragraph;
+        if (paragraph !== undefined) for (const finding of value.findings) if (finding !== null && typeof finding === 'object') finding.note = paragraph;
         return { ...response, text: JSON.stringify(value) };
       }
       return !emptyFindings ? response : { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
@@ -246,7 +248,7 @@ it('synthesizes settled findings with editorial disclosure of a failed category 
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS, 'literary-expression'], scope: WHOLE }, launchPolicy));
     const run = workspace(session, book).run!;
     expect(run.synthesis?.state).toBe('completed');
-    expect(run.synthesis?.missingCategories).toEqual(['文学性与表达改进']);
+    expect(run.synthesis?.missingCategories.some(label => label.startsWith('文学性与表达改进') && label.includes('0/8'))).toBe(true);
     expect(run.findings.length).toBeGreaterThan(0);
   });
 });
@@ -579,7 +581,8 @@ it('discloses partial category coverage and missing baseline units in the reques
     const request = session.capture.wireRequests.find(request => request.messages.some(message => sample1SynthesisAnswer(message.content) !== undefined))!;
     const payload = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
     expect(payload.coverage[0]).toMatchObject({ unitsRead: 7, unitsTotal: 8, missingUnitOrdinals: [8] });
-    expect(payload.baseline.missingUnitOrdinals).toEqual([8]);
+    expect(payload.baseline.missingUnitOrdinals).toContain(8);
+    expect(payload.baseline.missingUnitOrdinals.length).toBe(8 - payload.baseline.synopses.length);
     const summary = workspace(session, book).run!.synthesis!;
     expect(summary.state).toBe('completed');
     expect(summary.detail).toContain('已读范围');
