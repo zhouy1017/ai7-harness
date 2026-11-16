@@ -29,11 +29,14 @@ export function reviewSynthesisRequestBytes(contextTokens: number | null, system
 }
 
 /** Only closed structured unit results on the task's exact manuscript revision; no manuscript or source-range reader. */
-export function readClosedBaselineSynopses(db: DatabaseSync, bookId: string, manuscriptRevisionId: string): ClosedBaselineSynopses | null {
-  const baseline = db.prepare(`SELECT r.revision_id FROM analysis_result_set_revisions r
+export function readClosedBaselineSynopses(db: DatabaseSync, bookId: string, manuscriptRevisionId: string, manuscriptRevisionDigest?: string): ClosedBaselineSynopses | null {
+  const baseline = db.prepare(`SELECT r.revision_id, r.manuscript_revision_digest FROM analysis_result_set_revisions r
     JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id WHERE s.book_id = ? AND s.kind = 'baseline-manuscript-analysis'
     AND r.manuscript_revision_id = ? ORDER BY r.ordinal DESC LIMIT 1`).get(bookId, manuscriptRevisionId);
   if (baseline === undefined) return null;
+  // A read-only preview may use the committed revision id with a dirty journal's prospective
+  // digest. That prospective input is not the baseline's revision and must describe no chain.
+  if (manuscriptRevisionDigest !== undefined && baseline.manuscript_revision_digest !== manuscriptRevisionDigest) return null;
   const revisionId = String(baseline.revision_id);
   const rows = db.prepare('SELECT unit_ordinal, state, canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? ORDER BY unit_ordinal').all(revisionId);
   const synopses = rows.flatMap(row => {
@@ -90,9 +93,9 @@ function fitTaskSynopses(context: FrozenBaselineSynopsisContext, maximumBytes: n
 }
 
 /** Freeze once with the task input. Later baseline revisions never enter continuation/replay. */
-export function freezeTaskBaselineSynopses(db: DatabaseSync, kind: string, bookId: string, manuscriptRevisionId: string, maximumMessageBytes: number | null): FrozenBaselineSynopsisContext | null {
+export function freezeTaskBaselineSynopses(db: DatabaseSync, kind: string, bookId: string, manuscriptRevisionId: string, manuscriptRevisionDigest: string, maximumMessageBytes: number | null): FrozenBaselineSynopsisContext | null {
   if (!SYNOPSIS_REUSE_KINDS.has(kind)) return null;
-  const source = readClosedBaselineSynopses(db, bookId, manuscriptRevisionId);
+  const source = readClosedBaselineSynopses(db, bookId, manuscriptRevisionId, manuscriptRevisionDigest);
   if (source === null || source.synopses.length === 0) return null;
   const candidates = synopsisCandidates(source.synopses);
   const context: FrozenBaselineSynopsisContext = { revisionId: source.revisionId, manuscriptRevisionId, maximumMessageBytes, maximumSupplementBytes: MAX_TASK_SYNOPSIS_BYTES,

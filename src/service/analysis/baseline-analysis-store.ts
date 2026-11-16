@@ -3848,7 +3848,7 @@ export class BaselineAnalysisStore {
     const firstExecution = ordinal === 1 ? undefined : this.#db.prepare(
       "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'execution-plan'",
     ).get(taskIntentId);
-    const synopsisContext = ordinal === 1 ? freezeTaskBaselineSynopses(this.#db, definition.kind, checkpoint.bookId, checkpoint.revisionId,
+    const synopsisContext = ordinal === 1 ? freezeTaskBaselineSynopses(this.#db, definition.kind, checkpoint.bookId, checkpoint.revisionId, checkpoint.revisionDigest,
       remainingSynopsisMessageBytes(live === null ? null : modelProfileFor(live.route, live.model)?.context.tokens ?? null, definition.systemPrompt))
       : firstExecution === undefined ? null : (parseCanonicalJson(asString(firstExecution.canonical_json)) as {
         baselineSynopsisContext?: import('../../shared/protocol/baseline-synopsis.js').FrozenBaselineSynopsisContext;
