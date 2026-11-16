@@ -83,6 +83,12 @@ const BOOK_OWNERSHIP_CALLS = new Set<keyof RendererApi>([
   'startBaselineAnalysisWhenOnline', 'startEvaluation', 'startReplacementCommit', 'startScopedAiEdit',
   'startSearch', 'startTaskWhenIdle', 'startTaskWhenOnline', 'transitionProductionDocumentPhase',
   'undoManuscript', 'updateEditorialMark', 'updateProductionDocumentMeta',
+  'launchBaselineAnalysis', 'launchCustomAnalysis', 'launchInitialEvaluation', 'launchReadersReport',
+  'launchEvaluationRewrite', 'launchWritingTask', 'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun',
+  'controlTaskRun', 'editTaskPlan', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
+  'saveProductionDocumentType', 'deleteProductionDocumentType', 'reorderProductionDocumentTypes',
+  'approveBookDeliveryPackageArchiveExport', 'approveBookDeliveryPackageExport',
+  'cancelBookDeliveryPackageArchiveExport', 'cancelBookDeliveryPackageExport', 'inspectHouseWordList', 'saveHouseWordList',
 ]);
 
 /** One boundary for the capability-revoking leave and subsequent Book-scoped calls.
