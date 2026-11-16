@@ -5,16 +5,19 @@ import { resolve } from 'node:path';
 
 type Renderer = { evaluate(expression: string): Promise<unknown>; send(method: string, input: { type: string; x: number; y: number }): Promise<void> };
 type WaitFor = (renderer: Renderer, expression: string, name: string) => Promise<void>;
-const { pointerClick } = await import(pathToFileURL(resolve('e2e/dispatch-chooser.mjs')).href) as {
+const { pointerClick, pointerElementDescription, pointerFailureDetail } = await import(pathToFileURL(resolve('e2e/dispatch-chooser.mjs')).href) as {
   pointerClick(renderer: Renderer, waitFor: WaitFor, selector: string, name: string): Promise<void>;
+  pointerElementDescription(node: unknown): unknown;
+  pointerFailureDetail(value: unknown): unknown;
 };
 
-function scene({ covered = false, moveOnPress = false } = {}) {
+function scene({ covered = false, moveOnPress = false, neverSettles = false } = {}) {
   let frame = 0, pressed = false;
   const events: { type: string; frame: number; x: number }[] = [];
-  const left = () => moveOnPress && pressed ? 900 : [640, 650, 700, 770][Math.min(frame, 3)]!;
-  const node = { scrollIntoView() {}, getBoundingClientRect: () => ({ left: left(), top: 300, right: left() + 110, bottom: 334, width: 110, height: 34 }), contains: (other: unknown) => other === node };
-  const document = { querySelector: () => node, elementFromPoint: (x: number) => !covered && x >= left() && x <= left() + 110 ? node : null };
+  const left = () => moveOnPress && pressed ? 900 : neverSettles ? 640 + frame * 5 : [640, 650, 700, 770][Math.min(frame, 3)]!;
+  const node = { tagName: 'SUMMARY', id: 'summary-toggle', className: 'summary', getAttributeNames: () => ['data-toggle'], scrollIntoView() {}, getBoundingClientRect: () => ({ left: left(), top: 300, right: left() + 110, bottom: 334, width: 110, height: 34 }), contains: (other: unknown) => other === node };
+  const blocker = { tagName: 'DIV', id: 'sticky-bar', className: 'sticky overlay', getAttributeNames: () => ['data-overlay'], get textContent(): never { throw new Error('Text must never be read'); }, getAttribute(): never { throw new Error('Attribute values must never be read'); } };
+  const document = { querySelector: () => node, elementFromPoint: (x: number) => covered ? blocker : x >= left() && x <= left() + 110 ? node : null };
   const renderer: Renderer = {
     evaluate: async expression => await Function('document', 'requestAnimationFrame', 'innerWidth', 'innerHeight', `return (${expression})`)(document, (callback: () => void) => queueMicrotask(() => { frame++; callback(); }), 1280, 800),
     send: async (_method, input) => { events.push({ type: input.type, frame, x: input.x }); if (input.type === 'mousePressed') pressed = true; },
@@ -57,4 +60,38 @@ it('makes the J-11 caller await a false asynchronous actionability predicate', a
     await vi.advanceTimersByTimeAsync(50);
     expect(await outcome).toBe(false);
   } finally { vi.useRealTimers(); }
+});
+
+
+it('records the covering element and four geometry frames without reading text or attribute values (#1433 hosted diagnosis)', async () => {
+  const target = scene({ covered: true });
+  let failure: { pointerFailure?: { frames: Array<{ hit: { tag: string; id: string; classes: string[]; data: string[] }; contains: boolean }> } } | undefined;
+  try { await pointerClick(target.renderer, target.waitFor, 'button', 'covered-summary'); }
+  catch (error) { failure = error as typeof failure; }
+  expect(failure?.pointerFailure?.frames).toHaveLength(4);
+  expect(failure?.pointerFailure?.frames.every(frame => !frame.contains && frame.hit.tag === 'div' && frame.hit.id === 'sticky-bar' && frame.hit.data[0] === 'data-overlay')).toBe(true);
+  expect(target.events).toEqual([]);
+});
+
+it('caps pointer metadata and reconstructs only names and geometry (#1433 hosted diagnosis)', () => {
+  const descriptor = pointerElementDescription({ tagName: 'DIV', id: 'x'.repeat(5000), className: Array(50).fill('c'.repeat(500)).join(' '),
+    getAttributeNames: () => Array.from({ length: 50 }, (_, index) => `data-${index}-${'n'.repeat(500)}`),
+    get textContent(): never { throw new Error('Text must never be read'); }, getAttribute(): never { throw new Error('Attribute values must never be read'); } });
+  const detail = pointerFailureDetail({ viewport: [1008, 681], target: descriptor, textContent: 'private-payload',
+    frames: Array.from({ length: 4 }, () => ({ rect: [1, 2, 3, 4], point: [2.5, 4], hit: descriptor, contains: false, attributeValue: 'private-payload' })) });
+  expect(detail).not.toBeNull();
+  expect(JSON.stringify(detail).length).toBeLessThanOrEqual(4096);
+  expect(JSON.stringify(detail)).not.toContain('private-payload');
+  expect(pointerFailureDetail({ viewport: [1008, 681], frames: Array(5).fill({}) })).toBeNull();
+});
+
+
+it('distinguishes a target that never settles from a covering element (#1433 hosted diagnosis)', async () => {
+  const target = scene({ neverSettles: true });
+  let failure: { pointerFailure?: { frames: Array<{ rect: number[]; contains: boolean }> } } | undefined;
+  try { await pointerClick(target.renderer, target.waitFor, 'summary', 'moving-summary'); }
+  catch (error) { failure = error as typeof failure; }
+  expect(failure?.pointerFailure?.frames.every(frame => frame.contains)).toBe(true);
+  expect(new Set(failure?.pointerFailure?.frames.map(frame => frame.rect[0])).size).toBe(4);
+  expect(target.events).toEqual([]);
 });

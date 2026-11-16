@@ -1,6 +1,7 @@
 import {
   classifyJourneyResult,
   collectJourneyCheck,
+  collectJourneyPointerFailure,
   collectReadinessTrace,
   debugArtifactLabel,
   isAdmittedJourney,
@@ -30,6 +31,8 @@ if (localDebugRefused()) {
     console.error(`LOCAL_DEBUG/${journey}/fail/${failure.location}/${failure.errorClass}/${seconds}s`);
     const check = collectJourneyCheck(result, journey, failure);
     if (check !== null) console.error(`LOCAL_DEBUG/${journey}/fail/${failure.location}/check/${check}`);
+    const pointer = collectJourneyPointerFailure(result, journey, failure);
+    if (pointer !== null) console.error(`POINTER_FAILURE/${journey}/${failure.location}/${pointer}`);
     const readiness = collectReadinessTrace(result, journey);
     if (readiness !== null) console.error(`LOCAL_DEBUG/${journey}/readiness/${readiness}`);
     console.error(`LOCAL_DEBUG/${journey}/artifacts/${artifacts}`);

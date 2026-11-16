@@ -26,6 +26,7 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   formatJourneyCheckLine(journey: string, location: string, error: unknown): string | null;
   classifyJourneyResult(result: JourneyResult, journey: string): Failure;
   collectJourneyCheck(result: JourneyResult, journey: string, failure: Failure): string | null;
+  collectJourneyPointerFailure(result: JourneyResult, journey: string, failure: Failure): string | null;
   journeyElapsedSegment(milliseconds: number): string;
   discloseJ02Viewport(viewport: { width: number; height: number; overlay: boolean }): void;
   collectJ02ViewportDisclosures(result: { stdout: string }): string[];
@@ -324,4 +325,29 @@ describe('the label guard itself', () => {
     ];
     for (const body of cases) expect(refused(body), body).toHaveLength(1);
   });
+});
+
+
+it('forwards bounded pointer failure metadata from a real child without changing its check or classification (#1433)', () => {
+  const detail = { viewport: [1008, 681], target: { tag: 'summary', id: 'summary-toggle', classes: ['review-synthesis'], data: ['data-toggle'] },
+    frames: [{ rect: [20, 30, 200, 24], point: [120, 42], hit: { tag: 'div', id: 'sticky-bar', classes: ['overlay'], data: ['data-overlay'] }, contains: false }] };
+  const expression = `Object.assign(c.journeyCheckFailure('J-07', 'summary-pointer-target'), { pointerFailure: ${JSON.stringify(detail)} })`;
+  const child = reported(J07_LOCATION, expression);
+  const result = childResult(child.stderr), failure = controller.classifyJourneyResult(result, 'J-07');
+  expect(failure).toEqual({ location: J07_LOCATION, errorClass: 'journey-failure' });
+  expect(controller.collectJourneyCheck(result, 'J-07', failure)).toBe('summary-pointer-target');
+  expect(JSON.parse(controller.collectJourneyPointerFailure(result, 'J-07', failure)!)).toEqual(detail);
+  const completion = `LOCAL_COMPLETION/J-07/fail/${J07_LOCATION}/journey-failure`;
+  const withoutPointer = queue.parseGateLog(completion), withPointer = queue.parseGateLog(`${completion}\nPOINTER_FAILURE/J-07/${J07_LOCATION}/${JSON.stringify(detail)}`);
+  expect(withPointer.failed).toEqual(withoutPointer.failed);
+  expect(withPointer.unclassified).toBe(withoutPointer.unclassified + 1);
+  const prefix = `J-07/${J07_LOCATION}/pointer/`;
+  expect(controller.collectJourneyPointerFailure(childResult(prefix + 'private text'), 'J-07', failure)).toBeNull();
+  expect(controller.collectJourneyPointerFailure(childResult(prefix + JSON.stringify({ textContent: 'private text' })), 'J-07', failure)).toBeNull();
+  expect(controller.collectJourneyPointerFailure(childResult([prefix + JSON.stringify(detail), prefix + JSON.stringify(detail)].join('\n')), 'J-07', failure)).toBeNull();
+  for (const file of ['run-all.mjs', 'run-gate.mjs', 'debug.mjs', 'repeat.mjs']) {
+    const source = readFileSync(resolve(E2E, file), 'utf8');
+    expect(source.match(/collectJourneyPointerFailure\(result, journey, failure\)/gu), file).toHaveLength(1);
+    expect(source, file).toContain('console.error(`POINTER_FAILURE/${journey}/${failure.location}/${pointer}`)');
+  }
 });

@@ -226,7 +226,6 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-04' };
-  if (localDebugEnabled()) selected.AI7_E2E_WINDOW = '1024x768'; // [DEBUG-1433-pointer] Match hosted native content bounds.
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -2886,11 +2885,6 @@ async function main() {
     requireJourney(synthesisEvidence !== undefined, 'review-synthesis-linked-evidence');
     const synthesisLayouts = [];
     const synthesisNativeViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
-    if (localDebugEnabled()) {
-      requireJourney(synthesisNativeViewport.width === 1008 && synthesisNativeViewport.height === 681, 'review-synthesis-diagnostic-native', synthesisNativeViewport);
-      recordDebugDetail('J-04', `[DEBUG-1433-pointer] native ${JSON.stringify(synthesisNativeViewport)}; renderer throttle 4`);
-      await renderer.send('Emulation.setCPUThrottlingRate', { rate: 4 });
-    }
     try {
       for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
         at(`review-synthesis-${viewport}`);
@@ -2915,17 +2909,7 @@ async function main() {
         const findingScroll = await renderer.evaluate(`(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return {x:Math.min(innerWidth-24,r.left+r.width/2),y:innerHeight-48,deltaY:Math.max(0,r.bottom-innerHeight+24)};})()`);
         await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', deltaX: 0, ...findingScroll });
         await waitFor(renderer, `(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-scroll-card`);
-        if (localDebugEnabled()) await renderer.evaluate(`(() => {const probe={active:true,frames:[]};globalThis.__j04SynthesisPointer=probe;const tick=()=>{if(!probe.active)return;const header=document.querySelector('details.review-synthesis > summary'),r=header?.getBoundingClientRect(),x=r?r.left+r.width/2:0,y=r?r.top+r.height/2:0,hit=r?document.elementFromPoint(x,y):null,describe=node=>node?{tag:node.tagName,id:node.id,className:node.className,position:getComputedStyle(node).position,zIndex:getComputedStyle(node).zIndex}:null,ancestors=[];for(let node=header?.parentElement;node&&ancestors.length<8;node=node.parentElement)ancestors.push({...describe(node),scrollTop:node.scrollTop,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight,rect:node.getBoundingClientRect().toJSON()});probe.frames.push({time:performance.now(),viewport:[innerWidth,innerHeight],rect:r?.toJSON(),centre:[x,y],hit:describe(hit),headerContainsHit:!!header&&header.contains(hit),open:header?.parentElement.open,ancestors});if(probe.frames.length>24)probe.frames.shift();requestAnimationFrame(tick);};tick();})()`);
-        let collapseError;
-        try { await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`); }
-        catch (error) { collapseError = error; }
-        if (localDebugEnabled()) {
-          const frames = await renderer.evaluate(`(() => {const probe=globalThis.__j04SynthesisPointer;probe.active=false;delete globalThis.__j04SynthesisPointer;return probe.frames;})()`);
-          const detail = { debug: '[DEBUG-1433-pointer]', error: collapseError?.message ?? null, nativeViewport: synthesisNativeViewport, frames };
-          recordDebugDetail('J-04', JSON.stringify(detail));
-          if (collapseError) requireJourney(false, `review-synthesis-${viewport}-access-collapse-hit-test`, detail);
-        }
-        if (collapseError) throw collapseError;
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`);
         await pressEnter(renderer);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
         for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.querySelector('article.review-finding').contains(document.activeElement)`)); tab += 1) await pressTab(renderer);
@@ -2949,7 +2933,6 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-screen="book-review"] details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-returned`);
       }
     } finally {
-      if (localDebugEnabled()) await renderer.send('Emulation.setCPUThrottlingRate', { rate: 1 });
       await renderer.send('Emulation.clearDeviceMetricsOverride');
       await waitFor(renderer, `innerWidth===${synthesisNativeViewport.width} && innerHeight===${synthesisNativeViewport.height}`, 'review-synthesis-native-viewport');
     }
