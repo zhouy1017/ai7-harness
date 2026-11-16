@@ -694,16 +694,16 @@ it('opening another conflict supersedes pending navigation without an explicit b
 });
 
 
-function completionProbe(read?: () => Promise<TaskOverviewProjection>) {
+function completionProbe(read?: () => Promise<TaskOverviewProjection>, change: Partial<GlobalAttentionItemProjection> = {}) {
  const item: GlobalAttentionItemProjection = { itemId:'analysis:completion',group:'recent',state:'analysis-completed',blocked:false,at:'2026-11-16T00:00:01Z',
   book:{bookId:'completion-book',title:'测试图书'},object:{kind:'analysis',mode:'first-baseline'},facts:{progress:null,categories:[],revisionOrdinal:null},
-  nextStep:'view-run',target:{kind:'analysis',bookId:'completion-book',taskIntentId:'completion'},technical:[] };
+  nextStep:'view-run',target:{kind:'analysis',bookId:'completion-book',taskIntentId:'completion'},technical:[],...change };
  const projection: GlobalAttentionProjection = {groups:[{key:'recent',items:[item],total:1}],actionableCount:0,running:false,processing:{state:'local'}};
  const overview=composeTaskOverview(projection,2,()=>null), inspect=vi.fn(read ?? (async()=>overview));
  const page=harness({notify:async()=>undefined,inspectTaskOverview:inspect,inspectBaselineAnalysis:async()=>({bookId:'completion-book'})});
  const options=page.context['completionObserverOptions'] as Parameters<typeof createNotificationObserver>[0];
  const observe=()=>createNotificationObserver({...options,focused:()=>true,startedAt:0})(projection);
- return {...page,overview,inspect,observe};
+ return {...page,overview,inspect,observe,item};
 }
 
 it.each(['overview','panel'])('automatically opens a completion while watching the %s with the real shell loader (#1510)',async surface=>{
@@ -742,7 +742,38 @@ it.each(['sheet','off','plan'])('keeps a delayed completion quiet if %s changes 
  await page.run('renderTaskOverview()');page.observe();expect(page.inspect).toHaveBeenCalledOnce();
  if(change==='sheet'){const sheet=document.createElement('dialog');sheet.setAttribute('open','');miniDocument.body.append(sheet as unknown as MiniElement);}
  if(change==='off') await page.run("localStorage.getItem=()=> 'off'");
- if(change==='plan') await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book'})");
+ if(change==='plan') await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'baseline-analysis',ref:'another-task'}})");
  answer.resolve(page.overview);await Promise.resolve();await Promise.resolve();
  expect(page.context['openOverviewResult']).not.toHaveBeenCalled();
+});
+
+it.each(['plan','run'])('opens a completion for the matching task in its %s drawer (#1510 own task)',async()=>{
+ const page=completionProbe();await page.run("renderBookAnalysis('completion-book','测试图书',undefined,{tab:'chapters'})");
+ await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'baseline-analysis',ref:'completion'}})");
+ page.observe();await Promise.resolve();await Promise.resolve();
+ expect(page.context['openOverviewResult']).toHaveBeenCalledOnce();
+});
+
+const completedReview: Partial<GlobalAttentionItemProjection> = {itemId:'review:review-completion',state:'review-completed',object:{kind:'review',ordinal:1},
+ target:{kind:'review',bookId:'completion-book',reviewRunId:'review-completion'}};
+it.each([{shown:true,view:'plan'},{shown:false,view:'plan'},{shown:true,view:'panel'},{shown:false,view:'panel'}])('review result already shown=$shown controls its $view completion (#1510 own result)',async ({shown,view})=>{
+ const page=completionProbe(undefined,completedReview);await page.run("renderBookReview('completion-book','测试图书')");
+ const run=document.createElement('section');run.className='review-run';run.dataset['reviewRunId']=shown?'review-completion':'other-review';page.screen.firstElementChild!.append(run);
+ await page.run(view==='panel' ? "taskDrawer.view=()=>({kind:'panel',bookId:'completion-book'})" : "taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'review-run',ref:'review-completion'}})");
+ page.observe();await Promise.resolve();await Promise.resolve();
+ expect(page.context['showQuietNotice']).toHaveBeenCalledOnce();
+ expect(page.context['openOverviewResult']).toHaveBeenCalledTimes(shown?0:1);
+});
+
+it('opens the matching writing task drawer (#1510 own task)',async()=>{
+ const page=completionProbe(undefined,{object:{kind:'task',taskKind:'writing'},target:{kind:'task-plan',bookId:'completion-book',taskKind:'writing',ref:'writing-task'}});
+ page.replaceScreen('editor');await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'writing',ref:'writing-task'}})");
+ page.observe();await Promise.resolve();await Promise.resolve();expect(page.context['openOverviewResult']).toHaveBeenCalledOnce();
+});
+
+it('keeps another task in the same Book quiet (#1510 own task)',async()=>{
+ const page=completionProbe();page.replaceScreen('editor');
+ await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'baseline-analysis',ref:'different-task'}})");
+ page.observe();await Promise.resolve();await Promise.resolve();
+ expect(page.context['openOverviewResult']).not.toHaveBeenCalled();expect(page.inspect).not.toHaveBeenCalled();
 });

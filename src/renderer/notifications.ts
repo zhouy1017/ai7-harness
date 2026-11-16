@@ -74,10 +74,10 @@ export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => 
 
 /** Automatic results belong to the task surface that received the completion, never a later destination. */
 export async function openCurrentBookCompletion(item: GlobalAttentionItemProjection, options: {
-  allowed(bookId: string): boolean; enabled(): boolean; navigation: NavigationCheckpoint;
+  allowed(item: GlobalAttentionItemProjection): boolean; enabled(): boolean; navigation: NavigationCheckpoint;
   read(): Promise<TaskOverviewProjection>; open(entry: TaskOverviewItemProjection): void;
 }): Promise<void> {
-  const current = (): boolean => item.book.bookId !== null && options.navigation.isCurrent() && options.allowed(item.book.bookId) && options.enabled() &&
+  const current = (): boolean => item.book.bookId !== null && options.navigation.isCurrent() && options.allowed(item) && options.enabled() &&
     !document.querySelector('[data-testid="manuscript-editor"]')?.contains(document.activeElement);
   if (!current()) return;
   const tasks = await options.read();

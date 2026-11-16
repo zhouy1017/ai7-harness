@@ -2840,7 +2840,7 @@ async function main() {
     // #1510: exercise the focused hosted completion path on the background guest too.
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await assertRenderer(renderer, `document.hasFocus() && localStorage.getItem('ai7.task-overview.auto-result')!=='off'`, 'review-completion-focused-preference-on');
-    await renderer.evaluate(`(() => {const probe=window.__j04ReviewCompletion={noticed:false,opened:false};const record=()=>{if(document.querySelector('.task-result-window[data-task-result-kind="review"]'))probe.opened=true;const toast=document.querySelector('[data-toast]');if(toast?.dataset.tone==='review-completed')probe.noticed=true;};probe.observer=new MutationObserver(record);probe.observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-tone','data-task-result-kind']});record();})()`);
+    await renderer.evaluate(`(() => {const probe=window.__j04ReviewCompletion={noticed:false,opened:false};const record=()=>{if(document.querySelector('.task-result-window[data-task-result-kind="review"]'))probe.opened=true;const toast=document.querySelector('[data-toast]');if(toast?.dataset.tone==='review-completed'&&!probe.noticed){const drawer=document.querySelector('#task-drawer');probe.context={drawerView:drawer?.dataset.taskDrawerView,drawerRef:drawer?.dataset.taskPlanRef,workspaceRun:document.querySelector('.review-run')?.dataset.reviewRunId};probe.noticed=true;}};probe.observer=new MutationObserver(record);probe.observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-tone','data-task-result-kind']});record();})()`);
     await writeFile(connectivityPath, 'online');
     at('review-authorize');
     // The sheet launched the Run directly; each category starts from its frozen plan at its driver turn.
@@ -2871,6 +2871,8 @@ async function main() {
     // Completion is a quiet 查看 notice while the editor is working in 审阅, even with the preference on.
     await renderer.evaluate(`window.dispatchEvent(new Event('focus'))`);
     await waitFor(renderer, `window.__j04ReviewCompletion?.noticed===true`, 'review-completion-quiet-notice');
+    const completionContext = await renderer.evaluate(`window.__j04ReviewCompletion.context`);
+    requireJourney(completionContext.drawerView==='plan' && completionContext.drawerRef===preparedReview.reviewRunId && completionContext.workspaceRun===preparedReview.reviewRunId, 'review-completion-own-result-context', completionContext);
     await assertRenderer(renderer, `window.__j04ReviewCompletion.opened===false && !document.querySelector('.task-result-window')`, 'review-completion-no-popup');
     await renderer.evaluate(`window.__j04ReviewCompletion.observer.disconnect();delete window.__j04ReviewCompletion`);
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
