@@ -27,7 +27,7 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
       } else {
         const link = document.createElement('button'); link.type = 'button'; link.className = 'quiet';
         link.dataset['synthesisEvidence'] = ref;
-        link.textContent = `[${ref}] ${evidence.chapterLabel}${evidence.status === 'pending' ? '' : '（已处理）'}「${evidence.quote}」`;
+        link.textContent = `[${ref}] ${evidence.chapterLabel}${evidence.status === 'pending' ? '' : evidence.status === 'absent' ? '（原发现已不在，查看原文）' : '（已处理）'}「${evidence.quote}」`;
         link.addEventListener('click', () => jump?.(evidence)); node.append(' ', link);
       }
     }
