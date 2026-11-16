@@ -1,3 +1,4 @@
+import { bindEditorialMemory, editorialMemoryDigest } from '../learning/memory-facade.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST,
   admittedGlobalAgentRoute, admittedGlobalAgentScopedRoute } from './global-agent-session.js';
 import { randomUUID } from 'node:crypto';
@@ -5,7 +6,7 @@ import { RetrievalIndex } from '../retrieval/index.js';
 import { PlatformToolSession, type GlobalAgentScopedToolOwner } from '../provider/platform-tool-session.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
-import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
+import type { EditorialMemorySnapshot } from '../learning/editorial-memory.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import type { OrdinaryProductionRouteId } from '../../shared/protocol.js';
@@ -384,8 +385,7 @@ export class DialogueExecutionOwner {
       : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt) : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     const memory = live?.route?.providerProcessingVersion === 'v35' || turn.globalRoute?.providerProcessingVersion === 'v35'
       ? records.dialogueEditorialMemory?.(turn.dialogueId) ?? null : null;
-    const promptContractDigest = editorialMemoryDigest(basePromptContractDigest, memory);
-    const systemPrompt = editorialMemoryPrompt(baseSystemPrompt, memory);
+    const { promptContractDigest, systemPrompt } = bindEditorialMemory({ promptContractDigest: basePromptContractDigest, systemPrompt: baseSystemPrompt }, memory);
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;

@@ -1,6 +1,6 @@
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { resolveEditorialMarkCategory } from '../shared/editorial-mark-category.js';
-import { EditorialLearningLedger } from './learning/ledger.js';
+import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
@@ -1506,7 +1506,7 @@ export class EditorialMarkStore {
           "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
         ).run(decisionId, reason, now);
       }
-      new EditorialLearningLedger(this.#db).captureDecision(decisionId);
+      new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
       this.#db.prepare('UPDATE editorial_marks SET status = ?, updated_at = ? WHERE mark_id = ?')
         .run(input.disposition === 'rejected' ? 'resolved' : 'open', now, input.markId);
     });
@@ -1538,7 +1538,7 @@ export class EditorialMarkStore {
       this.#db.prepare(
         'INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, ?, ?)',
       ).run(input.decisionId, reason, input.reasonSource, new Date().toISOString());
-      new EditorialLearningLedger(this.#db).captureDecision(input.decisionId);
+      new EditorialMemoryFacade(this.#db).captureDecision(input.decisionId);
     });
     return this.#command(input, input.markId);
   }
@@ -1581,7 +1581,7 @@ export class EditorialMarkStore {
         reason,
         first: firstReasonOf(current),
       });
-      new EditorialLearningLedger(this.#db).captureDecision(input.decisionId);
+      new EditorialMemoryFacade(this.#db).captureDecision(input.decisionId);
     });
     return this.#command(input, input.markId);
   }
@@ -1742,7 +1742,7 @@ export class EditorialMarkStore {
         "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
       ).run(decisionId, this.#body(reason), now);
     }
-    new EditorialLearningLedger(this.#db).captureDecision(decisionId);
+    new EditorialMemoryFacade(this.#db).captureDecision(decisionId);
     return decisionId;
   }
 

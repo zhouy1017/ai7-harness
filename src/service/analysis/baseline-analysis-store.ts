@@ -1,3 +1,4 @@
+import { analysisUsesAutomaticMemory } from '../learning/memory-facade.js';
 import { launchedRunModelLabels } from '../editorial-mark-source.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
@@ -2050,8 +2051,8 @@ export class BaselineAnalysisStore {
   #currentEditorialMemory(bookId: string): EditorialMemorySnapshot | null {
     // Category review keeps its existing exact preference pins, assembled by the same memory builder.
     const kind = this.#definition.editorialMemorySourceKind ?? this.#definition.kind;
-    return kind.startsWith('editorial-review/') || this.#launch.operationalScope !== 'ordinary-production' ||
-      this.#launch.policy?.providerProcessing.version !== 'v35' ? null : this.#launch.editorialMemory?.(bookId, kind) ?? null;
+    return analysisUsesAutomaticMemory(this.#launch.operationalScope, this.#launch.policy?.providerProcessing.version, kind)
+      ? this.#launch.editorialMemory?.(bookId, kind) ?? null : null;
   }
 
   #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {

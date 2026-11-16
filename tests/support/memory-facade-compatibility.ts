@@ -14,12 +14,12 @@ import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/servi
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes } from '../../src/service/fast-role/fast-role-execution.js';
 import { FastRoleRequests } from '../../src/service/fast-role/fast-role-suggestions.js';
-import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type DialogueSelectionInput } from '../../src/shared/protocol.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { capturedOrdinaryExecution } from './captured-ordinary-transport.js';
 import { createServiceTestRoots } from './temp-data-root.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from './sample1-baseline.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from './sample1-baseline.js';
 import { sample1SynthesisAnswer } from './review-synthesis-answer.js';
 import { composeRevisedDocx, ADMITTED_BASELINE_DOCX } from './composed-fixture.js';
 
@@ -109,7 +109,11 @@ export async function memoryCompatibilityPacket() {
     const memory = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).items[0]!.current;
     store.acceptEditorialMemory({ itemId: memory.itemId, expectedVersionId: memory.versionId, actionId: randomUUID() });
     read('accepted');
-    surface = 'analysis';
+    const procedure = store.procedureLibrary({ action: 'inspect' }).procedures.find(entry => entry.executorKind === 'baseline-manuscript-analysis')!;
+    const edited = store.procedureLibrary({ action: 'save', input: { procedureId: procedure.procedureId,
+      basedOn: { procedureId: procedure.procedureId, version: procedure.version, digest: procedure.digest }, title: procedure.document.title,
+      editorInstruction: '仅按已给出的叙述作出判断。', stages: procedure.document.stages.map((stage, index) => index === 1 ? { ...stage, exemptionRules: ['保留明确写出的设定。'] } : stage) } }).procedures.find(entry => entry.procedureId === procedure.procedureId)!;
+    store.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: { procedureId: edited.procedureId, version: edited.version, digest: edited.digest } });
     surface = 'analysis-prepare';
     const launched = store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, capture.policy);
     surface = 'analysis';
@@ -179,6 +183,22 @@ export async function memoryCompatibilityPacket() {
     const staged = await store.stageSelectedManuscript(randomUUID(), path);
     const prepared = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain', { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false });
     const commitId = randomUUID(); await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: prepared.draftVersion, reviewDigest: prepared.reviewDigest!, commitId }); await store.acknowledgeImportCompletion(commitId);
+    surface = 'legacy-preference-plan';
+    const legacyCredential = recordMissingCredentialConnection(store, '旧版记忆计划元数据');
+    const legacyPolicy = resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'developer-live');
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: legacyPolicy, live: { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: legacyCredential, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } } });
+    const freezeLegacy = (bookId: string) => {
+      let work = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, legacyPolicy);
+      while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+      const id = work.projection!.run!.reviewRunId;
+      return id;
+    };
+    for (let index = 0; index < 6; index++) guide('typos-and-usage', '旧版短规则' + index);
+    const legacyLines = freezeLegacy(book.bookId);
+    const second = await importSample1Book(store, roots.codeRoot, 'sample1 旧版字符预算');
+    await pinEditorialWorkspaceProfileRevision2(store, second.bookId);
+    for (let index = 0; index < 3; index++) guide('typos-and-usage', ('长' + index + '：').padEnd(100, '字'), { kind: 'book', bookId: second.bookId });
+    const legacyCharacters = freezeLegacy(second.bookId);
     capture.assertMatched();
     const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
     try {
@@ -186,6 +206,9 @@ export async function memoryCompatibilityPacket() {
       const records = Object.fromEntries(tables.map(table => [table, db.prepare('SELECT * FROM ' + table + ' ORDER BY rowid').all()]));
       const envelopes = db.prepare("SELECT t.kind,p.canonical_json,p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id=p.task_intent_id WHERE p.component='plan-envelope' ORDER BY p.rowid").all();
       const frozen = envelopes.map(row => { const value = JSON.parse(String(row.canonical_json)); return { kind: row.kind, editorialMemory: value.editorialMemory, editorialMemoryBasePromptContractDigest: value.editorialMemoryBasePromptContractDigest, promptContractDigest: value.promptContractDigest }; });
+      snapshots.legacyPreferences = [legacyLines, legacyCharacters].map(id => db.prepare('SELECT canonical_json FROM review_run_preference_pins WHERE review_run_id=?').all(id).map(row => JSON.parse(String(row.canonical_json)).preference));
+      strictEqual((snapshots.legacyPreferences as Array<Array<{ lines: string[] }>>)[0]![0]!.lines.length, 5);
+      strictEqual((snapshots.legacyPreferences as Array<Array<{ lines: string[] }>>)[1]![0]!.lines.length, 2);
       const bindings = db.prepare('SELECT canonical_json FROM dialogue_execution_bindings ORDER BY rowid').all();
       return { schema: 'ai7.memory-facade-compatibility/1', timing, requests, snapshots, frozen, bindings, records };
     } finally { db.close(); }

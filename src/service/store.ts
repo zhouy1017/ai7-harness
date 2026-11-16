@@ -1,3 +1,4 @@
+import { EditorialMemoryFacade, dialogueMemoryContext } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
 import { withModelClarification } from './provider/clarification-contract.js';
@@ -535,7 +536,6 @@ import type { ProcedureDefinitionDocument } from '../shared/protocol/procedures.
 import {
   SupervisionDirectives,
   initializeSupervisionSchema,
-  type EditorialMemoryGovernanceHooks,
 } from './learning/supervision-directives.js';
 import {
   analysisBytePage,
@@ -2553,10 +2553,8 @@ export class EditorialStore {
       dialogueCall: this.#dialogueCall.bind(this),
       get dialogueHistory() { return store.#dialogueHistory; },
       get dialogues() { return store.#dialogues; },
-      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
       learningCall: this.#learningCall.bind(this),
-      learningLedger: this.#learningLedger.bind(this),
-      get learningSupervisionHost() { return store.#learningSupervisionHost; },
+      memoryFacade: this.#memoryFacade.bind(this),
       get localFixtureCatalog() { return store.#localFixtureCatalog; },
       set localFixtureCatalog(value) { store.#localFixtureCatalog = value; },
       transaction: this.#transaction.bind(this),
@@ -2922,10 +2920,10 @@ export class EditorialStore {
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       executionFor: binding => this.#baselineAnalysis.withExecutionChoice(binding,
         resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', binding)).launch,
-      learningLedger: () => this.#learningLedger(),
+      memoryFacade: () => this.#memoryFacade(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+        const use = this.#memoryFacade().reviewPreference(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -3728,7 +3726,7 @@ export class EditorialStore {
         // Current consistency availability is derived from today's knowledge. Its historical Run reconstructs from its
         // snapshot entry instead; mixing today's definition with a prior Run's pins would falsely make a saved step unavailable.
         if (entry.seriesKnowledge === undefined) scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
-        preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(asString(row.task_intent_id));
+        preference = this.#memoryFacade().pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
           const json = asString(record.canonical_json);
@@ -3799,7 +3797,7 @@ export class EditorialStore {
       const snapshot = JSON.parse(String(row.canonical_json)) as { materialReferences?: TaskMaterialBoundary };
       const category = JSON.parse(String(row.category)) as { entry: ReviewCategoryConfigurationEntry; task: { taskIntentId: string } };
       if (category.entry.executor !== 'review-category-contract') return null;
-      const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(category.task.taskIntentId);
+      const use = this.#memoryFacade().pinned(category.task.taskIntentId);
       const baseDigest = unwrappedPlanPromptDigest(JSON.parse(String(row.execution_json)), JSON.parse(String(row.envelope_json)));
       const historical = this.#reviewLedgerOf(category.entry, snapshot.materialReferences, baseDigest, undefined, use,
         row.contract_version === 'ai7.editorial-review/1' ? 1 : 2).definition;
@@ -4290,7 +4288,7 @@ export class EditorialStore {
     return this.#reviewCall(() => {
       this.#transaction(this.#authority, () => {
         this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-        this.#learningLedger().captureIgnoredFinding(bookId, reviewRunId, findingId);
+        this.#memoryFacade().captureIgnoredFinding(bookId, reviewRunId, findingId);
       });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
@@ -8910,7 +8908,7 @@ export class EditorialStore {
       get bookPeople() { return store.#bookPeople; },
       learningCall: this.#learningCall.bind(this),
       get learningEligibility() { return store.#learningEligibility; },
-      learningLedger: this.#learningLedger.bind(this),
+      memoryFacade: this.#memoryFacade.bind(this),
       learningMaterialSource: this.#learningMaterialSource.bind(this),
       get learningSupervisionHost() { return store.#learningSupervisionHost; },
       get replacementFrozen() { return store.replacementFrozen.bind(store); },
@@ -9023,24 +9021,16 @@ export class EditorialStore {
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost), 'memory');
+      this.#memoryFacade().accept(input, this.#baselineAnalysis.launch.operationalScope);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+      this.#memoryFacade().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
-  }
-
-  #editorialMemoryGovernanceHooks(): EditorialMemoryGovernanceHooks {
-    const learning = this.#learningLedger();
-    return { revisions: () => learning.revisions(this.#baselineAnalysis.launch.operationalScope),
-      govern: (directive, expected) => learning.govern(directive, expected) };
   }
 
   /**
@@ -9150,7 +9140,6 @@ export class EditorialStore {
       get authority() { return store.#authority; },
       get baselineAnalysis() { return store.#baselineAnalysis; },
       get bookPeople() { return store.#bookPeople; },
-      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
       evaluationBookTitle: this.#evaluationBookTitle.bind(this),
       get inspectBaselineAnalysis() { return store.inspectBaselineAnalysis.bind(store); },
       get inspectGlobalAgent() { return store.inspectGlobalAgent.bind(store); },
@@ -9158,7 +9147,7 @@ export class EditorialStore {
       learningCall: this.#learningCall.bind(this),
       learningCandidates: this.#learningCandidates.bind(this),
       get learningEligibility() { return store.#learningEligibility; },
-      learningLedger: this.#learningLedger.bind(this),
+      memoryFacade: this.#memoryFacade.bind(this),
       learningMaterialSource: this.#learningMaterialSource.bind(this),
       get reviewRuns() { return store.#reviewRuns; },
       get series() { return store.#series; },
@@ -9280,7 +9269,7 @@ export class EditorialStore {
   #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'> {
     const source = candidate.source;
     if (source.kind === 'word-tracked-edit') return { target: { ...source, bookId }, sourceTask: null,
-      wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
+      wordCurrentEligibility: this.#memoryFacade().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
     if (source.kind === 'analysis') {
       // The judged revision owns this Task, even after a newer analysis becomes current.
       const row = one(this.#authority.prepare(
@@ -9396,7 +9385,7 @@ export class EditorialStore {
       }, withExcerpt);
     }
     // Retained Word pairs verify their original before projecting; a consumer that never uses them skips that read.
-    if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
+    if (includeWord) yield* this.#memoryFacade().wordCandidates(bookId);
   }
 
   #learningCall<T>(operation: () => T): T {
@@ -9410,6 +9399,12 @@ export class EditorialStore {
       }
       throw error;
     } finally { if (--this.#learningCallDepth === 0) this.#wordLearningRead = null; }
+  }
+
+  /** The facade reuses the current operation's proof reader and never owns its transaction. */
+  #memoryFacade(): EditorialMemoryFacade {
+    return new EditorialMemoryFacade(this.#authority, () => this.#learningLedger(),
+      () => learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
   }
 
   /** C0's existing per-read proofs, invalidated by any database write; no cache survives the outer local operation. */
@@ -9576,8 +9571,8 @@ export class EditorialStore {
       const result = this.#bookPeople.update(input);
       const scope = this.#baselineAnalysis.launch.operationalScope;
       // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
-      const preferences = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger());
-      if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
+      const preferences = this.#memoryFacade();
+      if (this.#memoryFacade().directives(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
         preferences.refreshGovernance(scope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
       return result;
     }));
@@ -13587,14 +13582,14 @@ export class EditorialStore {
     if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite();
     else this.#checkpoint.admitJournalWrite();
     const ack = this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
-      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+      new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
     this.#checkpointWorker?.journalWritten();
     return ack;
   }
 
   inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,
     budgetBytes = MAX_FRAME_BYTES): import('./bounded-manuscript.js').ManualCommandSourcePage {
-    return this.#learningCall(() => this.#learningLedger().manualSourcePage(signalId, cursor, budgetBytes));
+    return this.#learningCall(() => this.#memoryFacade().manualSourcePage(signalId, cursor, budgetBytes));
   }
 
   /**
@@ -13932,7 +13927,7 @@ export class EditorialStore {
 
   commitReplacement(previewId: string): ReplacementCommitProjection {
     return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId, (source) =>
-      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+      new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
   }
 
   cancelReplacement(previewId: string): boolean {
@@ -14279,7 +14274,7 @@ export class EditorialStore {
     const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (run === undefined) return null;
     try {
-      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost))
+      return this.#memoryFacade().governanceChanged(asString(run.task_intent_id))
         ? '本社审阅偏好的学习监督已变化' : null;
     } catch (error) {
       if (!(error instanceof LearningEligibilityError)) throw error;
@@ -16022,15 +16017,13 @@ export class EditorialStore {
   /** Automatic house context for Global Agent; book context for selection dialogue and workspace turns. */
   dialogueEditorialMemory(dialogueId: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
     const task = this.#dialogues.task(dialogueId);
-    return this.editorialMemory(task?.bookId ?? null, task?.origin === 'agent-workspace' ? 'agent-workspace' : task ? 'editorial-dialogue' : 'global-agent');
+    return this.editorialMemory(...dialogueMemoryContext(task == null ? null : { bookId: task.bookId, workspace: task.origin === 'agent-workspace' }));
   }
 
   editorialMemory(bookId: string | null, taskKind: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
     const launch = this.#baselineAnalysis.launch;
-    if (launch.operationalScope !== 'ordinary-production' || launch.policy?.selectedPolicyIdentity?.providerProcessingVersion !== 'v35') return null;
-    return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).memory(launch.operationalScope,
-      { bookId, taskKind, ...(taskKind.startsWith('custom-analysis/') ? { categoryId: taskKind.slice('custom-analysis/'.length) } : {}) },
-      learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+    return this.#memoryFacade().request({ operationalScope: launch.operationalScope,
+      providerProcessingVersion: launch.policy?.selectedPolicyIdentity?.providerProcessingVersion, bookId, taskKind });
   }
 
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
@@ -16708,7 +16701,7 @@ export class EditorialStore {
         const original = await readRetainedWordOriginal(this.#authority, this.#dataRoot, this.#objectsRoot, result.bookId, sourceVersionId);
         const { compiled } = readWordManuscriptExportSource(this.#authority, result.bookId, result.revisionId, sourceVersionId, original);
         this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, result.bookId, result.commitId, compiled));
-        this.#learningCall(() => this.#learningLedger().validateWordImportSamples(result.bookId, result.commitId, compiled));
+        this.#learningCall(() => this.#memoryFacade().validateWordImportSamples(result.bookId, result.commitId, compiled));
       }
     }
   }
@@ -18532,7 +18525,7 @@ export class EditorialStore {
       choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认「直接并入正文（作为定稿基线）」。' : '接受修订后的阅读没有可编辑的非空稿件。');
     const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
     requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
-    const ledger = this.#learningLedger();
+    const ledger = this.#memoryFacade();
     let preparedTarget: WordPreparedIntake['target'];
     if (target.kind === 'new-book') preparedTarget = { kind: 'new-book', controls: ledger.wordImportControlPins(null) };
     else {
@@ -18640,7 +18633,7 @@ export class EditorialStore {
     const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
       materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
         wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
-    const ledger = this.#learningLedger();
+    const ledger = this.#memoryFacade();
     const controls = ledger.wordImportControls(bookId, materials);
     if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
       'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
@@ -19559,7 +19552,7 @@ export class EditorialStore {
       this.#retentionCall(() => requireWordManuscriptSourceSegments(this.#authority, input.bookId, choice,
         word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
       this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, input.bookId, word.commitId, word.compiled));
-      this.#learningCall(() => this.#learningLedger().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
+      this.#learningCall(() => this.#memoryFacade().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
     }
     const { plan: persistedPlan } = this.#persistedFidelityPlan(
       input.fidelityReviewId,
