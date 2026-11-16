@@ -1,4 +1,5 @@
 import { launchedRunModelLabels } from '../editorial-mark-source.js';
+import { freezeTaskBaselineSynopses, remainingSynopsisMessageBytes } from './baseline-synopsis.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
 import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
@@ -3842,14 +3843,25 @@ export class BaselineAnalysisStore {
     const clarificationPin = unwrappedDefinition.clarificationBase === undefined ? {} : {
       clarificationBasePromptContractDigest: unwrappedDefinition.clarificationBase.promptContractDigest,
     };
+    // A new task snapshots the matching baseline with its exact input revision. Edits and
+    // predecessor tasks retain their first plan's context (including its absence).
+    const firstExecution = ordinal === 1 ? undefined : this.#db.prepare(
+      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'execution-plan'",
+    ).get(taskIntentId);
+    const firstSynopsis = firstExecution === undefined ? {} : parseCanonicalJson(asString(firstExecution.canonical_json)) as import('../../shared/protocol/baseline-synopsis.js').FrozenBaselineSynopsisPlan;
+    const synopsisPin = ordinal === 1 ? freezeTaskBaselineSynopses(this.#db, definition.kind, checkpoint.bookId, checkpoint.revisionId, checkpoint.revisionDigest,
+      remainingSynopsisMessageBytes(live === null ? null : modelProfileFor(live.route, live.model)?.context.tokens ?? null, definition.systemPrompt))
+      : { ...(firstSynopsis.baselineSynopsisContext === undefined ? {} : { baselineSynopsisContext: firstSynopsis.baselineSynopsisContext }),
+        ...(firstSynopsis.baselineSynopsisUnavailable === undefined ? {} : { baselineSynopsisUnavailable: firstSynopsis.baselineSynopsisUnavailable }) };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
       'run-source-scope': canonicalRecord(composition.sources === undefined ? sourceScope : { ...sourceScope, localToolSources: composition.sources }),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
-      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin } : {
+      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin, ...synopsisPin } : {
         ...executionPlan,
+        ...synopsisPin,
         ...samplingPin,
         ...clarificationPin,
         materialReferences: this.#definition.materialReferences.sources,
@@ -4867,6 +4879,9 @@ export class BaselineAnalysisStore {
       },
       manifest,
       manifestDigest: manifest.digest,
+      ...((plan['execution-plan'] as NonNullable<BaselineAnalysisProjection['executionPlan']>).baselineSynopsisContext === undefined ? {} : {
+        baselineSynopsisContext: (plan['execution-plan'] as NonNullable<BaselineAnalysisProjection['executionPlan']>).baselineSynopsisContext,
+      }),
       planEnvelopeDigest: asString(run.plan_envelope_sha256),
       runSourceScopeDigest: asString(digests['run-source-scope']),
       ...(providerPlan.webToolsBackend === undefined ? {} : { webToolsBackend: providerPlan.webToolsBackend, searchCredentialReference: providerPlan.searchCredentialReference! }), ...(providerPlan.webToolsFallback === undefined ? {} : { webToolsFallback: providerPlan.webToolsFallback }),

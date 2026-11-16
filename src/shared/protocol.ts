@@ -321,6 +321,7 @@ export * from './protocol/learning.js';
 export * from './protocol/analysis.js';
 export * from './protocol/task-kinds.js';
 export * from './protocol/analysis-plan.js';
+export * from './protocol/baseline-synopsis.js';
 export * from './protocol/factual-verification.js';
 export * from './protocol/review-runs.js';
 export * from './protocol/review-synthesis.js';

@@ -392,6 +392,7 @@ export interface PlanAdaptationInput {
 
 /** Everything the execution owner needs from the frozen plan before the first model call. */
 export interface ExecutionPlanFacts {
+  readonly baselineSynopsisContext?: import('../../shared/protocol/baseline-synopsis.js').FrozenBaselineSynopsisContext;
   readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
   readonly retainedPolicyPin?: ResultSetPolicyPin;
   readonly retainedPolicy?: LaunchPolicyProjection;

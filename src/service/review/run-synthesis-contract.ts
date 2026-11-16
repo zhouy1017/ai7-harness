@@ -1,6 +1,7 @@
 import { canonicalJson, extractModelJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { ReviewSynthesisSummary } from '../../shared/protocol/review-synthesis.js';
+import { fitSynopsisChain, synopsisCandidates, synopsisOmissions, MAX_REVIEW_SYNTHESIS_BYTES } from '../analysis/baseline-synopsis.js';
 
 /** This boundary accepts editorial records only. It has no manuscript reader or block input. */
 export interface SynthesisFinding {
@@ -64,8 +65,8 @@ export function buildSynthesisInput(source: {
   missingCategories: readonly string[];
   coverage?: SynthesisInput['coverage'];
   baseline: null | { revisionId: string; missingUnitOrdinals?: number[]; synopses: readonly { unitOrdinal: number; synopsis: string }[] };
-}, maximumBytes = 96 * 1024): SynthesisInput {
-  const ceiling = Math.max(1024, Math.min(96 * 1024, maximumBytes));
+}, maximumBytes = MAX_REVIEW_SYNTHESIS_BYTES): SynthesisInput {
+  const ceiling = Math.max(1024, Math.min(MAX_REVIEW_SYNTHESIS_BYTES, maximumBytes));
   const text = (value: string): string => bounded(value, SYNTHESIS_TEXT_LIMIT);
   const input: SynthesisInput = { schema: 'ai7.review.run-synthesis-input/1', missingCategories: source.missingCategories.slice(0, 32),
     coverage: (source.coverage ?? []).map(entry => ({ ...entry, categoryId: text(entry.categoryId), label: text(entry.label) })),
@@ -91,29 +92,20 @@ export function buildSynthesisInput(source: {
       findingRefs: [finding.findingId], evidenceRefs: [ref] });
   }
   const synopses = [...(source.baseline?.synopses ?? [])].sort((a, b) => a.unitOrdinal - b.unitOrdinal);
-  const candidates = synopses.slice(0, 200).map(unit => ({ unitOrdinal: unit.unitOrdinal, synopsis: bounded(unit.synopsis, 400) }));
+  const candidates = synopsisCandidates(synopses);
   const baselineBudget = Math.min(24 * 1024, Math.floor(ceiling / 4));
   const baselineBytes = (synopses: Array<{ unitOrdinal: number; synopsis: string }>): number => bytes({ synopses, missingUnitOrdinals: input.baseline?.missingUnitOrdinals ?? [] });
   const fitBaseline = (accept: () => boolean): void => {
     if (input.baseline === null) return;
-    const set = (count: number, length: number): void => {
-      input.baseline!.synopses = candidates.slice(0, count).map(unit => ({ ...unit, synopsis: bounded(unit.synopsis, length) }));
-    };
-    // Preserve the whole chapter chain before text length; only remove tail units if even one
-    // grapheme per chapter cannot fit. A common text cap shortens all chapters evenly.
-    let low = 0, high = candidates.length;
-    while (low < high) { const count = Math.ceil((low + high) / 2); set(count, 1); if (accept()) low = count; else high = count - 1; }
-    const count = low;
-    low = 1; high = 400;
-    while (low < high) { const length = Math.ceil((low + high) / 2); set(count, length); if (accept()) low = length; else high = length - 1; }
-    set(count, low);
+    fitSynopsisChain(candidates, synopses => { input.baseline!.synopses = synopses; }, accept);
   };
   fitBaseline(() => baselineBytes(input.baseline!.synopses) <= baselineBudget);
   const updateOmissions = (): void => {
     input.omitted.findings = source.findings.length - input.clusters.reduce((sum, cluster) => sum + cluster.count, 0);
     input.omitted.clusters = grouped.size - input.clusters.length;
-    input.omitted.synopses = synopses.length - (input.baseline?.synopses.length ?? 0);
-    const shortened = input.baseline?.synopses.filter((unit, index) => unit.synopsis !== candidates[index]!.synopsis).length ?? 0;
+    const omissions = synopsisOmissions(candidates, input.baseline?.synopses ?? [], synopses.length);
+    input.omitted.synopses = omissions.omitted;
+    const shortened = omissions.shortened;
     if (shortened > 0) input.omitted.shortenedSynopses = shortened;
     else delete input.omitted.shortenedSynopses;
   };

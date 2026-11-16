@@ -1,3 +1,5 @@
+import { seedSynopsisBaselineAnswers, runSynopsisBaseline } from '../support/synopsis-reuse.js';
+import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-evaluation-report-authored` (Issue #429, plan slice S81b2; contract `/2`, Issue #1407). The observations
 // and the rewritten words in `tests/support/evaluation-rewrite.ts` are the authored part: each observation rests on blocks the
@@ -77,11 +79,12 @@ beforeEach(async () => {
   // The 初评 the version begins from runs on the fixtures this one is layered over.
   base = await loadModelFixture(FIXTURES_ROOT, 'sample1-readers-report-authored');
   for (const [key, entry] of base.entries) fixture.entries.set(key, entry);
+  await seedSynopsisBaselineAnswers(fixture.entries, roots.codeRoot);
 });
 afterEach(async () => { await roots.dispose(); });
 
 /** One pass of J-11's rewrite: a fresh import of exact sample1, its 初评, a 定稿 version, J-11's 第 15 版 words, and the rewrite. */
-async function pass(): Promise<boolean> {
+async function pass(withBaseline = false): Promise<boolean> {
   const scenario = await createServiceTestRoots('ai7-s81b2-generate-pass-');
   const store = await EditorialStore.open(scenario.dataRoot, scenario.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -96,6 +99,7 @@ async function pass(): Promise<boolean> {
     const imported = await importSample1Book(store, scenario.codeRoot, 'S81b2 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
     recordMissingCredentialConnection(store, 'S81b2 主编辑连接');
+    if (withBaseline) await runSynopsisBaseline(store, owner, imported.bookId, launchPolicy);
     await runInitialEvaluationToEnd(store, owner, imported.bookId, launchPolicy);
     finalizeAsJ11(store, imported.bookId);
     const record = beginRewriteAsJ11(store, imported.bookId);
@@ -125,7 +129,7 @@ async function pass(): Promise<boolean> {
     }));
     add({
       unitOrdinal: 0,
-      requestDigest: evaluationRewriteSynthesisRequestDigest(contract, evaluationRewriteObservationSetDigest(closed)),
+      requestDigest: taskSynopsisRequestDigest(evaluationRewriteSynthesisRequestDigest(contract, evaluationRewriteObservationSetDigest(closed)), prepared.executionPlan?.baselineSynopsisContext),
       attempt: null,
       contentDigest: null,
       response: { kind: 'unit-result', text: JSON.stringify(AUTHORED_REWRITE_WORDS), usage: { inputTokens: 2600, outputTokens: 560 } },
@@ -157,7 +161,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_REWRITE_FIXTURE'] === '1')('gene
   let closed = false;
   for (let index = 0; index < 4 && !closed; index += 1) {
     additions = 0;
-    closed = await pass();
+    closed = (await pass()) && (await pass(true));
     // eslint-disable-next-line no-console
     console.log(`pass ${index + 1}: +${additions} entries, closed: ${closed}`);
     if (additions > 0) closed = false;
@@ -167,7 +171,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_REWRITE_FIXTURE'] === '1')('gene
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: EVALUATION_REWRITE_FIXTURE_IDENTITY,
-    description: '评估报告重新生成契约 v2（评语重写契约 /2）的人工撰写夹具：回答 J-11 第 15 版评估（从 AI7 初评开始，结构、叙事逻辑与连贯调为 13 分、打分偏高，读者与市场潜力调为 10 分、依据不足，保存一次）按编辑的修改重新生成评估报告时发出的八个单元请求与一次全书综合。每条依据都引用 sample1（ADR 0043 收录的 Public SampleBook）的初评与审稿意见夹具已经引用过的内容块，说明它如何印证编辑所给的分数；「读者与市场潜力」在书稿中没有依据。全书综合依据这一版修改后的报告、AI7 原报告与这些依据，为五个已打分的评分项各重写一段评语，写出含下一步建议的总评以及新版主要优点与主要问题，不写任何分数或结论。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。契约 /1 的前身夹具 sample1-evaluation-rewrite-authored 保持原字节，不被本夹具替代。本夹具叠加在 sample1-readers-report-authored 之上：同一次启动既能运行基线分析、AI7 初评与审稿意见，也能重新生成评估报告；各自的请求摘要互不相同，叠加不改变任何条目的键。',
+    description: '评估报告重新生成契约 v2（评语重写契约 /2）的人工撰写夹具：回答 J-11 第 15 版评估（从 AI7 初评开始，结构、叙事逻辑与连贯调为 13 分、打分偏高，读者与市场潜力调为 10 分、依据不足，保存一次）按编辑的修改重新生成评估报告时发出的八个单元请求与一次全书综合。每条依据都引用 sample1（ADR 0043 收录的 Public SampleBook）的初评与审稿意见夹具已经引用过的内容块，说明它如何印证编辑所给的分数；「读者与市场潜力」在书稿中没有依据。全书综合依据这一版修改后的报告、AI7 原报告与这些依据，为五个已打分的评分项各重写一段评语，写出含下一步建议的总评以及新版主要优点与主要问题，不写任何分数或结论。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。契约 /1 的前身夹具 sample1-evaluation-rewrite-authored 保持原字节，不被本夹具替代。本夹具叠加在 sample1-readers-report-authored 之上：同一次启动既能运行基线分析、AI7 初评与审稿意见，也能重新生成评估报告；各自的请求摘要互不相同，叠加不改变任何条目的键。 #1500 另覆盖有匹配基线的任务：分章概述在计划中冻结，只交给最后的全书综合，保留无匹配基线的原请求；写作原有的全书梗概与人物输入保持不变。',
     basedOn: 'sample1-readers-report-authored',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',

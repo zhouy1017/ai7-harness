@@ -1,3 +1,5 @@
+import { seedSynopsisBaselineAnswers, runSynopsisBaseline } from '../support/synopsis-reuse.js';
+import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-evaluation-authored` (Issue #429, plan slice S81b1). The observations and the
 // synthesis below are the authored part: each observation was written after reading one Analysis Unit of exact `sample1` (ADR
@@ -145,11 +147,12 @@ function add(entry: ModelFixtureEntry, order: string): void {
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-s81b-generate-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+  await seedSynopsisBaselineAnswers(fixture.entries, roots.codeRoot);
 });
 afterEach(async () => { await roots.dispose(); });
 
 /** One pass of J-11's 初评: a fresh import of exact sample1, its first 初评 run to its end on what the fixture holds so far. */
-async function pass(): Promise<boolean> {
+async function pass(withBaseline = false): Promise<boolean> {
   const scenario = await createServiceTestRoots('ai7-s81b-generate-pass-');
   const store = await EditorialStore.open(scenario.dataRoot, scenario.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -164,6 +167,7 @@ async function pass(): Promise<boolean> {
     const imported = await importSample1Book(store, scenario.codeRoot, 'S81b 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
     recordMissingCredentialConnection(store, 'S81b 主编辑连接');
+    if (withBaseline) await runSynopsisBaseline(store, owner, imported.bookId, launchPolicy);
     let progress = store.createInitialEvaluationPreparationWork(imported.bookId, launchPolicy);
     while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
     const prepared = progress.projection!;
@@ -190,7 +194,7 @@ async function pass(): Promise<boolean> {
     }));
     add({
       unitOrdinal: 0,
-      requestDigest: initialEvaluationSynthesisRequestDigest(definition.promptContractDigest, initialEvaluationObservationSetDigest(closed)),
+      requestDigest: taskSynopsisRequestDigest(initialEvaluationSynthesisRequestDigest(definition.promptContractDigest, initialEvaluationObservationSetDigest(closed)), prepared.executionPlan?.baselineSynopsisContext),
       attempt: null,
       contentDigest: null,
       response: { kind: 'unit-result', text: JSON.stringify(AUTHORED_SYNTHESIS), usage: { inputTokens: 2400, outputTokens: 520 } },
@@ -222,7 +226,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_FIXTURE'] === '1')('generates th
   let closed = false;
   for (let index = 0; index < 4 && !closed; index += 1) {
     additions = 0;
-    closed = await pass();
+    closed = (await pass()) && (await pass(true));
     // eslint-disable-next-line no-console
     console.log(`pass ${index + 1}: +${additions} entries, closed: ${closed}`);
     if (additions > 0) closed = false;
@@ -232,7 +236,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_FIXTURE'] === '1')('generates th
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: FIXTURE_IDENTITY,
-    description: '评估契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置评估方案（审稿评估方案第 1 版）下 AI7 初评发出的八个单元请求与一次全书综合。每条依据都按其在单元消息中的位置引用它所依据的内容块；「读者与市场潜力」在所读内容中没有任何依据，「主题、价值与社会文化语境」只在三个阅读范围中有依据，用来证明依据充分度的三档。全书综合只依据这些依据给出五个评分项的整数或半分初评分数、评语、主要优点、主要问题、下一步建议与建议结论「修改后再议」，并写出市场部分：目标读者、差异化卖点、渠道与策略各两条，市场回报暂无法预测，评奖可能性只说明它在书稿内的依据。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动既能运行基线分析，也能运行 AI7 初评；两者的请求摘要互不相同，叠加不改变任何条目的键。',
+    description: '评估契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置评估方案（审稿评估方案第 1 版）下 AI7 初评发出的八个单元请求与一次全书综合。每条依据都按其在单元消息中的位置引用它所依据的内容块；「读者与市场潜力」在所读内容中没有任何依据，「主题、价值与社会文化语境」只在三个阅读范围中有依据，用来证明依据充分度的三档。全书综合只依据这些依据给出五个评分项的整数或半分初评分数、评语、主要优点、主要问题、下一步建议与建议结论「修改后再议」，并写出市场部分：目标读者、差异化卖点、渠道与策略各两条，市场回报暂无法预测，评奖可能性只说明它在书稿内的依据。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动既能运行基线分析，也能运行 AI7 初评；两者的请求摘要互不相同，叠加不改变任何条目的键。 #1500 另覆盖有匹配基线的任务：分章概述在计划中冻结，只交给最后的全书综合，保留无匹配基线的原请求；写作原有的全书梗概与人物输入保持不变。',
     basedOn: 'sample1-baseline-happy',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
