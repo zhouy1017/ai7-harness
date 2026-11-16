@@ -1,4 +1,5 @@
 import type { TaskLaunchRequest } from './task-drawer.js';
+import { BookOwnershipFailure, sendJournalEdit } from './navigation-generation.js';
 import { reviewReportExportButton } from './review-report-export.js';
 import { showTransientNotice } from './notifications.js';
 import { menuPanel } from './components/controls.js';
@@ -2495,7 +2496,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     scrollContainer: editorWindow,
     platform: api.platform,
     initialWindow,
-    flushJournalEdit: (input) => api.flushJournalEdit(input),
+    flushJournalEdit: (input, action) => sendJournalEdit(api, input, action),
     readManuscriptImageChunk: (input) => api.readManuscriptImageChunk(input),
     onStateChange: (state) => {
       const closeRisk = authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty) ||
@@ -2613,8 +2614,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   manuscriptRail.setPosition(initialWindow.position.proportion);
   manuscriptRail.refresh();
   const taskBadgeVisible = (): boolean => document.visibilityState !== 'hidden';
+  let taskBadgePaused = false;
   const readTaskBadge = async (): Promise<void> => {
-    if (taskBadgeReading || destroyed || !taskBadgeVisible()) return;
+    if (taskBadgeReading || taskBadgePaused || destroyed || !taskBadgeVisible()) return;
     taskBadgeReading = true;
     let pollMs = 2_000;
     try {
@@ -2628,13 +2630,18 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       badge.hidden = count === 0;
       badge.title = `${count} 项进行中或等你处理的任务`;
       updateEdgeName(tasksEntry);
-    } catch {
+    } catch (error) {
+      if (error instanceof BookOwnershipFailure) {
+        taskBadgePaused = true;
+        void error.recovered.then(() => { taskBadgePaused = false; if (!destroyed) void readTaskBadge(); });
+        return;
+      }
       // The task panel owns its retry/error surface; an unread count is never presented as zero.
       tasksEntry.querySelector<HTMLElement>('.edge-badge')!.hidden = true;
       updateEdgeName(tasksEntry);
     } finally {
       taskBadgeReading = false;
-      if (!destroyed && taskBadgeVisible()) taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), pollMs);
+      if (!destroyed && !taskBadgePaused && taskBadgeVisible()) taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), pollMs);
     }
   };
   function taskBadgeVisibility(): void {

@@ -5,6 +5,7 @@ import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js'
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer/manuscript-screen.js';
+import { NavigationGeneration, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
 import { readReturnPlace } from '../../src/renderer/reading-return.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
@@ -203,6 +204,24 @@ beforeEach(() => {
   children.writingStates.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
+
+it('pauses the actual manuscript task poll on ownership failure and resumes it after an explicit recovery', async () => {
+  const owner=new NavigationGeneration();owner.commit('editor','book-one');let heldElsewhere=true;
+  const open=vi.fn(async()=>({target:heldElsewhere?'held-elsewhere':'requesting-window',route:{kind:'book',bookId:'book-one'}}));
+  const tasks=vi.fn(async()=>({running:true,groups:[]}));let retry:()=>Promise<void>=async()=>undefined;
+  const boundary=reconcileBookWorkbenchApi({...api,leaveBookWorkbench:async()=>({state:'library'}),openBookWorkbench:open,inspectBookTasks:tasks} as unknown as RendererApi,
+    {bookOnScreen:()=>owner.bookId,left:vi.fn(),failed:(_error,again)=>{retry=again;}},owner);
+  const leaving=boundary.leaveBookWorkbench();owner.begin();await leaving.catch(()=>undefined);
+  const badgeReads=vi.fn(()=>boundary.inspectBookTasks());
+  const rendererApi=new Proxy(boundary,{get:(target,key)=>key==='inspectBookTasks'?badgeReads:Reflect.get(target,key)??Reflect.get(api,key)});
+  const app=shell(rendererApi);app.open(windowOf('book-one'));
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(open).toHaveBeenCalledOnce();expect(tasks).not.toHaveBeenCalled();expect(badgeReads).toHaveBeenCalledOnce();
+  heldElsewhere=false;await retry();await vi.advanceTimersByTimeAsync(0);
+  expect(open).toHaveBeenCalledTimes(2);expect(tasks).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(2_000);expect(tasks).toHaveBeenCalledTimes(2);
+  app.showing?.destroy();
+});
 
 async function searchArrivalWithPendingWrite(jump = true) {
   vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));

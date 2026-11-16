@@ -53,6 +53,19 @@ it('ordinary open keeps the existing reassign and focus behavior',async()=>{
  expect(app.call).toHaveBeenCalledWith('resolveBookWorkbenchRoute',{kind:'book',bookId});
 });
 
+it('non-activating open refuses Book B when the requester already holds Book A without changing either binding',async()=>{
+ const app=main(),first='00000000-0000-4000-8000-000000000002',requester=owner(first);
+ requester.route={...route,bookId:first};app.bookWindows.set(first,requester);
+ const before={route:requester.route,generation:requester.routeGeneration,sequence:requester.routeRequestSequence,
+  manuscripts:[...requester.manuscriptCapabilities],resources:[...requester.editorResourceCapabilities]};
+ expect(await app.open(requester,true)).toMatchObject({target:'held-elsewhere'});
+ expect(requester.bookId).toBe(first);expect(requester.route).toBe(before.route);
+ expect(requester.routeGeneration).toBe(before.generation);expect(requester.routeRequestSequence).toBe(before.sequence);
+ expect([...requester.manuscriptCapabilities]).toEqual(before.manuscripts);expect([...requester.editorResourceCapabilities]).toEqual(before.resources);
+ expect([...app.bookWindows]).toEqual([[first,requester]]);expect(requester.window.webContents.send).not.toHaveBeenCalled();
+ expect(app.focus).not.toHaveBeenCalled();expect(app.create).not.toHaveBeenCalled();
+});
+
 const preload=ts.createSourceFile('preload.ts',readFileSync(new URL('../../src/main/preload.ts',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let bridge='';
 function findBridge(node:ts.Node):void {if(ts.isPropertyAssignment(node)&&node.name.getText(preload)==='openBookWorkbench')bridge=node.initializer.getText(preload);ts.forEachChild(node,findBridge);}
