@@ -2837,6 +2837,8 @@ async function main() {
     const waitingItem = waitingAttention.groups.flatMap(group=>group.items).find(item=>item.itemId===`review:${preparedReview.reviewRunId}`);
     requireJourney(waitingItem?.group==='active' && waitingItem.state==='analysis-waiting-network' && waitingItem.nextStep==='view-review', 'review-waiting-attention', waitingItem);
     at('review-online-dispatch');
+    // #1510 diagnostic: hosted windows are focused; emulate that state on the background guest.
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await writeFile(connectivityPath, 'online');
     at('review-authorize');
     // The sheet launched the Run directly; each category starts from its frozen plan at its driver turn.
@@ -2863,6 +2865,12 @@ async function main() {
     requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
       settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
+
+    // #1510 diagnostic: no result action was clicked anywhere in this review flow.
+    await renderer.evaluate(`window.dispatchEvent(new Event('focus'))`);
+    await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult==='ready'`, 'completion-popup-reproduced');
+    const completionCover = await renderer.evaluate(`(() => {const window=document.querySelector('.task-result-window'),summary=document.querySelector('details.review-synthesis > summary'),r=summary.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {screen:document.querySelector('#screen').dataset.screen,kind:window.dataset.taskResultKind,ready:window.dataset.taskResult,cover:!!hit&&window.contains(hit),hit:hit?.tagName};})()`);
+    requireJourney(!completionCover.cover, 'completion-popup-cover-repro', completionCover);
 
     // #1433: the compact book summary leaves the first actionable finding visible and its evidence opens the passage.
     const synthesisDatabase = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });

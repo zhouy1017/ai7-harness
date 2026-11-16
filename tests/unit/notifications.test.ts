@@ -1,3 +1,6 @@
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
+import * as notificationFunctions from '../../src/renderer/notifications.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +43,34 @@ function setup() {
   return { notifier, notices, navigate, prefs: (change: Partial<typeof prefs>) => { prefs = { ...prefs, ...change }; }, focus: (value: boolean) => { focused = value; } };
 }
 afterEach(() => vi.restoreAllMocks());
+
+it('keeps a focused Book completion quiet even when its overview read finishes after returning (#1510)', async () => {
+  const restore = installMiniDom();
+  try {
+    const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    let observerOptions = '';
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText(source) === 'createNotificationObserver') observerOptions = node.arguments[0]!.getText(source);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let release!: (value: TaskOverviewProjection) => void;
+    const read = vi.fn(() => new Promise<TaskOverviewProjection>(resolve => { release = resolve; }));
+    const opened = vi.fn(), quiet = vi.fn();
+    const screen = { firstElementChild: { dataset: { bookId: event.book.bookId } } };
+    const options = runInNewContext(ts.transpileModule(`(${observerOptions})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText,
+      { ...notificationFunctions, api: { notify: vi.fn(async () => {}), inspectTaskOverview: read }, document: { hasFocus: () => true }, screen,
+        localStorage: { getItem: () => 'on' }, showQuietNotice: quiet, openOverviewResult: opened });
+    createNotificationObserver({ ...options, startedAt: START })(projection([event]));
+    screen.firstElementChild.dataset.bookId = 'settings'; screen.firstElementChild.dataset.bookId = event.book.bookId;
+    release?.(overview); await Promise.resolve(); await Promise.resolve();
+    expect(quiet).toHaveBeenCalledExactlyOnceWith(event);
+    expect(opened).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  } finally { restore(); }
+});
 
 it('keeps a delayed completion on its Book and opens only while that Book is still current', async () => {
   const restore = installMiniDom();
