@@ -27,6 +27,8 @@ Wave 23 targets **0.5.0 Beta** under [#1279](https://github.com/zhouy1017/ai7-ha
 | 0.6.5 | integrated | Owner [#1444](https://github.com/zhouy1017/ai7-harness/issues/1444) fix-only Beta closure of the two known 0.6.3 issues (#1445, #1446; slice PRs #1447, #1448); human acceptance pending | `6fdb6a8bcadb6be58c82d10c22788faa16bf186d` ([PR #1457](https://github.com/zhouy1017/ai7-harness/pull/1457)) | none |
 | 0.7.0 | integrated | Owner [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) R1 Alpha (#1451, #1452, #1454, #1435; slice PRs #1460, #1461, #1462, #1465, #1466; repair #1469); human acceptance pending | `2026a9ee952133e8927649419d3f537d6117d798` ([PR #1468](https://github.com/zhouy1017/ai7-harness/pull/1468)) | none |
 | 0.7.1 | integrated | Owner [#1472](https://github.com/zhouy1017/ai7-harness/issues/1472) R2 Alpha (#1470, #1453, #1471, #1475, #1455, #1476, #1491; slice PRs #1473, #1480, #1474, #1478, #1477, #1485, #1487, #1488, #1489, #1493; stage repairs #1482, #1484, #1486, #1490 / PR #1492) | `dev@1654f386` ([PR #1495](https://github.com/zhouy1017/ai7-harness/pull/1495)) | none |
+| 0.7.2 | candidate | Owner [#1496](https://github.com/zhouy1017/ai7-harness/issues/1496) R3 Alpha (#1433, #1434, #1497, #1498, #1500; #1504 repairs and #1508; PRs #1499, #1501, #1502, #1503, #1505, #1507, #1509, #1511, #1512) | `codex/integration-0.7.2`; closure candidate only, pending final verification, dev merge and human-test refresh | none |
+
 
 Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev` at `b3fe090d` through PR #1398 with schema 109, protocol 198 and Data Version 1.
 
@@ -40,16 +42,18 @@ Wave 24b → 0.6.1 Beta (the Owner's explicit #1373 target) is delivered on `dev
 
 #1472 → **0.7.1 Alpha** is delivered at `dev@1654f386` through [PR #1495](https://github.com/zhouy1017/ai7-harness/pull/1495). Protocol 203 records reasoning effort in role inputs/settings (#1478), one-step review launch, scoped execution choice and frozen labels (#1487), six task launches, preview, remembered choices and result labels (#1488), and optional analysis `planEnvelope.procedureContent { editorInstruction, exemptionRules }` (#1489). #1491 / PR #1493 makes pre-start and frozen plans name this start’s model service and 「模型@思考强度」 from the chosen execution, without changing IPC or persisted plan digests. Schema 115 includes the two additive in-place migrations, 113 → 114 (#1478) and 114 → 115 (#1487); Data Version stays 1. No tag or release is claimed.
 
+#1496 -> **0.7.2 Alpha** is the Owner's R3 number and a **candidate**, with every R3 slice merged on `codex/integration-0.7.2` at `b00b194d`. Protocol **204** closes the review synthesis/run/report/attention projections (#1503), optional non-activating Book-open IPC and `held-elsewhere` result (#1507), and optional frozen baseline-synopsis context on plan projections (#1512). Schema **116** includes #1503's single in-place 115 -> 116 migration; closure adds none and Data Version remains **1**. Final exact-head verification is recorded in the closure PR; dev delivery, the human-test refresh, tags and releases are not claimed. The Owner asked to pause after R3 for a complete review (梳理) before any further development.
+
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.7.1`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**115** at this head) and service protocol (**203**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.7.2`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**116** at this head) and service protocol (**204**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.7.1",
+  "softwareVersion": "0.7.2",
   "dataVersion": 1,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

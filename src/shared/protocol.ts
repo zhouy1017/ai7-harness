@@ -344,18 +344,26 @@ export * from './protocol/scoped-edit.js';
  * mark category/source fields on mark projections (#1429); inline editor revisions with apply/revert card actions (#1428);
  * the one-click `book-review-report` DOCX export target and its report sections (#1430).
  *
+ * Protocol 204 (#1496 R3 closure, 0.7.2): PR #1503 adds optional review-run/report
+ * synthesis and aggregate usage projections, including their attention presentation.
+ * PR #1507 adds optional activation: 'non-activating' to the existing Book-open IPC
+ * and the held-elsewhere result, with shared closed validation in main/preload.
+ * PR #1512 adds optional executionPlan.baselineSynopsisContext and
+ * baselineSynopsisUnavailable on analysis, writing and evaluation projections.
+ * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
+ * remain separate compatibility identities; closure adds no migration.
+ *
  * Protocol 203 (#1472 R2 closure, 0.7.1): PR #1478 adds reasoning effort to role
  * selection inputs and settings projections. PR #1487 adds launchReviewRun, optional
  * execution choice on scoped edit and review-workspace inspection, and frozen model
  * labels. PR #1488 adds six launch operations, launch preview, remembered task choices
  * and model labels on evaluation, writing and report projections. PR #1489 adds the
  * optional analysis planEnvelope.procedureContent { editorInstruction, exemptionRules } (#1476).
- * Schema 116 and Data Version 1 remain separate compatibility identities.
  *
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 203 as const;
+export const SERVICE_PROTOCOL_VERSION = 204 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
