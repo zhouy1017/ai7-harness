@@ -855,13 +855,25 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
 const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)));
+/** Automatic results stay with the task being watched; an open review already shows its own result. */
+function canAutoOpenTaskResult(item: GlobalAttentionItemProjection): boolean {
+  const bookId = item.book.bookId;
+  if (bookId === null || document.querySelector('dialog[open]') !== null) return false;
+  const target = item.target;
+  const ref = 'taskIntentId' in target ? target.taskIntentId : 'reviewRunId' in target ? target.reviewRunId : 'ref' in target ? target.ref : null;
+  const review = target.kind === 'review' || target.kind === 'review-plan' || target.kind === 'task-plan' && target.taskKind === 'review-run';
+  if (review && screen.dataset['screen'] === 'book-review' && screen.querySelector<HTMLElement>('.review-run')?.dataset['reviewRunId'] === ref) return false;
+  const view = taskDrawer.view();
+  if (view !== null) return view.bookId === bookId && (view.kind === 'panel' || view.kind === 'plan' && ref !== null && view.task.ref === ref);
+  return screen.dataset['screen'] === 'task-overview';
+}
 const observeNotifications = createNotificationObserver({
   api: api,
   focused: () => document.hasFocus(),
   completed: (item) => {
     showQuietNotice(item);
     void openCurrentBookCompletion(item, {
-      currentBookId: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] ?? null,
+      allowed: canAutoOpenTaskResult, navigation: navigation.route(),
       enabled: () => localStorage.getItem('ai7.task-overview.auto-result') !== 'off',
       read: () => api.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
     }).catch(() => undefined);
