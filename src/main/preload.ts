@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { DiagnosticsApi } from './diagnostics.js';
 import {
   IPC_CHANNELS,
+  isNonActivatingBookOpen,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
@@ -822,8 +823,10 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>
     invoke<ServiceOperationMap['redoManuscript']['output']>(IPC_CHANNELS.redoManuscript, input),
-  openBookWorkbench: (input: ServiceOperationMap['resolveBookWorkbenchRoute']['input']) =>
-    invoke<Awaited<ReturnType<RendererApi['openBookWorkbench']>>>(IPC_CHANNELS.openBookWorkbench, input),
+  openBookWorkbench: (input: Parameters<RendererApi['openBookWorkbench']>[0]) => {
+    isNonActivatingBookOpen(input);
+    return invoke<Awaited<ReturnType<RendererApi['openBookWorkbench']>>>(IPC_CHANNELS.openBookWorkbench, input);
+  },
   getBookWorkbenchRoute: () =>
     invoke<Awaited<ReturnType<RendererApi['getBookWorkbenchRoute']>>>(IPC_CHANNELS.getBookWorkbenchRoute),
   leaveBookWorkbench: () =>

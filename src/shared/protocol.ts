@@ -2635,6 +2635,16 @@ export type BookWorkbenchRoute =
   | { kind: 'book'; bookId: string; feedbackEntryId?: string; learningMaterialKey?: string }
   | { kind: 'revision'; revisionId: string };
 
+/** Renderer/main presentation option; never sent to the service route resolver. */
+export type BookWorkbenchOpenInput = BookWorkbenchRoute & { activation?: 'non-activating' };
+export function isNonActivatingBookOpen(input: unknown): input is { kind: 'book'; bookId: string; activation: 'non-activating' } {
+  if (input === null || typeof input !== 'object' || !Object.hasOwn(input, 'activation')) return false;
+  const value = input as Record<string, unknown>;
+  if (value.activation !== 'non-activating' || value.kind !== 'book' || typeof value.bookId !== 'string' ||
+      Object.keys(value).length !== 3 || !Object.hasOwn(value, 'kind') || !Object.hasOwn(value, 'bookId')) throw new Error('AI7_RENDERER_BOUNDARY_INVALID');
+  return true;
+}
+
 export type ResolvedBookWorkbenchRoute =
   | {
       kind: 'book';
@@ -2655,7 +2665,7 @@ export type ResolvedBookWorkbenchRoute =
 
 export interface BookWorkbenchOpenProjection {
   route: ResolvedBookWorkbenchRoute;
-  target: 'requesting-window' | 'existing-window' | 'new-window';
+  target: 'requesting-window' | 'existing-window' | 'new-window' | 'held-elsewhere';
 }
 
 export type DistributionChannel = 'source-checkout' | 'windows-installer' | 'windows-portable' | 'macos-dmg' | 'packaged';
@@ -7378,7 +7388,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealManuscriptExport(input: Omit<InspectManuscriptExportReceiptInput, 'bookId'>): Promise<{ state: 'revealed' }>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
-  openBookWorkbench(input: BookWorkbenchRoute): Promise<BookWorkbenchOpenProjection>;
+  openBookWorkbench(input: BookWorkbenchOpenInput): Promise<BookWorkbenchOpenProjection>;
   getBookWorkbenchRoute(): Promise<ResolvedBookWorkbenchRoute | null>;
   leaveBookWorkbench(): Promise<{ state: 'library' }>;
   getHistoricalRevision(

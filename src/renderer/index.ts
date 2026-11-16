@@ -1,4 +1,4 @@
-import { navigation, reconcileBookWorkbenchApi, bindRendererApi, type NavigationCheckpoint } from './navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, type NavigationCheckpoint } from './navigation-generation.js';
 import { importSteps } from './components/import-steps.js';
 import { icon } from './components/icon-sprite.js';
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
@@ -224,6 +224,7 @@ const api = reconcileBookWorkbenchApi(window.ai7, {
   editorOnScreen: () => manuscriptOnScreen === null ? null : { manuscriptId: manuscriptOnScreen.manuscriptId, branchId: manuscriptOnScreen.branchId },
   left: () => shell.leaveBook(),
   failed: reportBookReacquisitionFailure,
+  recovered: clearBookReacquisitionNotice,
 });
 bindRendererApi(api);
 const unmountSelectControls = mountSelectControls(document.body);
@@ -704,8 +705,41 @@ async function guardNavigationRead<T>(current: NavigationCheckpoint, read: () =>
   try { return await read(); } catch (error) { if (navigation.errorIsCurrent(error, current)) throw error; }
 }
 
-function reportBookReacquisitionFailure(error: unknown): void {
-  if (navigation.bookId !== null) setStatus(rendererErrorMessage(error, '无法重新打开当前图书，请从侧栏重新打开。'), 'error');
+function clearBookReacquisitionNotice(): void {
+  screen.querySelector('[data-book-reacquire]')?.remove();
+}
+
+function reportBookReacquisitionFailure(error: unknown, retry: () => Promise<void>): void {
+  const content = screen.firstElementChild;
+  if (navigation.bookId === null || !(content instanceof HTMLElement)) return;
+  const line = bookOwnershipFailureLine(error);
+  const existing = content.querySelector<HTMLElement>('[data-book-reacquire]');
+  if (existing !== null) {
+    const words = existing.querySelector('p');
+    if (words?.textContent === line) return;
+    if (words) words.textContent = line;
+    setStatus(line, 'error');
+    return;
+  }
+  setStatus(line, 'error');
+  const notice = element('section', 'attention-note');
+  notice.dataset['bookReacquire'] = 'retry';
+  const page = navigation.read(content);
+  const editor = manuscriptOnScreen;
+  let retrying = false;
+  const again = button('重试连接当前图书', 'secondary', async () => {
+    if (retrying) return;
+    retrying = true;
+    again.setAttribute('aria-busy', 'true');
+    try { await retry(); } catch { return; } // The existing notice retains its node and focus.
+    finally { retrying = false; again.removeAttribute('aria-busy'); }
+    if (!page.isCurrent()) return;
+    try { if (editor !== null && editor === manuscriptOnScreen && !await editor.settle()) return; }
+    catch { setStatus('当前修改尚未保存，请在编辑保护选项中重试写入。', 'error'); return; }
+    if (page.isCurrent()) setStatus(editor === null ? '已重新连接当前图书。' : '已重新连接当前图书；当前修改已保存。', 'success');
+  });
+  notice.append(element('p', undefined, line), again);
+  content.prepend(notice);
 }
 
 /** Open another page once the surface on screen has settled; a refusal keeps it. */

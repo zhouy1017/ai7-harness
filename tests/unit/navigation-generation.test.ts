@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { navigation, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
-import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit } from '../../src/renderer/navigation-generation.js';
+import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
+const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
 const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
 const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let settingsLoader='';
@@ -22,6 +22,10 @@ let failureCallback='';
 function findFailureCallback(node:ts.Node):void {if(ts.isCallExpression(node)&&node.expression.getText(source)==='reconcileBookWorkbenchApi'&&node.arguments[1]&&ts.isObjectLiteralExpression(node.arguments[1])){const property=node.arguments[1].properties.find((entry)=>entry.name?.getText(source)==='failed');if(property&&ts.isPropertyAssignment(property))failureCallback=property.initializer.getText(source);}ts.forEachChild(node,findFailureCallback);}
 findFailureCallback(source);
 const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const manuscriptSource = ts.createSourceFile('manuscript-screen.ts', readFileSync(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+let journalSender='';
+function findJournalSender(node:ts.Node):void { if(ts.isPropertyAssignment(node)&&node.name.getText(manuscriptSource)==='flushJournalEdit')journalSender=node.initializer.getText(manuscriptSource);ts.forEachChild(node,findJournalSender); }
+findJournalSender(manuscriptSource);
 const procedureSource = ts.createSourceFile('procedure-library.ts', readFileSync(new URL('../../src/renderer/procedure-library.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 const selectionDeclarations: string[] = [];
 function visit(node: ts.Node): void {
@@ -51,8 +55,8 @@ function harness(api: object = {}) {
   const shell = { leaveBook: vi.fn(), follow: vi.fn() };
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
- const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error)=>(context['reportReacquisitionFailure'] as (error:unknown)=>void)(error)},navigation);
-  context = createContext({ navigation, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+ const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
+  context = createContext({ navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     mountGlobalAgent: vi.fn(() => element('section')), renderBookOverview, renderBaselineAnalysis,
     HTMLElement, SETTINGS_HUB_GROUPS: [], settingsNavigation:()=>element('nav'), overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
     restoreCurrentScreen: vi.fn(), currentRecoveryReturn: () => undefined, recoveryReturnContexts: new WeakMap(),
@@ -85,7 +89,7 @@ function harness(api: object = {}) {
     bookCardOpen:(title:string,_state:string,open:()=>void)=>{const card=element('button','',title);card.addEventListener('click',open);actions.set(title,open);return card;},
     bookCardAction:()=>element('span'),bookIdentityDisclosure:()=>element('details'),appendRecoveryReturnAction:vi.fn(),
   });
-  runInContext(program, context);
+  runInContext(program+ts.transpileModule("var sendEdit="+journalSender+";",{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText, context);
   context['renderError']=vi.fn(context['renderError'] as (...args:unknown[])=>void);
   return { screen, setStatus, focus, shell, context, actions, renderBookOverview, renderBaselineAnalysis, replaceScreen,
     run: (expression: string) => runInContext(expression, context) as Promise<void> };
@@ -167,7 +171,7 @@ it.each(['success', 'failure'])('keeps the late procedure selection %s while sup
   const root = document.createElement('section'); miniDocument.body.append(root as unknown as MiniElement);
   const status = document.createElement('p'), openRun = vi.fn();
   let selected: unknown = null;
-  const context = createContext({ navigation, page: navigation.read(root), formSlot: root, openRun,
+  const context = createContext({ navigation, BookHeldElsewhereError, page: navigation.read(root), formSlot: root, openRun,
     node: (tag: string, text?: string) => { const node = document.createElement(tag); node.textContent = text ?? ''; return node; },
     label: (_title: string, input: HTMLElement) => input, Option: function () { return document.createElement('option'); },
     showError: () => { status.textContent = '无法保存工序，请重试。'; },
@@ -433,7 +437,156 @@ it('keeps the manuscript visible when a refused second exit is followed by a fai
  await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
  expect(page.screen.firstElementChild===manuscript).toBe(true);expect(page.screen.dataset['screen']).toBe('editor');
  expect(page.context['renderError']).not.toHaveBeenCalled();
- expect(page.setStatus).toHaveBeenLastCalledWith('无法重新打开当前图书，请从侧栏重新打开。','error');
+ expect(page.setStatus).toHaveBeenLastCalledWith('暂时无法重新连接当前图书。未保存的修改仍保留在当前页，请使用本页「重试连接当前图书」后保存。','error');
+});
+
+it('retries failed Book re-acquisition on the next save without losing the unflushed edit', async () => {
+ const leave=Promise.withResolvers<void>();let owned:string|null='book-a',capability=true,dirty=true,stored=0,opens=0;
+ const page=harness({leaveBookWorkbench:async()=>{owned=null;capability=false;await leave.promise;},
+  openBookWorkbench:async()=>{if(++opens===1)throw new Error('offline');owned='book-a';return {target:'requesting-window'};},
+  getManuscriptWindow:async()=>{if(owned!=='book-a')throw new Error('AI7_EDITOR_ROUTE_INVALID');capability=true;return {bookId:owned};},
+  flushJournalEdit:async()=>{if(owned!=='book-a'||!capability)throw new Error('AI7_EDITOR_ROUTE_INVALID');stored+=1;dirty=false;return {clientEditId:'edit-1'};},
+ });
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ page.context['manuscriptOnScreen']={bookId:'book-a',manuscriptId:'manuscript',branchId:'branch',readingPlace:()=>null,destroy:vi.fn()};
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>!dirty;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;expect(dirty).toBe(true);
+ await page.run("sendEdit({manuscriptId:'manuscript',branchId:'branch',clientEditId:'edit-1'},{})");
+ expect(opens).toBe(2);expect(stored).toBe(1);expect(dirty).toBe(false);expect(page.screen.firstElementChild===manuscript).toBe(true);
+});
+
+it('the on-page retry preserves the dirty editor when held elsewhere and saves after that window releases the Book', async () => {
+ const leave=Promise.withResolvers<void>();let elsewhere=true,owned=false,dirty=true,saved=0;
+ const open=vi.fn(async()=>{if(elsewhere)return {target:'held-elsewhere'};owned=true;return {target:'requesting-window'};});
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,
+  getManuscriptWindow:async()=>{if(!owned)throw new Error('AI7_EDITOR_ROUTE_INVALID');return {bookId:'book-a'};},
+  flushJournalEdit:async()=>{if(!owned)throw new Error('AI7_EDITOR_ROUTE_INVALID');dirty=false;saved+=1;},
+ });
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ page.context['manuscriptOnScreen']={bookId:'book-a',manuscriptId:'manuscript',branchId:'branch',readingPlace:()=>null,destroy:vi.fn(),
+  settle:async()=>{await page.run("api.flushJournalEdit({clientEditId:'edit-1'})");return true;}};
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>!dirty;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ expect(page.screen.firstElementChild).toBe(manuscript);expect(dirty).toBe(true);expect(saved).toBe(0);
+ expect(page.screen.textContent).toContain('这本书已在另一个窗口打开');
+ expect(page.screen.textContent).toContain('尚未写入图书');expect(page.screen.textContent).toContain('复制');
+ expect(page.setStatus.mock.calls.flat().join(' ')).not.toContain('AI7_');
+ expect(open).toHaveBeenCalledExactlyOnceWith({kind:'book',bookId:'book-a',activation:'non-activating'});
+ await page.actions.get('重试连接当前图书')!();
+ expect(open).toHaveBeenCalledTimes(2);expect(dirty).toBe(true);expect(saved).toBe(0);
+ elsewhere=false;await page.actions.get('重试连接当前图书')!();
+ expect(open).toHaveBeenCalledTimes(3);expect(saved).toBe(1);expect(dirty).toBe(false);
+ expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
+ expect(page.setStatus).toHaveBeenLastCalledWith('已重新连接当前图书；当前修改已保存。','success');
+});
+
+it('coalesces journal-action ownership retries without blocking unrelated reads or issuing calls before recovery', async () => {
+ const leave=Promise.withResolvers<void>(),retry=Promise.withResolvers<object>(),started=Promise.withResolvers<void>();let opens=0;
+ const read=vi.fn(async()=>({bookId:'book-a'}));
+ const page=harness({leaveBookWorkbench:()=>leave.promise,
+  openBookWorkbench:async()=>{if(++opens===1)throw new Error('AI7_EDITOR_ROUTE_INVALID');started.resolve();return retry.promise;},
+  flushJournalEdit:read,inspectEvaluationProfiles:async()=>({profiles:[]})});
+ const book=document.createElement('section');book.dataset['bookId']='book-a';page.replaceScreen('book-review',book);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ expect(opens).toBe(1);expect(page.screen.textContent).not.toContain('AI7_');
+ const first=page.run("sendEdit({clientEditId:'edit-1'},{})"),second=page.run("sendEdit({clientEditId:'edit-2'},{})");
+ await started.promise;expect(opens).toBe(2);expect(read).not.toHaveBeenCalled();
+ await expect(page.run('api.inspectEvaluationProfiles()')).resolves.toEqual({profiles:[]});
+ retry.resolve({target:'requesting-window'});await Promise.all([first,second]);
+ expect(opens).toBe(2);expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('the real re-acquisition notice uses editorial words even when the error formatter exposes a raw code', async () => {
+ const page=harness();const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const formatter=vi.fn((error:Error)=>error.message);page.context['rendererErrorMessage']=formatter;
+ await page.run("reportBookReacquisitionFailure(new Error('AI7_EDITOR_ROUTE_INVALID'),async()=>undefined)");
+ expect(page.setStatus).toHaveBeenCalledExactlyOnceWith('暂时无法重新连接当前图书。未保存的修改仍保留在当前页，请使用本页「重试连接当前图书」后保存。','error');
+ expect(formatter).not.toHaveBeenCalled();expect(page.screen.firstElementChild).toBe(manuscript);
+});
+
+it('five background Book reads after failed reconciliation send no retry and keep the existing notice', async () => {
+ const leave=Promise.withResolvers<void>();const open=vi.fn(async()=>({target:'held-elsewhere'})),read=vi.fn();
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,inspectBookTasks:read});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const notice=page.screen.querySelector('[data-book-reacquire]');page.setStatus.mockClear();
+ for(let i=0;i<5;i+=1)await page.run('api.inspectBookTasks()').catch(()=>undefined);
+ expect(open).toHaveBeenCalledOnce();expect(read).not.toHaveBeenCalled();
+ expect(page.screen.querySelector('[data-book-reacquire]')).toBe(notice);expect(page.setStatus).not.toHaveBeenCalled();
+});
+
+it('one journal action makes one automatic attempt and a repeated failure retains the notice and keyboard focus', async () => {
+ const leave=Promise.withResolvers<void>(),open=vi.fn(async()=>({target:'held-elsewhere'})),save=vi.fn();
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,flushJournalEdit:save});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const notice=page.screen.querySelector('[data-book-reacquire]')!,button=notice.querySelector('button')!;
+ MiniElement.prototype.focus.call(button);page.setStatus.mockClear();page.context['editAction']={};
+ for(let i=0;i<5;i+=1)await page.run("sendEdit({clientEditId:'edit-1'},editAction)").catch(()=>undefined);
+ expect(open).toHaveBeenCalledTimes(2);expect(save).not.toHaveBeenCalled();
+ await page.actions.get('重试连接当前图书')!();
+ expect(open).toHaveBeenCalledTimes(3);expect(page.screen.querySelector('[data-book-reacquire]')).toBe(notice);
+ expect(notice.querySelector('button')).toBe(button);expect(miniDocument.activeElement).toBe(button);
+ expect(button.disabled).toBe(false);expect(page.setStatus).not.toHaveBeenCalled();
+});
+
+it('a failed-state Book read-click reports the same editorial notice at the clicked surface without retrying', async () => {
+ const leave=Promise.withResolvers<void>(),open=vi.fn(async()=>({target:'held-elsewhere'}));
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,getBookOverview:vi.fn()});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const notice=page.screen.querySelector('[data-book-reacquire]')!.querySelector('p')!.textContent;
+ const formatter=source.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='rendererErrorMessage')!;
+ page.context['rendererErrorData']=()=>null;page.context['researchUnavailableLine']=(_code:unknown,message:string)=>message;
+ runInContext(ts.transpileModule(formatter.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ page.setStatus.mockClear();
+ await page.run("jumpToManuscript('book-a',{manuscriptId:'manuscript',blockId:'block',markId:null})");
+ expect(open).toHaveBeenCalledOnce();expect(page.setStatus).toHaveBeenLastCalledWith(notice,'error');
+ expect(notice).toContain('重试连接当前图书');expect(notice).not.toContain('AI7_');
+});
+
+it('an explicit same-Book open bypasses failed reconciliation and focuses its existing window without replacing the editor', async () => {
+ const bookId='book-a',target='existing-window';
+ const leave=Promise.withResolvers<void>();const open=vi.fn(async(input:{activation?:string;bookId:string})=>input.activation
+  ?{target:'held-elsewhere'}:{target,route:{kind:'book',bookId:input.bookId,bookTitle:'图书'}});
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,getBookWorkbenchRoute:async()=>null});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const destroy=vi.fn();page.context['manuscriptOnScreen']={manuscriptId:'manuscript',branchId:'branch',readingPlace:()=>null,destroy};
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ await page.run(`openBookSection({bookId:'${bookId}',title:'图书'},'overview')`);
+ expect(open).toHaveBeenCalledTimes(2);expect(open).toHaveBeenLastCalledWith({kind:'book',bookId});
+ expect(page.screen.firstElementChild).toBe(manuscript);expect(destroy).not.toHaveBeenCalled();
+ expect(page.setStatus).toHaveBeenLastCalledWith(target==='existing-window'?'已切换到《图书》已有的图书工作台。':'已在新的图书工作台打开《图书》。','success');
+});
+
+it('opening another Book in this clean window clears the failed gate before its overview loads', async () => {
+ const leave=Promise.withResolvers<void>(),overview=vi.fn(async()=>({book:{bookId:'book-b'},manuscriptAnchor:null}));
+ const page=harness({leaveBookWorkbench:()=>leave.promise,getBookWorkbenchRoute:async()=>null,getBookOverview:overview,
+  openBookWorkbench:async(input:{activation?:string})=>input.activation?{target:'held-elsewhere'}:{target:'requesting-window',route:{kind:'book',bookId:'book-b',bookTitle:'图书'}}});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ await page.run("openBookSection({bookId:'book-b',title:'图书'},'overview')");
+ expect(overview).toHaveBeenCalledOnce();expect(page.screen.dataset['screen']).toBe('book-b');
+ expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
+});
+
+it('retries a failed manuscript capability read without opening an already re-acquired Book again', async () => {
+ const leave=Promise.withResolvers<void>();let reads=0;
+ const open=vi.fn(async()=>({target:'requesting-window'}));
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open,
+  getManuscriptWindow:async()=>{if(++reads===1)throw new Error('offline');return {bookId:'book-a'};},flushJournalEdit:async()=>undefined});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ page.context['manuscriptOnScreen']={manuscriptId:'manuscript',branchId:'branch',readingPlace:()=>null,destroy:vi.fn()};
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ await page.run("sendEdit({clientEditId:'edit-1'},{})");
+ expect(open).toHaveBeenCalledOnce();expect(reads).toBe(2);expect(page.screen.firstElementChild).toBe(manuscript);
 });
 
 it('does not let an older library page overwrite a newer filter result', async () => {
