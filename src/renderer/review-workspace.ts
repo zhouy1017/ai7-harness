@@ -657,7 +657,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
   let excludedPages = 1;
   let excludedOpen = false;
-  const basisDisclosures = new Map<string, boolean>();
   let synthesisDisclosure: { runId: string; open: boolean } | null = null;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
@@ -1073,20 +1072,35 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
-    if (run.synthesis === undefined) heading.append(meta);
+    heading.append(meta);
     section.append(heading);
     if (run.synthesis !== undefined) {
       const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
         if (destroyed || evidence.blockId === null) return;
-        const current = navigation.read(host);
-        const finding = run.findings.find(entry => entry.findingId === evidence.findingId);
+        const origin = navigation.read(host);
+        let current = navigation.begin();
         options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
-        void options.goToText({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
-          blockId: evidence.blockId, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null })
-          .catch(error => { if (current.isCurrent()) options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error'); });
+        void (async () => {
+          try {
+            let finding = run.findings.find(entry => entry.findingId === evidence.findingId);
+            let after: number | null = null;
+            while (finding === undefined) {
+              const page = await api.inspectReviewWorkspace({ reviewRunId: run.reviewRunId, findingsAfterOrdinal: after,
+                categoryId: null, severity: null, status: null, chapterBlockId: null });
+              if (!current.isCurrent() || !origin.isCurrent()) return;
+              finding = page.run?.findings.find(entry => entry.findingId === evidence.findingId);
+              const next = page.run?.findings.at(-1)?.ordinal;
+              if (finding !== undefined || !page.run?.findingsTruncated || next == null || after !== null && next <= after) break;
+              after = next;
+            }
+            const jumping = options.goToText({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
+              blockId: evidence.blockId!, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null });
+            current = navigation.route();
+            await jumping;
+          } catch (error) { if (current.isCurrent() && origin.isCurrent()) options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error'); }
+        })();
       }) as HTMLDetailsElement;
       if (run.usage !== undefined) summary.append(el('p', 'review-run-usage', `本次共进行了 ${run.usage.requests} 次模型调用。`));
-      summary.append(meta);
       summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
       summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
       section.append(summary);
@@ -1640,16 +1654,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     main.append(el('p', 'review-finding-note', finding.note));
     const referencedRules = findingReferencedRules(finding);
     if (referencedRules !== null) main.append(referencedRules);
-    const basis = run.synthesis === undefined ? main : el('details', 'review-finding-basis-fold');
-    if (basis !== main) {
-      const disclosure = basis as HTMLDetailsElement;
-      disclosure.open = basisDisclosures.get(finding.findingId) ?? false;
-      disclosure.addEventListener('toggle', () => basisDisclosures.set(finding.findingId, disclosure.open));
-      basis.append(el('summary', undefined, '审阅依据'));
-      main.append(basis);
-    }
-    if (finding.clauseRefs.length === 0) basis.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
-    for (const clause of finding.clauseRefs) basis.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
+    if (finding.clauseRefs.length === 0) main.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
+    for (const clause of finding.clauseRefs) main.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
     // Extraction's original non-verdict remains historical; this card's verified result owns the current three states.
     const stateLine = hasVerification && finding.stateLine === '未外部复核' ? null : finding.stateLine;
     const lines = [stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]

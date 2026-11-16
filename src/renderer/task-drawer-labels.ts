@@ -544,7 +544,7 @@ export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rang
 export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; rereadFailed?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
   const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage]
     : `${technicalWords(`第 ${entry.unitOrdinal} 个阅读范围`, `正文第 ${entry.unitOrdinal} 部分`)}${entry.earlierText === true ? '（当时的文字）' : ''}`;
-  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回${entry.rereadFailed ? ' · 上次重读未成功' : ''}`;
+  return `${entry.category === null ? '' : `「${entry.category === 'run-synthesis' ? '全书审阅统合总结' : entry.category}」`}${what} · 请求已发出 · 回答没有完整传回${entry.rereadFailed ? ' · 上次重读未成功' : ''}`;
 }
 
 /**

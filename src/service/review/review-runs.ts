@@ -1,3 +1,4 @@
+import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../shared/review-synthesis-wording.js';
 import { REVIEW_UNCHECKED_DISCLOSURE } from '../../shared/review-basis.js';
 import { RUN_SYNTHESIS_CATEGORY, RUN_SYNTHESIS_ENTRY } from './run-synthesis-kind.js';
 import { buildSynthesisInput, parseSynthesisSummary, type SynthesisInput } from './run-synthesis-contract.js';
@@ -2857,8 +2858,8 @@ export class ReviewRunStore {
       return event?.runRecordId != null && this.#categoryLedger(entry, snapshot).currentRunState(event.runRecordId) === 'completed';
     }).map(entry => entry.categoryId));
     const missingCategories = coverage.filter(entry => entry.unitsRead < entry.unitsTotal || !completeCategories.has(entry.categoryId)).map(entry =>
-      `${entry.label}（已读 ${entry.unitsRead}/${entry.unitsTotal} 个阅读范围；${entry.missingUnitOrdinals.length ? `未读第 ${entry.missingUnitOrdinals.join('、')} 范围` : '部分检查未完成'}）`);
-    if (baselineMissing.length > 0) missingCategories.push(`基线概述（缺少第 ${baselineMissing.join('、')} 阅读范围）`);
+      `${entry.label}（已读 ${entry.unitsRead}/${entry.unitsTotal} 个阅读范围；${entry.missingUnitOrdinals.length ? `未读第 ${reviewSynthesisOrdinalRanges(entry.missingUnitOrdinals)} 范围` : '部分检查未完成'}）`);
+    if (baselineMissing.length > 0) missingCategories.push(`基线概述（缺少第 ${reviewSynthesisOrdinalRanges(baselineMissing)} 阅读范围）`);
     const synthesisLedger = this.#categoryLedger(category, snapshot);
     const synthesisPlan = synthesisLedger.frozenPlan(category.task!.taskIntentId, category.task!.planEnvelopeDigest);
     const route = (synthesisPlan.components['provider-resolution-plan'] as { executionRoute: { kind: string; model?: string } }).executionRoute;
@@ -2927,8 +2928,7 @@ export class ReviewRunStore {
       detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? (input?.missingCategories.length ? '统合仅依据已读范围；未读部分仍需审阅。' : '已形成全书审阅统合总结。') : terminal && !paused ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
         : paused ? '统合已暂停；继续审阅后接着完成。' : event?.state === 'dispatched' ? '正在统合各章发现。' : '各章审阅后将统合已有发现。',
       summary, missingCategories: input?.missingCategories ?? [],
-      omissionLabel: input === null || Object.values(input.omitted).every((count) => count === 0) ? null
-        : `受单次阅读容量限制，另有 ${input.omitted.findings} 条发现、${input.omitted.clusters} 组问题与 ${input.omitted.synopses} 段概述未纳入统合。`,
+      omissionLabel: input === null ? null : reviewSynthesisOmissionLabel(input.omitted),
       evidence: (input?.evidence ?? []).map((entry) => {
         const finding = findings.get(entry.findingId);
         return { ref: entry.ref, findingId: entry.findingId, chapterLabel: entry.chapterLabel, quote: entry.quote,

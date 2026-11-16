@@ -1,3 +1,4 @@
+import { reviewSynthesisOmissionLabel, reviewSynthesisOrdinalRanges } from '../../src/shared/review-synthesis-wording.js';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
@@ -50,7 +51,8 @@ describe('whole-book synthesis contract', () => {
     const input = buildSynthesisInput({ findings, missingCategories: ['事实核查'], baseline: {
       revisionId: 'baseline', synopses: Array.from({ length: 220 }, (_, index) => ({ unitOrdinal: 220 - index, synopsis: findings[index % findings.length]!.note.repeat(40) })),
     } }, 4096);
-    expect(Buffer.byteLength(JSON.stringify(input), 'utf8')).toBeLessThanOrEqual(4096);
+    expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(4096);
+    expect(Buffer.byteLength(JSON.stringify(JSON.parse(synthesisMessage(input)).baseline))).toBeLessThanOrEqual(1024);
     expect(input.omitted.findings + input.omitted.synopses).toBeGreaterThan(0);
     const refs = new Set(input.evidence.map((entry) => entry.ref));
     expect(input.clusters.every((cluster) => cluster.evidenceRefs.every((ref) => refs.has(ref)))).toBe(true);
@@ -64,9 +66,10 @@ it.each([[300, 40], [300, 120], [150, 200]])('keeps every cluster citable and ba
     note: `${findings[index % findings.length]!.note.repeat(length).slice(0, length - 8)} ${String(index).padStart(7, '0')}` }));
   const input = buildSynthesisInput({ findings: source, missingCategories: [], baseline: { revisionId: 'baseline',
     synopses: Array.from({ length: 40 }, (_, index) => ({ unitOrdinal: index + 1, synopsis: findings[index % findings.length]!.note.repeat(20) })) } });
-  expect(Buffer.byteLength(JSON.stringify(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
+  expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
   expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
   expect(input.baseline!.synopses.length).toBeGreaterThan(0);
+  expect(Buffer.byteLength(JSON.stringify(JSON.parse(synthesisMessage(input)).baseline))).toBeLessThanOrEqual(24 * 1024);
   expect(input.clusters.length).toBeGreaterThan(0);
   expect(input.clusters.every(cluster => cluster.evidenceRefs.length > 0 && input.findings.some(finding => finding.ref === cluster.representativeRef) && cluster.evidenceRefs.every(ref => input.evidence.some(evidence => evidence.ref === ref)))).toBe(true);
   expect(input.findings.length).toBeLessThanOrEqual(200);
@@ -76,4 +79,36 @@ it.each([['```json\n', '\n```'], ['以下是总结：\n', '\n供编辑核对。'
   const input = buildSynthesisInput({ findings, missingCategories: [], baseline: null });
   const parsed = parseSynthesisSummary(prefix + JSON.stringify({ overallAssessment: '先核对跨章反复出现的问题。' }) + suffix, input);
   expect(parsed?.overallAssessment).toBe('先核对跨章反复出现的问题。');
+});
+
+it('counts represented duplicates as included and reports only capacity-dropped findings (#1433 re-review 1)', () => {
+  const source = Array.from({ length: 17 }, (_, index) => ({ ...findings[0]!, findingId: `duplicate-${index}` }));
+  const small = buildSynthesisInput({ findings: source, missingCategories: [], baseline: null });
+  expect(small.clusters[0]!.count).toBe(17); expect(small.omitted.findings).toBe(0);
+  expect(reviewSynthesisOmissionLabel(small.omitted)).toBeNull();
+  const large = buildSynthesisInput({ findings: Array.from({ length: 600 }, (_, index) => ({ ...findings[0]!, findingId: `capacity-${index}`, note: `${index}: ${findings[0]!.note}` })), missingCategories: [], baseline: null });
+  expect(large.omitted.findings).toBe(600 - large.clusters.reduce((sum, cluster) => sum + cluster.count, 0));
+  expect(large.omitted.findings).toBeGreaterThan(0);
+  expect(reviewSynthesisOmissionLabel(large.omitted)).toContain(`${large.omitted.findings} 条发现`);
+});
+it('fills spare room with round-robin evidence for 600 findings in 21 recurring topics (#1433 re-review 2)', () => {
+  const source = Array.from({ length: 600 }, (_, index) => ({ ...findings[0]!, findingId: `recurring-${index}`, categoryId: `category-${index % 2}`,
+    note: `问题 ${index % 21}: ${findings[0]!.note}`, chapterOrdinal: index + 1 }));
+  const input = buildSynthesisInput({ findings: source, missingCategories: [], baseline: null });
+  expect(input.clusters).toHaveLength(42); expect(input.findings).toHaveLength(42); expect(input.evidence).toHaveLength(200);
+  expect(input.clusters.every(cluster => cluster.evidenceRefs.length > 1)).toBe(true); expect(input.omitted.findings).toBe(0);
+  const sent = JSON.parse(synthesisMessage(input)); expect(sent.evidence.every((entry: { findingRef: string }) => /^f[0-9]+$/.test(entry.findingRef))).toBe(true);
+  expect(Buffer.byteLength(synthesisMessage(input))).toBeLessThanOrEqual(96 * 1024);
+});
+it('clusters on the bounded note and preserves 400-character synopses (#1433 re-review 3)', () => {
+  const prefix = findings[0]!.note.repeat(100).slice(0, 80);
+  const input = buildSynthesisInput({ findings: Array.from({ length: 30 }, (_, index) => ({ ...findings[0]!, findingId: `bounded-${index}`, note: prefix + index })),
+    missingCategories: [], baseline: { revisionId: 'baseline', synopses: [{ unitOrdinal: 1, synopsis: findings[0]!.note.repeat(100) }] } });
+  expect(input.findings).toHaveLength(1); expect(input.clusters[0]!.count).toBe(30);
+  expect([...input.baseline!.synopses[0]!.synopsis]).toHaveLength(400);
+});
+it('compresses coverage ordinals without cutting a number (#1433 re-review 4)', () => {
+  const label = `未读第 ${reviewSynthesisOrdinalRanges([...Array.from({ length: 37 }, (_, index) => index + 1), 40])} 范围`;
+  const input = buildSynthesisInput({ findings, missingCategories: [label], baseline: null });
+  expect(input.missingCategories).toEqual(['未读第 1–37、40 范围']);
 });

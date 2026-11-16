@@ -1,3 +1,4 @@
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -1179,7 +1180,7 @@ export function capturedStepWords(host: CapturedProcedureStoreHost): StepWords {
   const configuration = host.reviewGuidelines.configuration();
   return (categoryId) => {
     const entry = configuration.categories.find((candidate) => candidate.categoryId === categoryId);
-    return { label: entry?.label ?? categoryId, procedureTitle: entry?.procedure.title ?? categoryId };
+    return { label: reviewCategoryDisplayLabel(categoryId, entry?.label), procedureTitle: reviewCategoryDisplayLabel(categoryId, entry?.procedure.title) };
   };
 }
 

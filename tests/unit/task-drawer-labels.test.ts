@@ -1,3 +1,4 @@
+import { unconfirmedLine } from '../../src/renderer/task-drawer-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
@@ -1152,4 +1153,9 @@ describe('the drawer bar for a waiting Run of every other kind', () => {
       expect([view.status, view.note, view.actions.map((entry) => entry.name)], kind).toEqual(['等待网络', TASK_BAR_WAITING_NOTE, ['cancel-wait', 'run-link']]);
     }
   });
+});
+
+it('uses the editorial synthesis name for an older unconfirmed category id (#1433 re-review 5)', () => {
+  expect(unconfirmedLine({ stage: 'cross-unit-reduction', category: 'run-synthesis' })).toContain('全书审阅统合总结');
+  expect(unconfirmedLine({ stage: 'cross-unit-reduction', category: 'run-synthesis' })).not.toContain('run-synthesis');
 });

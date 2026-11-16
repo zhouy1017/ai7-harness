@@ -21,7 +21,7 @@ export interface SynthesisInput {
   coverage?: Array<{ categoryId: string; label: string; unitsRead: number; unitsTotal: number; missingUnitOrdinals: number[] }>;
   clusters: Array<{ categoryId: string; clauseId: string; representativeRef: string; count: number; chapterOrdinals: number[]; findingRefs: string[]; evidenceRefs: string[] }>;
   findings: Array<{ ref: string; categoryId: string; clauseId: string; severity: string; summary: string; evidenceRefs: string[] }>;
-  evidence: Array<{ ref: string; findingId: string; blockId?: string | null; chapterOrdinal: number; chapterLabel: string; quote: string }>;
+  evidence: Array<{ ref: string; findingId: string; representativeRef?: string; blockId?: string | null; chapterOrdinal: number; chapterLabel: string; quote: string }>;
   baseline: null | { revisionId: string; missingUnitOrdinals?: number[]; synopses: Array<{ unitOrdinal: number; synopsis: string }> };
   omitted: { findings: number; clusters: number; synopses: number };
 }
@@ -43,7 +43,7 @@ export function synthesisMessage(input: SynthesisInput): string {
   return canonicalJson({ ...input,
     clusters: input.clusters.map((cluster) => ({ ...cluster, representativeRef: refs.get(cluster.representativeRef)!, findingRefs: cluster.findingRefs.map((ref) => refs.get(ref)!) })),
     findings: input.findings.map((finding) => ({ ...finding, ref: refs.get(finding.ref)! })),
-    evidence: input.evidence.map(({ findingId, blockId: _block, chapterLabel: _label, ...evidence }) => ({ ...evidence, findingRef: refs.get(findingId)! })),
+    evidence: input.evidence.map(({ findingId, representativeRef, blockId: _block, chapterLabel: _label, ...evidence }) => ({ ...evidence, findingRef: refs.get(representativeRef ?? findingId)! })),
     baseline: input.baseline === null ? null : { synopses: input.baseline.synopses, missingUnitOrdinals: input.baseline.missingUnitOrdinals ?? [] },
   });
 }
@@ -52,8 +52,7 @@ const bytes = (value: unknown): number => Buffer.byteLength(canonicalJson(value)
 const bounded = (value: string, length: number): string => sliceGraphemes(value, 0, length);
 const topicKey = (value: string): string => value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
 
-/** Every transmitted free-text field (including notes, quotations and baseline synopses) is at most
- * 80 graphemes. A note is sent once, on its representative finding; clusters carry references only.
+/** Notes and quotations are at most 80 graphemes; baseline synopses have their own 400-grapheme bound. A note is sent once, on its representative finding; clusters carry references only.
  * Keep one citable representative per cluster, ordered by occurrence count (stable ties). Reserve
  * the baseline's own quarter-budget (at most 24 KiB); trim its tail only inside that budget. Fit the
  * remaining request by dropping whole least-frequent clusters, never orphaning a kept cluster.
@@ -67,14 +66,14 @@ export function buildSynthesisInput(source: {
 }, maximumBytes = 96 * 1024): SynthesisInput {
   const ceiling = Math.max(1024, Math.min(96 * 1024, maximumBytes));
   const text = (value: string): string => bounded(value, SYNTHESIS_TEXT_LIMIT);
-  const input: SynthesisInput = { schema: 'ai7.review.run-synthesis-input/1', missingCategories: source.missingCategories.slice(0, 32).map(text),
+  const input: SynthesisInput = { schema: 'ai7.review.run-synthesis-input/1', missingCategories: source.missingCategories.slice(0, 32),
     coverage: (source.coverage ?? []).map(entry => ({ ...entry, categoryId: text(entry.categoryId), label: text(entry.label) })),
     clusters: [], findings: [], evidence: [], baseline: source.baseline === null ? null : {
       revisionId: source.baseline.revisionId, missingUnitOrdinals: source.baseline.missingUnitOrdinals ?? [], synopses: [] },
     omitted: { findings: 0, clusters: 0, synopses: 0 } };
   const grouped = new Map<string, SynthesisFinding[]>();
   for (const finding of source.findings) {
-    const key = canonicalJson([finding.categoryId, finding.clauseId, topicKey(finding.note)]);
+    const key = canonicalJson([finding.categoryId, finding.clauseId, topicKey(text(finding.note))]);
     const group = grouped.get(key) ?? [];
     group.push(finding); grouped.set(key, group);
   }
@@ -92,22 +91,43 @@ export function buildSynthesisInput(source: {
   }
   const synopses = [...(source.baseline?.synopses ?? [])].sort((a, b) => a.unitOrdinal - b.unitOrdinal);
   const baselineBudget = Math.min(24 * 1024, Math.floor(ceiling / 4));
+  const baselineBytes = (synopses: Array<{ unitOrdinal: number; synopsis: string }>): number => bytes({ synopses, missingUnitOrdinals: input.baseline?.missingUnitOrdinals ?? [] });
   for (const unit of synopses.slice(0, 200)) {
-    const entry = { unitOrdinal: unit.unitOrdinal, synopsis: text(unit.synopsis) };
-    if (bytes([...input.baseline!.synopses, entry]) > baselineBudget) break;
+    const entry = { unitOrdinal: unit.unitOrdinal, synopsis: bounded(unit.synopsis, 400) };
+    if (baselineBytes([...input.baseline!.synopses, entry]) > baselineBudget) break;
     input.baseline!.synopses.push(entry);
   }
   // Even a small model receives at least the first available synopsis within its reserved budget.
   if (input.baseline !== null && input.baseline.synopses.length === 0 && synopses.length > 0) {
-    const entry = { unitOrdinal: synopses[0]!.unitOrdinal, synopsis: text(synopses[0]!.synopsis) };
-    while (bytes([entry]) > baselineBudget && entry.synopsis.length > 0) entry.synopsis = bounded(entry.synopsis, [...entry.synopsis].length - 1);
+    const entry = { unitOrdinal: synopses[0]!.unitOrdinal, synopsis: bounded(synopses[0]!.synopsis, 400) };
+    while (baselineBytes([entry]) > baselineBudget && entry.synopsis.length > 0) entry.synopsis = bounded(entry.synopsis, [...entry.synopsis].length - 1);
     input.baseline.synopses.push(entry);
   }
-  while (bytes(input) > ceiling - 128 && input.clusters.length > 0) {
-    input.clusters.pop(); input.findings.pop(); input.evidence.pop(); input.omitted.clusters += 1;
+  const updateOmissions = (): void => {
+    input.omitted.findings = source.findings.length - input.clusters.reduce((sum, cluster) => sum + cluster.count, 0);
+    input.omitted.clusters = grouped.size - input.clusters.length;
+    input.omitted.synopses = synopses.length - (input.baseline?.synopses.length ?? 0);
+  };
+  const fits = (): boolean => { updateOmissions(); return Buffer.byteLength(synthesisMessage(input), 'utf8') <= ceiling; };
+  while (!fits() && input.clusters.length > 0) {
+    input.clusters.pop(); input.findings.pop(); input.evidence.pop();
   }
-  input.omitted.findings = source.findings.length - input.findings.length;
-  input.omitted.synopses = synopses.length - (input.baseline?.synopses.length ?? 0);
+  // Counts include every finding represented by a retained topic, whether or not each occurrence
+  // fits as a quotation. Spend remaining capacity on further occurrences, round-robin in frequency
+  // order, without repeating the topic's note. Under pressure the initial citable representative stays.
+  const kept = groups.slice(0, input.clusters.length);
+  for (let round = 1; input.evidence.length < 200 && kept.some(group => round < group.length); round += 1) {
+    for (const [index, group] of kept.entries()) {
+      const finding = group[round];
+      if (finding === undefined || input.evidence.length >= 200) continue;
+      const cluster = input.clusters[index]!, ref = `e${input.evidence.length + 1}`;
+      input.evidence.push({ ref, findingId: finding.findingId, representativeRef: cluster.representativeRef,
+        blockId: finding.blockId ?? null, chapterOrdinal: finding.chapterOrdinal, chapterLabel: text(finding.chapterLabel), quote: text(finding.quote) });
+      cluster.evidenceRefs.push(ref); input.findings[index]!.evidenceRefs.push(ref);
+      if (!fits()) { input.evidence.pop(); cluster.evidenceRefs.pop(); input.findings[index]!.evidenceRefs.pop(); }
+    }
+  }
+  updateOmissions();
   return input;
 }
 

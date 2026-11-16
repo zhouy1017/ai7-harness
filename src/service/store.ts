@@ -1,6 +1,7 @@
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
 import { withModelClarification } from './provider/clarification-contract.js';
-import { runSynthesisKind } from './review/run-synthesis-kind.js';
+import { RUN_SYNTHESIS_ENTRY, runSynthesisKind } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
 import { TaskLaunchPreview } from './task-plan-creation.js';
@@ -9389,7 +9390,7 @@ export class EditorialStore {
         signalId: asString(row.signal_id),
         reviewRunId: asString(row.review_run_id),
         findingId: asString(row.finding_id),
-        categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        categoryLabel: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
         reason: asString(row.reason),
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
@@ -15290,12 +15291,13 @@ export class EditorialStore {
 
   /** The category a review kind names, in the house's built-in configuration's words; `null` for any other kind. */
   #unconfirmedCategory(kind: string): string | null {
+    if (kind === 'editorial-review/run-synthesis') return RUN_SYNTHESIS_ENTRY.label;
     if (kind === FACTUAL_REVIEW_KIND) {
       return BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.executor === 'factual-review-kind')?.label ?? kind;
     }
     if (!isReviewCategoryKindId(kind)) return null;
     const categoryId = kind.slice(kind.indexOf('/') + 1);
-    return reviewCategoryEntry(categoryId)?.label ?? categoryId;
+    return reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label);
   }
 
   /** The drawer's list of 结果待确认 a completed Run of this kind left on the Book (Issue #757); `null` when there is none. */

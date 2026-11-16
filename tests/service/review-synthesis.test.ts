@@ -663,3 +663,23 @@ it.each([['```json\n', '\n```'], ['审阅总结：\n', '\n请逐条核对。']])
     expect(workspace(session, book).run!.synthesis!.summary!.recurringProblems.length).toBeGreaterThan(0);
   }, message => { const answer = sample1SynthesisAnswer(message); return answer?.kind === 'unit-result' ? { ...answer, text: prefix + answer.text + suffix } : answer; });
 });
+
+it('shows no capacity omission for an under-capacity run of represented duplicates (#1433 re-review 1)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const run = workspace(session, book).run!;
+    const sent = session.capture.wireRequests.find(request => request.messages.some(message => sample1SynthesisAnswer(message.content) !== undefined))!;
+    const input = JSON.parse(sent.messages.findLast(message => message.role === 'user')!.content);
+    expect(input.clusters.reduce((sum: number, cluster: { count: number }) => sum + cluster.count, 0)).toBe(run.findings.length);
+    expect(input.omitted.findings).toBe(0); expect(run.synthesis!.omissionLabel).toBeNull();
+  }, sample1SynthesisAnswer, {}, false, false, true);
+});
+it('names an outcome-unknown synthesis editorially in the unconfirmed plan (#1433 re-review 5)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const run = workspace(session, book).run!;
+    const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+    expect(plan.unconfirmed?.steps.some(step => step.category === '全书审阅统合总结')).toBe(true);
+    expect(plan.unconfirmed?.steps.some(step => step.category === 'run-synthesis')).toBe(false);
+  }, () => ({ kind: 'outcome-unknown', message: 'Captured ambiguous synthesis' }));
+});

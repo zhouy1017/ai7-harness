@@ -2883,6 +2883,7 @@ async function main() {
     const synthesisEvidence = reviewed.run.synthesis.evidence.find(evidence => evidence.blockId !== null &&
       reviewed.run.synthesis.summary.recurringProblems.some(problem => problem.evidenceRefs.includes(evidence.ref)));
     requireJourney(synthesisEvidence !== undefined, 'review-synthesis-linked-evidence');
+    const synthesisLayouts = [];
     const synthesisNativeViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
     try {
       for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
@@ -2894,12 +2895,13 @@ async function main() {
           await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
           await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
         }
-        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect();return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,ok:!!(root && !root.open && r && r.top>=0 && r.bottom<=innerHeight && root.querySelector('summary').textContent.includes('组共性问题') && !/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,fullyVisible:!!(r&&r.top>=0&&r.bottom<=innerHeight),ok:!!(root&&!root.open&&root.querySelector('summary').textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        synthesisLayouts.push(synthesisLayout);
         requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
-        await pointerClick(renderer, waitFor, 'article.review-finding .review-finding-basis-fold > summary', `review-synthesis-${viewport}-basis-open`);
-        await waitFor(renderer, `document.querySelector('article.review-finding .review-finding-basis-fold')?.open===true`, `review-synthesis-${viewport}-basis-ready`);
-        await pointerClick(renderer, waitFor, 'article.review-finding .review-finding-basis-fold > summary', `review-synthesis-${viewport}-basis-close`);
-        await waitFor(renderer, `document.querySelector('article.review-finding .review-finding-basis-fold')?.open===false`, `review-synthesis-${viewport}-basis-closed`);
+        const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
+        const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
+        await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${synthesisEvidence.findingId}"]')===null`, `review-synthesis-${viewport}-filtered-citation`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
@@ -2916,6 +2918,7 @@ async function main() {
       await renderer.send('Emulation.clearDeviceMetricsOverride');
       await waitFor(renderer, `innerWidth===${synthesisNativeViewport.width} && innerHeight===${synthesisNativeViewport.height}`, 'review-synthesis-native-viewport');
     }
+    requireJourney(synthesisLayouts.every(layout => layout.fullyVisible), 'review-synthesis-base-layout-geometry', synthesisLayouts);
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');

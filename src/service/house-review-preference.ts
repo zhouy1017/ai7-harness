@@ -1,3 +1,4 @@
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
 import { composeEditorialMemoryBlock, type EditorialMemorySnapshot } from './learning/editorial-memory.js';
 import { EDITORIAL_MEMORY_LIBRARY_LINES, EDITORIAL_MEMORY_LIBRARY_GRAPHEMES, type EditorialMemoryContext, selectPreferenceLines, type PreferenceLineCandidate } from './learning/retrieval.js';
@@ -1087,7 +1088,7 @@ export function rebuildStoredHouseReviewPreference(host: LearningSupervisionStor
   for (const book of host.authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
     const bookId = asString(book.book_id);
     sources.push(...housePreferenceSources(host.authority, scope, { bookId, title: asString(book.title) }, standingMaterials(host, bookId),
-      (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
+      (categoryId) => reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label)));
   }
   new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger()).rebuild(scope, sources, names);
 }
@@ -1434,7 +1435,7 @@ export function readFeedbackHistory(host: LearningSupervisionStoreHost, input: F
         entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
         origin: 'review-disposition',
         bookId,
-        dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        dimension: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
         signal: '忽略',
         reason: feedbackReasonExcerpt(asString(row.reason)),
         reasonState: 'given',
