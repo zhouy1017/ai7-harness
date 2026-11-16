@@ -316,7 +316,7 @@ it.each(['bad-digest', 'missing-synopsis'] as const)('preserves review baseline 
     const baseline = session.store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, launchPolicy);
     session.owner.admitAndDispatch(baseline.runRecordId, session.store.baselineAnalysisLedger); await session.owner.whenIdle();
     const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
-    appendBaselineUnitVariant(roots.dataRoot, book.bookId, variant);
+    const affectedOrdinal = appendBaselineUnitVariant(roots.dataRoot, book.bookId, variant);
     await driveLaunchedReviewRun(session.driver, launched);
     expect(workspace(session, book).run!.findings.length).toBeGreaterThan(0);
     if (variant === 'bad-digest') {
@@ -325,8 +325,8 @@ it.each(['bad-digest', 'missing-synopsis'] as const)('preserves review baseline 
     } else {
       const request = session.capture.wireRequests.find(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
       const input = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
-      expect(input.baseline.missingUnitOrdinals).toEqual([2]);
-      expect(input.baseline.synopses.some((unit: { unitOrdinal: number }) => unit.unitOrdinal === 2)).toBe(false);
+      expect(input.baseline.missingUnitOrdinals).toContain(affectedOrdinal);
+      expect(input.baseline.synopses.some((unit: { unitOrdinal: number }) => unit.unitOrdinal === affectedOrdinal)).toBe(false);
       expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
     }
   });

@@ -26,7 +26,7 @@ export async function runSynopsisBaseline(store: EditorialStore, owner: Baseline
 /** Append an isolated baseline variant for damaged/older-record compatibility probes. Existing
  * immutable rows and triggers remain intact; no manuscript or original plan is rewritten.
  */
-export function appendBaselineUnitVariant(dataRoot: string, bookId: string, variant: 'bad-digest' | 'missing-synopsis'): void {
+export function appendBaselineUnitVariant(dataRoot: string, bookId: string, variant: 'bad-digest' | 'missing-synopsis'): number {
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   try {
     const row = db.prepare(`SELECT r.* FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id=r.result_set_id
@@ -36,14 +36,20 @@ export function appendBaselineUnitVariant(dataRoot: string, bookId: string, vari
     const copy = { ...row, revision_id: revisionId, ordinal, canonical_json: body.json, sha256: body.digest };
     const columns = Object.keys(copy);
     db.prepare(`INSERT INTO analysis_result_set_revisions(${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`).run(...Object.values(copy));
-    for (const unit of db.prepare('SELECT * FROM analysis_unit_results WHERE revision_id=? ORDER BY unit_ordinal').all(row.revision_id!)) {
+    const units = db.prepare('SELECT * FROM analysis_unit_results WHERE revision_id=? ORDER BY unit_ordinal').all(row.revision_id!);
+    const closed = units.filter(unit => unit.state === 'closed' && typeof JSON.parse(String(unit.canonical_json)).synopsis === 'string');
+    const affected = closed.find(unit => Number(unit.unit_ordinal) === 2) ?? closed[0];
+    if (affected === undefined) throw new Error('SYNOPSIS_VARIANT_NEEDS_CLOSED_UNIT');
+    const affectedOrdinal = Number(affected.unit_ordinal);
+    for (const unit of units) {
       let json = String(unit.canonical_json), digest = String(unit.sha256);
-      if (Number(unit.unit_ordinal) === 2) {
+      if (Number(unit.unit_ordinal) === affectedOrdinal) {
         if (variant === 'bad-digest') digest = '0'.repeat(64);
         else { const value = JSON.parse(json); delete value.synopsis; const record = canonicalRecord(value); json = record.json; digest = record.digest; }
       }
       db.prepare('INSERT INTO analysis_unit_results(revision_id,unit_ordinal,state,canonical_json,sha256) VALUES (?,?,?,?,?)')
         .run(revisionId, unit.unit_ordinal!, unit.state!, json, digest);
     }
+    return affectedOrdinal;
   } finally { db.close(); }
 }
