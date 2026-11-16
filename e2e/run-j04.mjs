@@ -2895,9 +2895,27 @@ async function main() {
           await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
           await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
         }
-        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,fullyVisible:!!(r&&r.top>=0&&r.bottom<=innerHeight),ok:!!(root&&!root.open&&root.querySelector('summary').textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),header=root?.querySelector('summary'),line=header?parseFloat(getComputedStyle(header).lineHeight):0,previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,oneLine:!!header&&header.getBoundingClientRect().height<=line,ok:!!(root&&!root.open&&header.textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
         synthesisLayouts.push(synthesisLayout);
         requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
+        requireJourney(synthesisLayout.oneLine && synthesisLayout.headerCost > 0 && synthesisLayout.headerCost <= 48, `review-synthesis-${viewport}-header-bound`, synthesisLayout);
+        await assertRenderer(renderer, `(() => {const meta=document.querySelector('.review-run > .review-run-heading > .review-run-meta'),basis=document.querySelector('article.review-finding .review-finding-basis');return !!(meta&&meta.getClientRects().length&&meta.firstChild.textContent.includes(${JSON.stringify(reviewed.run.scope.label.replaceAll('内容块', '段落'))})&&meta.firstChild.textContent.includes('创建于')&&!meta.closest('details')&&basis&&basis.getClientRects().length&&!basis.closest('details:not([open])'));})()`, `review-synthesis-${viewport}-base-metadata-basis`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-expand`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-access-expanded`);
+        await pressTab(renderer);
+        await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-access-evidence`);
+        for (const type of ['keyDown', 'keyUp']) await renderer.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
+        await assertRenderer(renderer, `document.activeElement?.matches('details.review-synthesis > summary')===true`, `review-synthesis-${viewport}-keyboard-header`);
+        const findingScroll = await renderer.evaluate(`(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return {x:Math.min(innerWidth-24,r.left+r.width/2),y:innerHeight-48,deltaY:Math.max(0,r.bottom-innerHeight+24)};})()`);
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', deltaX: 0, ...findingScroll });
+        await waitFor(renderer, `(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-scroll-card`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`);
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
+        for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.querySelector('article.review-finding').contains(document.activeElement)`)); tab += 1) await pressTab(renderer);
+        await assertRenderer(renderer, `(() => {const card=document.querySelector('article.review-finding'),active=document.activeElement,r=active?.getBoundingClientRect();return card.contains(active)&&r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-keyboard-card`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-reset`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
         const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
         const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
         await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
@@ -2918,7 +2936,7 @@ async function main() {
       await renderer.send('Emulation.clearDeviceMetricsOverride');
       await waitFor(renderer, `innerWidth===${synthesisNativeViewport.width} && innerHeight===${synthesisNativeViewport.height}`, 'review-synthesis-native-viewport');
     }
-    requireJourney(synthesisLayouts.every(layout => layout.fullyVisible), 'review-synthesis-base-layout-geometry', synthesisLayouts);
+    requireJourney(synthesisLayouts.every(layout => layout.oneLine && layout.headerCost > 0 && layout.headerCost <= 48), 'review-synthesis-base-layout-geometry', synthesisLayouts);
     await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
