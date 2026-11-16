@@ -291,8 +291,8 @@ async function verifyWordManifest(store: EditorialStore, book: Awaited<ReturnTyp
   }
 }
 
-it.each([{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_001 }, { mode: 'accepted-baseline', count: 2_001 }] as const)(
-  'retains the independent $count-edit Word manifest through public $mode import, all pages, reopen and selected-Book merge', async ({ mode, count }) => {
+for (const { mode, count } of [{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_001 }, { mode: 'accepted-baseline', count: 2_001 }] as const) {
+it(`retains the independent ${count}-edit Word manifest through public '${mode}' import, all pages, reopen and selected-Book merge`, async () => {
   cpSync(seed.dataRoot, roots.dataRoot, { recursive: true });
   const path = join(roots.inputRoot, `word-manifest-${mode}.docx`);
   const span = { block: 9, from: 0, to: 5 };
@@ -329,7 +329,10 @@ it.each([{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_00
     expect(target.listBooks(null).items.map((book) => book.bookId)).toEqual([commit.bookId]);
     target.markCleanShutdown();
   } finally { target.close(); }
-}, 180_000);
+// #1508: median 137 s, max 208 s over 140 guest runs (2026-11-13 → 16).
+// Headroom only for the 2001-edit cases; R4 (#1033) owns cutting their cost.
+}, count === 2_001 ? 300_000 : 180_000);
+}
 });
 
 function withAttached<T>(target: string, source: string, run: (db: DatabaseSync) => T): T {
