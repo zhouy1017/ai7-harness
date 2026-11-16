@@ -1,4 +1,6 @@
+import { analysisUsesAutomaticMemory } from '../learning/memory-facade.js';
 import { launchedRunModelLabels } from '../editorial-mark-source.js';
+import { freezeTaskBaselineSynopses, remainingSynopsisMessageBytes } from './baseline-synopsis.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
 import { allowedProductionBindingOf } from '../launch-policy.js';
 import { editorialMemoryDefinition, withEditorialMemoryDefinition, type EditorialMemorySnapshot } from '../learning/editorial-memory.js';
@@ -589,10 +591,10 @@ export class BaselineAnalysisStore {
     if (row !== undefined) {
       const json = asString(row.canonical_json);
       requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '计划记录已损坏。');
-      const plan = parseCanonicalJson(json) as { basePromptContractDigest?: string; editorialMemoryBasePromptContractDigest?: string; editorialMemory?: EditorialMemorySnapshot };
+      const plan = parseCanonicalJson(json) as { basePromptContractDigest?: string; editorialMemoryBasePromptContractDigest?: string; editorialMemory?: EditorialMemorySnapshot; inheritedProcedureInstruction?: AnalysisKindDefinition['inheritedProcedureInstruction'] };
       let definition = this.#baseDefinitionForDigest(plan.basePromptContractDigest ?? plan.editorialMemoryBasePromptContractDigest!);
       if (plan.basePromptContractDigest !== undefined) {
-        const member = readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
+        const member = plan.inheritedProcedureInstruction ?? readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
         definition = withProcedureDefinition(definition, member.document, member.pin);
       }
       definition = withEditorialMemoryDefinition(definition, plan.editorialMemory ?? null);
@@ -607,10 +609,12 @@ export class BaselineAnalysisStore {
       const original = pinnedReviewDefinition(this.#originalDefinition, promptContractDigest);
       if (original.promptContractDigest === promptContractDigest) return original;
     }
+    const historical = this.#originalDefinition.historicalDefinitionForDigest?.(promptContractDigest);
+    if (historical?.promptContractDigest === promptContractDigest) return historical;
     const current = this.definition;
     if (current.kind === BASELINE_ANALYSIS_KIND) {
       const base = current.clarificationBase ?? current;
-      for (const candidate of [current, base, withModelClarification(base)]) {
+      for (const candidate of [current, base, withModelClarification(base), ...(this.#launch.operationalScope === 'ordinary-production' ? ['retained-v2'] as const : ['retained-v1', 'retained-v2'] as const).flatMap((version) => { const old = baselineAnalysisKindDefinition(version); return [old, withModelClarification(old)]; })]) {
         if (candidate.promptContractDigest === promptContractDigest) return candidate;
       }
     }
@@ -694,6 +698,7 @@ export class BaselineAnalysisStore {
       : (({ document, executor }) => ({ document, pin: executor }))(resolveProcedureForKind(this.#db, selected, this.#definition.kind));
     const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
       ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
+    if (definition.structuredOnly === true) return { version: 2, ...procedureOptions };
     const stock = reviewCategoryEntry('typos-and-usage')!;
     const expected = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
     const localLeaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
@@ -800,6 +805,7 @@ export class BaselineAnalysisStore {
   }
 
   #refreshClarificationDefinition(): void {
+    if (this.#definition.structuredOnly === true) return;
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
     const leaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
@@ -1019,7 +1025,8 @@ export class BaselineAnalysisStore {
         providerStatus: envelope.providerStatus as 'remote-denied-local-deterministic' | 'remote-denied-no-route',
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
-        procedureContent: procedureContent(readProcedurePlanView(this.#db, asString(digests['plan-envelope']), this.#definition.kind)?.document),
+        procedureContent: procedureContent((envelope.inheritedProcedureInstruction as AnalysisKindDefinition['inheritedProcedureInstruction'])?.document
+          ?? readProcedurePlanView(this.#db, asString(digests['plan-envelope']), this.#definition.kind)?.document),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
         ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 || envelope.compositionVersion === 4 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
@@ -1578,6 +1585,11 @@ export class BaselineAnalysisStore {
    * developer-live and the launch's under it.
    */
   #planCeiling(unitCount: number, editorCeiling: RunBudgetCeilingState, background: BackgroundRunBudgetCeiling | null): RunBudgetCeilingState {
+    // Developer launches own their immutable ceiling. Ordinary plans keep the editor's editable ceiling.
+    const inherited = this.#launch.live !== null && this.#launch.live.scope !== 'ordinary-production' && this.#definition.structuredOnly === true
+      ? this.#definition.inheritedBudgetCeiling : undefined;
+    if (inherited !== undefined) return inherited === 'unset' ? editorCeiling : editorCeiling === 'unset' ? inherited
+      : { kind: 'tokens', maxTotalTokens: Math.min(inherited.maxTotalTokens, editorCeiling.maxTotalTokens) };
     const live = this.#launch.live;
     const share = background === null ? null : { kind: 'tokens' as const, maxTotalTokens: background.maxTotalTokens };
     if (live === null || live.scope === 'ordinary-production') return share ?? editorCeiling;
@@ -1886,7 +1898,7 @@ export class BaselineAnalysisStore {
     ).get(taskIntentId, ordinal) as SqlRow | undefined;
     if (row === undefined) return NO_PLAN_EDITS;
     try {
-      return planEditsOf(parseCanonicalJson(asString(row.canonical_json)));
+      return planEditsOf(parseCanonicalJson(asString(row.canonical_json)), this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     } catch {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }
@@ -1931,7 +1943,7 @@ export class BaselineAnalysisStore {
     // The Evidence Assurance Level is a factual-review Task's term alone (Issue #901); left out, the version keeps its own.
     requireAnalysis(input.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
       'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
-    const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel });
+    const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel }, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
     if (isRecord(intent.record.factualDecision)) requireAnalysis(planEditAssuranceLevel(next) === intent.record.factualDecision.level || planEditAssuranceLevel(next) === 'strict',
       'ANALYSIS_PLAN_EDIT_INVALID', '补充核查不能降低编辑决定要求的核查级别。');
@@ -2039,13 +2051,15 @@ export class BaselineAnalysisStore {
    */
   #currentEditorialMemory(bookId: string): EditorialMemorySnapshot | null {
     // Category review keeps its existing exact preference pins, assembled by the same memory builder.
-    return this.#definition.kind.startsWith('editorial-review/') || this.#launch.operationalScope !== 'ordinary-production' ||
-      this.#launch.policy?.providerProcessing.version !== 'v35' ? null : this.#launch.editorialMemory?.(bookId, this.#definition.kind) ?? null;
+    const kind = this.#definition.editorialMemorySourceKind ?? this.#definition.kind;
+    return analysisUsesAutomaticMemory(this.#launch.operationalScope, this.#launch.policy?.providerProcessing.version, kind)
+      ? this.#launch.editorialMemory?.(bookId, kind) ?? null : null;
   }
 
   #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
     const pin = selectedProcedureForBook(this.#db, bookId, base.kind);
-    return withEditorialMemoryDefinition(pin === null ? base : ((member) => withProcedureDefinition(base, member.document, member.pin))(resolveProcedureForKind(this.#db, pin, base.kind)),
+    const instruction = base.inheritedProcedureInstruction ?? (pin === null ? null : resolveProcedureForKind(this.#db, pin, base.kind));
+    return withEditorialMemoryDefinition(instruction === null ? base : withProcedureDefinition(base, instruction.document, instruction.pin),
       this.#currentEditorialMemory(bookId));
   }
 
@@ -2160,7 +2174,7 @@ export class BaselineAnalysisStore {
     providerPlanPolicyMetadata(records['provider-resolution-plan']);
     const envelope = records['plan-envelope'] as Record<string, unknown>;
     const route = (records['provider-resolution-plan'] as { executionRoute?: { kind: string; model: string; fixtureIdentity?: string; fixtureSha256?: string } }).executionRoute;
-    if (route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE || envelope.compositionVersion === 3 || envelope.compositionVersion === 4) {
+    if ((this.#definition.structuredOnly !== true && route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) || envelope.compositionVersion === 3 || envelope.compositionVersion === 4) {
       const stock = reviewCategoryEntry('typos-and-usage')!;
       const definition = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
       const options = envelope.compositionOptions as CompositionOptions | undefined;
@@ -3124,7 +3138,7 @@ export class BaselineAnalysisStore {
     const predecessor = modeDefinition.initial ? null : existing.resultSetRevision;
     requireAnalysis(modeDefinition.initial || predecessor !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '请先完成首次分析。');
     const selectedRange = modeDefinition.rangeBound ? requireSelectedRange(update?.selectedRange ?? null, blocks.length) : null;
-    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] });
+    const canonical = canonicalPlanEdits(edits ?? { removedSteps: [], disallowedAdaptations: [] }, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     requireAnalysis(canonical !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
     const selected = selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind);
     const instant = new Date().toISOString(), taskIntentId = randomUUID();
@@ -3195,7 +3209,7 @@ export class BaselineAnalysisStore {
       ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }) };
     const persist = (checkpoint: ManuscriptCheckpointBinding): void => {
       this.#insertIntent(intent);
-      const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits);
+      const launchEdits = edits === undefined ? undefined : canonicalPlanEdits(edits, this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
       requireAnalysis(launchEdits !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '本次运行选项无效，请检查预算与重试设置。');
       requireAnalysis(edits?.evidenceAssuranceLevel === undefined || this.#definition.kind === FACTUAL_REVIEW_KIND,
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
@@ -3611,7 +3625,7 @@ export class BaselineAnalysisStore {
     preview?: { blocks: ReadonlyArray<ManifestBlockInput>; consume: (projection: AnalysisProjection) => never };
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
-    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
+    if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
       intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null,
     'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于标准前台全文首次审阅。');
     const taskIntentId = intent.taskIntentId;
@@ -3648,7 +3662,8 @@ export class BaselineAnalysisStore {
       if (currentId !== null) validateProcedureEdit(resolveProcedureDefinition(this.#db, currentId, currentPreinstalledVersion(currentId)).document,
         { procedureId: null, basedOn: selected, title: document.title, editorInstruction: document.editorInstruction, stages: document.stages });
     }
-    const unwrappedDefinition = selected === undefined || document === null ? baseDefinition : withProcedureDefinition(baseDefinition, document, selected);
+    const instruction = baseDefinition.inheritedProcedureInstruction ?? (selected === undefined || document === null ? null : { document, pin: selected });
+    const unwrappedDefinition = instruction === null ? baseDefinition : withProcedureDefinition(baseDefinition, instruction.document, instruction.pin);
     // Plan edits keep their original memory; a newly initiated task selects current enabled rules.
     const firstEnvelope = ordinal === 1 ? undefined : this.#db.prepare(
       "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'plan-envelope'",
@@ -3657,7 +3672,7 @@ export class BaselineAnalysisStore {
       : firstEnvelope === undefined ? null : (parseCanonicalJson(asString(firstEnvelope.canonical_json)) as { editorialMemory?: EditorialMemorySnapshot }).editorialMemory ?? null;
     const definition = withEditorialMemoryDefinition(unwrappedDefinition, memory);
     if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
-    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null && live.scope !== 'ordinary-production') {
+    if (selected !== undefined && document !== null && instruction !== null && procedureInstruction(instruction.document, instruction.pin) !== '' && live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
         'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '这项任务暂不支持带编辑指令的工序。');
     }
@@ -3829,14 +3844,25 @@ export class BaselineAnalysisStore {
     const clarificationPin = unwrappedDefinition.clarificationBase === undefined ? {} : {
       clarificationBasePromptContractDigest: unwrappedDefinition.clarificationBase.promptContractDigest,
     };
+    // A new task snapshots the matching baseline with its exact input revision. Edits and
+    // predecessor tasks retain their first plan's context (including its absence).
+    const firstExecution = ordinal === 1 ? undefined : this.#db.prepare(
+      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = 'execution-plan'",
+    ).get(taskIntentId);
+    const firstSynopsis = firstExecution === undefined ? {} : parseCanonicalJson(asString(firstExecution.canonical_json)) as import('../../shared/protocol/baseline-synopsis.js').FrozenBaselineSynopsisPlan;
+    const synopsisPin = ordinal === 1 ? freezeTaskBaselineSynopses(this.#db, definition.kind, checkpoint.bookId, checkpoint.revisionId, checkpoint.revisionDigest,
+      remainingSynopsisMessageBytes(live === null ? null : modelProfileFor(live.route, live.model)?.context.tokens ?? null, definition.systemPrompt))
+      : { ...(firstSynopsis.baselineSynopsisContext === undefined ? {} : { baselineSynopsisContext: firstSynopsis.baselineSynopsisContext }),
+        ...(firstSynopsis.baselineSynopsisUnavailable === undefined ? {} : { baselineSynopsisUnavailable: firstSynopsis.baselineSynopsisUnavailable }) };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
       'run-source-scope': canonicalRecord(composition.sources === undefined ? sourceScope : { ...sourceScope, localToolSources: composition.sources }),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
-      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin } : {
+      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin, ...synopsisPin } : {
         ...executionPlan,
+        ...synopsisPin,
         ...samplingPin,
         ...clarificationPin,
         materialReferences: this.#definition.materialReferences.sources,
@@ -3870,8 +3896,10 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
-      ...(memory === null ? {} : { editorialMemory: memory, editorialMemoryBasePromptContractDigest: unwrappedDefinition.promptContractDigest }),
-      ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest }),
+      ...(memory === null ? {} : { editorialMemory: memory, editorialMemoryBasePromptContractDigest: unwrappedDefinition.promptContractDigest,
+        ...(baseDefinition.editorialMemorySourceKind === undefined ? {} : { editorialMemorySourceKind: baseDefinition.editorialMemorySourceKind }) }),
+      ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest,
+        ...(baseDefinition.inheritedProcedureInstruction === undefined ? {} : { inheritedProcedureInstruction: baseDefinition.inheritedProcedureInstruction }) }),
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       compositionVersion: composition.version,
@@ -3907,7 +3935,7 @@ export class BaselineAnalysisStore {
         runSourceScope: components['run-source-scope'] as BaselineAnalysisProjection['runSourceScope'],
         coverageManifest: manifest, providerResolutionPlan: components['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'],
         executionPlan: components['execution-plan'] as BaselineAnalysisProjection['executionPlan'],
-        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null, procedureContent: procedureContent(document),
+        planEnvelope: { ...projectedEnvelope, digest: envelope.digest, procedure: selected ?? null, procedureContent: procedureContent(instruction?.document),
           providerStatus: envelopeBase.providerStatus as NonNullable<BaselineAnalysisProjection['planEnvelope']>['providerStatus'],
           boundary: envelopeBase.boundary, ...(composition.version === 1 ? {} : { compositionVersion: composition.version }) },
         planVersion: { ...version, materialInputs: materialPlanInputsOfComponents(components, intent.record) }, planVersions: [version],
@@ -3955,7 +3983,7 @@ export class BaselineAnalysisStore {
     launchSnapshotId?: string,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(launchSnapshotId === undefined || UUID_PATTERN.test(launchSnapshotId), 'ANALYSIS_RECORD_INVALID', '任务启动快照引用无效。');
-    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+    if (this.#definition.structuredOnly !== true && this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
@@ -4198,7 +4226,7 @@ export class BaselineAnalysisStore {
       const plan = governed ? this.#planRecords(stored!.binding.taskIntentId, 'any', stored!.binding.planVersion) : null;
       const reuse = plan?.['reuse-plan'] as { units: Array<{ disposition: string }> } | undefined;
       const facts = governed ? null : this.loadExecutionPlan(runRecordId);
-      const expected = governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
+      const expected = definition.structuredOnly === true ? 0 : governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
         : facts!.update === null ? facts!.manifest.units.length : facts!.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
       if (this.unitCheckpoints(runRecordId).length !== expected) invalid();
       const usage = this.carriedUsageOf(runRecordId)?.stages;
@@ -4780,7 +4808,7 @@ export class BaselineAnalysisStore {
     // editor withdrew is looked for — the split's words, and a class a later release adds, are not a plan's to answer.
     let editorEdits: PlanEdits;
     try {
-      editorEdits = planEditsOf(plan['execution-plan']);
+      editorEdits = planEditsOf(plan['execution-plan'], this.#definition.structuredOnly === true ? Number.MAX_SAFE_INTEGER : undefined);
     } catch {
       throw new AnalysisError('ANALYSIS_RECORD_INVALID', '计划记录的修改无效。');
     }
@@ -4852,6 +4880,9 @@ export class BaselineAnalysisStore {
       },
       manifest,
       manifestDigest: manifest.digest,
+      ...((plan['execution-plan'] as NonNullable<BaselineAnalysisProjection['executionPlan']>).baselineSynopsisContext === undefined ? {} : {
+        baselineSynopsisContext: (plan['execution-plan'] as NonNullable<BaselineAnalysisProjection['executionPlan']>).baselineSynopsisContext,
+      }),
       planEnvelopeDigest: asString(run.plan_envelope_sha256),
       runSourceScopeDigest: asString(digests['run-source-scope']),
       ...(providerPlan.webToolsBackend === undefined ? {} : { webToolsBackend: providerPlan.webToolsBackend, searchCredentialReference: providerPlan.searchCredentialReference! }), ...(providerPlan.webToolsFallback === undefined ? {} : { webToolsFallback: providerPlan.webToolsFallback }),

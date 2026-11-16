@@ -1,4 +1,8 @@
+import { EditorialMemoryFacade, dialogueMemoryContext } from './learning/memory-facade.js';
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
+import { withModelClarification } from './provider/clarification-contract.js';
+import { RUN_SYNTHESIS_ENTRY, runSynthesisKind } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
 import { TaskLaunchPreview } from './task-plan-creation.js';
@@ -532,7 +536,6 @@ import type { ProcedureDefinitionDocument } from '../shared/protocol/procedures.
 import {
   SupervisionDirectives,
   initializeSupervisionSchema,
-  type EditorialMemoryGovernanceHooks,
 } from './learning/supervision-directives.js';
 import {
   analysisBytePage,
@@ -686,6 +689,7 @@ import {
   baselineAnalysisKindDefinition,
   factualReviewKindDefinition,
   RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
+  RETAINED_V2_RECORDED_FIXTURE_IDENTITY,
   type AnalysisKindDefinition,
 } from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
@@ -2549,10 +2553,8 @@ export class EditorialStore {
       dialogueCall: this.#dialogueCall.bind(this),
       get dialogueHistory() { return store.#dialogueHistory; },
       get dialogues() { return store.#dialogues; },
-      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
       learningCall: this.#learningCall.bind(this),
-      learningLedger: this.#learningLedger.bind(this),
-      get learningSupervisionHost() { return store.#learningSupervisionHost; },
+      memoryFacade: this.#memoryFacade.bind(this),
       get localFixtureCatalog() { return store.#localFixtureCatalog; },
       set localFixtureCatalog(value) { store.#localFixtureCatalog = value; },
       transaction: this.#transaction.bind(this),
@@ -2918,10 +2920,10 @@ export class EditorialStore {
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       executionFor: binding => this.#baselineAnalysis.withExecutionChoice(binding,
         resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', binding)).launch,
-      learningLedger: () => this.#learningLedger(),
+      memoryFacade: () => this.#memoryFacade(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+        const use = this.#memoryFacade().reviewPreference(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -3031,8 +3033,10 @@ export class EditorialStore {
     const route = control.baselineAnalysisRoute;
     requireStore((control.baselinePromptContract ?? 'current') === 'current' || (control.baselinePromptContract === 'retained-v1' &&
       route !== null && route.fixtureIdentity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY && route.fixtureLineage.length === 1 &&
-      route.fixtureLineage[0]!.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY),
-    'ANALYSIS_PROMPT_CONTRACT_REFUSED', '基线提示契约 v1 只随已准入的历史录制夹具重放。');
+      route.fixtureLineage[0]!.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY) || (control.baselinePromptContract === 'retained-v2' &&
+      route !== null && route.fixtureIdentity === RETAINED_V2_RECORDED_FIXTURE_IDENTITY && route.fixtureLineage.length === 1 &&
+      route.fixtureLineage[0]!.identity === RETAINED_V2_RECORDED_FIXTURE_IDENTITY),
+    'ANALYSIS_PROMPT_CONTRACT_REFUSED', '历史基线提示契约只随已准入的历史录制夹具重放。');
     const workflowProfile = await loadBuiltInManuscriptProfile(codeRoot);
     // The software version the store records beside its Data Version (Issue #433, S85a).
     const softwareVersion = control.softwareVersion ?? await readSoftwareVersion(codeRoot).catch((error: unknown) => {
@@ -3634,7 +3638,7 @@ export class EditorialStore {
       return ledger;
     };
     const seriesRule = definition.seriesScopes === undefined ? '' : sha256(canonicalJson(this.#baselineAnalysis.launch.policy?.providerProcessing.admittedRules ?? []));
-    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}`, make) : make();
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}\n${definition.structuredInputKey ?? ''}\n${canonicalJson(definition.inheritedBudgetCeiling ?? null)}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -3709,7 +3713,9 @@ export class EditorialStore {
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
-    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const base = entry.synthesisKey === undefined
+      ? this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)))
+      : runSynthesisKind(this.#authority, entry.synthesisKey, entry.synthesisSource, contractVersion);
     const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
@@ -3720,7 +3726,7 @@ export class EditorialStore {
         // Current consistency availability is derived from today's knowledge. Its historical Run reconstructs from its
         // snapshot entry instead; mixing today's definition with a prior Run's pins would falsely make a saved step unavailable.
         if (entry.seriesKnowledge === undefined) scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
-        preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(asString(row.task_intent_id));
+        preference = this.#memoryFacade().pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
           const json = asString(record.canonical_json);
@@ -3759,7 +3765,7 @@ export class EditorialStore {
       prior = toolBase.promptContractDigest === base.promptContractDigest ? definition : wrap(base);
     } else {
       const candidates: AnalysisKindDefinition[] = [];
-      for (const historical of historicalReviewCategoryDefinitions(input, contractVersion)) {
+      for (const historical of entry.synthesisKey === undefined ? historicalReviewCategoryDefinitions(input, contractVersion) : [base]) {
         try { candidates.push(wrap(historical)); }
         catch (error) {
           // Series consistency accepts only its own supported base; another historical form gains no proof.
@@ -3775,6 +3781,29 @@ export class EditorialStore {
     requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
     if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
+    Object.assign(definition, { historicalDefinitionForDigest: (digest: string): AnalysisKindDefinition | null => {
+      const row = this.#authority.prepare(`SELECT r.canonical_json, r.sha256, member.value category, t.contract_version,
+        p.canonical_json envelope_json, p.sha256 envelope_digest, x.canonical_json execution_json, x.sha256 execution_digest FROM review_runs r
+        JOIN json_each(r.canonical_json, '$.categories') member
+        JOIN analysis_task_intents t ON t.task_intent_id=json_extract(member.value, '$.task.taskIntentId')
+        JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id AND p.component='plan-envelope'
+        JOIN analysis_plan_records x ON x.task_intent_id=t.task_intent_id AND x.plan_version=p.plan_version AND x.component='execution-plan'
+        WHERE t.kind=? AND COALESCE(json_extract(p.canonical_json, '$.basePromptContractDigest'),
+          json_extract(p.canonical_json, '$.editorialMemoryBasePromptContractDigest'),json_extract(p.canonical_json, '$.promptContractDigest'))=?
+        ORDER BY r.ordinal DESC LIMIT 1`).get(definition.kind, digest);
+      if (row === undefined) return null;
+      requireStore(sha256(String(row.canonical_json)) === row.sha256 && sha256(String(row.envelope_json)) === row.envelope_digest && sha256(String(row.execution_json)) === row.execution_digest,
+        'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
+      const snapshot = JSON.parse(String(row.canonical_json)) as { materialReferences?: TaskMaterialBoundary };
+      const category = JSON.parse(String(row.category)) as { entry: ReviewCategoryConfigurationEntry; task: { taskIntentId: string } };
+      if (category.entry.executor !== 'review-category-contract') return null;
+      const use = this.#memoryFacade().pinned(category.task.taskIntentId);
+      const baseDigest = unwrappedPlanPromptDigest(JSON.parse(String(row.execution_json)), JSON.parse(String(row.envelope_json)));
+      const historical = this.#reviewLedgerOf(category.entry, snapshot.materialReferences, baseDigest, undefined, use,
+        row.contract_version === 'ai7.editorial-review/1' ? 1 : 2).definition;
+      const base = historical.clarificationBase ?? historical;
+      return [historical, base, withModelClarification(base)].find(candidate => candidate.promptContractDigest === digest) ?? null;
+    } });
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
     return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
@@ -4259,7 +4288,7 @@ export class EditorialStore {
     return this.#reviewCall(() => {
       this.#transaction(this.#authority, () => {
         this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-        this.#learningLedger().captureIgnoredFinding(bookId, reviewRunId, findingId);
+        this.#memoryFacade().captureIgnoredFinding(bookId, reviewRunId, findingId);
       });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
@@ -4901,6 +4930,8 @@ export class EditorialStore {
       // The Evidence Assurance Level is the 事实核查 Task's alone (Issue #901): only that category's Task is handed it, and a
       // Review Run without one refuses it. An edit of the level alone leaves every other category's plan as it is.
       const { evidenceAssuranceLevel, ...shared } = input;
+      const budgetMembers = this.#reviewRuns.planFacts(input.bookId, input.ref).composite === undefined
+        ? tasks.filter(task => task.categoryId !== 'run-synthesis').length : 1;
       requireStore(evidenceAssuranceLevel === undefined || tasks.some((task) => task.categoryId === 'factual-review'),
         'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
       this.#transaction(this.#authority, () => {
@@ -4908,7 +4939,9 @@ export class EditorialStore {
         for (const task of tasks) {
           const factual = task.categoryId === 'factual-review';
           try {
-            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
+            const summaryCeiling = task.categoryId === 'run-synthesis' && shared.runBudgetCeiling != null
+              ? { runBudgetCeiling: { ...shared.runBudgetCeiling, maxTotalTokens: shared.runBudgetCeiling.maxTotalTokens * budgetMembers } } : {};
+            this.#analysisCall(() => task.ledger.editPlan(input.bookId, { ...shared, ...summaryCeiling, ...(factual && evidenceAssuranceLevel !== undefined ? { evidenceAssuranceLevel } : {}),
               taskIntentId: task.taskIntentId, planEnvelopeDigest: task.planEnvelopeDigest }));
             changed += 1;
           } catch (error) {
@@ -5464,7 +5497,7 @@ export class EditorialStore {
       FROM analysis_clarification_requests q JOIN analysis_run_records r ON r.run_record_id = q.run_record_id
       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN books b ON b.book_id = i.book_id
       LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
-      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
+      WHERE q.model_question_json IS NOT NULL AND a.answer_id IS NULL AND i.kind <> 'editorial-review/run-synthesis' AND i.kind <> ? AND (? IS NULL OR i.book_id = ?)
       AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
         IN ('admitted','executing','pausing','paused','resumable','awaiting-clarification') LIMIT ?`).all(BASELINE_ANALYSIS_KIND, bookId, bookId, limit) as SqlRow[];
     // A Task the control readings above already carry shows its open question there, as the baseline's does (#870).
@@ -8875,7 +8908,7 @@ export class EditorialStore {
       get bookPeople() { return store.#bookPeople; },
       learningCall: this.#learningCall.bind(this),
       get learningEligibility() { return store.#learningEligibility; },
-      learningLedger: this.#learningLedger.bind(this),
+      memoryFacade: this.#memoryFacade.bind(this),
       learningMaterialSource: this.#learningMaterialSource.bind(this),
       get learningSupervisionHost() { return store.#learningSupervisionHost; },
       get replacementFrozen() { return store.replacementFrozen.bind(store); },
@@ -8988,24 +9021,16 @@ export class EditorialStore {
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost), 'memory');
+      this.#memoryFacade().accept(input, this.#baselineAnalysis.launch.operationalScope);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+      this.#memoryFacade().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
-  }
-
-  #editorialMemoryGovernanceHooks(): EditorialMemoryGovernanceHooks {
-    const learning = this.#learningLedger();
-    return { revisions: () => learning.revisions(this.#baselineAnalysis.launch.operationalScope),
-      govern: (directive, expected) => learning.govern(directive, expected) };
   }
 
   /**
@@ -9115,7 +9140,6 @@ export class EditorialStore {
       get authority() { return store.#authority; },
       get baselineAnalysis() { return store.#baselineAnalysis; },
       get bookPeople() { return store.#bookPeople; },
-      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
       evaluationBookTitle: this.#evaluationBookTitle.bind(this),
       get inspectBaselineAnalysis() { return store.inspectBaselineAnalysis.bind(store); },
       get inspectGlobalAgent() { return store.inspectGlobalAgent.bind(store); },
@@ -9123,7 +9147,7 @@ export class EditorialStore {
       learningCall: this.#learningCall.bind(this),
       learningCandidates: this.#learningCandidates.bind(this),
       get learningEligibility() { return store.#learningEligibility; },
-      learningLedger: this.#learningLedger.bind(this),
+      memoryFacade: this.#memoryFacade.bind(this),
       learningMaterialSource: this.#learningMaterialSource.bind(this),
       get reviewRuns() { return store.#reviewRuns; },
       get series() { return store.#series; },
@@ -9245,7 +9269,7 @@ export class EditorialStore {
   #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'> {
     const source = candidate.source;
     if (source.kind === 'word-tracked-edit') return { target: { ...source, bookId }, sourceTask: null,
-      wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
+      wordCurrentEligibility: this.#memoryFacade().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
     if (source.kind === 'analysis') {
       // The judged revision owns this Task, even after a newer analysis becomes current.
       const row = one(this.#authority.prepare(
@@ -9355,13 +9379,13 @@ export class EditorialStore {
         signalId: asString(row.signal_id),
         reviewRunId: asString(row.review_run_id),
         findingId: asString(row.finding_id),
-        categoryLabel: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        categoryLabel: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
         reason: asString(row.reason),
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
     }
     // Retained Word pairs verify their original before projecting; a consumer that never uses them skips that read.
-    if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
+    if (includeWord) yield* this.#memoryFacade().wordCandidates(bookId);
   }
 
   #learningCall<T>(operation: () => T): T {
@@ -9375,6 +9399,12 @@ export class EditorialStore {
       }
       throw error;
     } finally { if (--this.#learningCallDepth === 0) this.#wordLearningRead = null; }
+  }
+
+  /** The facade reuses the current operation's proof reader and never owns its transaction. */
+  #memoryFacade(): EditorialMemoryFacade {
+    return new EditorialMemoryFacade(this.#authority, () => this.#learningLedger(),
+      () => learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
   }
 
   /** C0's existing per-read proofs, invalidated by any database write; no cache survives the outer local operation. */
@@ -9541,8 +9571,8 @@ export class EditorialStore {
       const result = this.#bookPeople.update(input);
       const scope = this.#baselineAnalysis.launch.operationalScope;
       // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
-      const preferences = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger());
-      if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
+      const preferences = this.#memoryFacade();
+      if (this.#memoryFacade().directives(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
         preferences.refreshGovernance(scope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
       return result;
     }));
@@ -13552,14 +13582,14 @@ export class EditorialStore {
     if (this.#checkpointWorker) this.#checkpointWorker.admitJournalWrite();
     else this.#checkpoint.admitJournalWrite();
     const ack = this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
-      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+      new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
     this.#checkpointWorker?.journalWritten();
     return ack;
   }
 
   inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,
     budgetBytes = MAX_FRAME_BYTES): import('./bounded-manuscript.js').ManualCommandSourcePage {
-    return this.#learningCall(() => this.#learningLedger().manualSourcePage(signalId, cursor, budgetBytes));
+    return this.#learningCall(() => this.#memoryFacade().manualSourcePage(signalId, cursor, budgetBytes));
   }
 
   /**
@@ -13897,7 +13927,7 @@ export class EditorialStore {
 
   commitReplacement(previewId: string): ReplacementCommitProjection {
     return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId, (source) =>
-      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+      new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
   }
 
   cancelReplacement(previewId: string): boolean {
@@ -14228,8 +14258,9 @@ export class EditorialStore {
       JOIN analysis_plan_records p ON p.sha256 = a.plan_envelope_sha256 AND p.component = 'plan-envelope'
       WHERE r.run_record_id = ?`).get(runRecordId);
     if (row !== undefined) {
-      const frozen = (JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown }).editorialMemory;
-      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), String(row.kind))))
+      const plan = JSON.parse(String(row.canonical_json)) as { editorialMemory?: unknown; editorialMemorySourceKind?: string };
+      const frozen = plan.editorialMemory;
+      if (frozen !== undefined && canonicalJson(frozen) !== canonicalJson(this.editorialMemory(String(row.book_id), plan.editorialMemorySourceKind ?? String(row.kind))))
         return '本社与本书编辑偏好已变化，请重新准备任务。';
     }
     return this.#reviewRuns.learningReadGuard(runRecordId) ?? this.#preferenceGovernanceGuard(runRecordId);
@@ -14243,7 +14274,7 @@ export class EditorialStore {
     const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (run === undefined) return null;
     try {
-      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost))
+      return this.#memoryFacade().governanceChanged(asString(run.task_intent_id))
         ? '本社审阅偏好的学习监督已变化' : null;
     } catch (error) {
       if (!(error instanceof LearningEligibilityError)) throw error;
@@ -15255,12 +15286,13 @@ export class EditorialStore {
 
   /** The category a review kind names, in the house's built-in configuration's words; `null` for any other kind. */
   #unconfirmedCategory(kind: string): string | null {
+    if (kind === 'editorial-review/run-synthesis') return RUN_SYNTHESIS_ENTRY.label;
     if (kind === FACTUAL_REVIEW_KIND) {
       return BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.executor === 'factual-review-kind')?.label ?? kind;
     }
     if (!isReviewCategoryKindId(kind)) return null;
     const categoryId = kind.slice(kind.indexOf('/') + 1);
-    return reviewCategoryEntry(categoryId)?.label ?? categoryId;
+    return reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label);
   }
 
   /** The drawer's list of 结果待确认 a completed Run of this kind left on the Book (Issue #757); `null` when there is none. */
@@ -15985,15 +16017,13 @@ export class EditorialStore {
   /** Automatic house context for Global Agent; book context for selection dialogue and workspace turns. */
   dialogueEditorialMemory(dialogueId: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
     const task = this.#dialogues.task(dialogueId);
-    return this.editorialMemory(task?.bookId ?? null, task?.origin === 'agent-workspace' ? 'agent-workspace' : task ? 'editorial-dialogue' : 'global-agent');
+    return this.editorialMemory(...dialogueMemoryContext(task == null ? null : { bookId: task.bookId, workspace: task.origin === 'agent-workspace' }));
   }
 
   editorialMemory(bookId: string | null, taskKind: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
     const launch = this.#baselineAnalysis.launch;
-    if (launch.operationalScope !== 'ordinary-production' || launch.policy?.selectedPolicyIdentity?.providerProcessingVersion !== 'v35') return null;
-    return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).memory(launch.operationalScope,
-      { bookId, taskKind, ...(taskKind.startsWith('custom-analysis/') ? { categoryId: taskKind.slice('custom-analysis/'.length) } : {}) },
-      learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+    return this.#memoryFacade().request({ operationalScope: launch.operationalScope,
+      providerProcessingVersion: launch.policy?.selectedPolicyIdentity?.providerProcessingVersion, bookId, taskKind });
   }
 
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
@@ -16671,7 +16701,7 @@ export class EditorialStore {
         const original = await readRetainedWordOriginal(this.#authority, this.#dataRoot, this.#objectsRoot, result.bookId, sourceVersionId);
         const { compiled } = readWordManuscriptExportSource(this.#authority, result.bookId, result.revisionId, sourceVersionId, original);
         this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, result.bookId, result.commitId, compiled));
-        this.#learningCall(() => this.#learningLedger().validateWordImportSamples(result.bookId, result.commitId, compiled));
+        this.#learningCall(() => this.#memoryFacade().validateWordImportSamples(result.bookId, result.commitId, compiled));
       }
     }
   }
@@ -18495,7 +18525,7 @@ export class EditorialStore {
       choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认「直接并入正文（作为定稿基线）」。' : '接受修订后的阅读没有可编辑的非空稿件。');
     const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
     requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
-    const ledger = this.#learningLedger();
+    const ledger = this.#memoryFacade();
     let preparedTarget: WordPreparedIntake['target'];
     if (target.kind === 'new-book') preparedTarget = { kind: 'new-book', controls: ledger.wordImportControlPins(null) };
     else {
@@ -18603,7 +18633,10 @@ export class EditorialStore {
     const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
       materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
         wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
-    const ledger = this.#learningLedger();
+    // This import's three operations historically shared one ledger/read proof across its writes.
+    // A facade factory per method would re-read controls here; retain that operation-local lifetime.
+    const learning = this.#learningLedger();
+    const ledger = new EditorialMemoryFacade(this.#authority, () => learning);
     const controls = ledger.wordImportControls(bookId, materials);
     if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
       'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
@@ -19522,7 +19555,7 @@ export class EditorialStore {
       this.#retentionCall(() => requireWordManuscriptSourceSegments(this.#authority, input.bookId, choice,
         word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
       this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, input.bookId, word.commitId, word.compiled));
-      this.#learningCall(() => this.#learningLedger().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
+      this.#learningCall(() => this.#memoryFacade().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
     }
     const { plan: persistedPlan } = this.#persistedFidelityPlan(
       input.fidelityReviewId,

@@ -321,8 +321,10 @@ export * from './protocol/learning.js';
 export * from './protocol/analysis.js';
 export * from './protocol/task-kinds.js';
 export * from './protocol/analysis-plan.js';
+export * from './protocol/baseline-synopsis.js';
 export * from './protocol/factual-verification.js';
 export * from './protocol/review-runs.js';
+export * from './protocol/review-synthesis.js';
 export * from './protocol/evaluation.js';
 export * from './protocol/writing.js';
 export * from './protocol/task-plan.js';
@@ -342,18 +344,26 @@ export * from './protocol/scoped-edit.js';
  * mark category/source fields on mark projections (#1429); inline editor revisions with apply/revert card actions (#1428);
  * the one-click `book-review-report` DOCX export target and its report sections (#1430).
  *
+ * Protocol 204 (#1496 R3 closure, 0.7.2): PR #1503 adds optional review-run/report
+ * synthesis and aggregate usage projections, including their attention presentation.
+ * PR #1507 adds optional activation: 'non-activating' to the existing Book-open IPC
+ * and the held-elsewhere result, with shared closed validation in main/preload.
+ * PR #1512 adds optional executionPlan.baselineSynopsisContext and
+ * baselineSynopsisUnavailable on analysis, writing and evaluation projections.
+ * Schema 116 (PR #1503's in-place 115 -> 116 migration) and Data Version 1
+ * remain separate compatibility identities; closure adds no migration.
+ *
  * Protocol 203 (#1472 R2 closure, 0.7.1): PR #1478 adds reasoning effort to role
  * selection inputs and settings projections. PR #1487 adds launchReviewRun, optional
  * execution choice on scoped edit and review-workspace inspection, and frozen model
  * labels. PR #1488 adds six launch operations, launch preview, remembered task choices
  * and model labels on evaluation, writing and report projections. PR #1489 adds the
  * optional analysis planEnvelope.procedureContent { editorInstruction, exemptionRules } (#1476).
- * Schema 115 and Data Version 1 remain separate compatibility identities.
  *
  * Protocol 202 (#1459 R1 closure, 0.7.0): PR #1462 (#1435) adds `guessed-anchor` to
  * ProposalDraftBatchProjection.excluded.reason. No other R1 change alters IPC.
  */
-export const SERVICE_PROTOCOL_VERSION = 203 as const;
+export const SERVICE_PROTOCOL_VERSION = 204 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
@@ -2634,6 +2644,16 @@ export type BookWorkbenchRoute =
   | { kind: 'book'; bookId: string; feedbackEntryId?: string; learningMaterialKey?: string }
   | { kind: 'revision'; revisionId: string };
 
+/** Renderer/main presentation option; never sent to the service route resolver. */
+export type BookWorkbenchOpenInput = BookWorkbenchRoute & { activation?: 'non-activating' };
+export function isNonActivatingBookOpen(input: unknown): input is { kind: 'book'; bookId: string; activation: 'non-activating' } {
+  if (input === null || typeof input !== 'object' || !Object.hasOwn(input, 'activation')) return false;
+  const value = input as Record<string, unknown>;
+  if (value.activation !== 'non-activating' || value.kind !== 'book' || typeof value.bookId !== 'string' ||
+      Object.keys(value).length !== 3 || !Object.hasOwn(value, 'kind') || !Object.hasOwn(value, 'bookId')) throw new Error('AI7_RENDERER_BOUNDARY_INVALID');
+  return true;
+}
+
 export type ResolvedBookWorkbenchRoute =
   | {
       kind: 'book';
@@ -2654,7 +2674,7 @@ export type ResolvedBookWorkbenchRoute =
 
 export interface BookWorkbenchOpenProjection {
   route: ResolvedBookWorkbenchRoute;
-  target: 'requesting-window' | 'existing-window' | 'new-window';
+  target: 'requesting-window' | 'existing-window' | 'new-window' | 'held-elsewhere';
 }
 
 export type DistributionChannel = 'source-checkout' | 'windows-installer' | 'windows-portable' | 'macos-dmg' | 'packaged';
@@ -7377,7 +7397,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   revealManuscriptExport(input: Omit<InspectManuscriptExportReceiptInput, 'bookId'>): Promise<{ state: 'revealed' }>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
-  openBookWorkbench(input: BookWorkbenchRoute): Promise<BookWorkbenchOpenProjection>;
+  openBookWorkbench(input: BookWorkbenchOpenInput): Promise<BookWorkbenchOpenProjection>;
   getBookWorkbenchRoute(): Promise<ResolvedBookWorkbenchRoute | null>;
   leaveBookWorkbench(): Promise<{ state: 'library' }>;
   getHistoricalRevision(

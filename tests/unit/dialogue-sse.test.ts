@@ -17,7 +17,7 @@ import type { CoverageManifestUnitProjection } from '../../src/shared/protocol.j
 
 const model = OPENCODE_GO_V41_FLASH_PROFILE;
 /** What the adapter at b32fb75b, before #833, sent for the synthetic baseline unit and review unit below. */
-const BASELINE_BYTES_SHA256 = '00e2583afeecfb79882410ef5bbdd4eb52602e280b600d0598b16076c3405d89';
+const BASELINE_BYTES_SHA256 = '321247cc4083a730a7be4257d04b73ae71447786cb1a3e1f58dac955d28939b8';
 const REVIEW_BYTES_SHA256 = 'd7ebae3ad6ca7a71a8f60d77b0cfff9629536c2e9791472d37c12a366e3673d3';
 const event = (value: unknown): string => `data: ${JSON.stringify(value)}\r\n\r\n`;
 const delta = (text: string): string => event({ model: model.model, choices: [{ index: 0, delta: { content: text } }] });

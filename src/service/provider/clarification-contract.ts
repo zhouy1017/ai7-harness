@@ -88,7 +88,7 @@ export function buildClarificationAnswerMessage(unitMessage: string, request: Pi
       : request.modelQuestion.options![Number(ordinal)]!;
   const record = { schema: 'ai7.provider.clarification-answer-turn/2', question: request.modelQuestion, answer: text };
   // The second turn has a different fixture/cache key, including the answer, even on an identical unit.
-  const blockIds = [...unitMessage.matchAll(/^\[(blk_[0-9a-f]{24})\]/gmu)].map((match) => match[1]!);
+  const blockIds = [...unitMessage.matchAll(/^(?:\[[1-9][0-9]*\] )?\[(blk_[0-9a-f]{24})\]/gmu)].map((match) => match[1]!);
   const normalized = canonicalJson(record).replace(/blk_[0-9a-f]{24}/gu, (id) => {
     const index = blockIds.indexOf(id);
     return index < 0 ? id : `{{block:${index + 1}}}`;

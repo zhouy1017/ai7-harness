@@ -96,7 +96,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const close = el('button', 'quiet', '关闭'); close.addEventListener('click', () => sheet.close());
     const foot = el('div'); foot.append(added, add, close);
     const config = el('div', 'button-row'); for (const [label, kind] of [['自定义审阅…', 'review'], ['写作任务说明…', 'writing']] as const) { const link = el('button', 'quiet', label); link.addEventListener('click', () => { const book = list.querySelector<HTMLInputElement>('input:checked')?.value; if (book) { sheet.close(); options.configure?.(book, kind); } }); config.append(link); }
-    const popup = el('label'); const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.dataset['taskOverviewAutoResult'] = ''; checkbox.checked = localStorage.getItem('ai7.task-overview.auto-result') !== 'off'; checkbox.addEventListener('change', () => localStorage.setItem('ai7.task-overview.auto-result', checkbox.checked ? 'on' : 'off')); popup.append(checkbox, document.createTextNode('正在看本书时自动显示结果'));
+    const popup = el('label'); const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.dataset['taskOverviewAutoResult'] = ''; checkbox.checked = localStorage.getItem('ai7.task-overview.auto-result') !== 'off'; checkbox.addEventListener('change', () => localStorage.setItem('ai7.task-overview.auto-result', checkbox.checked ? 'on' : 'off')); popup.append(checkbox, document.createTextNode('查看任务总览、任务面板或该任务时自动显示结果'));
     sheetContent(sheet, el('h2', undefined, '发起任务'), [list, type, config, popup], foot);
   }
   function filter(label: string, active: boolean, action: () => void): HTMLButtonElement { const node = el('button', 'quiet task-overview-filter', label); node.setAttribute('aria-pressed', String(active)); node.addEventListener('click', action); return node; }
@@ -184,7 +184,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     restoreInteraction();
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
   }
-  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error')).finally(() => { inFlight = false; }); }
+  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => { if (!destroyed) options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error'); }).finally(() => { inFlight = false; }); }
   function keydown(event: KeyboardEvent): void {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
     const cards = [...host.querySelectorAll<HTMLElement>('[data-task-item]')]; const index = cards.findIndex((node) => node === document.activeElement || node.contains(document.activeElement));

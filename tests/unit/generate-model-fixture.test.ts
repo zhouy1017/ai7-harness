@@ -18,6 +18,7 @@ import {
 } from '../../src/service/analysis/assurance-sampling-contract.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1,
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
   crossUnitRequestDigest,
   parseCrossUnitCitedBlocks,
@@ -566,7 +567,7 @@ function reductionMessage(setDigest = 'd'.repeat(64)): string {
   return [
     BASELINE_CROSS_UNIT_PROMPT_CONTRACT.messageHeader.replace('{closed}', '2').replace('{total}', '3').replace('{unitSetDigest}', setDigest),
     '合成单元结果占位。',
-    BASELINE_CROSS_UNIT_PROMPT_CONTRACT.citedBlocksHeader,
+    BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1.citedBlocksHeader,
     `单元 1：${BLOCKS[0]!}${BASELINE_CROSS_UNIT_PROMPT_CONTRACT.blockIdSeparator}${BLOCKS[1]!}`,
     `单元 2：${BLOCKS[2]!}`,
   ].join('\n');

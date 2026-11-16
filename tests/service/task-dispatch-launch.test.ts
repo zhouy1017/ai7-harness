@@ -1,8 +1,13 @@
 import { makeJ13Series } from '../support/series-consistency.js';
+import { runSynopsisBaseline, appendBaselineUnitVariant } from '../support/synopsis-reuse.js';
+import { appendTaskBaselineSynopses, MAX_TASK_SYNOPSIS_BYTES, taskSynopsisRequestDigest, remainingSynopsisMessageBytes, taskSynopsisMessageRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { readFileSync } from 'node:fs';
+import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { writeFile } from 'node:fs/promises';
 import { setLibraryDecision } from '../support/library-materials.js';
 import { launchedRevisionModelLabels, markModelLabels } from '../../src/service/editorial-mark-source.js';
-import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTES } from '../../src/shared/protocol/model-service.js';
+import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTES, type ModelServiceRouteId } from '../../src/shared/protocol/model-service.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -50,6 +55,266 @@ beforeEach(async () => {
   setupOwner = new BaselineAnalysisExecutionOwner({ requestGovernor: governor, ledger: store.baselineAnalysisLedger, launchPolicy: policy,
     fixture, secretResolver: { resolve: async () => null } });
 });
+
+const SYNOPSIS_KINDS = ['writing', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'] as const;
+type SynopsisKind = typeof SYNOPSIS_KINDS[number];
+
+async function synopsisSchedule(kind: SynopsisKind, failedBaselineUnit = 0) {
+  const answer = await lifecycleAnswers(kind);
+  const closed = new Map<number, { state: 'closed'; unitOrdinal: number; result: unknown }>();
+  const schedule: CapturedOrdinaryAnswer = request => {
+    const definition = store.executionLedgerForRun(capture!.runRecordIds.get(request.requestId)!).definitionForDigest(request.contractDigest);
+    if (definition.kind === 'baseline-manuscript-analysis' && request.stage === 'units' && request.unitOrdinal === failedBaselineUnit)
+      return { kind: 'adapter-failure', code: 'CAPTURED_BASELINE_GAP', message: 'Captured baseline gap', status: 400 };
+    const response = answer(request, definition);
+    if (request.stage === 'units' && definition.kind !== 'baseline-manuscript-analysis' && response?.kind === 'unit-result')
+      closed.set(request.unitOrdinal!, { state: 'closed', unitOrdinal: request.unitOrdinal!, result: JSON.parse(response.text) });
+    return response;
+  };
+  return { schedule, closed };
+}
+
+function verifySynopsisRequest(launched: LaunchedTask, closed: Awaited<ReturnType<typeof synopsisSchedule>>['closed'], expected: boolean) {
+  const facts = launched.ledger.loadExecutionPlan(launched.runRecordId);
+  const definition = launched.ledger.definitionForDigest(facts.promptContractDigest);
+  const blocks = new Map(launched.ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId).map(block => [block.blockId, block]));
+  const context = { manifest: facts.manifest, blocks };
+  const ordered = [...closed.values()].sort((a, b) => a.unitOrdinal - b.unitOrdinal);
+  const base = definition.crossUnit!.step!.buildMessage(ordered, facts.manifest.units.length, context);
+  const requests = capture!.requests.flatMap((request, index) => capture!.runRecordIds.get(request.requestId) === launched.runRecordId ? [{ request, wire: capture!.wireRequests[index]! }] : []);
+  const final = requests.find(({ request }) => request.stage === 'cross-unit-reduction')!;
+  expect(final).toBeDefined();
+  expect(final.request.requestDigest).toBe(taskSynopsisRequestDigest(definition.crossUnit!.step!.requestDigest(ordered, context), facts.baselineSynopsisContext));
+  const message = final.wire.messages.findLast(entry => entry.role === 'user')!.content;
+  expect(message).toBe(appendTaskBaselineSynopses(base, facts.baselineSynopsisContext));
+  expect(facts.baselineSynopsisContext !== undefined).toBe(expected);
+  for (const { request, wire } of requests.filter(({ request }) => request.stage === 'units')) {
+    const unit = facts.manifest.units.find(unit => unit.ordinal === request.unitOrdinal)!;
+    expect(request.requestDigest).toBe(definition.requestDigest(unit.ordinal, unit.digest));
+    expect(wire.messages.findLast(entry => entry.role === 'user')!.content).toBe(definition.buildUnitMessage(unit, facts.manifest.units.length, blocks));
+    expect(wire.messages.some(entry => entry.content.includes('基线分析的分章概述（仅作全书脉络参考'))).toBe(false);
+  }
+  if (!expected) { expect(message).toBe(base); return; }
+  expect(facts.baselineSynopsisContext!.manuscriptRevisionId).toBe(facts.checkpoint.revisionId);
+  const payload = JSON.parse(message.slice(message.indexOf('\n{', base.length) + 1));
+  expect(payload.synopses.length).toBeGreaterThan(0);
+  expect(payload.synopses.every((unit: { synopsis: string }) => [...unit.synopsis].length <= 400)).toBe(true);
+  if (facts.baselineSynopsisContext!.maximumMessageBytes !== null)
+    expect(Buffer.byteLength(message, 'utf8')).toBeLessThanOrEqual(facts.baselineSynopsisContext!.maximumMessageBytes!);
+  expect(Buffer.byteLength(JSON.stringify(payload), 'utf8')).toBeLessThanOrEqual(MAX_TASK_SYNOPSIS_BYTES);
+  expect(message).not.toContain(facts.baselineSynopsisContext!.revisionId);
+}
+
+describe('frozen baseline chapter context on ordinary downstream final steps (#1500)', () => {
+  it.each(SYNOPSIS_KINDS.flatMap(kind => ['matching', 'absent', 'other-revision'].map(baseline => ({ kind, baseline }))))(
+    '$kind sends chapter context only at synthesis with $baseline baseline; preview equals frozen (#1500)', async ({ kind, baseline }) => {
+      const target = await book(kind), { schedule, closed } = await synopsisSchedule(kind);
+      ordinary(schedule); policy = capture!.policy;
+      if (baseline !== 'absent') await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+      if (baseline === 'other-revision') typeBeforeLaunch(target);
+      const launch = launchRequest(kind, target, {});
+      const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy);
+      const launched = commitLaunch(target, launch);
+      const plan = store.inspectTaskPlan({ bookId: target.bookId, kind, ref: launched.taskIntentId });
+      expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`);
+      expect(plan.scope.send.includes('全书综合的请求有余量时')).toBe(baseline === 'matching');
+      driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+      expect(launched.ledger.currentRunState(launched.runRecordId)).toMatch(/^completed/u);
+      verifySynopsisRequest(launched, closed, baseline === 'matching');
+    });
+
+  it('discloses closed-baseline missing units in the frozen plan and final ordinary request (#1500)', async () => {
+    const target = await book('initial-evaluation'), { schedule, closed } = await synopsisSchedule('initial-evaluation', 8);
+    ordinary(schedule); policy = capture!.policy;
+    await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    const launched = command('initial-evaluation', target, {})();
+    const frozen = launched.ledger.loadExecutionPlan(launched.runRecordId).baselineSynopsisContext!;
+    expect(frozen.missingUnitOrdinals).toEqual([8]); expect(frozen.synopses).toHaveLength(7);
+    expect(store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: launched.taskIntentId }).scope.send).toContain('缺少第 8 范围');
+    driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+    verifySynopsisRequest(launched, closed, true);
+    const final = capture!.wireRequests.findLast(wire => wire.messages.some(entry => entry.content.includes('基线分析的分章概述（仅作全书脉络参考'))) !;
+    expect(final.messages.findLast(entry => entry.role === 'user')!.content).toContain('"missingUnitOrdinals":[8]');
+  });
+
+  it.each(SYNOPSIS_KINDS)('starts %s without a damaged baseline chain and explains the omission (#1500 R3)', async kind => {
+    const target = await book(kind), { schedule, closed } = await synopsisSchedule(kind);
+    ordinary(schedule); policy = capture!.policy;
+    await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    appendBaselineUnitVariant(roots.dataRoot, target.bookId, 'bad-digest');
+    const launch = launchRequest(kind, target, {}), preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy);
+    const launched = commitLaunch(target, launch), projection = launched.ledger.inspect(target.bookId);
+    expect(projection.executionPlan).toMatchObject({ baselineSynopsisUnavailable: 'damaged-baseline' });
+    expect(projection.executionPlan && 'baselineSynopsisContext' in projection.executionPlan ? projection.executionPlan.baselineSynopsisContext : undefined).toBeUndefined();
+    const plan = store.inspectTaskPlan({ bookId: target.bookId, kind, ref: launched.taskIntentId });
+    expect(preview.send).toBe(`${plan.scope.send}；${plan.service.send}`);
+    expect(plan.scope.send).toContain('分章概述记录无法读取');
+    expect(plan.technical.find(row => row.key === 'baseline-synopsis-unavailable')?.value).toBe('damaged-baseline');
+    driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+    verifySynopsisRequest(launched, closed, false);
+    expect(launched.ledger.currentRunState(launched.runRecordId)).toMatch(/^completed/u);
+  });
+
+  it('lists a closed baseline unit without a string synopsis as missing (#1500 R4)', async () => {
+    const target = await book('initial-evaluation'), { schedule, closed } = await synopsisSchedule('initial-evaluation');
+    ordinary(schedule); policy = capture!.policy;
+    await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    appendBaselineUnitVariant(roots.dataRoot, target.bookId, 'missing-synopsis');
+    const launched = command('initial-evaluation', target, {})();
+    expect(launched.ledger.loadExecutionPlan(launched.runRecordId).baselineSynopsisContext).toMatchObject({ missingUnitOrdinals: [2] });
+    driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+    verifySynopsisRequest(launched, closed, true);
+  });
+
+  it.each(['partial', 'header-only', 'none'] as const)(
+    'freezes registered model capacity and records the actual final input with %s room (#1500 R1 R2)', async room => {
+      const target = await book('initial-evaluation'), answer = await lifecycleAnswers('initial-evaluation');
+      const provider = JSON.parse(readFileSync(join(roots.codeRoot, 'config/providers/anthropic-claude.json'), 'utf8'));
+      const registered = provider.routes[0], model = registered.models.filter((entry: { context: { tokens: number | null } }) => entry.context.tokens !== null).sort((a: { context: { tokens: number } }, b: { context: { tokens: number } }) => a.context.tokens - b.context.tokens)[0];
+      const route = MODEL_SERVICE_ROUTES.find(route => route === registered.routeId)!;
+      expect(route).toBeDefined();
+      const paragraph = store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).find(block => [...block.text].length > 400)!.text.replace(/[^\p{Script=Han}]/gu, '');
+      const values = new Map<number, { schema: string; unitOrdinal: number; observations: Array<{ itemId: string; blockOrdinals: number[]; note: string }> }>();
+      const closed = new Map<number, { state: 'closed'; unitOrdinal: number; result: unknown }>();
+      ordinary(request => {
+        const definition = store.executionLedgerForRun(capture!.runRecordIds.get(request.requestId)!).definitionForDigest(request.contractDigest);
+        const response = answer(request, definition);
+        if (request.stage !== 'units' || response?.kind !== 'unit-result') return response;
+        const value = JSON.parse(response.text);
+        if (definition.kind === 'baseline-manuscript-analysis') value.synopsis = paragraph;
+        else {
+          Object.assign(value, values.get(request.unitOrdinal!)!);
+          const facts = store.executionLedgerForRun(capture!.runRecordIds.get(request.requestId)!).loadExecutionPlan(capture!.runRecordIds.get(request.requestId)!);
+          const parsed = definition.parseUnitResult(JSON.stringify(value), facts.manifest.units[request.unitOrdinal! - 1]!);
+          if (!parsed.ok) throw new Error('CAPACITY_PROBE_UNIT_INVALID');
+          closed.set(request.unitOrdinal!, { state: 'closed', unitOrdinal: request.unitOrdinal!, result: parsed.result });
+        }
+        return { ...response, text: JSON.stringify(value) };
+      }, {}, route); policy = capture!.policy;
+      await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+      store.selectMainRoleModel(route, model.modelId, 'off');
+      const launch = launchRequest('initial-evaluation', target, { modelConnectionId: MODEL_SERVICE_CONNECTION_IDS[route], modelId: model.modelId, reasoningEffort: 'off' });
+      const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy), launched = commitLaunch(target, launch);
+      const facts = launched.ledger.loadExecutionPlan(launched.runRecordId), definition = launched.ledger.definitionForDigest(facts.promptContractDigest), frozen = facts.baselineSynopsisContext!;
+      expect(launched.ledger.frozenPlan(launched.taskIntentId, facts.planEnvelopeDigest).components['provider-resolution-plan']).toMatchObject({ executionRoute: { kind: route, model: model.modelId } });
+      expect(frozen.maximumMessageBytes).toBe(remainingSynopsisMessageBytes(model.context.tokens, definition.systemPrompt));
+      expect(frozen.maximumMessageBytes).not.toBeNull();
+      expect(preview.send).toBe(`${store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: launched.taskIntentId }).scope.send}；${store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: launched.taskIntentId }).service.send}`);
+      for (const unit of facts.manifest.units) {
+        const response = answer({ stage: 'units', unitOrdinal: unit.ordinal, attemptIndex: 1 }, definition)!;
+        if (response.kind !== 'unit-result') throw new Error('CAPACITY_PROBE_ANSWER_MISSING');
+        const value = JSON.parse(response.text), first = value.observations[0];
+        values.set(unit.ordinal, { ...value, observations: Array.from({ length: 40 }, () => ({ ...first, note: sliceGraphemes(paragraph, 0, 1) })) });
+      }
+      const crossContext = { manifest: facts.manifest, blocks: new Map() };
+      const outcomes = () => facts.manifest.units.map(unit => {
+        const parsed = definition.parseUnitResult(JSON.stringify(values.get(unit.ordinal)), unit);
+        if (!parsed.ok) throw new Error('CAPACITY_PROBE_UNIT_INVALID');
+        return { state: 'closed' as const, unitOrdinal: unit.ordinal, result: parsed.result };
+      });
+      const baseMessage = () => definition.crossUnit!.step!.buildMessage(outcomes(), facts.manifest.units.length, crossContext);
+      const fullAppendix = appendTaskBaselineSynopses('', { ...frozen, maximumMessageBytes: null });
+      const headerBytes = Buffer.byteLength(fullAppendix.slice(0, fullAppendix.indexOf('\n{') + 1));
+      const desiredRoom = room === 'partial' ? 4000 : room === 'header-only' ? headerBytes : 0;
+      const targetBytes = frozen.maximumMessageBytes! - desiredRoom;
+      for (const value of values.values()) for (const observation of value.observations) {
+        const before = Buffer.byteLength(baseMessage()), original = observation.note;
+        let low = 1, high = 200;
+        while (low < high) {
+          const length = Math.ceil((low + high) / 2), candidate = sliceGraphemes(paragraph, 0, length);
+          if (before - Buffer.byteLength(original) + Buffer.byteLength(candidate) <= targetBytes) low = length; else high = length - 1;
+        }
+        observation.note = sliceGraphemes(paragraph, 0, low);
+      }
+      // ASCII space is normalized out of notes; an exact byte remainder is not needed: Chinese prefixes leave at most two bytes.
+      expect(targetBytes - Buffer.byteLength(baseMessage())).toBeLessThan(4);
+      driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+      const finalIndex = capture!.requests.findIndex(request => capture!.runRecordIds.get(request.requestId) === launched.runRecordId && request.stage === 'cross-unit-reduction');
+      expect(finalIndex).toBeGreaterThanOrEqual(0);
+      const request = capture!.requests[finalIndex]!, message = capture!.wireRequests[finalIndex]!.messages.findLast(entry => entry.role === 'user')!.content;
+      const ordered = [...closed.values()].sort((a, b) => a.unitOrdinal - b.unitOrdinal), inputDigest = canonicalRecord(ordered).digest;
+      const base = definition.crossUnit!.step!.buildMessage(ordered, facts.manifest.units.length, crossContext), baseRequest = definition.crossUnit!.step!.requestDigest(ordered, crossContext);
+      expect(message).toBe(appendTaskBaselineSynopses(base, frozen));
+      expect(Buffer.byteLength(message)).toBeLessThanOrEqual(frozen.maximumMessageBytes!);
+      expect(request.requestDigest).toBe(taskSynopsisMessageRequestDigest(baseRequest, message));
+      if (room === 'partial') {
+        const payload = JSON.parse(message.slice(message.lastIndexOf('\n{') + 1));
+        expect(payload.synopses.length).toBeGreaterThan(0); expect(payload.shortenedUnitOrdinals.length).toBeGreaterThan(0);
+        expect(request.inputDigest).toBe(canonicalRecord({ inputDigest, baselineSynopsisSent: payload }).digest);
+      } else if (room === 'header-only') {
+        expect(message).toContain('全部省略'); expect(request.inputDigest).toBe(canonicalRecord({ inputDigest, baselineSynopsisOmitted: 'capacity' }).digest);
+      } else { expect(message).toBe(base); expect(request.inputDigest).toBe(inputDigest); expect(request.requestDigest).toBe(baseRequest); }
+    });
+
+  it('keeps the chapter chain for an unregistered custom-model context with only the supplement cap (#1500)', async () => {
+    const target = await book('writing'), { schedule, closed } = await synopsisSchedule('writing');
+    ordinary(schedule); policy = capture!.policy;
+    await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    const launched = command('writing', target, { modelId: 'custom-model-without-context-registration' })();
+    expect(launched.ledger.loadExecutionPlan(launched.runRecordId).baselineSynopsisContext).toMatchObject({
+      maximumMessageBytes: null, maximumSupplementBytes: 24 * 1024,
+    });
+    const plan = store.inspectTaskPlan({ bookId: target.bookId, kind: 'writing', ref: launched.taskIntentId });
+    expect(plan.scope.send).toContain('每条最多 400 字'); expect(plan.scope.send).not.toMatch(/unregistered|未登记|KiB/u);
+    expect(plan.technical.find(row => row.key === 'baseline-synopsis-capacity')!.value).toContain('unregistered');
+    driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+    verifySynopsisRequest(launched, closed, true);
+  });
+
+  it.each(['writing', 'initial-evaluation'] as const)('keeps an already-frozen %s task unchanged when its baseline closes after launch (#1500)', async kind => {
+    const target = await book(kind), { schedule, closed } = await synopsisSchedule(kind);
+    ordinary(schedule); policy = capture!.policy;
+    const launched = command(kind, target, {})();
+    const before = launched.ledger.loadExecutionPlan(launched.runRecordId);
+    const plan = store.inspectTaskPlan({ bookId: target.bookId, kind, ref: launched.taskIntentId });
+    expect(before.baselineSynopsisContext).toBeUndefined();
+    await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    expect(launched.ledger.loadExecutionPlan(launched.runRecordId).planEnvelopeDigest).toBe(before.planEnvelopeDigest);
+    expect(store.inspectTaskPlan({ bookId: target.bookId, kind, ref: launched.taskIntentId }).scope.send).toBe(plan.scope.send);
+    driveLaunchedLedgerRun(capture!.owner, launched); await capture!.owner.whenIdle();
+    verifySynopsisRequest(launched, closed, false);
+  });
+
+  it.each([false, true])('restores the launched chapter chain after in-flight pause and restart=%s, ignoring a newer baseline and replay (#1500)', async reopen => {
+    const target = await book('writing'), { schedule, closed } = await synopsisSchedule('writing');
+    let newer = false, targetRun = '', holding = true, reached!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { reached = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+    const answer: CapturedOrdinaryAnswer = (request, message) => {
+      const response = schedule(request, message);
+      if (!newer || parseUnitMessageHeader(message) === null || response?.kind !== 'unit-result') return response;
+      const value = JSON.parse(response.text); value.synopsis += '（第二次分析）';
+      return { ...response, text: JSON.stringify(value) };
+    };
+    ordinary(answer, { transportHold: async request => {
+      if (holding && request.stage === 'units' && capture!.runRecordIds.get(request.requestId) === targetRun) { holding = false; reached(); await gate; }
+    } }); policy = capture!.policy;
+    await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    const launch = launchRequest('writing', target, { modelId: 'deepseek-v4.1-flash', reasoningEffort: 'high' });
+    let launched = commitLaunch(target, launch); targetRun = launched.runRecordId;
+    const before = launched.ledger.loadExecutionPlan(targetRun);
+    driveLaunchedLedgerRun(capture!.owner, launched);
+    try {
+      await Promise.race([held, capture!.owner.whenDone(targetRun).then(() => { throw new Error('request-ended-before-hold'); })]);
+      const paused = store.requestTaskRunControl({ bookId: target.bookId, kind: 'writing', ref: launched.taskIntentId, action: 'pause' });
+      capture!.owner.pauseRun(paused.runRecordId!, paused.ledger);
+    } finally { release(); }
+    await capture!.owner.whenIdle(); expect(launched.ledger.currentRunState(targetRun)).toBe('paused');
+    newer = true; await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
+    expect(store.inspectBaselineAnalysis(target.bookId).resultSetRevision!.revisionId).not.toBe(before.baselineSynopsisContext!.revisionId);
+    if (reopen) { await restart(answer); policy = capture!.policy; launched = { ...launched, ledger: store.executionLedgerForRun(targetRun) }; }
+    store.selectMainRoleModel('opencode-go', 'changed-default', 'off');
+    expect(launched.ledger.loadExecutionPlan(targetRun).baselineSynopsisContext).toEqual(before.baselineSynopsisContext);
+    expect(launched.ledger.loadExecutionPlan(targetRun).planEnvelopeDigest).toBe(before.planEnvelopeDigest);
+    capture!.owner.admitAndDispatch(targetRun, launched.ledger, { resume: true }); await capture!.owner.whenIdle();
+    verifySynopsisRequest(launched, closed, true);
+    const final = capture!.wireRequests.findLast(wire => wire.messages.some(entry => entry.content.includes('基线分析的分章概述（仅作全书脉络参考')))!;
+    expect(final.messages.findLast(entry => entry.role === 'user')!.content).not.toContain('第二次分析');
+    expect(final.model).toBe('deepseek-v4.1-flash');
+    const sent = capture!.requests.length, replay = commitLaunch(target, launch);
+    expect(replay).toMatchObject({ repeated: true, runRecordId: targetRun });
+    driveLaunchedLedgerRun(capture!.owner, replay); await capture!.owner.whenIdle(); expect(capture!.requests).toHaveLength(sent);
+  });
+});
 afterEach(async () => {
   await capture?.owner.dispose();
   await setupOwner?.dispose();
@@ -86,11 +351,11 @@ function selectInstruction(kind: Kind, bookId: string, instruction = INSTRUCTION
   store.procedureLibrary({ action: 'select', bookId, procedure: { procedureId: changed.procedureId, version: changed.version, digest: changed.digest } });
 }
 
-function ordinary(answer: CapturedOrdinaryAnswer = () => undefined, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}): void {
+function ordinary(answer: CapturedOrdinaryAnswer = () => undefined, controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, route?: ModelServiceRouteId): void {
   const search = store.getSearchBackendConnections().find(connection => connection.backendId === 'search-tinyfish') ?? store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
   store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
   store.selectSearchBackend('search-tinyfish');
-  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer, controls);
+  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, answer, controls, route);
 }
 
 async function restart(answer?: CapturedOrdinaryAnswer): Promise<void> {
@@ -165,7 +430,7 @@ async function lifecycleAnswers(kind: Kind) {
     if (entry.response?.kind !== 'unit-result') return [];
     try { return [{ entry, schema: String(JSON.parse(entry.response.text).schema) }]; } catch { return []; }
   });
-  return (request: Parameters<CapturedOrdinaryAnswer>[0], definition: LaunchedTask['ledger']['definition']) => {
+  return (request: Pick<Parameters<CapturedOrdinaryAnswer>[0], 'stage' | 'unitOrdinal' | 'attemptIndex'>, definition: LaunchedTask['ledger']['definition']) => {
     const schema = request.stage === 'units' ? definition.unitResultSchema : request.stage === 'cross-unit-reduction' ? definition.crossUnit?.resultSchema
       : request.stage === 'assurance-sampling' ? definition.assurance?.resultSchema : request.stage === 'run-report-reflection' ? 'ai7.analysis.run-report-reflection-result/1' : null;
     const ordinal = request.stage === 'units' ? request.unitOrdinal : 0;

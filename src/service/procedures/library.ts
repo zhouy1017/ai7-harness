@@ -1,3 +1,4 @@
+import { reviewCategoryDisplayLabel } from '../../shared/review-synthesis-wording.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { COMPOSITE_PROCEDURE_EXECUTOR, type PreinstalledProcedureProjection } from '../../shared/protocol/procedures.js';
 import type { DefinitionRecommendationReading } from '../procedure-recommendation.js';
@@ -41,7 +42,7 @@ export function readPreinstalledProcedures(db: DatabaseSync, reviewRuns: Readonl
  */
 export function definitionRecommendationReadings(db: DatabaseSync): readonly DefinitionRecommendationReading[] {
   const label = (categoryId: string): string => categoryId === LOCAL_CHECK_CATEGORY ? LOCAL_REVIEW_CATEGORY_V3.label
-    : BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId;
+    : reviewCategoryDisplayLabel(categoryId, BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === categoryId)?.label);
   return readProcedureLibrary(db).procedures.flatMap((procedure) => {
     if (procedure.stopped) return [];
     const categoryIds = procedure.executorKind === COMPOSITE_PROCEDURE_EXECUTOR ? compositeMembers(procedure.document).map((entry) => entry.member.categoryId)

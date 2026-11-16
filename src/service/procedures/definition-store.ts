@@ -90,7 +90,7 @@ function insertProcedureVersions(db: DatabaseSync, documents: readonly Procedure
 export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined;
   if (existing) {
-    if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= COMPOSITE_PROCEDURE_SCHEMA_VERSION) {
+    if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 116) {
       validateProcedureDefinitions(db);
       return;
     }
@@ -119,6 +119,7 @@ export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = fal
   const expected = allowLegacy && schemaVersion < REVIEW_CONTRACT_SCHEMA_VERSION ? preinstalledProcedureDefinitions(1)
     : allPreinstalledProcedureDefinitions();
   for (const document of expected) {
+    if (schemaVersion < 116 && document.id === 'ai7-procedure/review-run-synthesis') continue;
     if (schemaVersion < EDITABLE_PROCEDURE_SCHEMA_VERSION && ['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].some((kind) => document.id === `ai7-procedure/${kind}`)) continue;
     if (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check') continue;
     if (schemaVersion < COMPOSITE_PROCEDURE_SCHEMA_VERSION && document.id === FULL_REVIEW_PROCEDURE_ID) continue;

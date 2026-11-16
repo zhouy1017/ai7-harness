@@ -1,6 +1,8 @@
+import { editorialMemoryGovernanceItem, governedMemoryItems, preferenceItems, supervisionSourceCandidates } from './learning/supervision-directives.js';
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
 import { sha256Hex } from './analysis/canonical.js';
-import { EditorialLearningLedger } from './learning/ledger.js';
+import type { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { buildDialogueMessage, dialogueQuestionDigest, dialogueQuestion } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
 import {
@@ -30,16 +32,6 @@ import {
 } from '../shared/protocol.js';
 import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
 import {
-  SupervisionDirectives,
-  governedMemoryItems,
-  preferenceItems,
-  supervisionSourceCandidates,
-  editorialMemoryGovernanceItem,
-  type EditorialMemoryGovernanceHooks,
-} from './learning/supervision-directives.js';
-import * as learningSupervision from './house-review-preference.js';
-import { HouseReviewPreferenceLedger, preferenceNames, withoutNames } from './house-review-preference.js';
-import {
   selectedPolicyIdentityOf,
   resolveSourceCheckoutLaunchPolicySync,
   type ConfiguredProviderBinding,
@@ -65,10 +57,8 @@ export interface GlobalAgentOperationsHost {
   dialogueCall: <T>(operation: () => T) => T;
   readonly dialogueHistory: DialogueHistoryReader;
   readonly dialogues: DialogueLedger;
-  editorialMemoryGovernanceHooks: () => EditorialMemoryGovernanceHooks;
   learningCall: <T>(operation: () => T) => T;
-  learningLedger: () => EditorialLearningLedger;
-  readonly learningSupervisionHost: learningSupervision.LearningSupervisionStoreHost;
+  memoryFacade: () => EditorialMemoryFacade;
   localFixtureCatalog: LocalFixturePolicyCatalog | null;
   transaction: <T>(db: DatabaseSync, operation: () => T) => T;
   getConfiguredModelRoleBinding: (role: 'main-editorial' | 'fast-interaction') => ConfiguredProviderBinding | null;
@@ -87,33 +77,20 @@ export interface GlobalAgentOperationsHost {
 export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false, scopedAdmitted = false): GlobalAgentProjection {
   return host.learningCall(() => {
     const operationalScope = host.baselineAnalysis.launch.operationalScope;
-    const preference = new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger()).history(operationalScope).at(-1) ?? null;
-    const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
-    const directives = new SupervisionDirectives(host.authority).history(operationalScope);
-    const names = internalGlobalOriginalFieldsSelected(host) ? [] : internalGlobalAgentNames(host, preference);
-    const legacyDirectives = directives.filter((directive) => !directive.targets.some((pin) =>
-      host.authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId)));
-    const items = governedMemoryItems(preferenceItems(base), legacyDirectives).map((item) => ({ ...item, text: withoutNames(item.text, names),
-      revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
-    const memories: GlobalAgentSourceCandidate[] = [];
-    const mutableMemories: import('../shared/protocol.js').GlobalMemoryItem[] = [];
-    const learning = host.learningLedger();
-    for (const entry of host.editorialMemoryGovernanceHooks().revisions()) {
-      mutableMemories.push({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: withoutNames(entry.current.title, names) });
-      if (entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2') memories.push({ itemId: entry.current.itemId, revisionId: learning.sourcePinRevision(entry.current.itemId, entry.current.versionId), kind: 'memory',
-        title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
-    }
-    for (let itemOffset: number | null = 0; itemOffset !== null;) {
-      const page = learning.inspect({ signalOffset: 0, itemOffset });
-      for (const entry of page.items) {
-        if (entry.current.schema === 'ai7.global-editorial-memory/2') {
-          continue;
-        }
-        if (entry.usable) memories.push({ itemId: entry.current.itemId, revisionId: entry.current.versionId,
-          kind: 'memory', title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
-      }
-      itemOffset = page.nextItemOffset;
-    }
+    const memory = host.memoryFacade();
+    const basis = memory.globalSourceBasis(operationalScope);
+    const facts = memory.globalSources(operationalScope, internalGlobalOriginalFieldsSelected(host), basis);
+    const base = basis.preference === null ? null : { ...basis.preference, lines: basis.preference.governance?.baseLines ?? basis.preference.lines };
+    const redact = (text: string) => memory.redact(text, facts.names);
+    const items = governedMemoryItems(preferenceItems(base), facts.legacyDirectives).map(item => ({ ...item, text: redact(item.text),
+      revisionId: item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base') }));
+    const mutableMemories = facts.revisions.map(entry => ({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: redact(entry.current.title) }));
+    const sources: GlobalAgentSourceCandidate[] = [
+      ...facts.revisions.flatMap(entry => entry.sourceRevision === null ? [] : [{ itemId: entry.current.itemId,
+        revisionId: entry.sourceRevision, kind: 'memory' as const, title: redact(entry.current.title), text: redact(entry.current.title) }]),
+      ...facts.legacy.map(entry => ({ itemId: entry.itemId, revisionId: entry.versionId, kind: 'memory' as const, title: redact(entry.title), text: redact(entry.title) })),
+      ...supervisionSourceCandidates(basis.directives).map(entry => ({ ...entry, text: redact(entry.text) })),
+    ];
     const blocked = operationalScope === 'ordinary-production' && host.getConfiguredModelRoleBinding('fast-interaction') === null
       ? MODEL_SERVICE_SETUP_REQUIRED_REASON : GLOBAL_AGENT_POLICY_BLOCKED;
     return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : blocked,
@@ -123,10 +100,10 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
       categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
       books: host.authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
       items: [...items, ...mutableMemories], sourceCandidates: [
-        ...items.filter((item) => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
-          title: `本社审阅偏好 · ${reviewCategoryEntry(item.categoryId)?.label ?? item.categoryId}`, text: item.text })),
-        ...memories, ...supervisionSourceCandidates(directives).map((entry) => ({ ...entry, text: withoutNames(entry.text, names) })),
-      ], directives, history: internalGlobalAgentHistory(host, live) };
+        ...items.filter(item => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
+          title: `本社审阅偏好 · ${reviewCategoryDisplayLabel(item.categoryId, reviewCategoryEntry(item.categoryId)?.label)}`, text: item.text })),
+        ...sources,
+      ], directives: basis.directives, history: internalGlobalAgentHistory(host, live) };
   });
 }
 
@@ -165,7 +142,7 @@ export function internalPinGlobalAgentScope(host: GlobalAgentOperationsHost, inp
 }
 
 export function globalAgentScopeCurrent(host: GlobalAgentOperationsHost, scope: GlobalAgentScope): boolean {
-  const excluded = host.learningLedger().controls().excludedBooks;
+  const excluded = host.memoryFacade().controls().excludedBooks;
   return scope.books.every((book) => !excluded.has(book.bookId) && host.authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m
       ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary' WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?`)
     .get(book.bookId, book.manuscriptId, book.revisionId) !== undefined) && scope.procedures.every((pin) => {
@@ -249,12 +226,12 @@ export function internalRequireGlobalQualification(host: GlobalAgentOperationsHo
 }
 
 export function globalAgentRedact(host: GlobalAgentOperationsHost, text: string): string {
-  return withoutNames(text, internalGlobalAgentNames(host, new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger())
-    .history(host.baselineAnalysis.launch.operationalScope).at(-1) ?? null));
+  const memory = host.memoryFacade();
+  return memory.redact(text, memory.names(memory.history(host.baselineAnalysis.launch.operationalScope).at(-1) ?? null));
 }
 
 export function internalGlobalAgentNames(host: GlobalAgentOperationsHost, preference: HouseReviewPreferenceVersion | null): string[] {
-  return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], learningSupervision.housePreferencePeopleNames(host.learningSupervisionHost));
+  return host.memoryFacade().names(preference);
 }
 
 export function prepareGlobalAgentTurn(host: GlobalAgentOperationsHost, input: PrepareGlobalAgentTurnInput): DialogueTurnStart['message'] {

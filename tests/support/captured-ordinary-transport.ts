@@ -4,7 +4,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { BaselineAnalysisExecutionOwner, type ExecutionOwnerDependencies, type ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import type { AnalysisRequestIdentity, LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { assuranceSamplingRequestDigest, parseAssuranceSamplingListedRefs, parseAssuranceSamplingMessageHeader } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { modelProfileFor } from '../../src/service/provider/model-profile.js';
+import type { ModelServiceRouteId } from '../../src/shared/protocol/model-service.js';
 import { clarificationMessageRequestDigest } from '../../src/service/provider/clarification-contract.js';
 import { parseCrossUnitCitedBlocks } from '../../src/service/analysis/cross-unit-contract.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
@@ -41,12 +43,14 @@ export function capturedMapAnswer(entries: ReadonlyMap<string, ModelFixtureEntry
  */
 export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: string, dataRoot: string, requestGovernor: ModelRequestGovernor,
   answer: CapturedOrdinaryAnswer,
-  controls: Pick<ExecutionOwnerDependencies, 'capacity' | 'unitHold' | 'stageHold' | 'materialGuard' | 'influenceGuard' | 'seriesScopeGuard'> = {}) {
-  const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'opencode-go')!;
-  let connection = store.getModelServiceRouteConnection('opencode-go');
-  if (connection === null) connection = store.saveModelServiceConnection('Captured ordinary response schedule', null, 'needs-attention', 'opencode-go');
-  store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'opencode-go');
-  store.selectModelServiceRoute('opencode-go');
+  controls: Pick<ExecutionOwnerDependencies, 'capacity' | 'unitHold' | 'stageHold' | 'materialGuard' | 'influenceGuard' | 'seriesScopeGuard'> & { transportHold?: (request: AnalysisRequestIdentity, message: string, signal: AbortSignal) => Promise<void> } = {}, route: ModelServiceRouteId = 'opencode-go') {
+  const { transportHold, ...executionControls } = controls;
+  const abortedRequests: AnalysisRequestIdentity[] = [];
+  const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === route)!;
+  let connection = store.getModelServiceRouteConnection(route);
+  if (connection === null) connection = store.saveModelServiceConnection('Captured ordinary response schedule', null, 'needs-attention', route);
+  store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', route);
+  store.selectModelServiceRoute(route);
   const binding = { ...allowed, credentialReference: connection.credentialReference };
   const policy = resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', binding);
   strictEqual(policy.integrityState, 'verified'); strictEqual(policy.denialReason, null);
@@ -57,21 +61,29 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   store.factualReviewLedger.bindLaunch(launch);
   const unmatched: string[] = [];
   const requests: AnalysisRequestIdentity[] = [];
+  const runRecordIds = new Map<string, string>();
   const wireRequests: Array<{ model: string; reasoning_effort?: string; messages: Array<{ role: string; content: string }> }> = [];
   const nativeFetch: typeof fetch = async (url, init) => {
     const refuse = (reason = 'unmatched-request'): never => { unmatched.push(reason); throw new Error('CAPTURED_ORDINARY_UNMATCHED_REQUEST'); };
     if (String(url) !== allowed.endpoint || init === undefined) return refuse();
+    const body = JSON.parse(String(init.body)) as { model: string; messages: Array<{ role: string; content: string }> };
+    const message = body.messages.findLast((entry) => entry.role === 'user')?.content;
+    if (typeof message !== 'string') return refuse();
     const sessionId = new Headers(init.headers).get(OPENCODE_GO_SESSION_HEADER);
+    if (route === 'opencode-go' && sessionId === null) return refuse('session-header-missing');
     const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     let request: AnalysisRequestIdentity | undefined;
+    let runRecordId: string | undefined;
     let frozenModel: string | undefined;
     try {
+      const identityField = sessionId === null ? 'messageDigest' : 'sessionId';
       const row = db.prepare(`SELECT run_record_id, canonical_json FROM analysis_run_states
         WHERE json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'
-        AND json_extract(canonical_json, '$.requestAdmission.data.event.request.sessionId') = ? ORDER BY rowid DESC LIMIT 1`).get(sessionId);
+        AND json_extract(canonical_json, '$.requestAdmission.data.event.request.${identityField}') = ? ORDER BY rowid DESC LIMIT 1`).get(sessionId ?? sha256Hex(message));
       if (typeof row?.canonical_json === 'string') request = (JSON.parse(row.canonical_json) as {
         requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request;
       if (row !== undefined) {
+        runRecordId = String(row.run_record_id);
         const plan = db.prepare(`SELECT p.canonical_json FROM analysis_run_records r
           JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
           JOIN analysis_plan_versions v ON v.task_intent_id = r.task_intent_id AND v.plan_envelope_sha256 = a.plan_envelope_sha256
@@ -80,11 +92,19 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
         if (typeof plan?.canonical_json === 'string') frozenModel = JSON.parse(plan.canonical_json).executionRoute.model;
       }
     } finally { db.close(); }
-    const body = JSON.parse(String(init.body)) as { model: string; messages: Array<{ role: string; content: string }> };
-    const message = body.messages.findLast((entry) => entry.role === 'user')?.content;
     if (request === undefined || body.model !== frozenModel || typeof message !== 'string') return refuse();
     requests.push(request);
+    runRecordIds.set(request.requestId, runRecordId!);
     wireRequests.push(body);
+    if (transportHold !== undefined) {
+      const signal = init.signal ?? new AbortController().signal;
+      await new Promise<void>((done, fail) => {
+        const abort = (): void => { abortedRequests.push(request!); fail(new DOMException('Captured request aborted', 'AbortError')); };
+        if (signal.aborted) { abort(); return; }
+        signal.addEventListener('abort', abort, { once: true });
+        void transportHold(request!, message, signal).then(done, fail).finally(() => signal.removeEventListener('abort', abort));
+      });
+    }
     let response: ModelFixtureResponse | undefined;
     try { response = answer(request, message); } catch (error) { unmatched.push('invalid-response-schedule'); throw error; }
     if (response === undefined) return refuse(`${request.stage}:${request.unitOrdinal ?? 'none'}:response-missing`);
@@ -98,6 +118,9 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const text = substituteAssuranceSamplingBlockPlaceholders(substituteAssuranceSamplingRefPlaceholders(
       substituteCrossUnitBlockPlaceholders(substituteBlockPlaceholders(response.text, ownBlockIdsOf(message)), parseCrossUnitCitedBlocks(message)),
       parseAssuranceSamplingListedRefs(message)), message);
+    if (modelProfileFor(allowed.route, body.model)?.capabilities.requestShape === 'anthropic-messages')
+      return new Response(JSON.stringify({ model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn',
+        usage: { input_tokens: response.usage.inputTokens, output_tokens: response.usage.outputTokens } }), { status: 200 });
     return new Response(JSON.stringify({ model: body.model,
       choices: [{ message: { content: text }, finish_reason: 'stop' }],
       usage: { prompt_tokens: response.usage.inputTokens, completion_tokens: response.usage.outputTokens } }), { status: 200 });
@@ -105,7 +128,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy,
     currentLaunchPolicy: () => policy, productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', frozen),
     fixture: null, production: { scope: 'ordinary-production', nativeFetch },
-    secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...controls });
-  return { owner, policy, launch, nativeFetch, requests, wireRequests, assertMatched: () => strictEqual(unmatched.length, 0,
+    secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...executionControls });
+  return { owner, policy, launch, nativeFetch, requests, runRecordIds, wireRequests, abortedRequests, assertMatched: () => strictEqual(unmatched.length, 0,
     `CAPTURED_ORDINARY_UNMATCHED_REQUEST ${unmatched.join(', ')}`) };
 }

@@ -121,3 +121,10 @@ it('scans the Book task drawer in ordinary mode (#1315)', async () => {
   try { const view = harness(); view.drawer.openPanel(BOOK, () => null); await view.settle(); expectNoTechnicalText(view.root); view.drawer.close(false); }
   finally { setTechnicalLayerVisible(true); }
 });
+
+it.each(['plan','run'] as const)('exposes the watched task identity in the real %s drawer (#1510)',async view=>{
+ const {drawer,settle}=harness();
+ drawer.open({bookId:BOOK,kind:'baseline-analysis',ref:'watched-task'},()=>null,undefined,{view});
+ await settle();
+ expect(drawer.view()).toEqual({kind:'plan',bookId:BOOK,task:{kind:'baseline-analysis',ref:'watched-task'}});
+});

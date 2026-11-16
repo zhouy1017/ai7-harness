@@ -18,7 +18,7 @@ import {
   type TaskPlanProjection,
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from './canonical.js';
-import { buildUnitMessage, parseUnitMessageHeader, unitRequestDigest } from './contract.js';
+import { BASELINE_PROMPT_CONTRACT_V2, buildUnitMessage, parseUnitMessageHeader, unitRequestDigest } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   CUSTOM_ANALYSIS_RESULT_SET_REVISION_SCHEMA,
@@ -237,7 +237,7 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
     safeNextActions: SAFE_NEXT_ACTIONS,
     // The kind's classes: each row by whether its quotation was located. A count, never a quotation.
     findingCounts: (reduction) => countByClass(reduction.components.rows as ReadonlyArray<CustomAnalysisRowProjection>, 'row', (row) => row.anchorState),
-    buildUnitMessage,
+    buildUnitMessage: (unit, total, blocks) => buildUnitMessage(unit, total, blocks, BASELINE_PROMPT_CONTRACT_V2),
     parseUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
     parseUnitResult: (text, unit) => parseCustomAnalysisUnitResult(text, { unitOrdinal: unit.ordinal, blockCount: unit.overlapBlockIds.length + unit.blockIds.length }),

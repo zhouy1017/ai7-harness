@@ -1,3 +1,5 @@
+import { DatabaseSync } from 'node:sqlite';
+import { runSynthesisKind } from '../../src/service/review/run-synthesis-kind.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -91,7 +93,7 @@ const VALIDATION: DevelopmentValidationIntent = { family: 'baseline-analysis', c
  * The V4.1 developer-live composition: zero tools, no Session log; model identity changes its digest, and so does the baseline
  * prompt contract (/2 since Issue #826) — the digest the #826 developer-live checkpoint recorded.
  */
-const DEV_LIVE_COMPOSITION_DIGEST = 'f4971b9178724fba7ca95434996fb424d58ae24d20d21cbb2127d681c2346ca0';
+const DEV_LIVE_COMPOSITION_DIGEST = 'f6073bb92d23e6507005bdc72153da48cedd89d461f47a860a557af7b94041cd';
 /** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
 const POLICY_DEFAULT_CEILING: Ceiling = {
   kind: 'tokens-per-frozen-unit',
@@ -1371,6 +1373,12 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // it also owns and ahead of the developer-live transmittable-set check in the execution owner.
     expect(refusalCode(() => store.createBaselineAnalysisPreparationWork(commit.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy)))
       .toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    const summaryDb = new DatabaseSync(':memory:');
+    try {
+      const summary = runSynthesisKind(summaryDb, 'non-public-samplebook');
+      expect(refusalCode(() => store.createReviewCategoryPreparationWork(commit.bookId, summary,
+        { mode: 'review-first', selectedRange: null }, launchPolicy))).toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    } finally { summaryDb.close(); }
     await store.close();
   });
 });

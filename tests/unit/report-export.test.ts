@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { SAMPLE1_SYNTHESIS } from '../support/review-synthesis-projection.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,6 +84,15 @@ afterEach(async () => {
 });
 
 describe('the 审阅报告 as a file', () => {
+  it('places the synthesis and chapter quotations before the published DOCX finding list (#1433)', () => {
+    const source = input({ schema: 'ai7.review.report/2', synthesis: SAMPLE1_SYNTHESIS });
+    const exported = renderReportExport(source, 'docx', { emit: true });
+    if (exported.bytes === null) throw new Error('DOCX_BYTES_MISSING');
+    const xml = strFromU8(unzipSync(exported.bytes)['word/document.xml']!);
+    expect(xml).toContain('全书审阅统合总结');
+    expect(xml).toContain('[e1] 第一章「一九九○年代」');
+    expect(xml.indexOf('全书审阅统合总结')).toBeLessThan(xml.indexOf('四、逐项问题清单'));
+  });
   it('names a refused category by its decision-layer state, never the technical line it carries (reading 4)', async () => {
     const refusedLine = '派发前已阻止：Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝，未构造 Provider payload（EXECUTION_STOPPING）';
     const base = record();
@@ -284,4 +294,11 @@ describe('the 审阅报告 as a file', () => {
     expect(blocks.filter((block) => block.kind === 'heading').map((block) => `${block.level}:${block.text}`)).toEqual([
       '1:一、审阅说明', '1:二、问题统计', '1:三、建议优先处理的重点问题', '1:四、逐项问题清单', '2:第一章 示例', '2:第二章 示例']);
   });
+});
+
+it.each(['missing', 'budget'] as const)('omits %s synthesis from a published DOCX (#1433 R9d)', state => {
+  const result = renderReportExport(input({ schema: 'ai7.review.report/2', synthesis: { ...SAMPLE1_SYNTHESIS, state, summary: null,
+    detail: '统合总结暂缺，可新建审阅重试。' } }), 'docx', { emit: true });
+  const xml = strFromU8(unzipSync(result.bytes!)['word/document.xml']!);
+  expect(xml).not.toContain('全书审阅统合总结'); expect(xml).not.toContain('重试');
 });

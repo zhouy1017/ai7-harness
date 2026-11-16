@@ -1,3 +1,5 @@
+import { seedSynopsisBaselineAnswers, runSynopsisBaseline } from '../support/synopsis-reuse.js';
+import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-readers-report-authored` (Issue #429, plan slice S81c). The passages and the
 // five sections below are the authored part: each passage was written after reading one Analysis Unit of exact `sample1`
@@ -77,11 +79,12 @@ beforeEach(async () => {
   // The 初评 the 定稿 version begins from runs on the evaluation fixture this one is layered over.
   base = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
   for (const [key, entry] of base.entries) fixture.entries.set(key, entry);
+  await seedSynopsisBaselineAnswers(fixture.entries, roots.codeRoot);
 });
 afterEach(async () => { await roots.dispose(); });
 
 /** One pass of J-11's 审稿意见: a fresh import of exact sample1, its 初评, J-11's 定稿 version, and the draft run to its end. */
-async function pass(): Promise<boolean> {
+async function pass(withBaseline = false): Promise<boolean> {
   const scenario = await createServiceTestRoots('ai7-s81c-generate-pass-');
   const store = await EditorialStore.open(scenario.dataRoot, scenario.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -96,6 +99,7 @@ async function pass(): Promise<boolean> {
     const imported = await importSample1Book(store, scenario.codeRoot, 'S81c 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
     recordMissingCredentialConnection(store, 'S81c 主编辑连接');
+    if (withBaseline) await runSynopsisBaseline(store, owner, imported.bookId, launchPolicy);
     await runInitialEvaluationToEnd(store, owner, imported.bookId, launchPolicy);
     finalizeAsJ11(store, imported.bookId);
     let progress = store.createReadersReportPreparationWork(imported.bookId, 'author', launchPolicy);
@@ -124,7 +128,7 @@ async function pass(): Promise<boolean> {
     }));
     add({
       unitOrdinal: 0,
-      requestDigest: readersReportSynthesisRequestDigest(contract, readersReportPassageSetDigest(closed)),
+      requestDigest: taskSynopsisRequestDigest(readersReportSynthesisRequestDigest(contract, readersReportPassageSetDigest(closed)), prepared.executionPlan?.baselineSynopsisContext),
       attempt: null,
       contentDigest: null,
       response: { kind: 'unit-result', text: JSON.stringify(AUTHORED_SECTIONS), usage: { inputTokens: 3200, outputTokens: 640 } },
@@ -156,7 +160,7 @@ it.runIf(process.env['AI7_REGENERATE_READERS_REPORT_FIXTURE'] === '1')('generate
   let closed = false;
   for (let index = 0; index < 4 && !closed; index += 1) {
     additions = 0;
-    closed = await pass();
+    closed = (await pass()) && (await pass(true));
     // eslint-disable-next-line no-console
     console.log(`pass ${index + 1}: +${additions} entries, closed: ${closed}`);
     if (additions > 0) closed = false;
@@ -166,7 +170,7 @@ it.runIf(process.env['AI7_REGENERATE_READERS_REPORT_FIXTURE'] === '1')('generate
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: READERS_REPORT_FIXTURE_IDENTITY,
-    description: '审稿意见契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答「给作者的修改意见」模板下、从 J-11 第 14 版定稿评估（AI7 初评开始，读者与市场潜力调为 10 分，修改后再议）起草审稿意见时发出的八个单元请求与一次全书综合。每处段落都按其在单元消息中的位置引用它所依据的内容块，分为印证优点、显出问题与需要修改三类；全书综合只依据定稿的评估记录与这些段落写出总体评价、主要优点、主要问题、修改建议与结论五个部分，结论与编辑选定的「修改后再议」一致。本社暂无审稿意见范例，契约写明本次不参考范例。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-evaluation-authored 之上：同一次启动既能运行基线分析与 AI7 初评，也能起草审稿意见；各自的请求摘要互不相同，叠加不改变任何条目的键。',
+    description: '审稿意见契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答「给作者的修改意见」模板下、从 J-11 第 14 版定稿评估（AI7 初评开始，读者与市场潜力调为 10 分，修改后再议）起草审稿意见时发出的八个单元请求与一次全书综合。每处段落都按其在单元消息中的位置引用它所依据的内容块，分为印证优点、显出问题与需要修改三类；全书综合只依据定稿的评估记录与这些段落写出总体评价、主要优点、主要问题、修改建议与结论五个部分，结论与编辑选定的「修改后再议」一致。本社暂无审稿意见范例，契约写明本次不参考范例。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-evaluation-authored 之上：同一次启动既能运行基线分析与 AI7 初评，也能起草审稿意见；各自的请求摘要互不相同，叠加不改变任何条目的键。 #1500 另覆盖有匹配基线的任务：分章概述在计划中冻结，只交给最后的全书综合，保留无匹配基线的原请求；写作原有的全书梗概与人物输入保持不变。',
     basedOn: 'sample1-evaluation-authored',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',

@@ -417,19 +417,16 @@ describe('the market section and 按我的评分重写评语 over the real store
   }, 300_000);
 
   it('replays contract /2 from its own exact authored fixture, the /1 fixture keeping its bytes (Issue #1407)', async () => {
-    // The fixture registration: exact file bytes and lineage, the frozen `/2` prompt contract, and every entry the file adds answered.
-    expect(fixture.lineage).toEqual([
-      { identity: 'sample1-evaluation-report-authored', sha256: 'ff13f5e34129324daf3b281c9309011288472bd89f690a6002c601a202bacf8e' },
-      { identity: 'sample1-readers-report-authored', sha256: '5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128' },
-      { identity: 'sample1-evaluation-authored', sha256: '8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c' },
-      { identity: 'sample1-baseline-happy', sha256: '9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a' },
+    // Preserve the authored lineage and contracts without reintroducing retired fixture-file pins (#1500).
+    expect(fixture.lineage.map(entry => entry.identity)).toEqual([
+      'sample1-evaluation-report-authored', 'sample1-readers-report-authored', 'sample1-evaluation-authored', 'sample1-baseline-happy',
     ]);
     const v1 = await loadModelFixture(FIXTURES_ROOT, EVALUATION_REWRITE_V1_FIXTURE_IDENTITY);
     expect(v1.lineage[0]).toEqual({ identity: 'sample1-evaluation-rewrite-authored', sha256: '9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194' });
-    // Keyed apart from the `/1` fixture: eight units and the `/2` synthesis (the Run Report reflection asks the same as under `/1`).
+    // Eight unchanged units, the original `/2` synthesis and its matching-baseline context variant.
     const own = [...fixture.entries].filter(([key]) => !v1.entries.has(key));
-    expect(own.map(([, entry]) => entry.unitOrdinal).sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(own.filter(([, entry]) => entry.response.kind === 'unit-result' && entry.response.text.startsWith('{"schema":"ai7.evaluation-rewrite.synthesis-result/2"'))).toHaveLength(1);
+    expect(own.map(([, entry]) => entry.unitOrdinal).sort()).toEqual([0, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(own.filter(([, entry]) => entry.response.kind === 'unit-result' && entry.response.text.startsWith('{"schema":"ai7.evaluation-rewrite.synthesis-result/2"'))).toHaveLength(2);
     await withProposal(async (book) => {
       const settled = book.store.inspectEvaluationRewrite(book.bookId)!;
       expect(settled.planEnvelope!.promptContractDigest).toBe('b9a85f8724528a22b03c0bf6a84b8d443cec34be73780973eaee2848efc8817c');

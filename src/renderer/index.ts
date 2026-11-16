@@ -1,3 +1,4 @@
+import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, type NavigationCheckpoint } from './navigation-generation.js';
 import { importSteps } from './components/import-steps.js';
 import { icon } from './components/icon-sprite.js';
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
@@ -217,6 +218,15 @@ function requiredElement(selector: string): HTMLElement {
 }
 
 const screen = requiredElement('#screen');
+if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
+const api = reconcileBookWorkbenchApi(window.ai7, {
+  bookOnScreen: () => navigation.bookId,
+  editorOnScreen: () => manuscriptOnScreen === null ? null : { manuscriptId: manuscriptOnScreen.manuscriptId, branchId: manuscriptOnScreen.branchId },
+  left: () => shell.leaveBook(),
+  failed: reportBookReacquisitionFailure,
+  recovered: clearBookReacquisitionNotice,
+});
+bindRendererApi(api);
 const unmountSelectControls = mountSelectControls(document.body);
 window.addEventListener('pagehide', unmountSelectControls, { once: true });
 const unmountMenuControls = mountMenuControls(document.body);
@@ -225,7 +235,6 @@ const persistenceStatus = requiredElement('#persistence-status');
 const updateStatusSurface = createStatusSurface(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
-if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 /**
  * How each surface on screen that raises a Task reads it again, by the Task's kind: J-03's card on
@@ -241,7 +250,7 @@ let taskSurfaceRefresh: Partial<Record<TaskPlanKind, () => void>> = {};
  * since Issue #420 (S74a) its authorization bar is where every Task is started.
  */
 let overviewDrawerBookId: string | null = null;
-const overviewApi = taskOverviewApi(window.ai7, () => overviewDrawerBookId);
+const overviewApi = taskOverviewApi(api, () => overviewDrawerBookId);
 const taskDrawer = mountTaskDrawer({
   root: requiredElement('#task-drawer'),
   shell: document.body,
@@ -282,7 +291,7 @@ const taskDrawer = mountTaskDrawer({
   // The Context-bound Task Composer (Issue #423, wave 10 slice 7a; TASK-001 to 009, 046): the whole-Book composer names its Book;
   // 再选一段加入 takes the words selected in that Book's manuscript on screen; the house's 工序 open the composer beside them.
   wholeBookSeed: async (bookId) => {
-    const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null });
+    const read = await api.inspectTaskIntentDrafts({ draftId: null });
     if (read.bookId !== bookId) throw new Error(SELECTION_TASK_PICK_RANGE);
     return { bookId, bookTitle: read.bookTitle, origin: 'composer-book', manuscript: null, ranges: [] };
   },
@@ -298,12 +307,15 @@ const taskDrawer = mountTaskDrawer({
   },
   settle: () => settleScreen(),
   resumeDraft: (bookId, resume) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
-    renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+    const current = navigation.route();
+    const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
+    if (!current.isCurrent()) return;
+    navigation.present(() => renderBookOverview(overview));
     resume();
   }),
 });
 
-const procedureRecommendationSlots = mountProcedureRecommendationSlots(document.body, window.ai7, () => void renderKnowledgeBase('rules'));
+const procedureRecommendationSlots = mountProcedureRecommendationSlots(document.body, api, () => void renderKnowledgeBase('rules'));
 window.addEventListener('unload', () => procedureRecommendationSlots.disconnect(), { once: true });
 
 /** One range the composer carries, from the words selected now (Issue #423, slice 7a). */
@@ -329,12 +341,12 @@ let taskResultWindow: TaskResultWindow | undefined;
  * 查看结果 (TASK-045): the finished Task's result beside the text — level with the manuscript's text column while the
  * manuscript is on screen. Its jumps land in the manuscript and leave 回到<位置>; closing it opens the panel again.
  */
-function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void, api: RendererApi = window.ai7): void {
+function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void, resultApi: RendererApi = api): void {
   taskResultWindow?.close(false);
   const bookId = entry.item.book.bookId;
   taskResultWindow = openTaskResultWindow({
     entry,
-    api,
+    api: resultApi,
     column: () => {
       const text = screen.querySelector<HTMLElement>('[data-screen="editor"] .editor-window .ProseMirror');
       const pane = text?.closest<HTMLElement>('.editor-window') ?? null;
@@ -380,7 +392,7 @@ async function startWholeBookTask(
   }
   setStatus(TASK_PANEL_COMPOSE_STATUS.preparing, 'busy');
   try {
-    const initial = await window.ai7.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: false });
+    const initial = await api.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: false });
     const completed = await awaitServiceJob(initial, (job) => setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
     if (completed.state === 'cancelled') {
       setStatus(TASK_PANEL_COMPOSE_STATUS.cancelled, 'success');
@@ -394,7 +406,7 @@ async function startWholeBookTask(
     const planEnvelopeDigest = prepared.planEnvelope?.digest ?? null;
     if (taskIntentId === null) throw new Error('基线稿件分析准备未返回计划。');
     if (input.quick === null) {
-      await startPreparedTask(window.ai7, 'baseline-analysis', taskIntentId);
+      await startPreparedTask(api, 'baseline-analysis', taskIntentId);
       taskSurfaceRefresh['baseline-analysis']?.();
       globalAttentionReader.refresh();
       setStatus('已开始分析', 'success');
@@ -405,7 +417,7 @@ async function startWholeBookTask(
     setStatus(`正在按默认执行规则「${rule.name}」开始…`, 'busy');
     let result: QuickStartBaselineAnalysisResult;
     try {
-      result = await window.ai7.quickStartBaselineAnalysis({ taskIntentId, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
+      result = await api.quickStartBaselineAnalysis({ taskIntentId, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
     } catch (error) {
       setStatus(rendererErrorMessage(error, '快速开始没有开始任务；计划已准备，可在任务计划里开始。'), 'error');
       return { ref: taskIntentId };
@@ -430,8 +442,8 @@ async function startWholeBookTask(
  */
 async function selectionTaskOffer(): Promise<SelectionTaskChoices> {
   const [analysis, workspace, procedures] = await Promise.all([
-    window.ai7.inspectBaselineAnalysis().then((value) => value, () => null),
-    window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((value) => value, () => null),
+    api.inspectBaselineAnalysis().then((value) => value, () => null),
+    api.inspectReviewWorkspace({ reviewRunId: null }).then((value) => value, () => null),
     selectionProcedureOffer().then((value) => value, (): SelectionProcedureEntry[] => []),
   ]);
   if (analysis === null && workspace === null) throw new Error(SELECTION_TASK_STATUS.unreadable);
@@ -443,7 +455,7 @@ async function selectionTaskOffer(): Promise<SelectionTaskChoices> {
  * entries, read as 新建审阅's 按已保存的工序 reads them — one answer for the whole house, scoped to the selection.
  */
 async function selectionProcedureOffer(): Promise<SelectionProcedureEntry[]> {
-  return selectionProcedureEntries(await window.ai7.inspectCapturedProcedureApplicability({ scope: 'selection' }));
+  return selectionProcedureEntries(await api.inspectCapturedProcedureApplicability({ scope: 'selection' }));
 }
 
 /**
@@ -471,9 +483,9 @@ async function prepareSelectionTask(
     // The version is resolved again for the selection as the sheet's choice resolves it (ADR 0087 §4): the one the menu offered,
     // every step still able to run here, and the Series steps the editor ticked — nothing is prepared from a moved answer.
     setStatus(SELECTION_TASK_STATUS.readingProcedure, 'busy');
-    let resolved: Awaited<ReturnType<typeof window.ai7.inspectCapturedProcedureRun>>['resolved'];
+    let resolved: Awaited<ReturnType<typeof api.inspectCapturedProcedureRun>>['resolved'];
     try {
-      resolved = (await window.ai7.inspectCapturedProcedureRun({ procedureId: choice.procedureId, versionId: choice.versionId, scope: 'selection' })).resolved;
+      resolved = (await api.inspectCapturedProcedureRun({ procedureId: choice.procedureId, versionId: choice.versionId, scope: 'selection' })).resolved;
     } catch (error) {
       setStatus(rendererErrorMessage(error, SELECTION_TASK_STATUS.procedureUnreadable), 'error');
       return false;
@@ -509,7 +521,7 @@ async function prepareSelectionReview(
   if (!(await settleScreen())) return false;
   setStatus(SELECTION_TASK_STATUS.preparing, 'busy');
   try {
-    const initial = await window.ai7.prepareReviewRun({
+    const initial = await api.prepareReviewRun({
       categoryIds,
       scope: { kind: 'selection', fromChapterBlockId: anchor.blockId, toChapterBlockId: anchor.blockId },
       ...(capturedProcedure === null ? {} : { capturedProcedure }),
@@ -525,7 +537,7 @@ async function prepareSelectionReview(
     }
     taskSurfaceRefresh['review-run']?.();
     setStatus(SELECTION_TASK_STATUS.prepared, 'success');
-    await startPreparedTask(window.ai7, 'review-run', result.run.reviewRunId);
+    await startPreparedTask(api, 'review-run', result.run.reviewRunId);
     taskSurfaceRefresh['review-run']?.();
     globalAttentionReader.refresh();
     manuscriptOnScreen?.followReviewMarks(bookId, result.run.reviewRunId);
@@ -559,10 +571,10 @@ async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: s
     await preserveReturnPlace(known);
     return;
   }
-  const overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+  const overview = await api.getBookOverview({ bookId, historyCursor: null });
   const anchor = overview.manuscriptAnchor;
   if (anchor?.manuscriptId !== manuscriptId || anchor.branchId !== branchId || anchor.entry === null) return;
-  const remembered = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
+  const remembered = await api.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
   const block = remembered.blocks.find((item) => item.blockId === anchor.entry?.blockId);
   if (block !== undefined) await preserveReturnPlace({ manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) });
 }
@@ -573,6 +585,7 @@ async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: s
  * in the caller's own words (Issue #423 review, P2-1); every other refusal is said in the service's.
  */
 async function jumpToManuscript(bookId: string, target: { manuscriptId: string | null; blockId: string; markId: string | null }, gone?: string): Promise<boolean> {
+  const navigationRoute = navigation.begin();
   const origin = screen.firstElementChild;
   const showing = manuscriptOnScreen;
   const refused = (error: unknown, fallback: string): false => {
@@ -583,21 +596,25 @@ async function jumpToManuscript(bookId: string, target: { manuscriptId: string |
     try {
       return await showing.jump(target);
     } catch (error) {
+      if (!navigation.errorIsCurrent(error, navigationRoute)) return false;
       return refused(error, '无法移动到该稿件位置。');
     }
   }
   setStatus('正在打开对应稿件位置…', 'busy');
   try {
-    const overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+    const overview = await api.getBookOverview({ bookId, historyCursor: null });
+    if (!navigationRoute.isCurrent()) return false;
     const anchor = overview.manuscriptAnchor;
     if (anchor === null || (target.manuscriptId !== null && target.manuscriptId !== anchor.manuscriptId)) throw new Error('这项结果所在的稿件已不在这本书中。');
-    const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId: target.blockId } });
+    const opened = await api.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId: target.blockId } });
+    if (!navigationRoute.isCurrent()) return false;
     await leaveReturnChip(bookId, anchor.manuscriptId, anchor.branchId);
     if (screen.firstElementChild !== origin) return false;
-    await openEditorWindow(opened, overview.book.title, undefined, undefined, target.markId ?? undefined);
+    if (!navigationRoute.isCurrent()) return false;
+    await openEditorWindow(opened, overview.book.title, undefined, undefined, target.markId ?? undefined, undefined, navigationRoute);
     return true;
   } catch (error) {
-    if (screen.firstElementChild !== origin) return false;
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return false;
     return refused(error, '无法打开对应稿件位置。');
   }
 }
@@ -626,15 +643,17 @@ function taskPlanOpenButton(kind: TaskPlanKind, open: () => void, startable = fa
  * Run on ②B with that Run open. The drawer stays beside it, because each is a destination of the same Book.
  */
 async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
+  const current = navigation.begin();
   setStatus('正在打开运行所在的页面…', 'busy');
   try {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
     else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
     // 写作任务 is followed on 稿件 (Issue #1403), where its draft opens.
-    else if (plan.kind === 'writing') await renderBookManuscript(plan.bookId, plan.goal.chips.book);
-    else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
+    else if (plan.kind === 'writing') await renderBookManuscript(plan.bookId, plan.goal.chips.book, current);
+    else { const overview = await api.getBookOverview({ bookId: plan.bookId, historyCursor: null }); if (current.isCurrent()) navigation.present(() => renderBookOverview(overview)); }
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, current)) return;
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
   }
 }
@@ -682,9 +701,52 @@ async function settleScreen(): Promise<boolean> {
   }
 }
 
+async function guardNavigationRead<T>(current: NavigationCheckpoint, read: () => Promise<T>): Promise<T | undefined> {
+  try { return await read(); } catch (error) { if (navigation.errorIsCurrent(error, current)) throw error; }
+}
+
+function clearBookReacquisitionNotice(): void {
+  screen.querySelector('[data-book-reacquire]')?.remove();
+}
+
+function reportBookReacquisitionFailure(error: unknown, retry: () => Promise<void>): void {
+  const content = screen.firstElementChild;
+  if (navigation.bookId === null || !(content instanceof HTMLElement)) return;
+  const line = bookOwnershipFailureLine(error);
+  const existing = content.querySelector<HTMLElement>('[data-book-reacquire]');
+  if (existing !== null) {
+    const words = existing.querySelector('p');
+    if (words?.textContent === line) return;
+    if (words) words.textContent = line;
+    setStatus(line, 'error');
+    return;
+  }
+  setStatus(line, 'error');
+  const notice = element('section', 'attention-note');
+  notice.dataset['bookReacquire'] = 'retry';
+  const page = navigation.read(content);
+  const editor = manuscriptOnScreen;
+  let retrying = false;
+  const again = button('重试连接当前图书', 'secondary', async () => {
+    if (retrying) return;
+    retrying = true;
+    again.setAttribute('aria-busy', 'true');
+    try { await retry(); } catch { return; } // The existing notice retains its node and focus.
+    finally { retrying = false; again.removeAttribute('aria-busy'); }
+    if (!page.isCurrent()) return;
+    try { if (editor !== null && editor === manuscriptOnScreen && !await editor.settle()) return; }
+    catch { setStatus('当前修改尚未保存，请在编辑保护选项中重试写入。', 'error'); return; }
+    if (page.isCurrent()) setStatus(editor === null ? '已重新连接当前图书。' : '已重新连接当前图书；当前修改已保存。', 'success');
+  });
+  notice.append(element('p', undefined, line), again);
+  content.prepend(notice);
+}
+
 /** Open another page once the surface on screen has settled; a refusal keeps it. */
 async function leaveThen(open: () => Promise<void>): Promise<void> {
-  if (await settleScreen()) await open();
+  const route = navigation.begin();
+  if (!await settleScreen() || !route.isCurrent()) return;
+  if (route.isCurrent()) await open();
 }
 
 /**
@@ -693,7 +755,7 @@ async function leaveThen(open: () => Promise<void>): Promise<void> {
  * the surface's own ways out; none starts, adopts, designates or deletes anything (KEY-004). The commands of the manuscript on
  * screen register with it and leave with it.
  */
-const commandPlatformInUse: CommandPlatform = window.ai7.platform;
+const commandPlatformInUse: CommandPlatform = api.platform;
 let windowComposing = false;
 window.addEventListener('compositionstart', () => { windowComposing = true; }, true);
 window.addEventListener('compositionend', () => { windowComposing = false; }, true);
@@ -744,7 +806,7 @@ commandDispatcher.register({
 });
 
 const commandPalette = createCommandPalette({
-  api: window.ai7, execute: (id) => commandDispatcher.execute(id),
+  api: api, execute: (id) => commandDispatcher.execute(id),
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void openOverviewResult(item),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
@@ -761,7 +823,7 @@ function applyKeyboardBindings(bindings: Parameters<typeof configureCommandLabel
   configureCommandLabels(commandPlatformInUse, bindings);
   refreshShortcutLabels(document);
 }
-void window.ai7.getPreferences().then((preferences) => applyKeyboardBindings(preferences.values['keyboard.bindings']), () => undefined);
+void api.getPreferences().then((preferences) => applyKeyboardBindings(preferences.values['keyboard.bindings']), () => undefined);
 
 /** Each shortcut hint is derived from the same registry that dispatches it (KEY-011). */
 function refreshCommandEntries(): void {
@@ -784,7 +846,7 @@ function refreshCommandEntries(): void {
  * whenever the window gains focus, and slowly on its own while a Run is in flight; the header's entry and the
  * screen paint the same answer (global-attention.ts).
  */
-const globalAttentionReader = createGlobalAttentionReader(window.ai7);
+const globalAttentionReader = createGlobalAttentionReader(api);
 const globalAttentionEntry = ((): HTMLButtonElement => {
   const node = requiredElement('#global-attention-entry');
   if (!(node instanceof HTMLButtonElement)) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
@@ -793,28 +855,42 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
 const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)));
+/** Automatic results stay with the task being watched; an open review already shows its own result. */
+function canAutoOpenTaskResult(item: GlobalAttentionItemProjection): boolean {
+  const bookId = item.book.bookId;
+  if (bookId === null || document.querySelector('dialog[open]') !== null) return false;
+  const target = item.target;
+  const ref = 'taskIntentId' in target ? target.taskIntentId : 'reviewRunId' in target ? target.reviewRunId : 'ref' in target ? target.ref : null;
+  const review = target.kind === 'review' || target.kind === 'review-plan' || target.kind === 'task-plan' && target.taskKind === 'review-run';
+  if (review && screen.dataset['screen'] === 'book-review' && screen.querySelector<HTMLElement>('.review-run')?.dataset['reviewRunId'] === ref) return false;
+  const view = taskDrawer.view();
+  if (view !== null) return view.bookId === bookId && (view.kind === 'panel' || view.kind === 'plan' && ref !== null && view.task.ref === ref);
+  return screen.dataset['screen'] === 'task-overview';
+}
 const observeNotifications = createNotificationObserver({
-  api: window.ai7,
+  api: api,
   focused: () => document.hasFocus(),
   completed: (item) => {
     showQuietNotice(item);
     void openCurrentBookCompletion(item, {
-      currentBookId: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] ?? null,
+      allowed: canAutoOpenTaskResult, navigation: navigation.route(),
       enabled: () => localStorage.getItem('ai7.task-overview.auto-result') !== 'off',
-      read: () => window.ai7.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
+      read: () => api.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
     }).catch(() => undefined);
   },
 });
 globalAttentionReader.subscribe((reading) => {
   if (reading.kind === 'projection') observeNotifications(reading.projection);
 });
-window.ai7.onNotificationNavigate((target) => {
+api.onNotificationNavigate((target) => {
   void leaveThen(async () => {
     if (target.eventId !== null && target.target !== undefined) {
       await openTaskNotification(target.eventId, target.target);
       return;
     }
-    const projection = await window.ai7.inspectGlobalAttention();
+    const navigationRoute = navigation.route();
+    const projection = await api.inspectGlobalAttention();
+    if (!navigationRoute.isCurrent()) return;
     const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === target.eventId && entry.book.bookId === target.bookId);
     if (item) await openTaskNotification(item.itemId, item.target);
     else await openGlobalAttention(target.bookId);
@@ -828,13 +904,13 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
  * `#screen`. Every way it leads goes through `leaveThen`, so the surface on screen settles what it must first, exactly as
  * its own ways out do; a Book section checks the window's owned route before opening within that Book.
  */
-const shellPreferences = new ShellPreferences(window.ai7);
+const shellPreferences = new ShellPreferences(api);
 /**
  * Density, reading typography and region sizes (Issue #951, wave 12 slice 12a; VIEW-001 to VIEW-012): three more keys of the
  * same preferences owner, applied to the root as every read or write of the owner answers. The Task Drawer's width is adjusted
  * from a separator on its left edge, mounted once beside it.
  */
-const viewPreferences = new ViewPreferences(window.ai7, () => document.documentElement);
+const viewPreferences = new ViewPreferences(api, () => document.documentElement);
 shellPreferences.subscribe((values) => viewPreferences.accept(values));
 (() => {
   const drawer = requiredElement('#task-drawer');
@@ -906,7 +982,7 @@ const taskNavigationLink = document.querySelector<HTMLElement>('[data-nav-destin
 if (taskNavigationLink !== null) {
   taskNavigationLink.append(taskNavigationBadge);
   const refreshTaskBadge = (): void => {
-    void window.ai7.inspectTaskOverview().then((projection) => {
+    void api.inspectTaskOverview().then((projection) => {
       const count = projection.runningCount + projection.queuedCount + projection.actionableCount;
       taskNavigationBadge.textContent = count > 0 ? String(count) : '';
       taskNavigationBadge.hidden = count === 0;
@@ -1085,6 +1161,11 @@ function restoreCurrentScreen(): () => void | Promise<void> {
 }
 
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
+  const bookId = content.dataset['bookId'] ?? place?.bookId ?? null;
+  const tab = content.dataset['knowledgeTab'] ?? content.dataset['qualityTab'] ?? place?.section ?? null;
+  const object = content.dataset['documentId'] ?? content.dataset['manuscriptId'] ?? content.dataset['revisionId'] ?? content.dataset['seriesId'] ?? null;
+  const conflict = content.dataset['conflictMarkId'] ?? null;
+  navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId);
   if (state !== 'task-overview') overviewDrawerBookId = null;
   screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;
@@ -1144,26 +1225,31 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
  * showed, as 返回图书列表 does — after the surface on screen has settled what it must first.
  */
 async function openGlobalAttention(bookId?: string | null): Promise<void> {
+  const navigationRoute = navigation.begin();
   if (authorityInterrupted) return;
   const guard = leaveGuard;
   if (guard !== null) {
     setStatus(GLOBAL_ATTENTION_STATUS_LINES.leaving, 'busy');
     try {
-      if (!(await guard())) {
+      const left = await guard();
+      if (!navigationRoute.isCurrent()) return;
+      if (!left) {
         // The surface's own refusal stands; only a silent one is named here.
         if (persistenceStatus.textContent === GLOBAL_ATTENTION_STATUS_LINES.leaving) setStatus(GLOBAL_ATTENTION_STATUS_LINES.stayed, 'error');
         return;
       }
     } catch (error) {
+      if (!navigation.errorIsCurrent(error, navigationRoute)) return;
       setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
       return;
     }
   }
   try {
-    await window.ai7.leaveBookWorkbench();
-    shell.leaveBook();
+    await api.leaveBookWorkbench();
+    if (!navigationRoute.isCurrent()) return;
     renderGlobalAttention(bookId);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
   }
 }
@@ -1211,10 +1297,12 @@ function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run'
 }
 /** Task notices use the overview; other attention notices retain their existing destination. */
 async function openTaskNotification(itemId: string, target: GlobalAttentionTarget): Promise<void> {
+  const navigationRoute = navigation.begin();
   if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(target.kind)) {
     await openGlobalAttentionTarget(target); return;
   }
-  const overview = await window.ai7.inspectTaskOverview();
+  const overview = await api.inspectTaskOverview();
+  if (!navigationRoute.isCurrent()) return;
   const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === itemId);
   if (!task) { await openGlobalAttentionTarget(target); return; }
   renderTaskOverview(itemId);
@@ -1223,14 +1311,14 @@ async function openTaskNotification(itemId: string, target: GlobalAttentionTarge
 }
 async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
   if (!item.bookId) return;
-  const api = taskOverviewApi(window.ai7, () => item.bookId);
-  if (item.result || item.attention.object.kind === 'task') openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), api);
+  const resultApi = taskOverviewApi(api, () => item.bookId);
+  if (item.result || item.attention.object.kind === 'task') openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), resultApi);
   else openOverviewTask(item, 'run');
 }
 function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
   const content = panel(); content.classList.add('task-overview');
-  const surface = mountTaskOverview({ root: content, api: window.ai7, setStatus, beforeStart: settleScreen,
+  const surface = mountTaskOverview({ root: content, api: api, setStatus, beforeStart: settleScreen,
     onChanged: () => globalAttentionReader.refresh(),
     onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
     openTarget: openOverviewTask,
@@ -1238,14 +1326,15 @@ function renderTaskOverview(focusItemId?: string): void {
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
     openResult: (item) => void openOverviewResult(item), closeDrawer: () => taskDrawer.close(true),
     configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
+      const current = navigation.route();
       if (kind === 'review') renderBookReview(bookId, route.bookTitle);
       // 写作 lives on 稿件 (Issue #1403).
-      else await renderBookManuscript(bookId, route.bookTitle);
+      else { const shown = await renderBookManuscript(bookId, route.bookTitle, current); if (!shown?.isCurrent()) return; }
       const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
     }),
   });
   replaceScreen('task-overview', content); taskOverviewSurface = surface;
-  if (focusItemId) { surface.focus(focusItemId); window.setTimeout(() => surface.focus(focusItemId), 300); }
+  if (focusItemId) { const page = navigation.read(content); surface.focus(focusItemId); window.setTimeout(() => { if (page.isCurrent()) surface.focus(focusItemId); }, 300); }
 }
 
 /**
@@ -1255,12 +1344,14 @@ function renderTaskOverview(focusItemId?: string): void {
  * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
  */
 async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
+  const navigationRoute = navigation.begin();
   if (item.nextStep === 'open-network-proxy') {
     await renderModelServiceSettings();
     return;
   }
   if (['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(item.target.kind)) {
-    const tasks = await window.ai7.inspectTaskOverview();
+    const tasks = await api.inspectTaskOverview();
+    if (!navigationRoute.isCurrent()) return;
     const task = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
     if (task) { if (task.state === 'completed') await openOverviewResult(task); else openOverviewTask(task); return; }
   }
@@ -1269,11 +1360,15 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
 
 /** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
 async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
+  navigation.begin();
   switch (target.kind) {
     case 'apply-receipt':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        const receipt = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
+        const navigationRoute = navigation.route();
+        await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        if (!navigationRoute.isCurrent()) return;
+        const receipt = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
+        if (!navigationRoute.isCurrent()) return;
         const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
         const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
         heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
@@ -1283,13 +1378,13 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
         // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
         if (receipt.state === 'unresolved') {
           const recheck = button('重新核对应用结果', 'primary', async () => {
-            const next = await window.ai7.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
+            const next = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
             heading.textContent = labels[next.state]; heading.dataset['applyReceiptState'] = next.state; reason.textContent = next.reason; full.textContent = JSON.stringify(next, null, 2);
             if (next.state !== 'unresolved') recheck.remove();
           });
           content.append(recheck);
         }
-        content.append(button('在稿件中查看', 'secondary', async () => { const opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
+        content.append(button('在稿件中查看', 'secondary', async () => { const current = navigation.begin(); const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); if (current.isCurrent()) await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
         replaceScreen('apply-receipt', content, { bookId: target.bookId, title: route.bookTitle, section: 'review' });
       });
       return;
@@ -1301,13 +1396,19 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
     // the manuscript first does on the way there from its card.
     case 'manuscript-conflict':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId }, route.bookTitle);
+        const navigationRoute = navigation.route();
+        const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
+        if (!navigationRoute.isCurrent()) return;
+        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId, onDocument: opened.deliverable === 'production-document' }, route.bookTitle);
       });
       return;
-    case 'import-recovery':
-      await renderStartupProjection(await window.ai7.getImportStartup());
+    case 'import-recovery': {
+      const navigationRoute = navigation.begin();
+      const startup = await api.getImportStartup();
+      if (!navigationRoute.isCurrent()) return;
+      await renderStartupProjection(startup);
       return;
+    }
     case 'analysis':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, analysisRevisionId));
       return;
@@ -1332,6 +1433,7 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
     // 保留为缺口 is recorded.
     case 'task-plan':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        const current = navigation.route();
         switch (target.taskKind) {
           case 'review-run':
             renderBookReview(route.bookId, route.bookTitle, target.ref === null ? null : { reviewRunId: target.ref, findingId: null });
@@ -1341,9 +1443,11 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
           case 'evaluation-rewrite':
             renderBookEvaluation(route.bookId, route.bookTitle);
             break;
-          case 'writing':
-            await renderBookManuscript(route.bookId, route.bookTitle);
+          case 'writing': {
+            const shown = await renderBookManuscript(route.bookId, route.bookTitle, current);
+            if (!shown?.isCurrent()) return;
             break;
+          }
           default:
             renderBookAnalysis(route.bookId, route.bookTitle);
         }
@@ -1369,14 +1473,20 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       return;
     case 'dialogue':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+        const navigationRoute = navigation.route();
+        const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
+        if (!navigationRoute.isCurrent()) return;
+        navigation.present(() => renderBookOverview(overview));
         taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
       });
       return;
     // A Task Intent Draft (Issue #423, slice 7a; TASK-006): its own Book's 工作概览, with the draft in the composer beside it.
     case 'task-intent-draft':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+        const navigationRoute = navigation.route();
+        const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
+        if (!navigationRoute.isCurrent()) return;
+        navigation.present(() => renderBookOverview(overview));
         taskDrawer.openDraft(route.bookId, target.draftId, () => null);
       });
       return;
@@ -1392,11 +1502,12 @@ async function openFeedbackTarget(target: FeedbackHistoryTarget, entryId: string
 }
 
 /** The exact feedback source travels with its resolved Book route across windows. */
-async function renderFeedbackTarget(target: FeedbackHistoryTarget, bookTitle: string): Promise<void> {
+async function renderFeedbackTarget(target: FeedbackHistoryTarget, bookTitle: string, navigationRoute: NavigationCheckpoint = navigation.begin()): Promise<void> {
   switch (target.kind) {
     case 'mark': {
-      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
-      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
+      const opened = await api.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+      if (!navigationRoute.isCurrent()) return;
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId, undefined, navigationRoute);
       return;
     }
     case 'analysis':
@@ -1415,13 +1526,16 @@ async function openLearningMaterialSource(bookId: string, materialKey: string): 
 /** Follow the existing bounded Book history to the exact retained Source Version. */
 async function openWordSourceVersion(bookId: string, sourceVersionId: string): Promise<void> {
   await requestBookWorkbenchRoute({ kind: 'book', bookId }, async () => {
-    let overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+    const navigationRoute = navigation.route();
+    let overview = await api.getBookOverview({ bookId, historyCursor: null });
+    if (!navigationRoute.isCurrent()) return;
     while (!overview.records.some((record) => record.kind === 'source' && record.sourceVersionId === sourceVersionId)) {
       const cursor = overview.historyPage.nextCursor;
       if (cursor === null) throw new Error('保留的 Word 原文件不在这本图书的历史中。');
-      overview = await window.ai7.getBookOverview({ bookId, historyCursor: cursor });
+      overview = await api.getBookOverview({ bookId, historyCursor: cursor });
+      if (!navigationRoute.isCurrent()) return;
     }
-    renderBookOverview(overview);
+    navigation.present(() => renderBookOverview(overview));
     const source = screen.querySelector<HTMLButtonElement>(`[data-record-kind="source"][data-record-id="${CSS.escape(sourceVersionId)}"]`);
     if (source === null) throw new Error('原文件记录暂时无法打开。');
     source.click();
@@ -1429,20 +1543,21 @@ async function openWordSourceVersion(bookId: string, sourceVersionId: string): P
 }
 
 /** The service-owned arrival travels with the route to whichever workbench owns the Book. */
-async function renderLearningMaterialTarget(target: LearningMaterialTarget, bookTitle: string): Promise<void> {
+async function renderLearningMaterialTarget(target: LearningMaterialTarget, bookTitle: string, navigationRoute: NavigationCheckpoint = navigation.begin()): Promise<void> {
   switch (target.kind) {
     case 'word-tracked-edit': {
       const content = panel();
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
-      const reader = mountWordTrackedEditDetail({ root: content, api: window.ai7, ...target, openSourceVersion: openWordSourceVersion });
+      const reader = mountWordTrackedEditDetail({ root: content, api: api, ...target, openSourceVersion: openWordSourceVersion });
       if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
       replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'history' });
       await reader.load();
       return;
     }
     case 'mark': {
-      const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
-      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
+      const opened = await api.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
+      if (!navigationRoute.isCurrent()) return;
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId, undefined, navigationRoute);
       return;
     }
     case 'analysis':
@@ -1458,10 +1573,11 @@ function panel(): HTMLElement {
   return element('section', 'page-content');
 }
 
-async function returnToRecoveryComparison(attentionId: string): Promise<void> {
-  const recovery = await window.ai7.getRecoveryComparison({ attentionId });
-  await window.ai7.leaveBookWorkbench();
-  shell.leaveBook();
+async function returnToRecoveryComparison(attentionId: string, navigationRoute: NavigationCheckpoint = navigation.begin()): Promise<void> {
+  const recovery = await api.getRecoveryComparison({ attentionId });
+  if (!navigationRoute.isCurrent()) return;
+  await api.leaveBookWorkbench();
+  if (!navigationRoute.isCurrent()) return;
   renderManuscriptRecovery(recovery);
 }
 
@@ -1509,50 +1625,79 @@ function manuscriptEntryNotice(anchor: BookManuscriptAnchorProjection): string {
 async function renderResolvedBookWorkbenchRoute(
   route: ResolvedBookWorkbenchRoute,
   recoveryReturn?: RecoveryReturnContext,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
 ): Promise<void> {
+  await guardNavigationRead(navigationRoute, () => renderResolvedBookWorkbenchRouteNow(route, recoveryReturn, navigationRoute));
+}
+
+async function renderResolvedBookWorkbenchRouteNow(
+  route: ResolvedBookWorkbenchRoute,
+  recoveryReturn?: RecoveryReturnContext,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
+): Promise<NavigationCheckpoint | undefined> {
   if (route.kind === 'book') {
     if (route.feedbackTarget !== undefined) {
-      await renderFeedbackTarget(route.feedbackTarget, route.bookTitle);
+      await renderFeedbackTarget(route.feedbackTarget, route.bookTitle, navigationRoute);
       return;
     }
     if (route.learningMaterialTarget !== undefined) {
-      await renderLearningMaterialTarget(route.learningMaterialTarget, route.bookTitle);
+      await renderLearningMaterialTarget(route.learningMaterialTarget, route.bookTitle, navigationRoute);
       return;
     }
-    const overview = await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null });
+    const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
+    if (!navigationRoute.isCurrent()) return;
     const anchor = overview.manuscriptAnchor;
     if (anchor === null) {
-      renderBookOverview(overview, undefined, recoveryReturn);
-      return;
+      navigation.present(() => renderBookOverview(overview, undefined, recoveryReturn));
+      return navigation.read(screen.firstElementChild as HTMLElement);
     }
-    await openEditorWindow(
-      await window.ai7.getManuscriptWindowAt({
-        manuscriptId: anchor.manuscriptId,
-        branchId: anchor.branchId,
-        target: anchor.entry === null ? { kind: 'start' } : { kind: 'block', blockId: anchor.entry.blockId },
-      }),
+    const opened = await api.getManuscriptWindowAt({
+      manuscriptId: anchor.manuscriptId,
+      branchId: anchor.branchId,
+      target: anchor.entry === null ? { kind: 'start' } : { kind: 'block', blockId: anchor.entry.blockId },
+    });
+    if (!navigationRoute.isCurrent()) return;
+    const shown = await openEditorWindowNow(
+      opened,
       overview.book.title,
       recoveryReturn?.attentionId,
       manuscriptEntryNotice(anchor),
+      undefined, undefined, navigationRoute,
     );
+    if (!shown?.isCurrent()) return;
     const content = screen.firstElementChild;
     if (recoveryReturn && content instanceof HTMLElement && content.dataset['bookId'] === route.bookId) {
       recoveryReturnContexts.set(content, recoveryReturn);
     }
-    return;
+    return shown;
   }
-  renderHistoricalRevision(await window.ai7.getHistoricalRevision({ revisionId: route.revisionId, cursor: null }));
+  const historical = await api.getHistoricalRevision({ revisionId: route.revisionId, cursor: null });
+  if (!navigationRoute.isCurrent()) return;
+  renderHistoricalRevision(historical);
+  return navigation.read(screen.firstElementChild as HTMLElement);
 }
 
 async function requestBookWorkbenchRoute(
   route: BookWorkbenchRoute,
   onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>,
   recoveryReturn?: RecoveryReturnContext,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
 ): Promise<void> {
-  const opened = await window.ai7.openBookWorkbench(route);
+  await guardNavigationRead(navigationRoute, () => requestBookWorkbenchRouteNow(route, onRequestingWindow, recoveryReturn, navigationRoute));
+}
+
+async function requestBookWorkbenchRouteNow(
+  route: BookWorkbenchRoute,
+  onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>,
+  recoveryReturn?: RecoveryReturnContext,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
+): Promise<void> {
+  if (!navigationRoute.isCurrent()) return;
+  const opened = await api.openBookWorkbench(route);
+  if (!navigationRoute.isCurrent()) return;
   if (opened.target === 'requesting-window') {
     if (onRequestingWindow) await onRequestingWindow(opened.route);
-    else await renderResolvedBookWorkbenchRoute(opened.route, recoveryReturn);
+    else await renderResolvedBookWorkbenchRoute(opened.route, recoveryReturn, navigationRoute);
     return;
   }
   setStatus(
@@ -1564,30 +1709,41 @@ async function requestBookWorkbenchRoute(
 }
 
 async function renderOwnedBookWorkbenchRoute(): Promise<void> {
-  const route = await window.ai7.getBookWorkbenchRoute();
+  const navigationRoute = navigation.begin();
+  if (!navigationRoute.isCurrent()) return;
+  const route = await api.getBookWorkbenchRoute();
+  if (!navigationRoute.isCurrent()) return;
   if (!route) return;
   setStatus(technicalWords('正在读取精确图书工作台路由…', '正在打开图书…'), 'busy');
   try {
-    await renderResolvedBookWorkbenchRoute(route);
+    await renderResolvedBookWorkbenchRoute(route, undefined, navigationRoute);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     setStatus(rendererErrorMessage(error, technicalWords('无法读取精确图书工作台路由。', '无法打开这本书，请重试。')), 'error');
   }
 }
 
 async function renderGlobalAgent(dialogueId?: string): Promise<void> {
-  await window.ai7.leaveBookWorkbench();
-  shell.leaveBook();
-  replaceScreen('global-agent', mountGlobalAgent({ api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
-    ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
+  const navigationRoute = navigation.begin();
+  try {
+    await api.leaveBookWorkbench();
+    if (!navigationRoute.isCurrent()) return;
+    replaceScreen('global-agent', mountGlobalAgent({ api: api, setStatus, errorMessage: rendererErrorMessage,
+      ...(dialogueId === undefined ? {} : { dialogueId }), openAudit: () => void leaveThen(() => renderQualityLearning('audit', null)) }));
+  } catch (error) {
+    if (navigation.errorIsCurrent(error, navigationRoute)) throw error;
+  }
 }
 
 async function returnToLibrary(): Promise<void> {
+  const navigationRoute = navigation.begin();
   setStatus('正在返回图书列表…', 'busy');
   try {
-    await window.ai7.leaveBookWorkbench();
-    shell.leaveBook();
-    await initializeStartup();
+    await api.leaveBookWorkbench();
+    if (!navigationRoute.isCurrent()) return;
+    await initializeStartup(navigationRoute);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     setStatus(rendererErrorMessage(error, '无法返回图书列表。'), 'error');
   }
 }
@@ -1760,7 +1916,7 @@ async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): 
   }
   document.documentElement.dataset['ai7ImportCompletionPainted'] = 'true';
   try {
-    await window.ai7.acknowledgeImportCompletion({ commitId: result.commitId });
+    await api.acknowledgeImportCompletion({ commitId: result.commitId });
     document.documentElement.dataset['ai7ImportCompletionAcknowledged'] = 'true';
     return true;
   } catch {
@@ -1772,38 +1928,45 @@ async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): 
 async function renderStartupProjection(
   startup: ImportStartupProjection,
   recoveryReturn?: RecoveryReturnContext,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
 ): Promise<void> {
   if (startup.state === 'none') {
     const [priorWork, books] = await Promise.all([
-      window.ai7.listPriorWork(),
-      window.ai7.listBooks({ after: null }),
+      api.listPriorWork(),
+      api.listBooks({ after: null }),
     ]);
-    renderLanding(priorWork, recoveryReturn, books);
+    if (!navigationRoute.isCurrent()) return;
+    navigation.present(() => renderLanding(priorWork, recoveryReturn, books));
     return;
   }
   if (startup.state === 'committed-recovered') {
     setStatus('已核对中断前的原子提交结果', 'success');
-    renderImported(startup.result, recoveryReturn);
+    navigation.present(() => renderImported(startup.result, recoveryReturn));
     return;
   }
-  renderImportRecovery(startup.recovery, recoveryReturn);
+  navigation.present(() => renderImportRecovery(startup.recovery, recoveryReturn));
 }
 
-async function renderApplicationStartup(startup: StartupProjection): Promise<void> {
+async function renderApplicationStartup(startup: StartupProjection, navigationRoute: NavigationCheckpoint = navigation.begin()): Promise<void> {
   if (startup.state === 'manuscript-recovery') {
-    renderManuscriptRecovery(startup.recovery);
+    navigation.present(() => renderManuscriptRecovery(startup.recovery));
   } else if (startup.state === 'import') {
-    await renderStartupProjection(startup.startup);
+    await renderStartupProjection(startup.startup, undefined, navigationRoute);
   } else {
-    renderLanding(startup.priorWork, undefined, await window.ai7.listBooks({ after: null }));
+    const books = await api.listBooks({ after: null });
+    if (!navigationRoute.isCurrent()) return;
+    navigation.present(() => renderLanding(startup.priorWork, undefined, books));
   }
 }
 
 async function renderLandingFromAuthority(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn?: RecoveryReturnContext,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
 ): Promise<void> {
-  renderLanding(priorWork, recoveryReturn, await window.ai7.listBooks({ after: null }));
+  const books = await api.listBooks({ after: null });
+  if (!navigationRoute.isCurrent()) return;
+  renderLanding(priorWork, recoveryReturn, books);
 }
 
 function recoveryCandidateCard(
@@ -1871,7 +2034,8 @@ function focusRecoveryHeading(content: HTMLElement): void {
   const heading = content.querySelector<HTMLElement>('h2');
   if (!heading) return;
   heading.tabIndex = -1;
-  requestAnimationFrame(() => heading.focus());
+  const page = navigation.read(content);
+  requestAnimationFrame(() => { if (page.isCurrent()) heading.focus(); });
 }
 
 function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void {
@@ -1923,7 +2087,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     setStatus(technicalWords('正在原子创建恢复后代修订版…', '正在恢复…'), 'busy');
     let restored: RecoveryRestorationProjection;
     try {
-      restored = await window.ai7.restoreRecovery({
+      restored = await api.restoreRecovery({
         attentionId: recovery.attentionId,
         expectedAttentionVersion: recovery.attentionVersion,
         selection,
@@ -2021,25 +2185,27 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   view.disabled = true;
   restore.disabled = true;
   const defer = button('稍后处理', 'quiet', async () => {
+    const origin = navigation.route();
     view.disabled = true;
     restore.disabled = true;
     defer.disabled = true;
     setStatus('正在保留恢复待确认状态…', 'busy');
     try {
-      const deferred = await window.ai7.deferRecovery({
+      const deferred = await api.deferRecovery({
         attentionId: recovery.attentionId,
         expectedAttentionVersion: recovery.attentionVersion,
       });
-      await window.ai7.leaveBookWorkbench();
-      shell.leaveBook();
       setStatus(deferred.completionLabel, 'success');
+      if (!origin.isCurrent()) return;
+      await api.leaveBookWorkbench();
+      if (!origin.isCurrent()) return;
       const recoveryReturn = {
         attentionId: deferred.attentionId,
         attentionVersion: deferred.attentionVersion,
         bookTitle: recovery.bookTitle,
       } satisfies RecoveryReturnContext;
-      if (deferred.next.state === 'import') await renderStartupProjection(deferred.next.startup, recoveryReturn);
-      else await renderLandingFromAuthority(deferred.next.priorWork, recoveryReturn);
+      if (deferred.next.state === 'import') await renderStartupProjection(deferred.next.startup, recoveryReturn, origin);
+      else await renderLandingFromAuthority(deferred.next.priorWork, recoveryReturn, origin);
     } catch (error) {
       setStatus(rendererErrorMessage(error, '恢复待确认状态未能保留。'), 'error');
       view.disabled = selection === undefined;
@@ -2061,14 +2227,16 @@ async function openRecoveryViewer(
   selection: RecoverySelection,
   target: { kind: 'start' } | { kind: 'after'; position: number },
 ): Promise<void> {
+  const current = navigation.begin();
   setStatus(technicalWords('正在读取有界只读恢复窗口…', '正在打开…'), 'busy');
   try {
-    const projection = await window.ai7.viewRecoveryCandidate({
+    const projection = await api.viewRecoveryCandidate({
       attentionId: recovery.attentionId, expectedAttentionVersion: recovery.attentionVersion,
       selection, target,
     });
-    renderRecoveryViewer(recovery, projection);
+    if (current.isCurrent()) renderRecoveryViewer(recovery, projection);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, current)) return;
     setStatus(rendererErrorMessage(error, technicalWords('无法读取恢复证据。', '无法打开这份稿件。')), 'error');
   }
 }
@@ -2150,16 +2318,18 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
       await requestBookWorkbenchRoute(
         { kind: 'book', bookId: projection.bookId },
         async (route) => {
+          const currentRoute = navigation.route();
           if (route.kind !== 'book' || route.bookId !== projection.bookId) {
             throw new Error('AI7_WORKBENCH_ROUTE_INVALID');
           }
-          const current = await window.ai7.getManuscriptWindow({
+          const current = await api.getManuscriptWindow({
             manuscriptId: projection.manuscriptId,
             branchId: projection.branchId,
             cursor: null,
           });
+          if (!currentRoute.isCurrent()) return;
           if (current.bookId !== projection.bookId) throw new Error('AI7_WORKBENCH_ROUTE_INVALID');
-          await openEditorWindow(current, projection.bookTitle);
+          await openEditorWindow(current, projection.bookTitle, undefined, undefined, undefined, undefined, currentRoute);
         },
       );
     } catch (error) {
@@ -2170,14 +2340,14 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   returnToCurrent.dataset['returnToCurrentRevision'] = projection.revisionId;
   actions.append(returnToCurrent);
   const showPage = async (cursor: string): Promise<void> => {
+    const current = navigation.begin();
     setStatus('正在读取下一段只读修订内容…', 'busy');
     try {
-      renderHistoricalRevision(await window.ai7.getHistoricalRevision({
-        revisionId: projection.revisionId,
-        cursor,
-      }));
+      const next = await api.getHistoricalRevision({ revisionId: projection.revisionId, cursor });
+      if (!current.isCurrent()) return;
+      renderHistoricalRevision(next);
     } catch (error) {
-      setStatus(rendererErrorMessage(error, '无法读取只读修订内容。'), 'error');
+      if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法读取只读修订内容。'), 'error');
     }
   };
   if (projection.previousCursor) actions.append(button('上一窗口', 'quiet', () => showPage(projection.previousCursor!)));
@@ -2221,14 +2391,15 @@ async function abandonAndContinue(
   recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>,
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
+  const origin = navigation.route();
   setStatus(technicalWords('正在核对提交证据并放弃非权威草稿…', '正在放弃本次导入…'), 'busy');
   try {
-    const startup = await window.ai7.abandonImportDraft({
+    const startup = await api.abandonImportDraft({
       draftId: recovery.draftId,
       expectedDraftVersion: recovery.draftVersion,
     });
     setStatus(startup.state === 'none' ? technicalWords('已放弃导入草稿并安全清理暂存引用', '已放弃本次导入') : technicalWords('已核对导入状态', '已更新导入状态'), 'success');
-    await renderStartupProjection(startup, recoveryReturn);
+    if (origin.isCurrent()) await renderStartupProjection(startup, recoveryReturn, origin);
   } catch (error) {
     renderError(error, () => void initializeStartup());
   }
@@ -2360,7 +2531,7 @@ function renderImportRecovery(
       setStatus(technicalWords('正在重新校验暂存字节、解析器、目标与复核…', '正在继续导入…'), 'busy');
       try {
         renderContinuation(
-          await window.ai7.continueImportDraft({
+          await api.continueImportDraft({
             draftId: recovery.draftId,
             expectedDraftVersion: recovery.draftVersion,
           }),
@@ -2378,7 +2549,7 @@ function renderImportRecovery(
       abandonButton.disabled = true;
       setStatus(technicalWords('请选择与原暂存来源摘要精确一致的原文件…', '请重新选择同一个原文件…'), 'busy');
       try {
-        const result = await window.ai7.reselectImportDraft({
+        const result = await api.reselectImportDraft({
           draftId: recovery.draftId,
           expectedDraftVersion: recovery.draftVersion,
         });
@@ -2639,9 +2810,11 @@ async function renderBookWorkbenchChooser(
   accumulated: ReadonlyArray<BookSummaryPageProjection['items'][number]> = [],
   after: BookSummaryPageProjection['nextCursor'] = null,
 ): Promise<void> {
+  const navigationRoute = navigation.begin();
   setStatus('正在读取其他图书…', 'busy');
   try {
-    const page = await window.ai7.listBooks({ after });
+    const page = await api.listBooks({ after });
+    if (!navigationRoute.isCurrent()) return;
     const books = [...accumulated, ...page.items];
     const content = panel();
     content.classList.add('book-workbench-chooser');
@@ -2652,14 +2825,16 @@ async function renderBookWorkbenchChooser(
     for (const summary of books) {
       if (summary.bookId === currentOverview.book.bookId) continue;
       const open = bookCardOpen(summary.title, summary.manuscriptStateLabel, async () => {
+        const navigationRoute = navigation.begin();
         open.disabled = true;
         setStatus('正在打开图书…', 'busy');
         try {
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId });
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, undefined, navigationRoute);
         } catch (error) {
+          if (!navigation.errorIsCurrent(error, navigationRoute)) return;
           open.disabled = false;
           setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
-        }
+        } finally { open.disabled = false; }
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
@@ -2680,6 +2855,7 @@ async function renderBookWorkbenchChooser(
     replaceScreen('book-workbench-chooser', content, { bookId: currentOverview.book.bookId, title: currentOverview.book.title, section: 'overview' });
     setStatus('请选择另一图书工作台');
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     setStatus(rendererErrorMessage(error, '无法读取其他图书。'), 'error');
   }
 }
@@ -2697,7 +2873,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   content.append(host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
   agentWorkspaceReturns.set(content, () => renderBookFindings(bookId, bookTitle));
-  mountFindingsCenter(host, (offset) => window.ai7.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
+  mountFindingsCenter(host, (offset) => api.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
     const target = item.target;
     if (target.kind === 'review') renderBookReview(bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
     else if (target.kind === 'risk') renderBookEvaluation(bookId, bookTitle, target);
@@ -2705,7 +2881,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   }, async (items) => {
     const suggestions = items.flatMap((item) => item.suggestion ? [item.suggestion] : []);
     if (!suggestions.length) return;
-    try { return await applyFindingBatches(suggestions, window.ai7); }
+    try { return await applyFindingBatches(suggestions, api); }
     catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
   }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); });
   setStatus(FINDINGS_CENTER_WORDS.opened);
@@ -2729,16 +2905,17 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   backgroundHost.dataset['bookId'] = bookId;
   content.append(host, backgroundHost);
   replaceScreen('book-analysis', content, { bookId, title: bookTitle, section: 'analysis' });
+  const page = navigation.read(content);
   agentWorkspaceReturns.set(content, () => renderBookAnalysis(bookId, bookTitle, target, focus));
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
     // A 学习材料 entry opens ②A on the revision it judged (Issue #61, S26b): read-only when that is no longer the current one.
     const read = first && judged !== undefined
-      ? window.ai7.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === judged.revisionId ? current : window.ai7.inspectBaselineAnalysis({ revisionId: judged.revisionId }))
-      : window.ai7.inspectBaselineAnalysis(revisionId === undefined ? undefined : { revisionId });
+      ? api.inspectBaselineAnalysis().then((current) => current.resultSetRevision?.revisionId === judged.revisionId ? current : api.inspectBaselineAnalysis({ revisionId: judged.revisionId }))
+      : api.inspectBaselineAnalysis(revisionId === undefined ? undefined : { revisionId });
     void read.then(
       (projection) => {
-        if (!host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
+        if (!page.isCurrent() || !host.isConnected || projection.bookId !== host.dataset['analysisBookId']) return;
         renderBaselineAnalysis(host, projection, bookTitle);
         if (first && focus !== undefined) {
           host.querySelector<HTMLButtonElement>(`button[data-analysis-tab="${focus.tab}"]`)?.click();
@@ -2748,7 +2925,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
         if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
       (error) => {
-        if (!host.isConnected) return;
+        if (!page.isCurrent() || !host.isConnected) return;
         if (!first) {
           setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error');
           return;
@@ -2768,7 +2945,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
   // A Run the Enrollment started is the card's to show: it reads again once one is recorded, never stealing focus.
-  mountBackgroundAnalysis({ root: backgroundHost, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, onRunStarted: () => inspect(false) });
+  mountBackgroundAnalysis({ root: backgroundHost, api: api, setStatus, errorMessage: rendererErrorMessage, onRunStarted: () => inspect(false) });
 }
 
 /** The item of ②A a 反馈历史 entry judged: its revision, its place, and the tab it sits on. */
@@ -2809,30 +2986,33 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     focus,
     // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
     procedureId,
-    api: window.ai7,
+    api: api,
     awaitServiceJob,
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
     errorCode: (error) => rendererErrorData(error)?.code ?? null,
     openManuscript: async () => {
+      const current = navigation.begin();
       setStatus('正在打开稿件…', 'busy');
       try {
-        await openBook();
+        await renderResolvedBookWorkbenchRoute({kind:'book',bookId,bookTitle}, undefined, current);
       } catch (error) {
-        setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+        if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
       }
     },
     goToText: async (target) => {
+      const current = navigation.begin();
       const origin = screen.firstElementChild;
-      const opened = await window.ai7.getManuscriptWindowAt({
+      const opened = await api.getManuscriptWindowAt({
         manuscriptId: target.manuscriptId,
         branchId: target.branchId,
         target: { kind: 'block', blockId: target.blockId },
       });
+      if (!current.isCurrent()) return;
       await leaveReturnChip(bookId, target.manuscriptId, target.branchId);
-      if (screen.firstElementChild !== origin) return;
-      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
+      if (!current.isCurrent() || screen.firstElementChild !== origin) return;
+      await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined, undefined, current);
     },
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
@@ -2864,21 +3044,33 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
  * manuscript view's place; 返回稿件 opens the manuscript at the active change with its card.
  */
 async function renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void> {
+  const route = navigation.begin();
   const origin = screen.firstElementChild;
-  try { await window.ai7.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null }); }
-  catch (error) { setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); return; }
-  if (screen.firstElementChild !== origin) return;
+  let onDocument = false;
+  try { onDocument = (await api.getManuscriptWindow({ manuscriptId: input.manuscriptId, branchId: input.branchId, cursor: null })).deliverable === 'production-document'; }
+  catch (error) { if (navigation.errorIsCurrent(error, route)) setStatus(rendererErrorMessage(error, '无法打开提案审阅工作区。'), 'error'); return; }
+  if (!route.isCurrent() || screen.firstElementChild !== origin) return;
   const content = panel(); content.dataset['bookId'] = bookId; content.classList.add('proposal-workspace');
-  const surface = mountProposalWorkspace({ root: content, api: window.ai7, input, bookTitle, setStatus,
+  const surface = mountProposalWorkspace({ root: content, api: api, input, bookTitle, setStatus,
     returnToManuscript: async (blockId, markId) => {
+      const current = navigation.begin();
       const binding = { manuscriptId: input.manuscriptId, branchId: input.branchId };
-      const opened = blockId === null ? await window.ai7.getManuscriptWindow({ ...binding, cursor: null }) : await window.ai7.getManuscriptWindowAt({ ...binding, target: { kind: 'block', blockId } });
-      await openEditorWindow(opened, bookTitle, undefined, undefined, markId ?? undefined);
-    }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId }, bookTitle),
+      const opened = blockId === null ? await api.getManuscriptWindow({ ...binding, cursor: null }) : await api.getManuscriptWindowAt({ ...binding, target: { kind: 'block', blockId } });
+      if (!current.isCurrent()) return;
+      await openEditorWindow(opened, bookTitle, undefined, undefined, markId ?? undefined, undefined, current);
+    }, openConflict: (markId) => renderProposalConflict({ ...input, bookId, markId, onDocument }, bookTitle),
   });
   replaceScreen('proposal-workspace', content, { bookId, title: bookTitle, section: 'review' }); proposalWorkspaceSurface = surface; leaveGuard = () => surface.settle(); surface.start();
   agentWorkspaceReturns.set(content, () => renderProposalWorkspace(input, bookId, bookTitle));
 }
+
+function withConflictCompletion(onDocument: boolean, returning: Parameters<typeof mountProposalConflict>[0]['returnToManuscript']): Parameters<typeof mountProposalConflict>[0]['returnToManuscript'] {
+  return async (at, completion) => {
+    try { await returning(at, completion); }
+    finally { if (completion !== null) setStatus(conflictCompletionOn(onDocument, completion), 'success'); }
+  };
+}
+
 
 /**
  * 稿件冲突 of one 修改建议 as a Dedicated Work Workspace (Issue #57; ED-003, IA › Proposal conflict workspace).
@@ -2886,44 +3078,49 @@ async function renderProposalWorkspace(input: { manuscriptId: string; branchId: 
  * and back: 返回稿件 — and every way the conflict is left — opens the manuscript at the conflict's paragraph
  * with the card it came from, or the new version's, open again.
  */
-function renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void {
+function renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string; onDocument: boolean }, bookTitle: string): void {
   const content = panel();
   content.classList.add('proposal-conflict-workspace');
+  content.dataset['conflictMarkId'] = target.markId;
   content.dataset['bookId'] = target.bookId;
+  let origin: NavigationCheckpoint;
   const surface = mountProposalConflict({
     root: content,
     manuscriptId: target.manuscriptId,
     branchId: target.branchId,
     markId: target.markId,
     bookTitle,
-    platform: window.ai7.platform,
-    api: window.ai7,
+    platform: api.platform,
+    api: api,
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
     errorCode: (error) => rendererErrorData(error)?.code ?? null,
-    returnToManuscript: async (at, completion) => {
-      let opened: ManuscriptWindowProjection;
+    returnToManuscript: withConflictCompletion(target.onDocument, async (at, completion) => {
+      if (!origin.isCurrent()) return;
+      const current = completion === null ? navigation.begin() : navigation.route();
+      let opened: ManuscriptWindowProjection | undefined;
       if (at === null) {
         // With no place to return to, a conflict on a Production Document returns to that document, and one on the
         // Manuscript to where the Book opens.
-        opened = await window.ai7.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        if (opened.deliverable === 'production-document') await openEditorWindow(opened, bookTitle);
-        else await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: target.bookId, bookTitle });
+        opened = await guardNavigationRead(current, () => api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }));
+        if (!opened || !current.isCurrent()) return;
+        if (opened.deliverable === 'production-document') await guardNavigationRead(current, () => openEditorWindowNow(opened!, bookTitle, undefined, undefined, undefined, undefined, current));
+        else await guardNavigationRead(current, () => renderResolvedBookWorkbenchRouteNow({ kind: 'book', bookId: target.bookId, bookTitle }, undefined, current));
       } else {
-        opened = await window.ai7.getManuscriptWindowAt({
+        opened = await guardNavigationRead(current, () => api.getManuscriptWindowAt({
           manuscriptId: target.manuscriptId,
           branchId: target.branchId,
           target: { kind: 'block', blockId: at.blockId },
-        });
-        await openEditorWindow(opened, bookTitle, undefined, undefined, at.markId);
+        }));
+        if (!opened || !current.isCurrent()) return;
+        await guardNavigationRead(current, () => openEditorWindowNow(opened!, bookTitle, undefined, undefined, at.markId, undefined, current));
       }
-      // Said once the window is drawn, so nothing drawn after it takes its place — on a document, in its own words.
-      if (completion !== null) setStatus(conflictCompletionOn(opened.deliverable === 'production-document', completion), 'success');
-    },
+    }),
     openConflict: (markId) => renderProposalConflict({ ...target, markId }, bookTitle),
   });
   replaceScreen('proposal-conflict', content, { bookId: target.bookId, title: bookTitle, section: 'review' });
+  origin = navigation.read(content);
   agentWorkspaceReturns.set(content, () => renderProposalConflict(target, bookTitle));
   proposalConflictSurface = surface;
   // Leaving for 待我处理 from the header saves the draft on screen first, as 返回稿件 does (Issue #424).
@@ -2944,9 +3141,9 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
   let firstEvaluationRead = true;
   const surface = mountEvaluation({
     root: host,
-    api: { ...window.ai7, inspectEvaluation: (input) => {
+    api: { ...api, inspectEvaluation: (input) => {
       const first = firstEvaluationRead; firstEvaluationRead = false;
-      return window.ai7.inspectEvaluation(first && focus !== undefined ? { recordId: focus.recordId } : input);
+      return api.inspectEvaluation(first && focus !== undefined ? { recordId: focus.recordId } : input);
     } },
     setStatus,
     errorMessage: rendererErrorMessage,
@@ -2961,17 +3158,22 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
     // 按我的评分重写评语 (Issue #429, S81b2): its plan in the drawer likewise.
     openRewritePlan: (ref) => openTaskPlan(bookId, 'evaluation-rewrite', ref),
     openDraft: async (draft) => {
-      const opened = await window.ai7.getManuscriptWindow({ manuscriptId: draft.document.documentId, branchId: draft.document.branchId, cursor: null });
-      renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document });
+      const current = navigation.begin();
+      try {
+      const opened = await api.getManuscriptWindow({ manuscriptId: draft.document.documentId, branchId: draft.document.branchId, cursor: null });
+      if (!current.isCurrent()) return;
+      navigation.present(() => renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document }));
+      } catch (error) { if (navigation.errorIsCurrent(error, current)) throw error; }
     },
   });
   replaceScreen('book-evaluation', content, { bookId, title: bookTitle, section: 'evaluation' });
+  const page = navigation.read(content);
   agentWorkspaceReturns.set(content, () => renderBookEvaluation(bookId, bookTitle, focus));
   taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh(), 'evaluation-rewrite': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
-      if (content.isConnected) {
+      if (page.isCurrent()) {
         setStatus(EVALUATION_STATUS.opened);
         if (start) host.querySelector<HTMLButtonElement>('[data-evaluation-action="new-evaluation"]')?.click();
         if (focus !== undefined) {
@@ -2981,7 +3183,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
       }
     },
     (error: unknown) => {
-      if (content.isConnected) setStatus(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), 'error');
+      if (page.isCurrent()) setStatus(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), 'error');
     },
   );
 }
@@ -2999,14 +3201,15 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
     element('h2', undefined, SOURCES_TITLE),
     host,
   );
-  const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
+  const surface = mountResearchEvidence({ root: host, bookId, api: api, setStatus, errorMessage: rendererErrorMessage,
     ...(focusEvidenceId === undefined ? {} : { focusEvidenceId }) });
   replaceScreen('book-sources', content, { bookId, title: bookTitle, section: 'sources' });
+  const page = navigation.read(content);
   agentWorkspaceReturns.set(content, () => renderBookSources(bookId, bookTitle, focusEvidenceId));
   setStatus(SOURCES_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
-      if (!content.isConnected) return;
+      if (!page.isCurrent()) return;
       setStatus(SOURCES_STATUS.opened);
       // The source view has followed its existing cursor pages to the retained source named by this deep link.
       if (focusEvidenceId !== undefined) {
@@ -3019,26 +3222,28 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
       }
     },
     (error: unknown) => {
-      if (content.isConnected) setStatus(rendererErrorMessage(error, SOURCES_STATUS.unavailable), 'error');
+      if (page.isCurrent()) setStatus(rendererErrorMessage(error, SOURCES_STATUS.unavailable), 'error');
     },
   );
 }
 
 /** The Book's 稿件 at its remembered place (Issue #1403): where every derivative document, and AI 写作, now lives. */
-async function renderBookManuscript(bookId: string, bookTitle: string): Promise<void> {
-  await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+async function renderBookManuscript(bookId: string, bookTitle: string, route: NavigationCheckpoint = navigation.begin()): Promise<NavigationCheckpoint | undefined> {
+  return guardNavigationRead(route, () => renderResolvedBookWorkbenchRouteNow({ kind: 'book', bookId, bookTitle }, undefined, route));
 }
 
 /** One derivative document on the manuscript's surface (Issue #1403), read like the manuscript's window. */
 async function openProductionDocument(documentNow: ProductionDocumentProjection, type: { typeId: string; label: string }, bookTitle: string, notice?: string | null): Promise<void> {
-  const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
-  renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow });
+  const navigationRoute = navigation.begin();
+  const opened = await api.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
+  if (!navigationRoute.isCurrent()) return;
+  navigation.present(() => renderEditorWindow(opened, bookTitle, undefined, notice ?? undefined, undefined, undefined, { typeId: type.typeId, typeLabel: type.label, document: documentNow }));
 }
 
 function renderDerivativesWorkspace(bookId: string, bookTitle: string): void {
   const content = panel();
   content.dataset['bookId'] = bookId;
-  const surface = mountDerivativesWorkspace({ root: content, bookId, bookTitle, api: window.ai7,
+  const surface = mountDerivativesWorkspace({ root: content, bookId, bookTitle, api: api,
     setStatus, errorMessage: rendererErrorMessage,
     openDocument: (doc, type, notice) => openProductionDocument(doc, type, bookTitle, notice),
   });
@@ -3057,7 +3262,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     root: content,
     bookId,
     bookTitle,
-    api: window.ai7,
+    api: api,
     // 维护事项待处理 opens its case in place (Issue #426, S68b), and a step of a case reads the header's number again.
     ...(openCase === undefined ? {} : { openCase }),
     // A procedure version's link to one 图书交付包 version (Issue #66, S31b review P3-4): that version in view and focused.
@@ -3109,9 +3314,9 @@ function renderBookOverview(
   const isSample = overview.records.some((record) => record.kind === 'source' && record.sourceDigest ===
     'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
   if (isSample && anchor !== null) {
-    void window.ai7.getPreferences().then(async (preferences) => {
+    void api.getPreferences().then(async (preferences) => {
       const visible = await readSampleGuidance(isSample, preferences.values['onboarding.state'],
-        () => window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
+        () => api.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
       if (!guidance.isConnected || !visible) return;
       guidance.dataset['onboardingGuidance'] = 'sample-book';
       guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title));
@@ -3172,14 +3377,14 @@ function renderBookOverview(
     root: peopleSlot,
     bookId: overview.book.bookId,
     people: overview.people,
-    api: window.ai7,
+    api: api,
     setStatus,
     errorMessage: rendererErrorMessage,
   });
   // 书系 (Issue #63, S28a; SER-009): the Series the Book is in, and its membership change records.
   const seriesSlot = element('section');
 
-  mountBookSeries({ root: seriesSlot, bookId: overview.book.bookId, api: window.ai7 });
+  mountBookSeries({ root: seriesSlot, bookId: overview.book.bookId, api: api });
 
   const agentEntry = element('div', 'agent-workspace-entry');
   agentEntry.dataset['agentWorkspaceEntry'] = 'available';
@@ -3194,26 +3399,27 @@ function renderBookOverview(
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
   const inspectTaskAuthorization = async (): Promise<void> => {
-    if (!taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const page = navigation.read(taskHost);
+    if (!page.isCurrent() || !taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
     // The fixed Task belongs only to the development-ci baseline (ADR 0044, J-03).
     // Reuse the existing settings projection; an unknown scope retains the original surface (#992).
-    const scope = await window.ai7.getModelServiceSettings().then(
+    const scope = await api.getModelServiceSettings().then(
       (projection) => projection.launchPolicy.operationalScope,
       () => null,
     );
-    if (!taskHost.isConnected) return;
+    if (!page.isCurrent() || !taskHost.isConnected) return;
     if (scope === 'ordinary-production' || scope === 'developer-live') {
       taskHost.replaceChildren();
       return;
     }
-    await window.ai7.inspectTaskAuthorization().then(
+    await api.inspectTaskAuthorization().then(
       (projection) => {
-        if (taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
+        if (page.isCurrent() && taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(taskHost, projection);
         }
       },
       (error) => {
-        if (!taskHost.isConnected) return;
+        if (!page.isCurrent() || !taskHost.isConnected) return;
         const unavailable = element('section', 'task-authorization-card attention-note');
         unavailable.dataset['taskAuthorizationState'] = 'unavailable';
         unavailable.append(
@@ -3229,14 +3435,15 @@ function renderBookOverview(
   const analysisHost = element('section', 'book-analysis-summary');
   analysisHost.dataset['analysisBookId'] = overview.book.bookId;
   const inspectBaselineAnalysis = (): void => {
-    if (!analysisHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const page = navigation.read(analysisHost);
+    if (!page.isCurrent() || !analysisHost.isConnected || overview.manuscriptState.state !== 'populated') return;
     const open = button('打开分析', 'secondary', () => renderBookAnalysis(overview.book.bookId, overview.book.title));
     open.dataset['analysisAction'] = 'open-analysis';
-    void window.ai7.inspectBaselineAnalysis().then(
+    void api.inspectBaselineAnalysis().then(
       (projection) => {
-        if (!analysisHost.isConnected || projection.bookId !== analysisHost.dataset['analysisBookId']) return;
+        if (!page.isCurrent() || !analysisHost.isConnected || projection.bookId !== analysisHost.dataset['analysisBookId']) return;
         analysisHost.dataset['analysisState'] = projection.state;
-        if (projection.resultSetRevision !== null) void window.ai7.getPreferences().then((preferences) => {
+        if (projection.resultSetRevision !== null) void api.getPreferences().then((preferences) => {
           if (guidance.isConnected && preferences.values['onboarding.state'] !== null) guidance.remove();
         }, () => undefined);
         analysisHost.replaceChildren(
@@ -3249,7 +3456,7 @@ function renderBookOverview(
         );
       },
       (error) => {
-        if (!analysisHost.isConnected) return;
+        if (!page.isCurrent() || !analysisHost.isConnected) return;
         analysisHost.dataset['analysisState'] = 'unavailable';
         const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
         analysisHost.replaceChildren(element('h3', undefined, '分析'), element('p', 'attention-note', refusal.text));
@@ -3262,19 +3469,20 @@ function renderBookOverview(
   const reviewHost = element('section', 'book-review-summary');
   reviewHost.dataset['reviewBookId'] = overview.book.bookId;
   const inspectReviewSummary = (): void => {
-    if (!reviewHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const page = navigation.read(reviewHost);
+    if (!page.isCurrent() || !reviewHost.isConnected || overview.manuscriptState.state !== 'populated') return;
     const open = button(REVIEW_ACTION_LABELS['open-review'], 'secondary', () => renderBookReview(overview.book.bookId, overview.book.title));
     open.dataset['reviewAction'] = 'open-review';
     // The line needs the Runs and the coverage only, so it asks for the page after the last finding —
     // an empty one — and never carries a Run's findings onto the overview.
-    void window.ai7.inspectReviewWorkspace({ reviewRunId: null, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
+    void api.inspectReviewWorkspace({ reviewRunId: null, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
       (workspace) => {
-        if (!reviewHost.isConnected || workspace.bookId !== reviewHost.dataset['reviewBookId']) return;
+        if (!page.isCurrent() || !reviewHost.isConnected || workspace.bookId !== reviewHost.dataset['reviewBookId']) return;
         reviewHost.dataset['reviewState'] = workspace.run === null ? 'empty' : workspace.run.state;
         reviewHost.replaceChildren(element('h3', undefined, REVIEW_CARD_HEADING), element('p', undefined, reviewOverviewLine(workspace)), open);
       },
       (error) => {
-        if (!reviewHost.isConnected) return;
+        if (!page.isCurrent() || !reviewHost.isConnected) return;
         reviewHost.dataset['reviewState'] = 'unavailable';
         reviewHost.replaceChildren(
           element('h3', undefined, REVIEW_CARD_HEADING),
@@ -3290,12 +3498,13 @@ function renderBookOverview(
   const deliverablesHost = element('section', 'book-deliverables-summary');
   deliverablesHost.dataset['deliverablesBookId'] = overview.book.bookId;
   const inspectDeliverablesSummary = (): void => {
-    if (!deliverablesHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const page = navigation.read(deliverablesHost);
+    if (!page.isCurrent() || !deliverablesHost.isConnected || overview.manuscriptState.state !== 'populated') return;
     const open = button(PUBLICATION_ACTION_LABELS.open, 'secondary', () => renderBookDeliverables(overview.book.bookId, overview.book.title));
     open.dataset['deliverablesAction'] = 'open';
-    void window.ai7.inspectDeliverables().then(
+    void api.inspectDeliverables().then(
       (deliverables) => {
-        if (!deliverablesHost.isConnected || deliverables.bookId !== deliverablesHost.dataset['deliverablesBookId']) return;
+        if (!page.isCurrent() || !deliverablesHost.isConnected || deliverables.bookId !== deliverablesHost.dataset['deliverablesBookId']) return;
         deliverablesHost.dataset['deliverablesState'] = publicationStateOf(deliverables);
         deliverablesHost.replaceChildren(
           element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
@@ -3304,7 +3513,7 @@ function renderBookOverview(
         );
       },
       (error) => {
-        if (!deliverablesHost.isConnected) return;
+        if (!page.isCurrent() || !deliverablesHost.isConnected) return;
         deliverablesHost.dataset['deliverablesState'] = 'unavailable';
         deliverablesHost.replaceChildren(
           element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
@@ -3319,17 +3528,18 @@ function renderBookOverview(
   const evaluationHost = element('section', 'book-evaluation-summary');
   evaluationHost.dataset['evaluationBookId'] = overview.book.bookId;
   const inspectEvaluationSummary = (): void => {
-    if (!evaluationHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const page = navigation.read(evaluationHost);
+    if (!page.isCurrent() || !evaluationHost.isConnected || overview.manuscriptState.state !== 'populated') return;
     const open = button('打开评估', 'secondary', () => renderBookEvaluation(overview.book.bookId, overview.book.title));
     open.dataset['evaluationAction'] = 'open';
-    void window.ai7.inspectEvaluation({ recordId: null }).then(
+    void api.inspectEvaluation({ recordId: null }).then(
       (workspace) => {
-        if (!evaluationHost.isConnected || workspace.bookId !== evaluationHost.dataset['evaluationBookId']) return;
+        if (!page.isCurrent() || !evaluationHost.isConnected || workspace.bookId !== evaluationHost.dataset['evaluationBookId']) return;
         evaluationHost.dataset['evaluationState'] = workspace.records[0]?.state ?? 'empty';
         evaluationHost.replaceChildren(element('h3', undefined, EVALUATION_TITLE), element('p', undefined, evaluationOverviewLine(workspace)), open);
       },
       (error) => {
-        if (!evaluationHost.isConnected) return;
+        if (!page.isCurrent() || !evaluationHost.isConnected) return;
         evaluationHost.dataset['evaluationState'] = 'unavailable';
         evaluationHost.replaceChildren(
           element('h3', undefined, EVALUATION_TITLE),
@@ -3378,7 +3588,7 @@ function renderBookOverview(
       importFirst.disabled = true;
       setStatus('正在本地解析 DOCX…', 'busy');
       try {
-        const result = await window.ai7.selectAndStageManuscript();
+        const result = await api.selectAndStageManuscript();
         if (result.status === 'cancelled') {
           importFirst.disabled = false;
           setStatus('已取消文件选择');
@@ -3452,12 +3662,14 @@ function renderBookOverview(
   records.append(recordButtons, detailHost);
   const historyNavigation = element('div', 'button-row compact-actions');
   const replaceHistoryPage = async (historyCursor: NonNullable<BookWorkOverviewProjection['historyPage']['nextCursor']>) => {
+    const current = navigation.begin();
     setStatus('正在读取图书历史页…', 'busy');
     try {
-      renderBookOverview(await window.ai7.getBookOverview({ bookId: overview.book.bookId, historyCursor }),
-        undefined, recoveryReturn);
+      const next = await api.getBookOverview({ bookId: overview.book.bookId, historyCursor });
+      if (!current.isCurrent()) return;
+      navigation.present(() => renderBookOverview(next, undefined, recoveryReturn));
     } catch (error) {
-      setStatus(rendererErrorMessage(error, '无法读取图书历史页。'), 'error');
+      if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法读取图书历史页。'), 'error');
     }
   };
   if (overview.historyPage.previousCursor !== null) {
@@ -3593,7 +3805,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       cancel.hidden = false;
       setStatus(technicalWords('正在为任务保存修订版…', '正在准备任务…'), 'busy');
       try {
-        const initial = await window.ai7.prepareTaskAuthorization({ goal: J03_TASK_GOAL });
+        const initial = await api.prepareTaskAuthorization({ goal: J03_TASK_GOAL });
         cancel.dataset['serviceJobId'] = initial.jobId;
         const completed = await awaitServiceJob(initial, (job) => {
           cancel.dataset['serviceJobId'] = job.jobId;
@@ -3625,7 +3837,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       if (!jobId) return;
       cancel.disabled = true;
       try {
-        await window.ai7.cancelServiceJob({ jobId });
+        await api.cancelServiceJob({ jobId });
       } catch (error) {
         cancel.disabled = false;
         setStatus(rendererErrorMessage(error, '无法取消任务计划准备。'), 'error');
@@ -3663,7 +3875,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
         inspectBoundary.disabled = true;
         setStatus('正在核对前台执行边界…', 'busy');
         try {
-          const boundary = await window.ai7.inspectForegroundExecutionBoundary({ runRecordId: runRecord.runRecordId });
+          const boundary = await api.inspectForegroundExecutionBoundary({ runRecordId: runRecord.runRecordId });
           if (host.isConnected && boundary.bookId === host.dataset['taskAuthorizationBookId'] &&
               boundary.runRecordId === runRecord.runRecordId) {
             renderForegroundExecutionBoundary(boundaryHost, boundary);
@@ -3725,6 +3937,7 @@ function renderBookCreationForm(): void {
   // 新建图书 (Issue #1410 item 20): one click prepares and commits the empty Book and opens its 工作概览; the service's
   // review digest still binds the commit to what was prepared, with no separate review page in between.
   const create = button('新建图书', 'primary', async () => {
+    const follow = navigation.route();
     clearFieldError(title, titleError);
     clearFieldError(internalNumber, numberError);
     const normalizedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -3740,13 +3953,13 @@ function renderBookCreationForm(): void {
     create.disabled = true;
     setStatus('正在创建图书…', 'busy');
     try {
-      const review = await window.ai7.prepareBookCreation({
+      const review = await api.prepareBookCreation({
         title: normalizedTitle,
         internalNumber: normalizedNumber || null,
       });
-      const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
+      const result = await api.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
       setStatus(result.completionLabel, 'success');
-      renderBookOverview(result.overview);
+      if (follow.isCurrent()) navigation.present(() => renderBookOverview(result.overview));
     } catch (error) {
       create.disabled = false;
       if (hasErrorCode(error, 'TITLE_INVALID')) {
@@ -3763,7 +3976,8 @@ function renderBookCreationForm(): void {
   form.append(titleLabel, title, titleError, numberLabel, internalNumber, numberError, actions);
   content.append(form);
   replaceScreen('book-create', content);
-  queueMicrotask(() => title.focus());
+  const page = navigation.read(content);
+  queueMicrotask(() => { if (page.isCurrent()) title.focus(); });
 }
 
 function renderDiagnostics(): void {
@@ -3773,7 +3987,7 @@ function renderDiagnostics(): void {
     return;
   }
   const content = panel();
-  mountDiagnostics(content, window.ai7, () => void returnToLibrary());
+  mountDiagnostics(content, api, () => void returnToLibrary());
   replaceScreen('diagnostics', content);
   setStatus(DIAGNOSTICS_OPENED);
 }
@@ -3794,10 +4008,11 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
   content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, '将相关图书归入同一书系。')), host, back);
   replaceScreen('series-list', content);
+  const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
   const surface = mountSeriesList({
     root: host,
-    api: window.ai7,
+    api: api,
     setStatus,
     errorMessage: rendererErrorMessage,
     openSeries: (seriesId) => void renderSeries(seriesId),
@@ -3805,8 +4020,10 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   });
   try {
     await surface.load();
-    if (content.isConnected) setStatus(SERIES_STATUS.opened);
+    if (!page.isCurrent()) return;
+    setStatus(SERIES_STATUS.opened);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, page)) return;
     setStatus(rendererErrorMessage(error, SERIES_STATUS.unavailable), 'error');
   }
 }
@@ -3824,15 +4041,18 @@ async function renderSeries(seriesId: string): Promise<void> {
   back.append(button(SERIES_BACK_TO_LIST, 'quiet', () => void renderSeriesList(seriesId)));
   content.append(heading, note, host, back);
   replaceScreen('series', content);
+  const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
-  const surface = mountSeries({ root: host, seriesId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountSeries({ root: host, seriesId, api: api, setStatus, errorMessage: rendererErrorMessage });
   try {
     const series = await surface.load();
+    if (!page.isCurrent()) return;
     heading.textContent = `书系「${series.title}」`;
     note.textContent = series.note;
     note.hidden = series.note.length === 0;
-    if (content.isConnected) setStatus(SERIES_STATUS.opened);
+    if (page.isCurrent()) setStatus(SERIES_STATUS.opened);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, page)) return;
     setStatus(rendererErrorMessage(error, SERIES_STATUS.unavailable), 'error');
   }
 }
@@ -3855,19 +4075,24 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
     back,
   );
   replaceScreen('evaluation-calibration', content);
+  const page = navigation.read(content);
   setStatus(CALIBRATION_STATUS.loading, 'busy');
-  const surface = mountEvaluationCalibration({ root: host, focusBookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
+  const surface = mountEvaluationCalibration({ root: host, focusBookId, api: api, setStatus, errorMessage: rendererErrorMessage });
   try {
     await surface.load();
-    if (content.isConnected) setStatus(CALIBRATION_STATUS.opened);
+    if (!page.isCurrent()) return;
+    setStatus(CALIBRATION_STATUS.opened);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, page)) return;
     setStatus(rendererErrorMessage(error, CALIBRATION_STATUS.unavailable), 'error');
   }
 }
 
 /** 设置 › 本机 › 通知 (Issue #937; NOTIF-005 to 007): four local switches, all off by default; none grants authority. */
 async function renderNotificationSettings(): Promise<void> {
-  const preferences = await window.ai7.getPreferences();
+  const navigationRoute = navigation.begin();
+  const preferences = await api.getPreferences();
+  if (!navigationRoute.isCurrent()) return;
   let values = preferences.values;
   const content = panel();
   content.dataset['notificationSettings'] = 'true';
@@ -3896,7 +4121,7 @@ async function renderNotificationSettings(): Promise<void> {
     control.addEventListener('change', () => {
       const value = control.checked;
       control.disabled = true;
-      void window.ai7.savePreference({ key, value }).then((saved) => {
+      void api.savePreference({ key, value }).then((saved) => {
         values = saved.values;
         setStatus(NOTIFICATION_SETTINGS_WORDS.saved, 'success');
       }).catch((error: unknown) => setStatus(rendererErrorMessage(error, NOTIFICATION_SETTINGS_WORDS.unsaved), 'error')).finally(() => {
@@ -3918,6 +4143,7 @@ async function renderNotificationSettings(): Promise<void> {
  * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
  */
 async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
+  const current = navigation.begin();
   if (!technicalLayerVisible) {
     renderSettingsHub();
     setStatus('该页在开发者模式下显示');
@@ -3925,8 +4151,8 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
   }
   const origin = screen.firstElementChild;
   try {
-    const usage = await window.ai7.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
-    if (screen.firstElementChild !== origin) return;
+    const usage = await api.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
+    if (!current.isCurrent() || screen.firstElementChild !== origin) return;
     if (usage.detail === null || usage.detail === undefined) throw new Error('USAGE_RUN_UNAVAILABLE');
     run = usage.detail;
     const content = panel();
@@ -3943,6 +4169,7 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
     replaceScreen('usage-run', content);
     setStatus(USAGE_RUN_TITLE, 'success');
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, current)) return;
     setStatus(rendererErrorMessage(error, USAGE_RUN_REPORT_ABSENT), 'error');
   }
 }
@@ -3959,7 +4186,7 @@ function renderUsage(): void {
   content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
   const body = element('div');
   mountUsage({
-    root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel,
+    root: body, api: api, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel,
     openRun: (run) => void openUsageRun(run),
   });
   const actions = element('div', 'button-row');
@@ -3976,7 +4203,7 @@ function renderKeyboardSettings(): void {
   content.append(element('p', 'section-label', KEYBOARD_SECTION_LABEL), element('h2', undefined, KEYBOARD_TITLE));
   const body = element('div');
   const unmount = mountKeyboardSettings({
-    root: body, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
+    root: body, api: api, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
   });
   const actions = element('div', 'button-row');
   actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
@@ -4087,7 +4314,7 @@ function renderSettingsHub(): void {
     section.append(heading, list);
     content.append(section);
   }
-  if (technicalLayerVisible) mountLearningAskFrequency(content, window.ai7);
+  if (technicalLayerVisible) mountLearningAskFrequency(content, api);
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
 }
@@ -4102,7 +4329,7 @@ function renderHelp(): void {
   content.classList.add('help-screen');
   mountHelp({
     root: content,
-    loadVersions: () => window.ai7.inspectDataVersion(),
+    loadVersions: () => api.inspectDataVersion(),
     back: renderSettingsHub,
     modeChanged: () => {
       renderHelp();
@@ -4121,21 +4348,26 @@ function renderHelp(): void {
  * 发现 opens its read-only Book aggregate; 历史与恢复 is 工作概览's records.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
+  const navigationRoute = navigation.begin();
+  if (!navigationRoute.isCurrent()) return;
   const recoveryReturn = currentRecoveryReturn();
   setStatus(SHELL_LABELS.openingBook, 'busy');
   try {
     const openSection = async (route: ResolvedBookWorkbenchRoute): Promise<void> => {
+      const navigationRoute = navigation.route();
       const { bookId, bookTitle } = route;
-      if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, recoveryReturn);
-      else if (section === 'derivatives') renderDerivativesWorkspace(bookId, bookTitle);
-      else if (section === 'review') renderBookReview(bookId, bookTitle);
-      else if (section === 'evaluation') renderBookEvaluation(bookId, bookTitle);
-      else if (section === 'deliverables') renderBookDeliverables(bookId, bookTitle);
-      else if (section === 'findings') renderBookFindings(bookId, bookTitle);
-      else if (section === 'analysis') renderBookAnalysis(bookId, bookTitle);
-      else if (section === 'sources') renderBookSources(bookId, bookTitle);
+      if (section === 'manuscript') await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, recoveryReturn, navigationRoute);
+      else if (section === 'derivatives') navigation.present(() => renderDerivativesWorkspace(bookId, bookTitle));
+      else if (section === 'review') navigation.present(() => renderBookReview(bookId, bookTitle));
+      else if (section === 'evaluation') navigation.present(() => renderBookEvaluation(bookId, bookTitle));
+      else if (section === 'deliverables') navigation.present(() => renderBookDeliverables(bookId, bookTitle));
+      else if (section === 'findings') navigation.present(() => renderBookFindings(bookId, bookTitle));
+      else if (section === 'analysis') navigation.present(() => renderBookAnalysis(bookId, bookTitle));
+      else if (section === 'sources') navigation.present(() => renderBookSources(bookId, bookTitle));
       else {
-        renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }), undefined, recoveryReturn);
+        const overview = await api.getBookOverview({ bookId, historyCursor: null });
+        if (!navigationRoute.isCurrent()) return;
+        navigation.present(() => renderBookOverview(overview, undefined, recoveryReturn));
         if (section === 'history') {
           shell.markSection('history');
           const records = screen.querySelector<HTMLElement>('.record-navigation');
@@ -4150,10 +4382,12 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
         }
       }
     };
-    const ownedRoute = await window.ai7.getBookWorkbenchRoute();
+    const ownedRoute = await api.getBookWorkbenchRoute();
+    if (!navigationRoute.isCurrent()) return;
     if (ownedRoute?.kind === 'book' && ownedRoute.bookId === book.bookId) await openSection(ownedRoute);
-    else await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, openSection);
+    else await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, openSection, undefined, navigationRoute);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
   }
 }
@@ -4183,19 +4417,25 @@ function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
   const reading = state === 'editor' && onScreen === bookId ? manuscriptOnScreen?.readingPlace() ?? null : null;
   const section = onScreen === bookId ? AGENT_WORKSPACE_RETURN_SECTIONS[state] ?? null : null;
   return () => void leaveThen(async () => {
+    let current = navigation.route();
     try {
       if (reading !== null) {
-        await openEditorWindow(await window.ai7.getManuscriptWindowAt({
+        const opened = await api.getManuscriptWindowAt({
           manuscriptId: reading.manuscriptId, branchId: reading.branchId, target: { kind: 'block', blockId: reading.blockId },
-        }), bookTitle);
+        });
+        if (!current.isCurrent()) return;
+        await openEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, current);
       } else if (restore !== undefined) {
-        await restore();
+        const restoring = restore();
+        current = navigation.route();
+        await restoring;
       } else if (state === 'editor' && onScreen === bookId) {
-        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle }, undefined, current);
       } else {
         await openBookSection({ bookId, title: bookTitle }, section ?? 'overview');
       }
     } catch (error) {
+      if (!navigation.errorIsCurrent(error, current)) return;
       setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
     }
   });
@@ -4207,6 +4447,8 @@ function agentWorkspaceReturn(bookId: string, bookTitle: string): () => void {
  * Entering records nothing: no Active Work Object, Run, grant, permission or recent-section preference changes.
  */
 async function openAgentWorkspace(bookId: string, back: () => void): Promise<void> {
+  const navigationRoute = navigation.begin();
+  if (!navigationRoute.isCurrent()) return;
   setStatus(SHELL_LABELS.openingBook, 'busy');
   try {
     const render = async (route: ResolvedBookWorkbenchRoute): Promise<void> => {
@@ -4218,7 +4460,7 @@ async function openAgentWorkspace(bookId: string, back: () => void): Promise<voi
         root: content,
         bookId: route.bookId,
         bookTitle: route.bookTitle,
-        api: window.ai7,
+        api: api,
         setStatus,
         errorMessage: rendererErrorMessage,
         back,
@@ -4227,23 +4469,29 @@ async function openAgentWorkspace(bookId: string, back: () => void): Promise<voi
       replaceScreen('agent-workspace', content);
       agentWorkspaceSurface = surface;
     };
-    const ownedRoute = await window.ai7.getBookWorkbenchRoute();
+    const ownedRoute = await api.getBookWorkbenchRoute();
+    if (!navigationRoute.isCurrent()) return;
     if (ownedRoute?.kind === 'book' && ownedRoute.bookId === bookId) await render(ownedRoute);
-    else await requestBookWorkbenchRoute({ kind: 'book', bookId }, render);
+    else await requestBookWorkbenchRoute({ kind: 'book', bookId }, render, undefined, navigationRoute);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     setStatus(rendererErrorMessage(error, SHELL_LABELS.bookUnavailable), 'error');
   }
 }
 
 /** 在稿件中查看 after 提交为修改建议: the manuscript at the change set's paragraph, the first new 修改建议's card open. */
 async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProjection, bookTitle: string): Promise<void> {
+  const current = navigation.begin();
   try {
-    const card = await window.ai7.getEditorialMarkCard({ manuscriptId: promotion.manuscriptId, branchId: promotion.branchId, markId: promotion.markIds[0]! });
-    const opened = await window.ai7.getManuscriptWindowAt({
+    const card = await api.getEditorialMarkCard({ manuscriptId: promotion.manuscriptId, branchId: promotion.branchId, markId: promotion.markIds[0]! });
+    if (!current.isCurrent()) return;
+    const opened = await api.getManuscriptWindowAt({
       manuscriptId: promotion.manuscriptId, branchId: promotion.branchId, target: { kind: 'block', blockId: card.blockId },
     });
-    await openEditorWindow(opened, bookTitle, undefined, undefined, promotion.markIds[0]);
+    if (!current.isCurrent()) return;
+    await openEditorWindow(opened, bookTitle, undefined, undefined, promotion.markIds[0], undefined, current);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, current)) return;
     setStatus(rendererErrorMessage(error, AGENT_WORKSPACE_WORDS.manuscriptFailed), 'error');
   }
 }
@@ -4256,9 +4504,9 @@ function renderBookFilter(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn: RecoveryReturnContext | undefined,
   filter: BookSummaryFilter | null,
+  refresh = { request: 0 },
 ): HTMLElement {
   const form = element('form', 'book-filter');
-  let request = 0;
   form.noValidate = true;
   const legend = element('p', 'book-filter-legend', BOOK_FILTER_LEGEND);
   const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
@@ -4299,17 +4547,17 @@ function renderBookFilter(
       text: words,
     };
     find.disabled = true;
-    const current = ++request;
+    const current = ++refresh.request;
     setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
-    void window.ai7.listBooks({ after: null, filter: next }).then(
+    void api.listBooks({ after: null, filter: next }).then(
       (page) => {
-        if (!form.isConnected || current !== request) return;
+        if (!form.isConnected || current !== refresh.request) return;
         renderLanding(priorWork, recoveryReturn, page, next);
         setStatus(BOOK_FILTER_STATUS_LINES.found, 'success');
         document.querySelector<HTMLElement>('#book-filter-text')?.focus();
       },
       (error) => {
-        if (!form.isConnected || current !== request) return;
+        if (!form.isConnected || current !== refresh.request) return;
         restoreControls();
         setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
       },
@@ -4320,16 +4568,16 @@ function renderBookFilter(
   if (filter !== null) {
     const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
       clear.disabled = true;
-      const current = ++request;
-      void window.ai7.listBooks({ after: null }).then(
+      const current = ++refresh.request;
+      void api.listBooks({ after: null }).then(
         (page) => {
-          if (!form.isConnected || current !== request) return;
+          if (!form.isConnected || current !== refresh.request) return;
           renderLanding(priorWork, recoveryReturn, page, null);
           setStatus(BOOK_FILTER_STATUS_LINES.cleared, 'success');
           document.querySelector<HTMLElement>('#book-filter-text')?.focus();
         },
         (error) => {
-          if (!form.isConnected || current !== request) return;
+          if (!form.isConnected || current !== refresh.request) return;
           restoreControls();
           setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
         },
@@ -4401,6 +4649,7 @@ function renderLanding(
     : undefined;
   const activeRecoveryReturn = recoveryReturn ?? inferredRecoveryReturn;
   const content = panel();
+  const refresh = { request: 0 };
   // 书库 (Issue #934; editor-surfaces §8.2): the sidebar's destination for every Book, with the two ways a Book begins. The
   // screen keeps its state name `landing`, the window's first screen, which every Journey waits for.
   content.classList.add('library-home');
@@ -4415,7 +4664,7 @@ function renderLanding(
     importButton.disabled = true;
     setStatus('正在本地解析 DOCX…', 'busy');
     try {
-      const result = await window.ai7.selectAndStageManuscript();
+      const result = await api.selectAndStageManuscript();
       if (result.status === 'cancelled') {
         importButton.disabled = false;
         setStatus('已取消文件选择');
@@ -4437,7 +4686,7 @@ function renderLanding(
   const onboarding = element('section', 'onboarding-card');
   content.append(onboarding);
   if (filter === null && books.items.length === 0 && priorWork.length === 0) {
-    void Promise.all([window.ai7.getPreferences(), window.ai7.getProductDataLocation()]).then(([preferences, location]) => {
+    void Promise.all([api.getPreferences(), api.getProductDataLocation()]).then(([preferences, location]) => {
       if (!onboarding.isConnected || !showOnboardingCard(books.items.length > 0, preferences.values['onboarding.state'])) return;
       onboarding.dataset['onboardingCard'] = 'first-run';
       const labels = FIRST_RUN_CARD_LABELS;
@@ -4458,7 +4707,7 @@ function renderLanding(
           sample.disabled = true;
           setStatus(labels.sampleBusy, 'busy');
           try {
-            const result = await window.ai7.importBundledSampleBook();
+            const result = await api.importBundledSampleBook();
             if (result.status === 'staged') {
               setStatus(labels.sampleStaged, 'success');
               renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
@@ -4474,7 +4723,7 @@ function renderLanding(
       const skip = button(labels.skip, 'quiet', async () => {
         skip.disabled = true;
         try {
-          await window.ai7.savePreference({ key: 'onboarding.state', value: 'skipped' });
+          await api.savePreference({ key: 'onboarding.state', value: 'skipped' });
           onboarding.remove();
           setStatus(labels.skipped);
         } catch (error) {
@@ -4491,7 +4740,7 @@ function renderLanding(
     const library = element('section', 'recent-work');
     library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
     library.append(element('h3', undefined, SHELL_LABELS.allBooks));
-    library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
+    library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter, refresh));
     if (filter !== null) {
       const result = element('p', 'field-note');
       result.append(element('span', 'book-filter-line', bookFilterLine(filter)));
@@ -4501,14 +4750,14 @@ function renderLanding(
     const list = element('div', 'recent-work-list');
     for (const summary of books.items) {
       const open = bookCardOpen(summary.title, summary.manuscriptStateLabel, async () => {
+        const navigationRoute = navigation.begin();
         open.disabled = true;
         setStatus('正在打开图书…', 'busy');
         try {
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn);
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn, navigationRoute);
         } catch (error) {
-          open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
-        }
+          if (navigation.errorIsCurrent(error, navigationRoute)) setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
+        } finally { open.disabled = false; }
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
@@ -4527,10 +4776,13 @@ function renderLanding(
     library.append(list);
     if (books.nextCursor) {
       const loadMore = button('加载更多图书', 'secondary', async () => {
+        const current = navigation.begin();
+        const request = ++refresh.request;
         loadMore.disabled = true;
         setStatus('正在读取下一页图书摘要…', 'busy');
         try {
-          const page = await window.ai7.listBooks({ after: books.nextCursor, ...(filter === null ? {} : { filter }) });
+          const page = await api.listBooks({ after: books.nextCursor, ...(filter === null ? {} : { filter }) });
+          if (!current.isCurrent() || request !== refresh.request) return;
           renderLanding(
             priorWork,
             activeRecoveryReturn,
@@ -4540,8 +4792,8 @@ function renderLanding(
           setStatus('已加载更多图书摘要', 'success');
         } catch (error) {
           loadMore.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法读取下一页图书摘要。'), 'error');
-        }
+          if (navigation.errorIsCurrent(error, current) && request === refresh.request) setStatus(rendererErrorMessage(error, '无法读取下一页图书摘要。'), 'error');
+        } finally { loadMore.disabled = false; }
       });
       const loadMoreActions = element('div', 'button-row');
       loadMoreActions.append(loadMore);
@@ -4557,21 +4809,22 @@ function renderLanding(
       const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件 ${item.revisionLabel}`;
       const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
       const open = bookCardOpen(item.bookTitle, state, async () => {
+        const current = navigation.begin();
         open.disabled = true;
         setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
         try {
           if (item.recoveryAttention) {
-            await returnToRecoveryComparison(item.recoveryAttention.attentionId);
+            await returnToRecoveryComparison(item.recoveryAttention.attentionId, current);
             return;
           }
           // The startup return takes the Book route like 书库 does, rather than opening this
           // manuscript at its start: V2-UX-RET-002 asks both ways in to arrive at the same place, the
           // position the editor left, and one route is what keeps them from drifting apart.
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: item.bookId }, undefined, activeRecoveryReturn);
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: item.bookId }, undefined, activeRecoveryReturn, current);
         } catch (error) {
           open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
-        }
+          if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
+        } finally { open.disabled = false; }
       });
       open.dataset['manuscriptId'] = item.manuscriptId;
       const row = element('article', 'recent-work-item');
@@ -4609,7 +4862,7 @@ screen.addEventListener('drop', (event) => {
   dropImportBusy = true;
   void (async () => {
     if (!await settleScreen()) return;
-    const result = await window.ai7.stageDroppedManuscript(file);
+    const result = await api.stageDroppedManuscript(file);
     if (result.status === 'staged') renderTargetChoice(result.staged, null);
   })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法导入拖入的 DOCX。'), 'error')).finally(() => { dropImportBusy = false; });
 });
@@ -4620,7 +4873,7 @@ function renderImported(result: ImportCommitProjection, recoveryReturn?: Recover
   if ('reimportRecordId' in result) {
     // A reimport returns to the manuscript (V2-UX-IMP-056; Issue #412, S63): the first import of a manuscript ends in
     // the Book Work Overview once, an update of it does not.
-    renderEditorWindow(result.window, result.overview.book.title, recoveryReturn?.attentionId, undefined, undefined, result);
+    navigation.present(() => renderEditorWindow(result.window, result.overview.book.title, recoveryReturn?.attentionId, undefined, undefined, result));
     // Frame presentation and acknowledgement IPC can finish after a newer status, including a refused 跳到所选文字
     // (Issue #807). Repeat the completion only if the status has not changed; the landing notice also keeps the result.
     const landingStatusRevision = statusRevision;
@@ -4629,7 +4882,7 @@ function renderImported(result: ImportCommitProjection, recoveryReturn?: Recover
     });
     return;
   }
-  renderBookOverview(result.overview, result, recoveryReturn);
+  navigation.present(() => renderBookOverview(result.overview, result, recoveryReturn));
 }
 
 /** How many graphemes of a mark's words the reimport notice quotes. */
@@ -4711,7 +4964,7 @@ async function awaitServiceJob(
   onProgress(job);
   while (job.state === 'queued' || job.state === 'running') {
     await delay(25);
-    job = await window.ai7.pollServiceJob({ jobId: job.jobId });
+    job = await api.pollServiceJob({ jobId: job.jobId });
     requireMonotonicReimportProgress(job);
     onProgress(job);
   }
@@ -4735,15 +4988,30 @@ async function openEditorWindow(
   entryNotice?: string,
   openMarkId?: string,
   reimport?: ManuscriptReimportCommitProjection,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
 ): Promise<void> {
+  await guardNavigationRead(navigationRoute, () => openEditorWindowNow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport, navigationRoute));
+}
+
+async function openEditorWindowNow(
+  initialWindow: ManuscriptWindowProjection,
+  bookTitle: string,
+  recoveryAttentionId?: string,
+  entryNotice?: string,
+  openMarkId?: string,
+  reimport?: ManuscriptReimportCommitProjection,
+  navigationRoute: NavigationCheckpoint = navigation.begin(),
+): Promise<NavigationCheckpoint | undefined> {
   if (initialWindow.deliverable !== 'production-document') {
-    renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport);
-    return;
+    navigation.present(() => renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport));
+    return navigation.read(screen.firstElementChild as HTMLElement);
   }
   const showing = screen.firstElementChild;
-  const context = await documentContextOf(window.ai7, initialWindow);
+  const context = await documentContextOf(api, initialWindow);
+  if (!navigationRoute.isCurrent()) return;
   if (screen.firstElementChild !== showing) return;
-  renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport, context);
+  navigation.present(() => renderEditorWindow(initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, reimport, context));
+  return navigation.read(screen.firstElementChild as HTMLElement);
 }
 
 function renderEditorWindow(
@@ -4761,7 +5029,7 @@ function renderEditorWindow(
     return;
   }
   mountManuscriptScreen({
-    api: window.ai7, initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, productionDocument,
+    api: api, initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, productionDocument,
     reimportNotice: reimport === undefined ? undefined : reimportLandingSection(reimport),
     persistenceStatus, contextView: requiredElement('#context-view'), viewPreferences, preferences: shellPreferences,
     commandDispatcher, taskDrawer, interrupted: () => authorityInterrupted,
@@ -4772,8 +5040,10 @@ function renderEditorWindow(
       taskSurfaceRefresh = { writing: () => surface.refreshWriting() };
       leaveGuard = () => surface.settle();
       agentWorkspaceReturns.set(content, async () => {
-        const opened = await window.ai7.getManuscriptWindow({ manuscriptId: initialWindow.manuscriptId, branchId: initialWindow.branchId, cursor: null });
-        await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId);
+        const current = navigation.begin();
+        const opened = await api.getManuscriptWindow({ manuscriptId: initialWindow.manuscriptId, branchId: initialWindow.branchId, cursor: null });
+        if (!current.isCurrent()) return;
+        await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId, undefined, current);
       });
     },
     setContextActions: (...content) => shell.setContextActions(...content),
@@ -4782,7 +5052,7 @@ function renderEditorWindow(
     renderEditorWindow, renderBookAnalysis, renderBookReview,
     renderBookDeliverables, renderProposalConflict, renderProposalWorkspace,
     returnToRecoveryComparison,
-    openPrimaryManuscript: renderBookManuscript,
+    openPrimaryManuscript: async (bookId, title) => { await renderBookManuscript(bookId, title); },
     openDerivativesWorkspace: renderDerivativesWorkspace,
     openProductionDocument,
     openLaunch: (request) => taskDrawer.openLaunch(request, () => null),
@@ -4803,16 +5073,19 @@ function renderError(error: unknown, retry: () => void): void {
   setStatus('操作未完成', 'error');
 }
 
-async function initializeStartup(): Promise<void> {
+async function initializeStartup(navigationRoute: NavigationCheckpoint = navigation.begin()): Promise<void> {
   setStatus('正在核对本地恢复状态…', 'busy');
   try {
-    await renderApplicationStartup(await window.ai7.getStartup());
+    const startup = await api.getStartup();
+    if (!navigationRoute.isCurrent()) return;
+    await renderApplicationStartup(startup, navigationRoute);
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     renderError(error, () => void initializeStartup());
   }
 }
 
-const appearance = createAppearance(window.ai7);
+const appearance = createAppearance(api);
 
 
 const { renderDataAndStorage } = createDataStorage({
@@ -4831,19 +5104,23 @@ const { renderModelServiceSettings } = createModelServiceSettings({
 });
 
 async function initializeRenderer(): Promise<void> {
+  const navigationRoute = navigation.begin();
   resetTechnicalLayer();
   initializeReducedMotion();
   await appearance.ready;
   try {
-    const location = await window.ai7.getProductDataLocation();
-    const scope = location.channel === 'source-checkout' ? (await window.ai7.getModelServiceSettings()).launchPolicy.operationalScope : null;
+    const location = await api.getProductDataLocation();
+    const scope = location.channel === 'source-checkout' ? (await api.getModelServiceSettings()).launchPolicy.operationalScope : null;
     initializeTechnicalLayer(location.channel, window.localStorage, scope);
-    const route = await window.ai7.getBookWorkbenchRoute();
+    if (!navigationRoute.isCurrent()) return;
+    const route = await api.getBookWorkbenchRoute();
+    if (!navigationRoute.isCurrent()) return;
     if (route) {
-      await renderResolvedBookWorkbenchRoute(route);
+      await renderResolvedBookWorkbenchRoute(route, undefined, navigationRoute);
       return;
     }
   } catch (error) {
+    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
     renderError(error, () => void initializeRenderer());
     return;
   }

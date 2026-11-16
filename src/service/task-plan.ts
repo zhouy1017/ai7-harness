@@ -1,6 +1,8 @@
 import { markModelLabels } from './editorial-mark-source.js';
+import { baselineSynopsisSent, baselineSynopsisTechnical } from '../shared/baseline-synopsis-wording.js';
+import { REVIEW_SYNTHESIS_PLAN_LINE } from '../shared/review-synthesis-wording.js';
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
-import { housePreferenceLabel } from './house-review-preference.js';
+import { housePreferenceLabel } from './learning/memory-facade.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
@@ -1273,7 +1275,7 @@ export function initialEvaluationPlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${profile.title}（第 ${profile.version} 版）：${items}`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1325,6 +1327,7 @@ export function initialEvaluationPlan(input: {
       resolution: '请在「评估」里重新准备 AI7 初评。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -1431,7 +1434,7 @@ export function readersReportPlan(input: {
         `评估记录${basis}（${task.profile.title} 第 ${task.profile.version} 版）：各项得分与评语、主要优点与问题、风险与结论`,
         task.exemplars,
       ],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1487,6 +1490,7 @@ export function readersReportPlan(input: {
       resolution: '请在「评估」里重新起草审稿意见。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -1716,7 +1720,7 @@ export function writingPlan(input: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: writingReferenceLines(task, exemplarsHere, materials, projection.authorization !== null),
       send: live
-        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}`
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable)}`
         : '不发送任何内容',
       notRead: NOT_READ,
     },
@@ -1777,6 +1781,7 @@ export function writingPlan(input: {
       resolution: '请在「交付物」的新建文档 · 写作任务里重新起草。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -1886,7 +1891,7 @@ export function evaluationRewritePlan(input: {
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
       reference: [`${basis}：你的评分（${scored}）、调分原因、现在的评语、优点、问题、总评、风险与结论，以及 AI7 原报告`],
-      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}` : '不发送任何内容',
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明${procedureInstructionSent(projection.planEnvelope?.procedureContent)}${baselineSynopsisSent(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable)}` : '不发送任何内容',
       notRead: NOT_READ,
     },
     steps: [
@@ -1942,6 +1947,7 @@ export function evaluationRewritePlan(input: {
       resolution: '请在「评估」里再次按你的评分重写评语。',
     },
     technical: [
+      ...baselineSynopsisTechnical(projection.executionPlan?.baselineSynopsisContext, projection.executionPlan?.baselineSynopsisUnavailable),
       { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
       { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
       { key: 'goal', label: '固定任务目标', value: intent.goal },
@@ -2521,7 +2527,9 @@ export function reviewRunPlan(input: {
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
-  const categories = facts.categories;
+  const members = facts.synthesis === undefined ? facts.categories : [...facts.categories, facts.synthesis];
+  const categories = members.filter(category => category.categoryId !== 'run-synthesis');
+  const synthesis = members.find(category => category.categoryId === 'run-synthesis');
   const materials = facts.materials ?? [];
   // 本社审阅偏好 (Issue #911): each category that reads it names the version; a closed rule says so once.
   const preferences = facts.housePreferences ?? [];
@@ -2529,10 +2537,11 @@ export function reviewRunPlan(input: {
     : preferences.map(({ categoryLabel, preference }) => `${categoryLabel}：参考${housePreferenceLabel(preference)}`);
   const instructionSent = tasksWithInstruction(facts);
   const preferenceSent = preferences.length === 0 ? instructionSent : instructionSent + `，以及${[...new Set(preferences.map(({ preference }) => `本社审阅偏好 v${preference.ordinal}`))].join('、')}的摘录`;
-  const tasks = categories.filter((category) => category.task !== null);
+  const tasks = members.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
-  const ceilings = tasks.map((category) => frozenCeiling(category.task!.components));
+  const budgetTasks = tasks.filter(category => category.categoryId !== 'run-synthesis');
+  const ceilings = budgetTasks.map((category) => frozenCeiling(category.task!.components));
   const route = tasks.length === 0 ? null : frozenRoute(tasks[0]!.task!.components);
   const destinations = [...new Set(tasks.map(category => frozenRoute(category.task!.components))
     .filter(value => MODEL_SERVICE_ROUTES.some(remote => remote === value.kind)).map(planModelDestination))].join('、');
@@ -2574,7 +2583,7 @@ export function reviewRunPlan(input: {
           needsModelConnection,
           planEnvelopeDigest: null,
           categoryDigests: [...(local === undefined ? [] : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }]),
-            ...tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
+            ...tasks.filter(category => category.categoryId !== 'run-synthesis').map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
           reconfirm: null,
         };
   return {
@@ -2624,10 +2633,10 @@ export function reviewRunPlan(input: {
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
-      ...categories.map((category): TaskPlanStepProjection => ({
+      ...members.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
-        label: isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
-        result: `${category.label}的发现（稿件上的标记）`,
+        label: category.categoryId === 'run-synthesis' ? '全书审阅统合总结' : isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}${category.deferred === true ? '（空闲时处理）' : ''}`,
+        result: category.categoryId === 'run-synthesis' ? REVIEW_SYNTHESIS_PLAN_LINE : `${category.label}的发现（稿件上的标记）`,
         removable: false,
         removed: false,
       })),
@@ -2649,10 +2658,10 @@ export function reviewRunPlan(input: {
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
       send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往 ${destinations}` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
+      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${budgetTasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
-      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）`
+      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${budgetTasks.length} 类合计）`
         : `任务运行预算上限：${groupedCount(sharedCeiling)} tokens；各成员的模型阶段按工序份额分用`,
       accountLimit: ACCOUNT_LIMIT_UNKNOWN,
     },
@@ -2660,6 +2669,7 @@ export function reviewRunPlan(input: {
       ...categories.map((category) => category.riskPointsOnly
         ? `${category.label}：需人工复核的风险点（批注）`
         : `${category.label}：${category.output === 'change-suggestion' ? '修改建议' : '批注'}，标在稿件上，由你逐条处理`),
+      ...(synthesis === undefined ? [] : ['全书审阅统合总结：总体评价、共性问题与处理先后，保留逐条发现供你判断']),
       '审阅报告：在审阅里生成，按版本保存',
     ],
     notDo: {

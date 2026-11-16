@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { parseArguments } from '../../src/main/launch-arguments.js';
+import { packagedLaunchForm } from '../../src/main/channel.js';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   IME_COMPOSITION_RESERVE,
   PROTECTION_RETRY_DELAYS_MS,
@@ -161,8 +164,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('pins protocol 203 at the 0.7.1 R2 closure for task choices and reasoning (Issue #1472)', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(203);
+  it('pins protocol 204 at the 0.7.2 R3 closure for synthesis, Book opening and synopsis context (Issue #1496)', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(204);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {
@@ -174,6 +177,20 @@ describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
     expect(editJournalFaultControlAdmitted('armed', 'J-02', 'ordinary-production')).toBeNull();
     expect(editJournalFaultControlAdmitted('armed', 'J-02', 'developer-live')).toBeNull();
     expect(editJournalFaultControlAdmitted('on', 'J-02', 'development-ci')).toBeNull();
+    // The same launch-rule family pins J-11's bounded acknowledgement hold (#1497).
+    const control = ['--j11-navigation-answer-hold-path', resolve('.cache/navigation-answer-hold')];
+    const args = ['--data-root', resolve('.cache/test-data'), '--launcher-pid', String(process.ppid)];
+    try {
+      vi.stubEnv('AI7_E2E_JOURNEY', 'J-11');
+      expect(parseArguments([...args, ...control]).navigationAnswerHoldPath).toBe(control[1]);
+      for (const scope of ['ordinary-production', 'developer-live']) expect(() => parseArguments([...args, ...control, '--trusted-operational-scope', scope, ...(scope==='developer-live' ? ['--validation-case','baseline-analysis/sample1-whole-book'] : [])])).toThrow();
+      for (const journey of ['J-02', 'J-16', '']) {
+        vi.stubEnv('AI7_E2E_JOURNEY', journey);
+        expect(() => parseArguments([...args, ...control])).toThrow();
+      }
+      expect(() => packagedLaunchForm(control)).toThrow('AI7_PACKAGED_ARGUMENT_INVALID');
+    } finally { vi.unstubAllEnvs(); }
+
   });
 
   it('knows exactly three modes', () => {

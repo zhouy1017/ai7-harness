@@ -347,7 +347,7 @@ function retentionRows(reviewRunId: string) {
     const outcome = db.prepare(`SELECT o.run_record_id, o.result_set_revision_id, o.classification FROM analysis_task_outcomes o
       JOIN review_runs rr JOIN json_each(rr.canonical_json, '$.categories') c
       ON json_extract(c.value, '$.task.taskIntentId') = o.task_intent_id WHERE rr.review_run_id = ?`).get(reviewRunId)!;
-    const events = db.prepare('SELECT state, run_record_id, result_set_revision_id, canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? ORDER BY sequence').all(reviewRunId);
+    const events = db.prepare("SELECT state, run_record_id, result_set_revision_id, canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review' ORDER BY sequence").all(reviewRunId);
     const versions = db.prepare('SELECT result_id, version, finding_id, run_record_id, sha256 FROM factual_verification_results WHERE review_run_id = ? ORDER BY rowid').all(reviewRunId);
     return { snapshot, outcome, events, versions };
   } finally { db.close(); }
@@ -621,7 +621,7 @@ describe('factual claim occurrence ledger', () => {
         let migrated: EditorialStore | undefined;
         try {
           migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 115, dataVersion: 1 });
+          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 116, dataVersion: 1 });
           expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
         } finally { migrated?.close(); await migration.dispose(); }
       }
@@ -949,6 +949,9 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(store.factualReviewLedger.inspect(book.bookId).run?.state).toBe('interrupted');
     expect(sends.model).toBe(3);
     expect(run.categories[0]?.state).toBe('interrupted');
+    const coverage = store.factualReviewLedger.inspect(book.bookId).resultSetRevision!.coverage;
+    expect(coverage.unitsTotal).toBeGreaterThan(1);
+    expect(run.synthesis?.missingCategories.some(label => label.includes(`${coverage.unitsClosed}/${coverage.unitsTotal}`))).toBe(true);
     expect(run.categories[0]?.findingsCount).toBeGreaterThan(0);
     expect(results.length).toBe(run.categories[0]?.findingsCount);
     expect(run.state).toBe('partial');

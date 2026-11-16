@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { afterEach, expect, it, vi } from 'vitest';
+import { BookOwnershipFailure } from '../../src/renderer/navigation-generation.js';
 
 // Execute the private production flush loop and composition handlers together. Holding view.composing
 // by hand tests defensive waiter ordering; no editable-view path to this delay has been demonstrated.
@@ -18,6 +19,7 @@ function declaration(name: string): string {
 }
 const program = ts.transpileModule(`
   let destroyed=false, interrupted=false, composing=false, saving=false, retryRequired=false;
+  let editAction={},ownershipBlocked=false;
   let protection, retryPrepared, flushPromise, autoFlushTimer, compositionWaiters=[];
   const structures=Array.from({length:8},()=>({}));
   const block={blockId:'block',text:'公开合成原文',digest:'block-0'};
@@ -47,6 +49,28 @@ const program = ts.transpileModule(`
   return {flush,handlers,read:()=>({saving,journal:windowProjection.journalSequence,retryRequired})};
 `, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
+function publicAction(name:string):string {
+  let result='';
+  const visit=(node:ts.Node):void=>{if(ts.isPropertyAssignment(node)&&node.name.getText(source)===name&&ts.isArrowFunction(node.initializer))result=node.initializer.getText(source);ts.forEachChild(node,visit);};
+  visit(source);if(!result)throw new Error(`Missing editor action: ${name}`);return result;
+}
+
+it('ownership failure pauses the journal timer while explicit save and retry each start a fresh editor action',()=>{
+  vi.useFakeTimers();
+  const clock={setTimeout,clearTimeout};const attempts:object[]=[];
+  const compiled=ts.transpileModule(`
+    let editAction={},ownershipBlocked=true,protection={cause:'journal-unavailable',attempts:0,retrying:false},destroyed=false,retryTimer;
+    const clearRetryTimer=()=>{if(retryTimer!==undefined)window.clearTimeout(retryTimer);retryTimer=undefined;};
+    const retryDelayMs=()=>2000,runRetry=()=>attempts.push(editAction),flush=()=>editAction;
+    const ${declaration('scheduleRetry')};
+    return {scheduleRetry,save:${publicAction('flush')},again:${publicAction('retryWrite')},action:()=>editAction};
+  `,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+  const editor=Function('window','attempts',compiled)(clock,attempts) as {scheduleRetry():void;save():object;again():void;action():object};
+  const initial=editor.action();editor.scheduleRetry();expect(vi.getTimerCount()).toBe(0);
+  const saved=editor.save();expect(saved).not.toBe(initial);editor.scheduleRetry();expect(vi.getTimerCount()).toBe(1);
+  editor.again();expect(attempts).toHaveLength(1);expect(attempts[0]).not.toBe(saved);
+});
+
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 it.each([true,false])('adopts the eighth acknowledgement when the test holds the view composing flag (end before ack=%s, #1459)', async endFirst => {
@@ -66,7 +90,7 @@ it.each([true,false])('adopts the eighth acknowledgement when the test holds the
       window:{manuscriptId:'manuscript',branchId:'branch',revisionId:'revision',journalSequence:sequence,workingDigest:working,
         blocks:[{blockId:'block',text:'公开合成原文',digest}]}};
   } };
-  editor = Function('view','options',program)(view,options) as typeof editor;
+  editor = Function('view','options','BookOwnershipFailure',program)(view,options,BookOwnershipFailure) as typeof editor;
   const completion=editor.flush();
   await eighth.promise; await Promise.resolve(); await Promise.resolve();
   expect(durable).toBe(8); expect(editor.read()).toMatchObject({journal:7,saving:true});

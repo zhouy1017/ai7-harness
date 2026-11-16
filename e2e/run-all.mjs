@@ -2,6 +2,7 @@ import {
   ADMITTED_JOURNEYS,
   classifyJourneyResult,
   collectJourneyCheck,
+  collectJourneyPointerFailure,
   collectReadinessTrace,
   collectJourneyDisclosures,
   collectJ02ViewportDisclosures,
@@ -46,6 +47,8 @@ if (args.length !== 0) {
       // Issue #652: which check in that stage failed, as the child named it: a content-free label, never page text.
       const check = collectJourneyCheck(result, journey, failure);
       if (check !== null) console.error(`LOCAL_COMPLETION/${journey}/fail/${failure.location}/check/${check}`);
+      const pointer = collectJourneyPointerFailure(result, journey, failure);
+      if (pointer !== null) console.error(`POINTER_FAILURE/${journey}/${failure.location}/${pointer}`);
       const readiness = collectReadinessTrace(result, journey);
       if (readiness !== null) console.error(`LOCAL_COMPLETION/${journey}/readiness/${readiness}`);
       process.exitCode = result.code || 1;

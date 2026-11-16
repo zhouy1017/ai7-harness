@@ -85,7 +85,7 @@ describe('the Assurance Sampling Contract v1 message', () => {
     const contract = ASSURANCE_SAMPLING_PROMPT_CONTRACT;
     // The block-line format is the unit contract's, character for character; only the section
     // headers around it are this contract's own.
-    expect(contract.blockLine).toBe(BASELINE_PROMPT_CONTRACT.blockLine);
+    expect(contract.blockLine).toBe('[{blockId}] ({kind}{level}) {text}');
     const lines = buildAssuranceSamplingMessage(unit([BLOCK_C]), 8, BLOCKS, FINDINGS).split('\n');
     expect(lines.indexOf(contract.overlapHeader)).toBeGreaterThan(0);
     expect(lines[lines.indexOf(contract.overlapHeader) + 1]).toBe(`[${BLOCK_C}] (paragraph) 合成重叠上下文段落。`);

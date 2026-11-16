@@ -167,6 +167,32 @@
           "outputTokens": 40
         }
       }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "80bcb252310b350284e0ed291507b99c2dd9a8e063bc65bd0a06161143d7098f",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
+        },
+        "text": "{\"schema\":\"ai7.review.run-synthesis-result/1\",\"overallAssessment\":\"各章的发现应放回全书脉络逐条核对。建议先统一用字、数字与章题体例，再复核叙述表达和梦境与现场的衔接。\",\"recurringProblems\":[{\"title\":\"优先统一各章的编辑处理\",\"explanation\":\"以下发现提供了核对入口；同类问题应采用一致的编辑尺度，具体修改仍须逐条判断。\",\"evidenceRefs\":[\"e1\",\"e2\"],\"priority\":\"先处理必须核对的发现。\"}],\"contextualExplanations\":[],\"priorities\":[\"先核对用字与数字体例。\",\"再结合全书脉络处理表达与情节衔接。\"]}"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "7a0bfca842ac83b2519a9c3fdb088e4623dab46ddbaa750cbeed6ab79c460fce",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
+        },
+        "text": "{\"schema\":\"ai7.review.run-synthesis-result/1\",\"overallAssessment\":\"各章的发现应放回全书脉络逐条核对。建议先统一用字、数字与章题体例，再复核叙述表达和梦境与现场的衔接。\",\"recurringProblems\":[{\"title\":\"优先统一各章的编辑处理\",\"explanation\":\"以下发现提供了核对入口；同类问题应采用一致的编辑尺度，具体修改仍须逐条判断。\",\"evidenceRefs\":[\"e1\",\"e2\"],\"priority\":\"先处理必须核对的发现。\"}],\"contextualExplanations\":[],\"priorities\":[\"先核对用字与数字体例。\",\"再结合全书脉络处理表达与情节衔接。\"]}"
+      }
     }
   ]
 }

@@ -46,8 +46,9 @@ const SAMPLE1_UNITS = 8;
 const SAMPLE1_UNIT_RANGES = [[1, 15], [16, 25], [26, 43], [44, 59], [60, 68], [69, 75], [76, 92], [93, 97]];
 const SIDECAR_REVISION_2_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
-/** The baseline prompt contract every current Run asks under (/2, Issue #826). */
-const PROMPT_CONTRACT_DIGEST = '89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386';
+/** Current ordinal citations (/3); the historical range replay retains /2. */
+const PROMPT_CONTRACT_DIGEST = '0873454949bb92adc50284fb102baaf7e1759565f5841724ac38446988d2688d';
+const RETAINED_V2_PROMPT_CONTRACT_DIGEST = '89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386';
 /** Prompt contract /1, which the recorded 2026-10-12 Run was asked under and its replay asks again. */
 const RECORDED_PROMPT_CONTRACT_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5';
 /** The baseline's sampling contract /2 (Issue #826), which a current plan pins. */
@@ -2836,6 +2837,10 @@ async function main() {
     const waitingItem = waitingAttention.groups.flatMap(group=>group.items).find(item=>item.itemId===`review:${preparedReview.reviewRunId}`);
     requireJourney(waitingItem?.group==='active' && waitingItem.state==='analysis-waiting-network' && waitingItem.nextStep==='view-review', 'review-waiting-attention', waitingItem);
     at('review-online-dispatch');
+    // #1510: exercise the focused hosted completion path on the background guest too.
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await assertRenderer(renderer, `document.hasFocus() && localStorage.getItem('ai7.task-overview.auto-result')!=='off'`, 'review-completion-focused-preference-on');
+    await renderer.evaluate(`(() => {const probe=window.__j04ReviewCompletion={noticed:false,opened:false};const record=()=>{if(document.querySelector('.task-result-window[data-task-result-kind="review"]'))probe.opened=true;const toast=document.querySelector('[data-toast]');if(toast?.dataset.tone==='review-completed'&&!probe.noticed){const drawer=document.querySelector('#task-drawer');probe.context={drawerView:drawer?.dataset.taskDrawerView,drawerRef:drawer?.dataset.taskPlanRef,workspaceRun:document.querySelector('.review-run')?.dataset.reviewRunId};probe.noticed=true;}};probe.observer=new MutationObserver(record);probe.observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-tone','data-task-result-kind']});record();})()`);
     await writeFile(connectivityPath, 'online');
     at('review-authorize');
     // The sheet launched the Run directly; each category starts from its frozen plan at its driver turn.
@@ -2862,6 +2867,95 @@ async function main() {
     requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string' &&
       settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
+
+    // Completion is a quiet 查看 notice while the editor is working in 审阅, even with the preference on.
+    await renderer.evaluate(`window.dispatchEvent(new Event('focus'))`);
+    await waitFor(renderer, `window.__j04ReviewCompletion?.noticed===true`, 'review-completion-quiet-notice');
+    const completionContext = await renderer.evaluate(`window.__j04ReviewCompletion.context`);
+    requireJourney(completionContext.drawerView==='plan' && completionContext.drawerRef===preparedReview.reviewRunId && completionContext.workspaceRun===preparedReview.reviewRunId, 'review-completion-own-result-context', completionContext);
+    await assertRenderer(renderer, `window.__j04ReviewCompletion.opened===false && !document.querySelector('.task-result-window')`, 'review-completion-no-popup');
+    await renderer.evaluate(`window.__j04ReviewCompletion.observer.disconnect();delete window.__j04ReviewCompletion`);
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+
+    // #1433: the compact book summary leaves the first actionable finding visible and its evidence opens the passage.
+    const synthesisDatabase = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    let synthesisDiagnostics;
+    try { synthesisDiagnostics = {
+      events: synthesisDatabase.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id=? AND category_id='run-synthesis' ORDER BY sequence").all(reviewed.run.reviewRunId),
+      input: synthesisDatabase.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id=?').get(reviewed.run.reviewRunId),
+    }; } finally { synthesisDatabase.close(); }
+    requireJourney(reviewed.run.synthesis?.state === 'completed' && reviewed.run.synthesis.summary.recurringProblems.length > 0,
+      'review-synthesis-produced', synthesisDiagnostics);
+    if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
+      await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'review-synthesis-close-drawer');
+    await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-settings');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-mode-ready');
+    await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-ordinary');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-synthesis-ordinary-ready');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'review-synthesis-return');
+    const synthesisEvidence = reviewed.run.synthesis.evidence.find(evidence => evidence.blockId !== null &&
+      reviewed.run.synthesis.summary.recurringProblems.some(problem => problem.evidenceRefs.includes(evidence.ref)));
+    requireJourney(synthesisEvidence !== undefined, 'review-synthesis-linked-evidence');
+    const synthesisLayouts = [];
+    const synthesisNativeViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
+    try {
+      for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+        at(`review-synthesis-${viewport}`);
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `review-synthesis-${viewport}-viewport`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-ready`);
+        if (await renderer.evaluate(`document.querySelector('details.review-synthesis')?.open===true`)) {
+          await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
+          await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
+        }
+        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect(),box=root?.getBoundingClientRect(),header=root?.querySelector('summary'),line=header?parseFloat(getComputedStyle(header).lineHeight):0,previous=root?.previousElementSibling,next=root?.nextElementSibling,baselineGap=previous&&next?Math.max(parseFloat(getComputedStyle(previous).marginBottom)||0,parseFloat(getComputedStyle(next).marginTop)||0):0,cost=previous&&next?next.getBoundingClientRect().top-previous.getBoundingClientRect().bottom-baselineGap:null;return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,headerHeight:box?.height,headerCost:cost,withoutSummaryBottom:r&&cost!==null?r.bottom-cost:null,oneLine:!!header&&header.getBoundingClientRect().height<=line,ok:!!(root&&!root.open&&header.textContent.includes('组共性问题')&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        synthesisLayouts.push(synthesisLayout);
+        requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
+        requireJourney(synthesisLayout.oneLine && synthesisLayout.headerCost > 0 && synthesisLayout.headerCost <= 48, `review-synthesis-${viewport}-header-bound`, synthesisLayout);
+        await assertRenderer(renderer, `(() => {const meta=document.querySelector('.review-run > .review-run-heading > .review-run-meta'),basis=document.querySelector('article.review-finding .review-finding-basis');return !!(meta&&meta.getClientRects().length&&meta.firstChild.textContent.includes(${JSON.stringify(reviewed.run.scope.label.replaceAll('内容块', '段落'))})&&meta.firstChild.textContent.includes('创建于')&&!meta.closest('details')&&basis&&basis.getClientRects().length&&!basis.closest('details:not([open])'));})()`, `review-synthesis-${viewport}-base-metadata-basis`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-expand`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-access-expanded`);
+        await pressTab(renderer);
+        await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-access-evidence`);
+        for (const type of ['keyDown', 'keyUp']) await renderer.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
+        await assertRenderer(renderer, `document.activeElement?.matches('details.review-synthesis > summary')===true`, `review-synthesis-${viewport}-keyboard-header`);
+        const findingScroll = await renderer.evaluate(`(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return {x:Math.min(innerWidth-24,r.left+r.width/2),y:innerHeight-48,deltaY:Math.max(0,r.bottom-innerHeight+24)};})()`);
+        await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', deltaX: 0, ...findingScroll });
+        await waitFor(renderer, `(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-scroll-card`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`);
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
+        for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.querySelector('article.review-finding').contains(document.activeElement)`)); tab += 1) await pressTab(renderer);
+        await assertRenderer(renderer, `(() => {const card=document.querySelector('article.review-finding'),active=document.activeElement,r=active?.getBoundingClientRect();return card.contains(active)&&r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-keyboard-card`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-reset`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
+        const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
+        const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
+        await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${synthesisEvidence.findingId}"]')===null`, `review-synthesis-${viewport}-filtered-citation`);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+        await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-keyboard-evidence`);
+        await pointerClick(renderer, waitFor, `[data-synthesis-evidence="${synthesisEvidence.ref}"]`, `review-synthesis-${viewport}-citation`);
+        await waitFor(renderer, `(() => { const selection=getSelection(), anchor=selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement; return anchor?.closest('[data-block-id]')?.dataset.blockId===${JSON.stringify(synthesisEvidence.blockId)}; })()`, `review-synthesis-${viewport}-passage`);
+        const synthesisMarkId = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId)?.markId;
+        if (synthesisMarkId != null) await waitFor(renderer, `document.querySelector('[data-mark-card="${synthesisMarkId}"]')!==null`, `review-synthesis-${viewport}-finding-card`);
+        await pointerClick(renderer, waitFor, SIDEBAR.section('review'), `review-synthesis-${viewport}-back`);
+        await waitFor(renderer, `document.querySelector('[data-screen="book-review"] details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-returned`);
+      }
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+      await waitFor(renderer, `innerWidth===${synthesisNativeViewport.width} && innerHeight===${synthesisNativeViewport.height}`, 'review-synthesis-native-viewport');
+    }
+    requireJourney(synthesisLayouts.every(layout => layout.oneLine && layout.headerCost > 0 && layout.headerCost <= 48), 'review-synthesis-base-layout-geometry', synthesisLayouts);
+    await pointerClick(renderer, waitFor, SIDEBAR.settings, 'review-synthesis-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')!==null`, 'review-synthesis-restore-settings-ready');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false && !document.querySelector('.help-developer-mode input').disabled`, 'review-synthesis-restore-mode-ready');
+    await pointerClick(renderer, waitFor, '.help-developer-mode input', 'review-synthesis-restore-mode');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-synthesis-restored-ready');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('review'), 'review-synthesis-restore-review');
 
     at('book-findings-center');
     const centerBeforeDisposition = await renderer.evaluate(`window.ai7.inspectBookFindings()`);
@@ -2984,6 +3078,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
     await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && report.querySelector('[data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
 
+    await assertRenderer(renderer, `(() => {const summary=document.querySelector('section.review-report .review-synthesis');return summary?.dataset.synthesisState==='completed' && summary.textContent.includes('总体评价：') && summary.textContent.includes('[e1]') && summary.textContent.includes('「');})()`, 'review-report-synthesis-evidence');
+
     at('review-report-export');
     // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
     // its parts, all kept, with no mark to include — and the Markdown 备用格式 chosen reviews again, its table 降级导出.
@@ -3008,7 +3104,7 @@ async function main() {
     const findingHeadings = reportBlocks.slice(reportBlocks.indexOf('## 发现详单') + 1, reportBlocks.indexOf('## 各类别摘要')).filter((block) => block.startsWith('### '));
     requireJourney(reportMarkdown.endsWith('\n') && reportBlocks[0] === `# ${J04_BOOK_TITLE} · 审阅报告` && (reportBlocks[1] ?? '').startsWith(`${runHeading} · `) &&
       (reportBlocks[1] ?? '').includes(' · 报告第 1 版 · 生成于 ') &&
-      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 概览表', '## 必须处理的事项', '## 章节与类别统计', '## 发现详单', '## 各类别摘要', '## 附录']) &&
+      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 全书审阅统合总结', '## 概览表', '## 必须处理的事项', '## 章节与类别统计', '## 发现详单', '## 各类别摘要', '## 附录']) &&
       table.startsWith('| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n') && table.split('\n').length === 2 + overviewRows && overviewRows > 0 &&
       statistics.startsWith('| 章节 | ') && statistics.split('\n').length === 2 + statisticsRows && statistics.split('\n').at(-1).startsWith('| 合计 | ') &&
       findingHeadings.length === listedFindings && listedFindings > 0 && findingHeadings.every((block, index) => block.startsWith(`### 第 ${index + 1} 条 · `)),
@@ -3597,7 +3693,7 @@ async function main() {
       JSON.stringify(rangeFixture.entries.map((entry) => entry.capture.subject)) === JSON.stringify(['unit', 'unit', 'reduction', 'sampling', 'sampling', 'sampling']) &&
       rangeFixture.entries.every((entry) => entry.capture.model === 'deepseek-v4.1-flash' && entry.capture.route === 'opencode-go' &&
         entry.capture.evidenceScope === 'namespaced' && entry.capture.capturedAt.startsWith('2026-10-13') &&
-        entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
+        entry.capture.taskPromptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST) &&
       rangeFixture.entries.filter((entry) => entry.capture.subject === 'sampling').every((entry) => entry.capture.promptContractDigest === SAMPLING_CONTRACT_DIGEST),
     'range-recorded-source-provenance');
 
@@ -3665,7 +3761,7 @@ async function main() {
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
         JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&
-      rangeRecordedPrepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+      rangeRecordedPrepared.planEnvelope?.promptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST &&
       rangeRecordedPrepared.executionPlan?.assurancePromptContractDigest === SAMPLING_CONTRACT_DIGEST &&
       rangeRecordedPrepared.actions?.canAuthorize === false, 'range-recorded-prepared-plan');
 
@@ -3678,7 +3774,7 @@ async function main() {
     requireJourney(rangeRecorded?.run?.state === 'completed' && rangeRecorded.taskOutcome?.classification === 'completed' &&
       rangeRevision?.ordinal === 2 && rangeRecorded.taskOutcome.resultSetRevisionId === rangeRevision.revisionId &&
       JSON.stringify(rangeRecorded.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
-      rangeRecorded.run.attempt?.executionBinding?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+      rangeRecorded.run.attempt?.executionBinding?.promptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST &&
       rangeRevision.adapterPin?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY && rangeRevision.adapterPin.fixtureSha256 === rangeFixtureDigest,
     'range-recorded-settled-run');
     // Eight units closed: units 1 and 2 recomputed from the recorded /2 answers, the other six reused from the /1 revision.
@@ -3747,8 +3843,11 @@ async function main() {
       leafReviewed.categories[0].excludedCount === 0, 'stock-leaf-validated-findings');
     const leafUsage = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book'})`);
     const leafRuns = leafUsage.rows.find((row) => row.key === leafBook.bookId).runs;
-    requireJourney(leafRuns.length === 1 && leafRuns[0].taskIntentId === leafPrepared.categories[0].taskIntentId, 'stock-leaf-one-business-run');
-    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafRuns[0].runRecordId)}})`);
+    const leafSourceRun = leafRuns.find(run => run.taskIntentId === leafPrepared.categories[0].taskIntentId);
+    requireJourney(leafRuns.length === 1 && leafSourceRun !== undefined &&
+      leafRuns.every(run => run.reviewRunId === leafPrepared.reviewRunId) && leafReviewed.synthesis?.state === 'completed',
+    'stock-leaf-category-and-final-summary', leafRuns);
+    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafSourceRun.runRecordId)}})`);
     const leafReport = leafDetail.detail.report;
     requireJourney(leafReport.units.submitted === SAMPLE1_UNITS && leafReport.units.gaps === 0 && leafReport.units.retried === 0 &&
       leafReport.usagePerStage.units.requests === SAMPLE1_UNITS + 1 && leafReport.usagePerStage['assurance-sampling'].requests === 2 &&

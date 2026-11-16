@@ -1,5 +1,6 @@
 import type { CallId, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { isRecord, canonicalJson } from '../analysis/canonical.js';
+import { taskSynopsisMessageRequestDigest } from '../analysis/baseline-synopsis.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, dialogueQuestionDigest, type DialogueMessageInput } from '../dialogue/contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
@@ -248,6 +249,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #promptContractDigest: string;
   /** The sampling contract the Run's kind binds (Issue #826): its turns are keyed by it, never by another's. */
   readonly #assurancePromptContractDigest: string;
+  readonly #crossUnitPromptContractDigest: string;
   readonly #codes: DshFailureCodes;
   readonly #resolveBy: FixtureResolution;
   readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
@@ -281,6 +283,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
        * another. Absent, /1 — the contract every other kind binds.
        */
       readonly assurancePromptContractDigest?: string;
+      /** The frozen stage contract, including tasks wrapped by clarification, memory or procedures. */
+      readonly crossUnitPromptContractDigest?: string;
     } = {},
   ) {
     this.#fixture = fixture;
@@ -290,6 +294,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     this.#profileEntryKeys = options.localFixture?.catalog.entriesFor(options.localFixture.execution, fixture, promptContractDigest) ?? null;
     this.#promptContractDigest = promptContractDigest;
     this.#assurancePromptContractDigest = options.assurancePromptContractDigest ?? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
+    this.#crossUnitPromptContractDigest = options.crossUnitPromptContractDigest ?? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
     this.#codes = codes;
     this.#attemptsBefore = options.attemptsBefore ?? new Map();
     this.#answerHold = options.answerHold ?? null;
@@ -494,6 +499,14 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // be read as another kind's, as the reduction's, or as a sampling turn's. Which kind a request
     // belongs to is decided by its header alone; its request digest is then keyed by that kind's
     // contract digest, which the adapter was constructed with.
+    if (text !== null) {
+      let input: unknown;
+      try { input = JSON.parse(text); } catch { input = null; }
+      if (isRecord(input) && input.schema === 'ai7.review.run-synthesis-input/1') {
+        yield* this.#fastRole(sha256Hex(text), '全书审阅统合总结', failure);
+        return;
+      }
+    }
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
     const reviewSynthesis = text === null ? null : parseReviewCrossChapterMessage(text);
     // AI7 初评's book-level synthesis (Issue #429, S81b1) is answered as the reduction is, under ordinal `0`, keyed by the
@@ -538,8 +551,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const toolResults = options.messages.slice(Math.max(lastUserIndex, lastAssistantIndex) + 1).flatMap((message) => {
       const result = message.source?.kind === 'tool' ? toolResultOf(message) : null; return result === null ? [] : [result];
     });
-    const expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
-      ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
+    let expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
+      ? crossUnitRequestDigest(this.#crossUnitPromptContractDigest, crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
         : report !== null
@@ -565,13 +578,17 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
                       : writing !== null
                         ? writingRequestDigest(this.#promptContractDigest, writing.ordinal, writing.unitDigest)
                         : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest));
+    const originalDigest = expectedDigest;
+    if (text !== null && (synthesis !== null || report !== null || rewrite !== null || drafting !== null))
+      expectedDigest = taskSynopsisMessageRequestDigest(expectedDigest, text);
+    const hasSynopsisContext = originalDigest !== expectedDigest;
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
-    const stageContractDigest = crossUnit !== null ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
-    const compatible = exact === undefined && stage !== null && this.#sourceDigest !== null
+    const stageContractDigest = crossUnit !== null ? this.#crossUnitPromptContractDigest : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+    const compatible = exact === undefined && !hasSynopsisContext && stage !== null && this.#sourceDigest !== null
       ? resolveReplayCompatibleFixtureEntry(this.#fixture, stage, fixtureReplayContentKey(this.#sourceDigest, this.#promptContractDigest, { stageContractDigest }), attempt)
       : undefined;
     const entry = this.#answering(exact ?? compatible);

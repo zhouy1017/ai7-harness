@@ -179,9 +179,9 @@ function transitions(taskIntentId: string): string[] {
   ).all(taskIntentId) as Array<{ state: string }>).map((row) => row.state));
 }
 
-function reviewStates(reviewRunId: string): string[] {
+function selectedReviewStates(reviewRunId: string): string[] {
   return withDatabase((database) => (database.prepare(
-    'SELECT state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid',
+    "SELECT state FROM review_run_category_events WHERE review_run_id = ? AND category_id <> 'run-synthesis' ORDER BY rowid",
   ).all(reviewRunId) as Array<{ state: string }>).map((row) => row.state));
 }
 
@@ -218,12 +218,12 @@ describe('Reconnect Preflight admits strictly oldest-first across kinds (Issue #
       expect(owner.capacity).toBe(2);
       // One pass, one free place: the older Run takes it, and the governor is never exceeded.
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
-      expect(reviewStates(reviewRunId)[0]).toBe('dispatched');
+      expect(selectedReviewStates(reviewRunId)[0]).toBe('dispatched');
       expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity']);
       expect(store.waitingTaskRuns(null).map((run) => run.kind)).toEqual(['writing']);
       // The place frees and the next pass admits the later one.
       await session.driver.drive(reviewRunId);
-      expect(reviewStates(reviewRunId)).toEqual(['dispatched', 'settled', 'materialized']);
+      expect(selectedReviewStates(reviewRunId)).toEqual(['dispatched', 'settled', 'materialized']);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
       await owner.whenDone(store.inspectWriting(writingBook)!.run!.runRecordId);
       expect(transitions(taskIntentId).slice(0, 3)).toEqual(['authorized', 'awaiting-connectivity', 'admitted']);
@@ -255,9 +255,9 @@ describe('a leads-first Review Run keeps its place in the order (Issue #764 revi
       expect(owner.capacity).toBe(2);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
       expect(withDatabase((database) => (database.prepare(
-        'SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid',
+        "SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? AND category_id <> 'run-synthesis' ORDER BY rowid",
       ).all(reviewRunId) as Array<{ category_id: string; state: string }>).map((row) => [row.category_id, row.state]))[0]).toEqual(['plot-consistency', 'dispatched']);
-      expect(reviewStates(reviewRunId)).toContain('dispatched');
+      expect(selectedReviewStates(reviewRunId)).toContain('dispatched');
       expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity']);
       await session.driver.drive(reviewRunId);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
@@ -345,7 +345,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
       expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([reviewRunId]);
       // The category's ledger authorized by its turn and the service stopped before the category recorded anything.
       expect(store.reviewRunDriveSteps.start(reviewRunId, TYPOS)).not.toBeNull();
-      expect(reviewStates(reviewRunId)).toEqual([]);
+      expect(selectedReviewStates(reviewRunId)).toEqual([]);
       expect(store.waitingTaskRuns(null)).toEqual([]);
     });
     await withSession('sample1-review-cross-chapter-authored', async (session) => {
@@ -398,7 +398,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
         "CREATE TRIGGER induce_cancel_rollback BEFORE INSERT ON review_run_category_events BEGIN SELECT RAISE(ABORT, 'induced'); END",
       ), false);
       expect(() => store.cancelWaitingTask({ bookId, kind: 'review-run', ref: reviewRunId })).toThrow();
-      expect(reviewStates(reviewRunId)).toEqual([]);
+      expect(selectedReviewStates(reviewRunId)).toEqual([]);
       expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([reviewRunId]);
       withDatabase((database) => database.exec('DROP TRIGGER induce_cancel_rollback'), false);
       // …and the one that commits settles it.
@@ -436,7 +436,7 @@ describe('an exclusion that reaches a waiting Review Run reads in SER-024\'s wor
       expect(stopped.categories[0]!.detail).toBe(seriesScopeStopDetail([`书系知识条目「${J13_PLACE}」（地点）`]));
       expect(JSON.stringify(stopped)).not.toContain('已经变化，这次授权不再对应当前的情况');
       expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: reviewRunId }).state).toEqual({ key: 'stopped', label: SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL });
-      expect(reviewStates(reviewRunId)).toEqual(['refused']);
+      expect(selectedReviewStates(reviewRunId)).toEqual(['refused']);
       // The ways on are SER-024's: 取消任务 ends it, and nothing was ever sent.
       expect(store.cancelReviewRun(bookId, reviewRunId).run!.state).toBe('cancelled');
     });

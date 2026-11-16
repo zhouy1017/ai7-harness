@@ -1,4 +1,7 @@
-import { SupervisionDirectives, governedMemoryItems, preferenceItems, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
+import { referencedRules } from './learning/rule-references.js';
+import type { EditorialMemoryFacade } from './learning/memory-facade.js';
+import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
+import { SupervisionDirectives, governedMemoryItems, preferenceItems } from './learning/supervision-directives.js';
 import { composeEditorialMemoryBlock, type EditorialMemorySnapshot } from './learning/editorial-memory.js';
 import { EDITORIAL_MEMORY_LIBRARY_LINES, EDITORIAL_MEMORY_LIBRARY_GRAPHEMES, type EditorialMemoryContext, selectPreferenceLines, type PreferenceLineCandidate } from './learning/retrieval.js';
 import { EditorialLearningLedger, LearningReads, validateEditorialMemorySourceShape } from './learning/ledger.js';
@@ -274,7 +277,7 @@ export class HouseReviewPreferenceLedger {
       JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
       const preference = this.pinned(String(row.task_intent_id)); valid(preference !== null);
       const version = this.pinnedVersion(String(row.task_intent_id), preference);
-      if (version !== null) linesOfUse(version, preference, String(row.book_id), String(row.kind));
+      if (version !== null) linesOfUse(version, preference, String(row.book_id), preferenceSourceKind(this.db, String(row.task_intent_id), String(row.kind)));
     }
   }
 
@@ -638,13 +641,14 @@ export class HouseReviewPreferenceLedger {
     valid(version !== null);
     const task = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
     valid(task !== undefined && String(task.kind).startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
-    const categoryId = String(task.kind).slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+    const consumingKind = preferenceSourceKind(this.db, taskIntentId, String(task.kind));
+    const categoryId = consumingKind.slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
     const controls = learningControlsOf(this.db);
     // Learning authority stands over a prepared pin of either schema: disabled learning, an excluded Book or an excluded source stops it.
     if (controls !== null && (!controls.enabled || controls.excludedBooks.has(String(task.book_id)) ||
-      linesOfUse(version, preference, String(task.book_id), String(task.kind)).some((line) => line.sources.some((source) => controls.excludedBooks.has(source.bookId))))) return true;
+      linesOfUse(version, preference, String(task.book_id), consumingKind).some((line) => line.sources.some((source) => controls.excludedBooks.has(source.bookId))))) return true;
     if (version.schema === 'ai7.house-review-preference/2') {
-      const pinnedLines = linesOfUse(version, preference, String(task.book_id), String(task.kind));
+      const pinnedLines = linesOfUse(version, preference, String(task.book_id), consumingKind);
       if (pinnedLines.some((line) => !this.#lineCurrent(line))) return true;
       const now = this.#publication(version.operationalScope, version.legacyBasis?.lines ?? [],
         version.legacyBasis?.materialSetDigest ?? sha256Hex(canonicalJson([])), names());
@@ -658,7 +662,7 @@ export class HouseReviewPreferenceLedger {
     }
     const { lines, at } = this.#dated(version.operationalScope, version.governance?.baseLines ?? version.lines, names());
     const now = selectPreferenceLines(preferenceCandidates(version, lines, at, controls?.excludedBooks), { bookId: String(task.book_id), categoryId,
-      ...(preference.editorialMemory === undefined ? {} : { taskKind: String(task.kind) }) }, preference.editorialMemory === undefined ? { lines: 5, graphemes: 200 } : undefined);
+      ...(preference.editorialMemory === undefined ? {} : { taskKind: consumingKind }) }, preference.editorialMemory === undefined ? { lines: 5, graphemes: 200 } : undefined);
     return canonicalJson(now.map((line) => line.text)) !== canonicalJson(preference.lines);
   }
 
@@ -792,7 +796,7 @@ export class HouseReviewPreferenceLedger {
     valid(version !== null);
     const book = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
     valid(book !== undefined);
-    const lines = linesOfUse(version, preference, String(book.book_id), String(book.kind));
+    const lines = linesOfUse(version, preference, String(book.book_id), preferenceSourceKind(this.db, taskIntentId, String(book.kind)));
     const sources = new Map<string, PinnedInfluence['sources'][number]>();
     for (const line of lines) {
       for (const source of line.sources) {
@@ -827,6 +831,18 @@ export interface PinnedInfluence {
     readonly materialKey: string | null;
     readonly withdrawnAt: string | null;
   }>;
+}
+
+/** The final member reuses the launched category's exact preference selection and its lineage guards. */
+function preferenceSourceKind(db: DatabaseSync, taskIntentId: string, kind: string): string {
+  if (kind !== 'editorial-review/run-synthesis') return kind;
+  const row = db.prepare(`SELECT r.canonical_json, r.sha256 FROM review_runs r
+    JOIN review_run_preference_pins p ON p.review_run_id = r.review_run_id WHERE p.task_intent_id = ?`).get(taskIntentId);
+  valid(row !== undefined && sha256Hex(String(row.canonical_json)) === row.sha256);
+  const snapshot = JSON.parse(String(row.canonical_json)) as { categories: Array<{ task: null | { taskIntentId: string }; entry: { synthesisSource?: { kind: string } } }> };
+  const source = snapshot.categories.find((category) => category.task?.taskIntentId === taskIntentId)?.entry.synthesisSource;
+  valid(source !== undefined && source.kind.startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
+  return source.kind;
 }
 
 /** Resolve by the consuming Task's category and Book; identical text is never a causal identity. */
@@ -913,7 +929,7 @@ export class HousePreferenceInfluence {
       valid(preference !== null);
       const version = local ?? ledger.pinnedVersion(String(row.task_intent_id), preference);
       if (version === null || version.operationalScope !== scope) continue;
-      const sources = linesOfUse(version, preference, String(row.book_id), String(row.kind)).flatMap((line) => line.sources);
+      const sources = linesOfUse(version, preference, String(row.book_id), preferenceSourceKind(db, String(row.task_intent_id), String(row.kind))).flatMap((line) => line.sources);
       pins.push({ reviewRunId: String(row.review_run_id), taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), version,
         sources, sourceIdentities: new Set(sources.map(preferenceSourceIdentity)) });
     }
@@ -958,9 +974,7 @@ export function houseReviewPreferenceKindDefinition(base: AnalysisKindDefinition
   valid(preference.selection === undefined || preference.lines.length <= (preference.editorialMemory === undefined ? 5 : 15) &&
     preference.selection.lineIndexes.length === preference.lines.length &&
     new Set(preference.selection.lineIndexes).size === preference.lines.length);
-  const referencedRuleVersions: ReferencedRuleVersion[] = preference.selection === undefined ? [] : preference.lines.map((text, index) => ({
-    versionId: preference.versionId, ordinal: preference.ordinal, lineIndex: preference.selection!.lineIndexes[index]!, text,
-  }));
+  const referencedRuleVersions: ReferencedRuleVersion[] = referencedRules(preference);
   const memory = preference.editorialMemory === undefined ? null : composeEditorialMemoryBlock(preference.lines.map((text, index) => ({
     text, versionId: preference.versionId, ordinal: preference.ordinal, lineIndex: index,
     categoryId: preference.editorialMemory!.categories[index]!, bookId: null, active: true, confidence: 0, recordedAt: '2000-01-01T00:00:00.000Z',
@@ -1002,7 +1016,6 @@ export interface LearningSupervisionStoreHost {
   readonly authority: DatabaseSync;
   readonly baselineAnalysis: BaselineAnalysisStore;
   readonly bookPeople: BookPeople;
-  editorialMemoryGovernanceHooks(): EditorialMemoryGovernanceHooks;
   evaluationBookTitle(bookId: string): string;
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId?: string | null): BaselineAnalysisProjection;
   inspectGlobalAgent(live?: (attemptId: string) => LiveAnswer | null, dialogueAdmitted?: boolean, scopedAdmitted?: boolean): GlobalAgentProjection;
@@ -1010,7 +1023,7 @@ export interface LearningSupervisionStoreHost {
   learningCall<T>(operation: () => T): T;
   learningCandidates(bookId: string, withExcerpt: boolean, includeWord?: boolean): IterableIterator<LearningMaterialCandidate>;
   readonly learningEligibility: LearningEligibilityLedger;
-  learningLedger(): EditorialLearningLedger;
+  memoryFacade(): EditorialMemoryFacade;
   learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'>;
   readonly reviewRuns: ReviewRunStore;
   readonly series: SeriesLedger;
@@ -1023,17 +1036,7 @@ export function recordLearningSupervision(host: LearningSupervisionStoreHost, in
     requireStore(reviewCategoryEntry(input.categoryId) !== null, 'REVIEW_CATEGORY_INVALID', '请选择有效的审阅类别。');
     if (input.scope.kind === 'book') requireStore(host.authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.scope.bookId) !== undefined,
       'BOOK_INVALID', '监督范围的图书不存在。');
-    const memoryTargets = input.targets.filter((pin) => host.authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId));
-    requireStore(memoryTargets.length === 0 || memoryTargets.length === input.targets.length, 'LEARNING_SUPERVISION_INVALID', '请分别治理记忆与偏好条目。');
-    const directive = new SupervisionDirectives(host.authority).record(current.operationalScope, input, current.items);
-    if (memoryTargets.length > 0) {
-      host.editorialMemoryGovernanceHooks().govern(directive, memoryTargets);
-    }
-    // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
-    const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
-      input.operation === 'supervise' && input.effect === 'correct';
-    new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger()).refreshGovernance(current.operationalScope, housePreferencePeopleNames(host),
-      addsText && (memoryTargets.length > 0 ? 'memory' : true));
+    host.memoryFacade().recordSupervision(current.operationalScope, input, current.items);
   }));
   return host.inspectGlobalAgent();
 }
@@ -1041,7 +1044,7 @@ export function recordLearningSupervision(host: LearningSupervisionStoreHost, in
 export function inspectHouseReviewPreference(host: LearningSupervisionStoreHost): HouseReviewPreferenceProjection {
   return host.learningCall(() => {
     const operationalScope = host.baselineAnalysis.launch.operationalScope;
-    const history = new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger()).history(operationalScope);
+    const history = host.memoryFacade().history(operationalScope);
     // Its disclosure states the basis 学习准入 decisions now record (Issue #1082); the record, lineage and use are unchanged.
     return { operationalScope, current: history.at(-1) ?? null,
       history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LOCAL_LEARNING_POLICY_BASIS.text };
@@ -1074,9 +1077,9 @@ export function rebuildStoredHouseReviewPreference(host: LearningSupervisionStor
   for (const book of host.authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
     const bookId = asString(book.book_id);
     sources.push(...housePreferenceSources(host.authority, scope, { bookId, title: asString(book.title) }, standingMaterials(host, bookId),
-      (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
+      (categoryId) => reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label)));
   }
-  new HouseReviewPreferenceLedger(host.authority, () => host.learningLedger()).rebuild(scope, sources, names);
+  host.memoryFacade().rebuild(scope, sources, names);
 }
 
 /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
@@ -1159,9 +1162,9 @@ export function learningAuditPage(
   const influence = kept.length === 0 ? null : new HousePreferenceInfluence(host.authority, host.baselineAnalysis.launch.operationalScope);
   return { page: kept.map(({ candidate, material }) => ({
     material: { ...material, downstreamTasks: materialInfluence(host, bookId, material.materialKey, influence!).tasks.length,
-      ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: host.learningLedger().wordCurrentEligibility(
+      ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: host.memoryFacade().wordCurrentEligibility(
         bookId, candidate.source.sampleId, candidate.source.sampleDigest) } : {}),
-      automaticAdmission: host.learningLedger().automaticAdmissionFor(bookId, material.materialKey, material.digest, host.baselineAnalysis.launch.operationalScope) },
+      automaticAdmission: host.memoryFacade().automaticAdmissionFor(bookId, material.materialKey, material.digest, host.baselineAnalysis.launch.operationalScope) },
     orderedAt: candidate.orderedAt,
   })), count };
 }
@@ -1177,7 +1180,7 @@ export function materialInfluence(host: LearningSupervisionStoreHost, bookId: st
   tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
 } {
   const decisionIds = new Set([...host.learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
-    ...host.learningLedger().sourceKeys(bookId, [materialKey])]);
+    ...host.memoryFacade().sourceKeys(bookId, [materialKey])]);
   const uses = influence.usesOf(decisionIds).flatMap((pin) => {
     const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
       preferenceSourceWithdrawal(host.authority, source).withdrawnAt !== null);
@@ -1195,7 +1198,7 @@ export function materialInfluence(host: LearningSupervisionStoreHost, bookId: st
 export function remediationReach(host: LearningSupervisionStoreHost, bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
   const influence = new HousePreferenceInfluence(host.authority, host.baselineAnalysis.launch.operationalScope);
   const decisionIds = new Set([...materialKeys.flatMap((key) => host.learningEligibility.history(bookId, key).map((entry) => entry.decisionId)),
-    ...host.learningLedger().sourceKeys(bookId, materialKeys)]);
+    ...host.memoryFacade().sourceKeys(bookId, materialKeys)]);
   const current = influence.versions.at(-1) ?? null;
   const uses = host.reviewRuns.influenceUses(influence.usesOf(decisionIds));
   const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
@@ -1203,7 +1206,7 @@ export function remediationReach(host: LearningSupervisionStoreHost, bookId: str
   return {
     currentVersion: current?.ordinal ?? null,
     linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)))).length ?? 0,
-    memory: host.learningLedger().affectedMemoryCount(bookId, materialKeys),
+    memory: host.memoryFacade().affectedMemoryCount(bookId, materialKeys),
     running: running.length,
     prepared: uses.filter((use) => use.state === 'prepared').length,
     completed: completed.length,
@@ -1229,7 +1232,7 @@ export function inspectLearningLineage(host: LearningSupervisionStoreHost, bookI
       bookTitle: host.evaluationBookTitle(bookId),
       material,
       standing: learningAuditStanding(material),
-      automaticAdmission: host.learningLedger().automaticAdmissionFor(bookId, materialKey, material.digest, host.baselineAnalysis.launch.operationalScope),
+      automaticAdmission: host.memoryFacade().automaticAdmissionFor(bookId, materialKey, material.digest, host.baselineAnalysis.launch.operationalScope),
       decisions: shown.map((entry) => ({
         decisionId: entry.decisionId,
         ordinal: entry.ordinal,
@@ -1255,8 +1258,8 @@ export function inspectLearningLineage(host: LearningSupervisionStoreHost, bookI
           .get(host.baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
         const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
         return {
-          downstream: { signals: signals.length, memoryCandidates: host.learningLedger().candidateMemoryCount(bookId, materialKey),
-            activeMemories: host.learningLedger().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
+          downstream: { signals: signals.length, memoryCandidates: host.memoryFacade().candidateMemoryCount(bookId, materialKey),
+            activeMemories: host.memoryFacade().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
           signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
             current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
           tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
@@ -1320,7 +1323,7 @@ export function learningRemediation(host: LearningSupervisionStoreHost, input: P
     if (!wanted.has(candidate.materialKey)) continue;
     found.set(candidate.materialKey, candidate);
     const automatic = projection.state === 'pending' && projection.decisions === 0 && projection.decision === null
-      ? host.learningLedger().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, host.baselineAnalysis.launch.operationalScope) : null;
+      ? host.memoryFacade().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, host.baselineAnalysis.launch.operationalScope) : null;
     standings.set(candidate.materialKey, { candidate, projection, ...(automatic === null ? {} : { automaticEligibility: automatic.choice }) });
   }
   return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
@@ -1421,7 +1424,7 @@ export function readFeedbackHistory(host: LearningSupervisionStoreHost, input: F
         entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
         origin: 'review-disposition',
         bookId,
-        dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
+        dimension: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
         signal: '忽略',
         reason: feedbackReasonExcerpt(asString(row.reason)),
         reasonState: 'given',
@@ -1523,7 +1526,7 @@ export interface EditorialLearningStoreHost {
   readonly bookPeople: BookPeople;
   learningCall<T>(operation: () => T): T;
   readonly learningEligibility: LearningEligibilityLedger;
-  learningLedger(): EditorialLearningLedger;
+  memoryFacade(): EditorialMemoryFacade;
   learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'>;
   readonly learningSupervisionHost: LearningSupervisionStoreHost;
   replacementFrozen(): boolean;
@@ -1568,13 +1571,13 @@ export function inspectEditQualitySignals(host: EditorialLearningStoreHost, book
   return host.learningCall(() => {
     requireStore(bookId === null || StoreUUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     if (bookId !== null) requireStore(host.authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-    return { ...readEditQualitySignals(host.authority, bookId), ...host.learningLedger().adoption(bookId, after) };
+    return { ...readEditQualitySignals(host.authority, bookId), ...host.memoryFacade().adoption(bookId, after) };
   });
 }
 
 export function inspectEditorialLearning(host: EditorialLearningStoreHost, input: InspectEditorialLearningInput): EditorialLearningProjection {
   return host.learningCall(() => {
-    const learning = host.learningLedger();
+    const learning = host.memoryFacade();
     const current = learning.curationEnvelope();
     const offered = curationEnvelope(host, { maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
     return { ...learning.inspect(input, host.baselineAnalysis.launch.operationalScope), curation: {
@@ -1597,17 +1600,17 @@ export function curationEnvelope(host: EditorialLearningStoreHost, budget: Learn
     binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference,
       ...(live.reasoningEffort === undefined ? {} : { reasoningEffort: live.reasoningEffort }) },
     sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
-    supervisionDigest: host.learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
+    supervisionDigest: host.memoryFacade().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
     disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
 }
 
 export function prepareLearningCuration(host: EditorialLearningStoreHost, bookId: string, signalIds: readonly string[]): LearningCurationBundle {
-  return host.learningCall(() => host.learningLedger().prepareCuration(bookId, signalIds));
+  return host.learningCall(() => host.memoryFacade().prepareCuration(bookId, signalIds));
 }
 
 export function nextLearningCuration(host: EditorialLearningStoreHost): CurationRun | null {
   return host.learningCall(() => host.transaction(host.authority, () => {
-    const learning = host.learningLedger();
+    const learning = host.memoryFacade();
     const current = learning.curationEnvelope();
     if (current === null || storeCanonicalJson(curationEnvelope(host, current.envelope.budget)) !== storeCanonicalJson(current.envelope) || host.replacementFrozen()) return null;
     const use = host.baselineAnalysis.curationBudgetUse(current.entryId);
@@ -1622,7 +1625,7 @@ export function nextLearningCuration(host: EditorialLearningStoreHost): Curation
 
 export function learningCurationCurrent(host: EditorialLearningStoreHost, run: CurationRun): boolean {
   try {
-    const current = host.learningLedger().curationEnvelope();
+    const current = host.memoryFacade().curationEnvelope();
     return !host.replacementFrozen() && current?.entryId === run.controlEntryId &&
       storeCanonicalJson(curationEnvelope(host, run.envelope.budget)) === storeCanonicalJson(run.envelope) &&
       prepareLearningCuration(host, run.bundle.bookId, run.bundle.signalIds).digest === run.bundle.digest;
@@ -1634,7 +1637,7 @@ export function publishLearningCuration(host: EditorialLearningStoreHost, run: C
     requireStore(learningCurationCurrent(host, run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
     const proposals = parseCurationResult(text, run.bundle.examples);
     requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
-    host.learningLedger().proposeCuration(run.bundle, proposals, run);
+    host.memoryFacade().proposeCuration(run.bundle, proposals, run);
     host.baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
       reason: proposals.length === 0 ? '整理完成；证据不足以提出新偏好。' : `已形成 ${proposals.length} 条待接受的偏好与记忆。` });
     return proposals.length;
@@ -1642,7 +1645,7 @@ export function publishLearningCuration(host: EditorialLearningStoreHost, run: C
 }
 
 export function recordLearningReasonAsk(host: EditorialLearningStoreHost, input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
-  return host.learningCall(() => host.transaction(host.authority, () => host.learningLedger().reasonAsk(input, frequency)));
+  return host.learningCall(() => host.transaction(host.authority, () => host.memoryFacade().reasonAsk(input, frequency)));
 }
 
 export function changeEditorialLearning(host: EditorialLearningStoreHost, input: ChangeEditorialLearningInput): EditorialLearningProjection {
@@ -1650,7 +1653,7 @@ export function changeEditorialLearning(host: EditorialLearningStoreHost, input:
     const budget = input.kind === 'switch' ? input.curation : undefined;
     const envelope = budget === undefined ? undefined : curationEnvelope(host, budget);
     requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
-    host.learningLedger().change(input, envelope ?? undefined);
+    host.memoryFacade().change(input, envelope ?? undefined);
     rebuildStoredHouseReviewPreference(host.learningSupervisionHost);
     return inspectEditorialLearning(host, { signalOffset: 0, itemOffset: 0 });
   }));
@@ -1658,7 +1661,7 @@ export function changeEditorialLearning(host: EditorialLearningStoreHost, input:
 
 export function createEditorialMemory(host: EditorialLearningStoreHost, input: CreateEditorialMemoryInput): EditorialLearningProjection {
   return host.learningCall(() => host.transaction(host.authority, () => {
-    host.learningLedger().create(input, host.baselineAnalysis.launch.operationalScope);
+    host.memoryFacade().create(input, host.baselineAnalysis.launch.operationalScope);
     return inspectEditorialLearning(host, { signalOffset: 0, itemOffset: 0 });
   }));
 }

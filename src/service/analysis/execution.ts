@@ -1,4 +1,5 @@
 import { editorialMemoryDefinition } from '../learning/editorial-memory.js';
+import { appendTaskBaselineSynopses, taskSynopsisRequestDigest, taskSynopsisMessageRequestDigest, taskSynopsisStageInputDigest } from './baseline-synopsis.js';
 import { majorityGapReason } from '../../shared/analysis-run-summary.js';
 import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
@@ -85,8 +86,8 @@ import {
   type ClarificationFacts,
 } from './clarifications.js';
 import {
-  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
-  buildCrossUnitMessage,
+  buildBoundCrossUnitMessage,
+  crossUnitRows,
   citedBlocksByUnit,
   crossUnitRequestDigest,
   parseCrossUnitResult,
@@ -1770,7 +1771,7 @@ export class BaselineAnalysisExecutionOwner {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
       await cache.open();
     }
-    const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
+    const blocks = definition.structuredOnly === true ? [] : ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
     const childProfile = facts.compositionOptions?.version === 3 || facts.compositionOptions?.version === 4;
     if (childProfile) {
@@ -1783,10 +1784,10 @@ export class BaselineAnalysisExecutionOwner {
       } else if (production === null || policy.providerProcessing.subAgents === undefined) {
         throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '当前策略未声明父尝试子代理。');
       }
-    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE) {
+    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE && definition.structuredOnly !== true) {
       throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '子代理夹具不得回退到父代理执行配置。');
     }
-    const admittedLocalRule = childProfile ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : live === null || definition.evidenceAssuranceLevel === 'quick' || definition.factualClaims !== undefined ? null
+    const admittedLocalRule = childProfile ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : definition.structuredOnly === true || live === null || definition.evidenceAssuranceLevel === 'quick' || definition.factualClaims !== undefined ? null
       : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     const localRule = (facts.compositionOptions?.version ?? 1) >= 2 || admittedLocalRule === null ? admittedLocalRule :
       { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
@@ -1797,9 +1798,12 @@ export class BaselineAnalysisExecutionOwner {
     const update = facts.update;
     // The plan's units in one shape: the baseline's reuse plan knows two dispositions and a scope plan
     // a third, `unreviewed`, which the owner neither submits nor copies.
-    const planUnits: ReadonlyArray<AnalysisReusePlanUnitProjection | ReviewScopePlanUnitProjection> = update === null ? [] : update.reusePlan.units;
+    const planUnits: ReadonlyArray<AnalysisReusePlanUnitProjection | ReviewScopePlanUnitProjection> = definition.structuredOnly === true
+      ? manifest.units.map((unit) => ({ unitOrdinal: unit.ordinal, startPosition: unit.startPosition, endPosition: unit.endPosition,
+        contentKey: unit.digest, disposition: 'unreviewed', reason: 'out-of-scope', reusedFrom: null }))
+      : update === null ? [] : update.reusePlan.units;
     // Only recomputed units form unit messages; the Run Source Scope admits exactly those.
-    const recomputedOrdinals = new Set(update === null
+    const recomputedOrdinals = new Set(definition.structuredOnly === true ? [] : update === null
       ? manifest.units.map((unit) => unit.ordinal)
       : planUnits.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const submittedUnits = manifest.units.filter((unit) => recomputedOrdinals.has(unit.ordinal));
@@ -1821,6 +1825,7 @@ export class BaselineAnalysisExecutionOwner {
     // Usage accumulated so far, in the shape the ceiling evaluator reads. Every attempt counts, so the
     // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
     const accumulated: UsageFacts[] = [];
+    if (definition.structuredOnly === true && definition.priorBudgetUsage !== undefined) accumulated.push(definition.priorBudgetUsage());
     const stageUsage: Record<RunReportRevisionUsageStageId, { requests: number; inputTokens: number; outputTokens: number }> = {
       units: { requests: 0, inputTokens: 0, outputTokens: 0 },
       'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
@@ -2052,7 +2057,7 @@ export class BaselineAnalysisExecutionOwner {
               const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
               const profile = localFixture === null ? {} : { localFixture: { catalog: facts.localFixtureRuntime!.catalog, execution: localFixture } };
               return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
-                { ...assurance, ...profile, sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
+                { ...assurance, ...profile, ...(definition.crossUnit === null ? {} : { crossUnitPromptContractDigest: definition.crossUnit.promptContractDigest }), sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
             }
             liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
               ...effortConfig,
@@ -3483,11 +3488,20 @@ export class BaselineAnalysisExecutionOwner {
       const step = definition.crossUnit?.step ?? null;
       const crossUnitContext = { manifest, blocks: blocksById };
       const named = (text: string): string => (step === null ? text : text.replaceAll('跨单元归纳', step.label));
-      const reductionInput = definition.reviewCrossChapter === undefined ? canonicalRecord(closedOutcomes).digest
+      const baseReductionInput = definition.reviewCrossChapter === undefined ? canonicalRecord(closedOutcomes).digest
         : step!.requestDigest(closedOutcomes, crossUnitContext);
+      let reductionInput = baseReductionInput;
+      let finalMessage: string | undefined;
+      const reductionMessage = (): string => finalMessage ??= appendTaskBaselineSynopses(step === null
+        ? buildBoundCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit!)
+        : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext), facts.baselineSynopsisContext);
       const reductionContract = definition.crossUnit?.promptContractDigest ?? promptContractDigest;
       if (stages.reduction !== undefined) {
-        if (stages.reduction.inputDigest !== reductionInput || stages.reduction.contractDigest !== reductionContract) {
+        if (facts.baselineSynopsisContext !== undefined && stages.reduction.outcome.state !== 'not-run')
+          reductionInput = taskSynopsisStageInputDigest(baseReductionInput, reductionMessage(), facts.baselineSynopsisContext);
+        // Read the earlier provisional checkpoint identity without rewriting its immutable record.
+        const retainedInput = taskSynopsisRequestDigest(baseReductionInput, facts.baselineSynopsisContext);
+        if ((stages.reduction.inputDigest !== reductionInput && stages.reduction.inputDigest !== retainedInput) || stages.reduction.contractDigest !== reductionContract) {
           throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的归纳输入或契约无法核对；未发送。');
         }
         crossUnit = stages.reduction.outcome;
@@ -3505,9 +3519,10 @@ export class BaselineAnalysisExecutionOwner {
       } else if (closedOutcomes.length < (step?.minimumClosedUnits ?? 2)) {
         if (step !== null) crossUnit = { state: 'not-run', reason: step.notEnoughReason };
       } else {
-        const requestDigest = step === null
+        const baseRequestDigest = step === null
           ? crossUnitRequestDigest(reductionContract, unitSetDigest(closedOutcomes))
           : step.requestDigest(closedOutcomes, crossUnitContext);
+        let requestDigest = taskSynopsisRequestDigest(baseRequestDigest, facts.baselineSynopsisContext);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest, ...(parseFailure === undefined ? {} : { parseFailure }) });
         if (live !== null && (step !== null ? admitted?.crossUnitSynthesisAllowed !== true : policy.providerProcessing.crossUnitReductionAllowed !== true)) {
@@ -3525,10 +3540,12 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         } else {
-          const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
+          const message = reductionMessage();
+          requestDigest = facts.baselineSynopsisContext === undefined ? baseRequestDigest : taskSynopsisMessageRequestDigest(baseRequestDigest, message);
+          reductionInput = taskSynopsisStageInputDigest(baseReductionInput, message, facts.baselineSynopsisContext);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
-          if (production !== null && step !== null && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
+          if (production !== null && step !== null && definition.structuredOnly !== true && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
           // The same set the gate reads: exactly one further user message becomes admissible, and every
           // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
           admittedUserMessages.add(message);
@@ -3575,6 +3592,7 @@ export class BaselineAnalysisExecutionOwner {
                 : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)), { code: parsed.code, detail: parsed.detail });
             } else {
               const parsed = withProviderResponseSalvage(parseCrossUnitResult(candidate.text, {
+                rows: crossUnitRows(closedOutcomes),
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
                 citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
                 blockLengths: new Map(blocks.map((block) => [block.blockId, block.graphemes])),
@@ -3810,7 +3828,7 @@ export class BaselineAnalysisExecutionOwner {
           beginTurn: context.beginTurn,
           validationStep: (step) => { context.validationStep = step; },
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
-          stopped: terminalClassification === 'failed' || definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
+          stopped: definition.structuredOnly === true || terminalClassification === 'failed' || definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && (this.#deps.seriesScopeGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });

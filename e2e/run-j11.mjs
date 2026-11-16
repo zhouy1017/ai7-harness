@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1238,6 +1239,7 @@ async function main() {
     electronExecutableForCleanup = executable;
     // J-10's unit hold, admitted under J-11 (#641): absent until feedback-pending-submit writes it, so nothing before is held.
     const unitHoldPath = resolve(runRoot, 'j11-unit-hold.txt');
+    const navigationHoldPath = resolve(runRoot, 'j11-navigation-hold.txt');
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     let modelFixtureIdentity = FIXTURE_IDENTITY;
@@ -1254,7 +1256,7 @@ async function main() {
         // The calibration gate lowered to two Books (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the house offset
         // is proven over 评估旅程丙 and one more Book, with the product's own ten untouched in every other launch.
         args.push('--j11-picker-path', pickerPath, '--j04-model-adapter', modelFixtureIdentity, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
-          '--j11-calibration-min-books', '2');
+          '--j11-calibration-min-books', '2', '--j11-navigation-answer-hold-path', navigationHoldPath);
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       if (!forCleanup) cancellation.throwIfRequested();
@@ -1438,6 +1440,44 @@ async function main() {
       })()`, `late-${action}-keeps-destination`);
       await click(renderer, '取消', `late-${action}-cancel`);
       await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, `late-${action}-landing`);
+    }
+
+    // #1497: on the base, the late global-entry answer repaints over Knowledge.
+    // Main holds only the acknowledgement, after ownership has already been revoked.
+    at('navigation-late-answer');
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await rm(`${navigationHoldPath}.held`, { force: true });
+        await rm(`${navigationHoldPath}.released`, { force: true });
+        await writeFile(navigationHoldPath, 'hold');
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('global-agent'), 'navigation-open-global');
+        const deadline = Date.now() + 20_000;
+        while (!existsSync(`${navigationHoldPath}.held`) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+        requireJourney(existsSync(`${navigationHoldPath}.held`), 'navigation-answer-held');
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'navigation-open-knowledge');
+        await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-open');
+        await renderer.evaluate(`window.__j11NavigationSnapshot = {screen:document.querySelector('#screen').firstElementChild,focus:document.activeElement,status:document.querySelector('#persistence-status').textContent}`);
+        requireJourney(!existsSync(`${navigationHoldPath}.released`), 'navigation-still-held');
+        await writeFile(navigationHoldPath, 'release');
+        const releasedDeadline = Date.now() + 20_000;
+        while (!existsSync(`${navigationHoldPath}.released`) && Date.now() < releasedDeadline) await new Promise((resolve) => setTimeout(resolve, 50));
+        requireJourney(existsSync(`${navigationHoldPath}.released`), 'navigation-answer-released');
+        // A subsequent ownership read crosses main after the released acknowledgement; two frames paint its microtasks.
+        await renderer.evaluate(`(async () => {await window.ai7.getBookWorkbenchRoute();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));})()`);
+        await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-ready');
+        await assertRenderer(renderer, `(() => {
+          const held=window.__j11NavigationSnapshot; delete window.__j11NavigationSnapshot;
+          return document.querySelector('#screen').firstElementChild===held.screen && document.activeElement===held.focus &&
+            document.querySelector('#persistence-status').textContent==='知识库已打开' && document.querySelector('[data-screen="knowledge-base"]');
+        })()`, 'navigation-late-answer-keeps-page-focus-status');
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'navigation-restore-library');
+        await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, 'navigation-library-restored');
+      }
+    } finally {
+      await writeFile(navigationHoldPath, 'release');
+      await renderer.evaluate(`delete window.__j11NavigationSnapshot`);
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
     }
 
     at('restart-keeps-people');

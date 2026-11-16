@@ -29,6 +29,7 @@ import {
 } from 'electron';
 import {
   IPC_CHANNELS,
+  isNonActivatingBookOpen,
   SERVICE_PROTOCOL_VERSION,
   MAIN_EVENTS,
   EDIT_JOURNAL_FAULT_REFUSED_CODE,
@@ -192,6 +193,7 @@ export function registerRendererHandlers(
   requestBookWorkbench: (
     requester: OwnedRendererWindow,
     route: BookWorkbenchRoute,
+    nonActivating?: boolean,
   ) => Promise<BookWorkbenchOpenProjection>,
   serializeEffect: <Result>(operation: () => Promise<Result>) => Promise<Result>,
   claims: ApplicationAuthorityClaims,
@@ -218,6 +220,7 @@ export function registerRendererHandlers(
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
   journalFaultArmed: boolean,
+  navigationAnswerHoldPath?: string,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -1832,10 +1835,12 @@ export function registerRendererHandlers(
         return service.call('recordManuscriptEntryPosition', input);
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.openBookWorkbench, (event, input: BookWorkbenchRoute) =>
+  ipcMain.handle(IPC_CHANNELS.openBookWorkbench, (event, input: Parameters<RendererApi['openBookWorkbench']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
+      const nonActivating = isNonActivatingBookOpen(input);
+      if (nonActivating) return requestBookWorkbench(owned, { kind: 'book', bookId: input.bookId }, true);
       return requestBookWorkbench(owned, input);
     }),
   );
@@ -1845,10 +1850,21 @@ export function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.leaveBookWorkbench, (event) =>
     envelope(async () => {
       const owned = requireSender(event);
-      return serializeEffect(async () => {
+      const result = await serializeEffect(async () => {
         leaveBookWorkbench(owned);
         return { state: 'library' as const };
       });
+      // Armed only by J-11's development-ci launch. The hold never blocks main's effect queue.
+      if (navigationAnswerHoldPath !== undefined && await readFile(navigationAnswerHoldPath, 'utf8').catch(() => '') === 'hold') {
+        await writeFile(`${navigationAnswerHoldPath}.held`, 'held');
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline && await readFile(navigationAnswerHoldPath, 'utf8').catch(() => '') === 'hold') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        }
+        // The next main-loop turn follows the IPC promise's reply microtasks.
+        setImmediate(() => { void writeFile(`${navigationAnswerHoldPath}.released`, 'released').catch(() => undefined); });
+      }
+      return result;
     }),
   );
   ipcMain.handle(
@@ -3758,7 +3774,7 @@ export async function runApplication(): Promise<void> {
         injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined,
         injectedDiagnosticsFolder: undefined, importControl: undefined, foregroundExecutionControl: undefined,
         recoveryControl: undefined, modelAdapterControl: undefined, connectivityPath: undefined, unitHoldPath: undefined,
-        answerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
+        answerHoldPath: undefined, navigationAnswerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
         applyControl: undefined, observeJ12Reveal: false, launcherPid: 0, journalFaultArmed: false,
       };
     } else {
@@ -3851,7 +3867,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 115, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 116, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -4067,6 +4083,7 @@ export async function runApplication(): Promise<void> {
       requester: OwnedRendererWindow,
       route: BookWorkbenchRoute,
       requestSequence: number | null,
+      nonActivating = false,
     ): Promise<BookWorkbenchOpenProjection> => {
       return serializeRoute(async () => {
       const resolved = await service!.call('resolveBookWorkbenchRoute', route);
@@ -4077,6 +4094,15 @@ export async function runApplication(): Promise<void> {
         );
       }
       const existing = bookWindows.get(resolved.bookId);
+      if (nonActivating) {
+        if ((existing && !existing.window.isDestroyed()) || requester.bookId !== null) return { route: resolved, target: 'held-elsewhere' };
+        // Acquire only a free Book for this Bookless window. No other window or capability is changed.
+        requester.bookId = resolved.bookId;
+        requester.route = resolved;
+        requester.routeGeneration += 1;
+        bookWindows.set(resolved.bookId, requester);
+        return { route: resolved, target: 'requesting-window' };
+      }
       if (existing && !existing.window.isDestroyed()) {
         if (existing.closeRisk) {
           throw new ServiceCallError(
@@ -4107,7 +4133,9 @@ export async function runApplication(): Promise<void> {
     const requestBookWorkbench = (
       requester: OwnedRendererWindow,
       route: BookWorkbenchRoute,
+      nonActivating = false,
     ): Promise<BookWorkbenchOpenProjection> => {
+      if (nonActivating) return serializeEffect(() => applyBookWorkbench(requester, route, null, true));
       const requestSequence = requester.routeRequestSequence + 1;
       requester.routeRequestSequence = requestSequence;
       return serializeEffect(() => applyBookWorkbench(requester, route, requestSequence));
@@ -4528,6 +4556,7 @@ export async function runApplication(): Promise<void> {
       () => ownedWindows.values(),
       () => [...ownedWindows.values()],
       launch.journalFaultArmed,
+      launch.navigationAnswerHoldPath,
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

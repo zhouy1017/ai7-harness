@@ -1,4 +1,5 @@
 import type { SalvagedModelResult } from './analysis.js';
+import type { ReviewSynthesisProjection } from './review-synthesis.js';
 import type { ReviewCategoryBasis } from '../review-basis.js';
 import type {
   ReviewExcludedFindingProjection,
@@ -756,11 +757,13 @@ export interface EditQualitySignalsProjection {
 }
 
 export interface ReviewReportRecord extends ReviewReportDerivedSections {
+  synthesis?: ReviewSynthesisProjection;
   schema: ReviewReportSchema;
   reviewRunId: string;
   version: number;
   generatedAt: string;
   run: {
+    usage?: { requests: number; inputTokens: number; outputTokens: number };
     modelLabel?: string;
     ordinal: number;
     label: string;
@@ -815,6 +818,8 @@ export interface ReviewReportRecord extends ReviewReportDerivedSections {
 
 /** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
 export interface ReviewRunProjection {
+  usage?: { requests: number; inputTokens: number; outputTokens: number };
+  synthesis?: ReviewSynthesisProjection;
   modelLabel?: string;
   /** Existing repeat preparation input for optional references before authorization. */
   referenceInput?: Omit<PrepareReviewRunInput, 'bookId'>;
