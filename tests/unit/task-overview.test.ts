@@ -170,7 +170,10 @@ describe('task overview', () => {
     expect(freeze.mock.calls).toEqual([[true]]);
   });
   it('keeps completed and cancelled tasks in history and sorts the authoritative queue positions', () => {
-    const items = [task('active', 'analysis-waiting-capacity', 'second'), task('active', 'analysis-waiting-capacity', 'first'), task('recent', 'analysis-completed', 'done'), task('recent', 'analysis-cancelled', 'cancelled')];
+    // Recency is explicit: construction crossing a clock tick must not change the expected history order.
+    const items = [task('active', 'analysis-waiting-capacity', 'second'), task('active', 'analysis-waiting-capacity', 'first'),
+      { ...task('recent', 'analysis-completed', 'done'), at: '2026-11-16T00:00:02Z' },
+      { ...task('recent', 'analysis-cancelled', 'cancelled'), at: '2026-11-16T00:00:01Z' }];
     const attention: GlobalAttentionProjection = { groups: [{ key: 'active', items, total: 4 }], actionableCount: 0, running: true, processing: { state: 'local' } };
     const result = composeTaskOverview(attention, 2, (id) => id === 'first' ? 1 : id === 'second' ? 2 : null);
     expect(result.groups.find((group) => group.key === 'queued')!.items.map((item) => item.itemId)).toEqual(['first', 'second']);

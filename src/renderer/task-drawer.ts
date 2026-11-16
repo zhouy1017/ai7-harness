@@ -220,7 +220,8 @@ export interface TaskDrawerSurface {
   openComposer(seed: TaskComposerSeed, returnFocus: () => HTMLElement | null): void;
   openDraft(bookId: string, draftId: string, returnFocus: () => HTMLElement | null): void;
   /** What the drawer shows now: one Task's plan, a Book's 任务 panel, a dialogue, the composer, or nothing. */
-  view(): { readonly kind: 'plan' | 'panel' | 'dialogue' | 'composer' | 'launch'; readonly bookId: string } | null;
+  view(): { readonly kind: 'plan'; readonly bookId: string; readonly task: Pick<TaskPlanRequest, 'kind' | 'ref'> }
+    | { readonly kind: 'panel' | 'dialogue' | 'composer' | 'launch'; readonly bookId: string } | null;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -3076,7 +3077,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (view === 'composer') return panelBookId === null ? null : { kind: 'composer', bookId: panelBookId };
       if (view === 'dialogue') return panelBookId === null ? null : { kind: 'dialogue', bookId: panelBookId };
       if (view === 'panel') return panelBookId === null ? null : { kind: 'panel', bookId: panelBookId };
-      return request === null ? null : { kind: 'plan', bookId: request.bookId };
+      return request === null ? null : { kind: 'plan', bookId: request.bookId, task: { kind: request.kind, ref: request.ref } };
     },
     refresh(kind) {
       if (root.hidden || interrupted || view === 'dialogue' || view === 'composer' || view === 'launch') return;

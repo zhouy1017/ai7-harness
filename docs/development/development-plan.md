@@ -6,7 +6,7 @@ The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-proc
 
 ## R3 closure candidate -> 0.7.2 Alpha (#1496)
 
-Every R3 slice is merged into `codex/integration-0.7.2` at `b00b194d`, based on delivered `dev@1654f386` (0.7.1 Alpha). Candidate 0.7.2 Alpha uses protocol 204, schema 116 and Data Version 1. Closure requires the final exact-head ladder and two sequential unbound hosted controls, then the dev merge and fixed human-test refresh; no 0.7.2 dev delivery, tag or release is claimed. [PROGRESS](../../PROGRESS.md) owns the checkpoint and remaining risks.
+Every R3 slice is merged into `codex/integration-0.7.2` at `4eef1df7`, based on delivered `dev@1654f386` (0.7.1 Alpha). Candidate 0.7.2 Alpha uses protocol 204, schema 116 and Data Version 1. Closure requires the final exact-head ladder and two sequential unbound hosted controls, then the dev merge and fixed human-test refresh; no 0.7.2 dev delivery, tag or release is claimed. [PROGRESS](../../PROGRESS.md) owns the checkpoint and remaining risks.
 
 | Slice | What the editor can newly do / closure result | Merged PR / integration commit |
 | --- | --- | --- |
@@ -15,6 +15,7 @@ Every R3 slice is merged into `codex/integration-0.7.2` at `b00b194d`, based on 
 | #1497 | Leave a page without a late answer stealing focus, navigating, opening the Task Drawer or writing into the page now in front | [#1502](https://github.com/zhouy1017/ai7-harness/pull/1502) / `9a040b55` |
 | #1504 repairs | Keep newer list filters after 加载更多, see errors after a flow's own render, and stay on the manuscript after a failed Book re-acquire with one notice and retry on save or on demand; the unflushed edit saves after recovery | [#1505](https://github.com/zhouy1017/ai7-harness/pull/1505), [#1507](https://github.com/zhouy1017/ai7-harness/pull/1507) / `42ab659f`, `86901a4a` |
 | #1500 | Have 写作、初评、审稿意见 and 按我的修改重新生成 consult the baseline's per-chapter synopses in their final step | [#1512](https://github.com/zhouy1017/ai7-harness/pull/1512) / `ddf086a7` |
+| #1510 | A finished task no longer opens its result window over the page the editor is working on; automatic results remain on task overview, the matching Book task panel or the completing task's own drawer | [#1514](https://github.com/zhouy1017/ai7-harness/pull/1514) / `4eef1df7` |
 | #1498 | Existing memory behaviour stays the same; editorial memory and 本社审阅偏好 use one internal read/write facade for the R4 split | [#1511](https://github.com/zhouy1017/ai7-harness/pull/1511) / `b00b194d` |
 | #1508 | Two heavy Word-manifest tests have 300-second headroom; their cost is retained for R4 #1033 | [#1509](https://github.com/zhouy1017/ai7-harness/pull/1509) / `89f757a2` |
 | #1147 / opening docs | Offline validation is closed: batched inference failed the numerical tolerance; no local embedding product is claimed and #1027 remains a separate Owner decision | [#1499](https://github.com/zhouy1017/ai7-harness/pull/1499) / `5a06c848` |

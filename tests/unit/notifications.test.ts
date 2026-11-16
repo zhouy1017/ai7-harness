@@ -1,3 +1,4 @@
+import { NavigationGeneration } from '../../src/renderer/navigation-generation.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,7 @@ it('keeps a delayed completion on its Book and opens only while that Book is sti
     let release!: (value: TaskOverviewProjection) => void;
     const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
     const open = vi.fn();
-    const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
+    const options = { allowed: (event: GlobalAttentionItemProjection) => event.book.bookId === currentBookId, enabled: () => true, navigation: new NavigationGeneration().route(), read: () => reading, open };
     const pending = openCurrentBookCompletion(event, options);
     currentBookId = 'another-book'; release(overview); await pending;
     expect(open).not.toHaveBeenCalled();
@@ -71,7 +72,7 @@ it('keeps manuscript focus when a current-Book completion arrives or finishes re
     let release!: (value: TaskOverviewProjection) => void;
     const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
     const read = vi.fn(() => reading); const open = vi.fn();
-    const options = { currentBookId: () => event.book.bookId, enabled: () => true, read, open };
+    const options = { allowed: (next: GlobalAttentionItemProjection) => next.book.bookId === event.book.bookId, enabled: () => true, navigation: new NavigationGeneration().route(), read, open };
     text.focus();
     await openCurrentBookCompletion(event, { ...options, read: async () => overview });
     expect(open).not.toHaveBeenCalled();
