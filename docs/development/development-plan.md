@@ -12,6 +12,7 @@ R3 starts from `dev@1654f386` (protocol 203, schema 115, Data Version 1). Nothin
 | --- | --- | --- |
 | #1434 | Baseline analysis cites whole-number block ordinals and row indices; the program restores positions deterministically | First |
 | #1433 | A whole-book review synthesis summary with evidence indexes, reusing the baseline per-chapter synopsis without retransmitting the whole manuscript | First |
+| #1500 | Writing, initial evaluation, readers' reports and report regeneration reuse the revision-matched baseline chapter chain only in their final synthesis; preserve writing's existing whole-book synopsis input | After #1433 |
 | #1497 | Late answers after leaving a page never steal focus or navigate | First |
 | #1498 | One internal read/write facade for editorial memory and 本社审阅偏好, with no behaviour change | After #1433 |
 

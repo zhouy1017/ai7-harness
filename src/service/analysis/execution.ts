@@ -1,4 +1,5 @@
 import { editorialMemoryDefinition } from '../learning/editorial-memory.js';
+import { appendTaskBaselineSynopses, taskSynopsisRequestDigest, taskSynopsisMessageRequestDigest, taskSynopsisStageInputDigest } from './baseline-synopsis.js';
 import { majorityGapReason } from '../../shared/analysis-run-summary.js';
 import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
@@ -3487,11 +3488,20 @@ export class BaselineAnalysisExecutionOwner {
       const step = definition.crossUnit?.step ?? null;
       const crossUnitContext = { manifest, blocks: blocksById };
       const named = (text: string): string => (step === null ? text : text.replaceAll('跨单元归纳', step.label));
-      const reductionInput = definition.reviewCrossChapter === undefined ? canonicalRecord(closedOutcomes).digest
+      const baseReductionInput = definition.reviewCrossChapter === undefined ? canonicalRecord(closedOutcomes).digest
         : step!.requestDigest(closedOutcomes, crossUnitContext);
+      let reductionInput = baseReductionInput;
+      let finalMessage: string | undefined;
+      const reductionMessage = (): string => finalMessage ??= appendTaskBaselineSynopses(step === null
+        ? buildBoundCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit!)
+        : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext), facts.baselineSynopsisContext);
       const reductionContract = definition.crossUnit?.promptContractDigest ?? promptContractDigest;
       if (stages.reduction !== undefined) {
-        if (stages.reduction.inputDigest !== reductionInput || stages.reduction.contractDigest !== reductionContract) {
+        if (facts.baselineSynopsisContext !== undefined && stages.reduction.outcome.state !== 'not-run')
+          reductionInput = taskSynopsisStageInputDigest(baseReductionInput, reductionMessage(), facts.baselineSynopsisContext);
+        // Read the earlier provisional checkpoint identity without rewriting its immutable record.
+        const retainedInput = taskSynopsisRequestDigest(baseReductionInput, facts.baselineSynopsisContext);
+        if ((stages.reduction.inputDigest !== reductionInput && stages.reduction.inputDigest !== retainedInput) || stages.reduction.contractDigest !== reductionContract) {
           throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的归纳输入或契约无法核对；未发送。');
         }
         crossUnit = stages.reduction.outcome;
@@ -3509,9 +3519,10 @@ export class BaselineAnalysisExecutionOwner {
       } else if (closedOutcomes.length < (step?.minimumClosedUnits ?? 2)) {
         if (step !== null) crossUnit = { state: 'not-run', reason: step.notEnoughReason };
       } else {
-        const requestDigest = step === null
+        const baseRequestDigest = step === null
           ? crossUnitRequestDigest(reductionContract, unitSetDigest(closedOutcomes))
           : step.requestDigest(closedOutcomes, crossUnitContext);
+        let requestDigest = taskSynopsisRequestDigest(baseRequestDigest, facts.baselineSynopsisContext);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest, ...(parseFailure === undefined ? {} : { parseFailure }) });
         if (live !== null && (step !== null ? admitted?.crossUnitSynthesisAllowed !== true : policy.providerProcessing.crossUnitReductionAllowed !== true)) {
@@ -3529,7 +3540,9 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         } else {
-          const message = step === null ? buildBoundCrossUnitMessage(closedOutcomes, manifest.units.length, definition.crossUnit) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
+          const message = reductionMessage();
+          requestDigest = facts.baselineSynopsisContext === undefined ? baseRequestDigest : taskSynopsisMessageRequestDigest(baseRequestDigest, message);
+          reductionInput = taskSynopsisStageInputDigest(baseReductionInput, message, facts.baselineSynopsisContext);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
           if (production !== null && step !== null && definition.structuredOnly !== true && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };

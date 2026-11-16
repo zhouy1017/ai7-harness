@@ -171,6 +171,8 @@ export interface InitialEvaluationProjection extends Omit<
     modeLabel: string;
   };
   executionPlan: null | {
+    baselineSynopsisContext?: import('./baseline-synopsis.js').FrozenBaselineSynopsisContext;
+    baselineSynopsisUnavailable?: 'damaged-baseline';
     steps: ReadonlyArray<string>;
     effects: readonly [];
     unitCount: number;
@@ -288,6 +290,8 @@ export interface ReadersReportProjection extends Omit<
     modeLabel: string;
   };
   executionPlan: null | {
+    baselineSynopsisContext?: import('./baseline-synopsis.js').FrozenBaselineSynopsisContext;
+    baselineSynopsisUnavailable?: 'damaged-baseline';
     steps: ReadonlyArray<string>;
     effects: readonly [];
     unitCount: number;
@@ -403,6 +407,8 @@ export interface EvaluationRewriteProjection extends Omit<
     modeLabel: string;
   };
   executionPlan: null | {
+    baselineSynopsisContext?: import('./baseline-synopsis.js').FrozenBaselineSynopsisContext;
+    baselineSynopsisUnavailable?: 'damaged-baseline';
     steps: ReadonlyArray<string>;
     effects: readonly [];
     unitCount: number;

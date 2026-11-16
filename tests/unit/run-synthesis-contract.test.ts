@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { buildSynthesisInput, synthesisMessage, parseSynthesisSummary, type SynthesisFinding } from '../../src/service/review/run-synthesis-contract.js';
 import { runSynthesisKind } from '../../src/service/review/run-synthesis-kind.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 
@@ -19,6 +20,20 @@ const findings: SynthesisFinding[] = fixture.entries.filter((entry: { unitOrdina
       chapterLabel: `第 ${entry.unitOrdinal} 章`, categoryId: finding.clauseId.split('/')[0],
     }));
   });
+
+// Request/contract identities captured on integration73a3e75 before the shared-reader extraction.
+// These are request digests, not fixture-file fingerprints (#1500).
+it.each([1024, 24 * 1024, 96 * 1024])('preserves the integration-tip review synthesis request at %i bytes (#1500)', maximum => {
+  const source = Array.from({ length: 600 }, (_, index) => ({ ...findings[index % findings.length]!, findingId: `tip-${index}` }));
+  const input = buildSynthesisInput({ findings: source, missingCategories: [], baseline: { revisionId: 'baseline', missingUnitOrdinals: [41],
+    synopses: Array.from({ length: 40 }, (_, index) => ({ unitOrdinal: index + 1, synopsis: findings[0]!.note.repeat(100) })) } }, maximum);
+  const db = new DatabaseSync(':memory:');
+  try {
+    const kind = runSynthesisKind(db, 'tip');
+    expect({ input: canonicalRecord(input).digest, request: sha256Hex(synthesisMessage(input)),
+      prompt: kind.promptContractDigest, reducer: kind.reducerDigest, schema: kind.schemaDigest }).toMatchSnapshot();
+  } finally { db.close(); }
+});
 
 describe('whole-book synthesis contract', () => {
   it('admits the ordinary structured composition and refuses manuscript unit turns or tools', () => {

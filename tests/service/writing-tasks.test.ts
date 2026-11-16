@@ -1,4 +1,5 @@
 import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
+import { taskSynopsisRequestDigest } from '../../src/service/analysis/baseline-synopsis.js';
 import { initializeMultiDocumentSchema } from '../../src/service/production-document-ledger.js';
 import { CURATION_SCHEMA_SQL, FACTUAL_RANGE_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
@@ -182,7 +183,7 @@ function answerWriting(entries: Map<string, ModelFixtureEntry>, prepared: Writin
     entries.set(fixtureEntryKey(unit.ordinal, digest), { unitOrdinal: unit.ordinal, requestDigest: digest, attempt: null, contentDigest: null,
       response: { kind: 'unit-result', text: JSON.stringify(closed.find((entry) => entry.unitOrdinal === unit.ordinal)!.result), usage: { inputTokens: 1600, outputTokens: 120 } } });
   }
-  const digest = writingSynthesisRequestDigest(base!, writingPassageSetDigest(closed));
+  const digest = taskSynopsisRequestDigest(writingSynthesisRequestDigest(base!, writingPassageSetDigest(closed)), prepared.executionPlan?.baselineSynopsisContext);
   entries.set(fixtureEntryKey(0, digest), { unitOrdinal: 0, requestDigest: digest, attempt: null, contentDigest: null,
     response: { kind: 'unit-result', text: JSON.stringify(synthesis), usage: { inputTokens: 2600, outputTokens: 720 } } });
 }
