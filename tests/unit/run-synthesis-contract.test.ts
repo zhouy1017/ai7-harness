@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { buildSynthesisInput, parseSynthesisSummary, type SynthesisFinding } from '../../src/service/review/run-synthesis-contract.js';
+import { buildSynthesisInput, synthesisMessage, parseSynthesisSummary, type SynthesisFinding } from '../../src/service/review/run-synthesis-contract.js';
 import { runSynthesisKind } from '../../src/service/review/run-synthesis-kind.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
@@ -56,4 +56,24 @@ describe('whole-book synthesis contract', () => {
     expect(input.clusters.every((cluster) => cluster.evidenceRefs.every((ref) => refs.has(ref)))).toBe(true);
     expect(input.findings.every((finding) => finding.evidenceRefs.every((ref) => refs.has(ref)))).toBe(true);
   });
+});
+
+
+it.each([[300, 40], [300, 120], [150, 200]])('keeps every cluster citable and baseline represented for %i findings with %i-character notes (#1433 R2)', (count, length) => {
+  const source = Array.from({ length: count }, (_, index) => ({ ...findings[index % findings.length]!, findingId: `volume-${index}`,
+    note: `${findings[index % findings.length]!.note.repeat(length).slice(0, length - 8)} ${String(index).padStart(7, '0')}` }));
+  const input = buildSynthesisInput({ findings: source, missingCategories: [], baseline: { revisionId: 'baseline',
+    synopses: Array.from({ length: 40 }, (_, index) => ({ unitOrdinal: index + 1, synopsis: findings[index % findings.length]!.note.repeat(20) })) } });
+  expect(Buffer.byteLength(JSON.stringify(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
+  expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
+  expect(input.baseline!.synopses.length).toBeGreaterThan(0);
+  expect(input.clusters.length).toBeGreaterThan(0);
+  expect(input.clusters.every(cluster => cluster.evidenceRefs.length > 0 && input.findings.some(finding => finding.ref === cluster.representativeRef) && cluster.evidenceRefs.every(ref => input.evidence.some(evidence => evidence.ref === ref)))).toBe(true);
+  expect(input.findings.length).toBeLessThanOrEqual(200);
+});
+
+it.each([['```json\n', '\n```'], ['以下是总结：\n', '\n供编辑核对。']])('accepts an assessment wrapped in %s (#1433 R6)', (prefix, suffix) => {
+  const input = buildSynthesisInput({ findings, missingCategories: [], baseline: null });
+  const parsed = parseSynthesisSummary(prefix + JSON.stringify({ overallAssessment: '先核对跨章反复出现的问题。' }) + suffix, input);
+  expect(parsed?.overallAssessment).toBe('先核对跨章反复出现的问题。');
 });

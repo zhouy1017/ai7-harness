@@ -763,6 +763,7 @@ export interface ReviewReportRecord extends ReviewReportDerivedSections {
   version: number;
   generatedAt: string;
   run: {
+    usage?: { requests: number; inputTokens: number; outputTokens: number };
     modelLabel?: string;
     ordinal: number;
     label: string;
@@ -817,6 +818,7 @@ export interface ReviewReportRecord extends ReviewReportDerivedSections {
 
 /** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
 export interface ReviewRunProjection {
+  usage?: { requests: number; inputTokens: number; outputTokens: number };
   synthesis?: ReviewSynthesisProjection;
   modelLabel?: string;
   /** Existing repeat preparation input for optional references before authorization. */

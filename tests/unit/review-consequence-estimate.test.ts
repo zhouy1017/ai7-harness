@@ -30,9 +30,19 @@ describe('scope-derived review call estimates (#1320)', () => {
     const one = reviewConsequenceEstimate([model], 'chapters', workspace, chapters);
     expect(Object.keys(one)).toEqual(['read', 'send', 'notDo', 'cost']);
     expect(one.read).toContain('所选章'); expect(one.send).toContain('选章'); expect(one.cost).toBe('约 2 次模型调用');
-    expect(reviewConsequenceEstimate([model, { ...model, crossChapter: false }], 'whole', workspace, chapters).cost).toBe('约 7 次模型调用');
+    expect(reviewConsequenceEstimate([model, { ...model, crossChapter: false }], 'whole', workspace, chapters).cost).toBe('约 8 次模型调用');
     const offline = reviewConsequenceEstimate([local], 'selection', workspace, chapters);
     expect(offline.send).toContain('不发送'); expect(offline.cost).toBe('约 0 次模型调用');
     expect(reviewConsequenceEstimate([], 'whole', workspace, chapters).cost).toBe('选好类别后显示');
   });
+});
+
+it('counts one final request only for multi-unit whole or chapter review (#1433 R9a)', () => {
+  const workspace = { manuscript: null, scopeUnitCounts: counts };
+  const chapters = { from: chapter, to: { ...chapter, endPosition: 12 } };
+  const whole = reviewConsequenceEstimate([model], 'whole', workspace, chapters);
+  expect(whole.cost).toBe('约 5 次模型调用'); expect(whole.send).toContain('80 字');
+  expect(reviewConsequenceEstimate([model], 'chapters', workspace, chapters).send).toContain('统合');
+  for (const scope of ['selection', 'changed'] as const) expect(reviewConsequenceEstimate([model], scope, workspace, chapters).send).not.toContain('统合');
+  expect(reviewConsequenceEstimate([model], 'chapters', workspace, { from: chapter, to: chapter }).send).not.toContain('统合');
 });

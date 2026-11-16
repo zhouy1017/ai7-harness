@@ -1,10 +1,11 @@
-import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { canonicalJson, extractModelJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { sliceGraphemes } from '../analysis/factual-review-contract.js';
 import type { ReviewSynthesisSummary } from '../../shared/protocol/review-synthesis.js';
 
 /** This boundary accepts editorial records only. It has no manuscript reader or block input. */
 export interface SynthesisFinding {
   findingId: string;
+  blockId?: string | null;
   categoryId: string;
   clauseId: string;
   severity: string;
@@ -17,10 +18,11 @@ export interface SynthesisFinding {
 export interface SynthesisInput {
   schema: 'ai7.review.run-synthesis-input/1';
   missingCategories: string[];
-  clusters: Array<{ categoryId: string; clauseId: string; topic: string; count: number; chapterOrdinals: number[]; findingRefs: string[]; evidenceRefs: string[] }>;
+  coverage?: Array<{ categoryId: string; label: string; unitsRead: number; unitsTotal: number; missingUnitOrdinals: number[] }>;
+  clusters: Array<{ categoryId: string; clauseId: string; representativeRef: string; count: number; chapterOrdinals: number[]; findingRefs: string[]; evidenceRefs: string[] }>;
   findings: Array<{ ref: string; categoryId: string; clauseId: string; severity: string; summary: string; evidenceRefs: string[] }>;
-  evidence: Array<{ ref: string; findingId: string; chapterOrdinal: number; chapterLabel: string; quote: string }>;
-  baseline: null | { revisionId: string; synopses: Array<{ unitOrdinal: number; synopsis: string }> };
+  evidence: Array<{ ref: string; findingId: string; blockId?: string | null; chapterOrdinal: number; chapterLabel: string; quote: string }>;
+  baseline: null | { revisionId: string; missingUnitOrdinals?: number[]; synopses: Array<{ unitOrdinal: number; synopsis: string }> };
   omitted: { findings: number; clusters: number; synopses: number };
 }
 
@@ -39,10 +41,10 @@ export const RUN_SYNTHESIS_PROMPT_DIGEST = sha256Hex(RUN_SYNTHESIS_PROMPT);
 export function synthesisMessage(input: SynthesisInput): string {
   const refs = new Map(input.findings.map((finding, index) => [finding.ref, `f${index + 1}`]));
   return canonicalJson({ ...input,
-    clusters: input.clusters.map((cluster) => ({ ...cluster, findingRefs: cluster.findingRefs.map((ref) => refs.get(ref)!) })),
+    clusters: input.clusters.map((cluster) => ({ ...cluster, representativeRef: refs.get(cluster.representativeRef)!, findingRefs: cluster.findingRefs.map((ref) => refs.get(ref)!) })),
     findings: input.findings.map((finding) => ({ ...finding, ref: refs.get(finding.ref)! })),
-    evidence: input.evidence.map(({ findingId, chapterLabel: _label, ...evidence }) => ({ ...evidence, findingRef: refs.get(findingId)! })),
-    baseline: input.baseline === null ? null : { synopses: input.baseline.synopses },
+    evidence: input.evidence.map(({ findingId, blockId: _block, chapterLabel: _label, ...evidence }) => ({ ...evidence, findingRef: refs.get(findingId)! })),
+    baseline: input.baseline === null ? null : { synopses: input.baseline.synopses, missingUnitOrdinals: input.baseline.missingUnitOrdinals ?? [] },
   });
 }
 
@@ -50,62 +52,59 @@ const bytes = (value: unknown): number => Buffer.byteLength(canonicalJson(value)
 const bounded = (value: string, length: number): string => sliceGraphemes(value, 0, length);
 const topicKey = (value: string): string => value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
 
-/** Caps apply before transmission; omissions are facts the model and editor can see. */
+/** Every transmitted free-text field (including notes, quotations and baseline synopses) is at most
+ * 80 graphemes. A note is sent once, on its representative finding; clusters carry references only.
+ * Keep one citable representative per cluster, ordered by occurrence count (stable ties). Reserve
+ * the baseline's own quarter-budget (at most 24 KiB); trim its tail only inside that budget. Fit the
+ * remaining request by dropping whole least-frequent clusters, never orphaning a kept cluster.
+ */
+export const SYNTHESIS_TEXT_LIMIT = 80;
 export function buildSynthesisInput(source: {
   findings: readonly SynthesisFinding[];
   missingCategories: readonly string[];
-  baseline: null | { revisionId: string; synopses: readonly { unitOrdinal: number; synopsis: string }[] };
+  coverage?: SynthesisInput['coverage'];
+  baseline: null | { revisionId: string; missingUnitOrdinals?: number[]; synopses: readonly { unitOrdinal: number; synopsis: string }[] };
 }, maximumBytes = 96 * 1024): SynthesisInput {
-  const input: SynthesisInput = { schema: 'ai7.review.run-synthesis-input/1', missingCategories: source.missingCategories.slice(0, 32).map((label) => bounded(label, 80)),
-    clusters: [], findings: [], evidence: [], baseline: source.baseline === null ? null : { revisionId: source.baseline.revisionId, synopses: [] },
+  const ceiling = Math.max(1024, Math.min(96 * 1024, maximumBytes));
+  const text = (value: string): string => bounded(value, SYNTHESIS_TEXT_LIMIT);
+  const input: SynthesisInput = { schema: 'ai7.review.run-synthesis-input/1', missingCategories: source.missingCategories.slice(0, 32).map(text),
+    coverage: (source.coverage ?? []).map(entry => ({ ...entry, categoryId: text(entry.categoryId), label: text(entry.label) })),
+    clusters: [], findings: [], evidence: [], baseline: source.baseline === null ? null : {
+      revisionId: source.baseline.revisionId, missingUnitOrdinals: source.baseline.missingUnitOrdinals ?? [], synopses: [] },
     omitted: { findings: 0, clusters: 0, synopses: 0 } };
   const grouped = new Map<string, SynthesisFinding[]>();
   for (const finding of source.findings) {
     const key = canonicalJson([finding.categoryId, finding.clauseId, topicKey(finding.note)]);
     const group = grouped.get(key) ?? [];
-    group.push(finding);
-    grouped.set(key, group);
+    group.push(finding); grouped.set(key, group);
   }
-  const groups = [...grouped.values()].slice(0, 200);
+  const groups = [...grouped.values()].sort((a, b) => b.length - a.length).slice(0, 200);
   input.omitted.clusters = grouped.size - groups.length;
-  input.clusters = groups.map((group) => ({ categoryId: group[0]!.categoryId, clauseId: group[0]!.clauseId,
-    topic: bounded(group[0]!.note, 320), count: group.length,
-    chapterOrdinals: [...new Set(group.map((finding) => finding.chapterOrdinal))].slice(0, 200), findingRefs: [], evidenceRefs: [] }));
-  // Round-robin prevents one recurring topic from occupying the entire representative set.
-  for (let round = 0; input.findings.length < 200 && groups.some((group) => round < group.length); round += 1) {
-    for (const [index, group] of groups.entries()) {
-      const finding = group[round];
-      if (finding === undefined || input.findings.length === 200) continue;
-      const ref = `e${input.evidence.length + 1}`;
-      input.evidence.push({ ref, findingId: finding.findingId, chapterOrdinal: finding.chapterOrdinal,
-        chapterLabel: bounded(finding.chapterLabel, 80), quote: bounded(finding.quote, 80) });
-      input.findings.push({ ref: finding.findingId, categoryId: finding.categoryId, clauseId: finding.clauseId,
-        severity: finding.severity, summary: bounded(finding.note, 320), evidenceRefs: [ref] });
-      input.clusters[index]!.findingRefs.push(finding.findingId);
-      input.clusters[index]!.evidenceRefs.push(ref);
-    }
+  for (const group of groups) {
+    const finding = group[0]!, ref = `e${input.evidence.length + 1}`;
+    input.evidence.push({ ref, findingId: finding.findingId, blockId: finding.blockId ?? null, chapterOrdinal: finding.chapterOrdinal,
+      chapterLabel: text(finding.chapterLabel), quote: text(finding.quote) });
+    input.findings.push({ ref: finding.findingId, categoryId: text(finding.categoryId), clauseId: text(finding.clauseId),
+      severity: text(finding.severity), summary: text(finding.note), evidenceRefs: [ref] });
+    input.clusters.push({ categoryId: text(finding.categoryId), clauseId: text(finding.clauseId), representativeRef: finding.findingId,
+      count: group.length, chapterOrdinals: [...new Set(group.map(item => item.chapterOrdinal))].slice(0, 200),
+      findingRefs: [finding.findingId], evidenceRefs: [ref] });
   }
   const synopses = [...(source.baseline?.synopses ?? [])].sort((a, b) => a.unitOrdinal - b.unitOrdinal);
+  const baselineBudget = Math.min(24 * 1024, Math.floor(ceiling / 4));
   for (const unit of synopses.slice(0, 200)) {
-    const entry = { unitOrdinal: unit.unitOrdinal, synopsis: bounded(unit.synopsis, 400) };
-    if (bytes([...(input.baseline?.synopses ?? []), entry]) > 24 * 1024) break;
+    const entry = { unitOrdinal: unit.unitOrdinal, synopsis: text(unit.synopsis) };
+    if (bytes([...input.baseline!.synopses, entry]) > baselineBudget) break;
     input.baseline!.synopses.push(entry);
   }
-  // Keep references consistent while removing the deterministic tail to fit smaller contexts.
-  const ceiling = Math.max(1024, Math.min(96 * 1024, maximumBytes));
-  while (bytes(input) > ceiling - 256) {
-    if ((input.baseline?.synopses.length ?? 0) > 0) { input.baseline!.synopses.pop(); continue; }
-    const removed = input.findings.pop();
-    if (removed !== undefined) {
-      input.evidence.pop();
-      for (const cluster of input.clusters) {
-        cluster.findingRefs = cluster.findingRefs.filter((ref) => ref !== removed.ref);
-        cluster.evidenceRefs = cluster.evidenceRefs.filter((ref) => !removed.evidenceRefs.includes(ref));
-      }
-      continue;
-    }
-    if (input.clusters.length > 0) { input.clusters.pop(); input.omitted.clusters += 1; continue; }
-    break;
+  // Even a small model receives at least the first available synopsis within its reserved budget.
+  if (input.baseline !== null && input.baseline.synopses.length === 0 && synopses.length > 0) {
+    const entry = { unitOrdinal: synopses[0]!.unitOrdinal, synopsis: text(synopses[0]!.synopsis) };
+    while (bytes([entry]) > baselineBudget && entry.synopsis.length > 0) entry.synopsis = bounded(entry.synopsis, [...entry.synopsis].length - 1);
+    input.baseline.synopses.push(entry);
+  }
+  while (bytes(input) > ceiling - 128 && input.clusters.length > 0) {
+    input.clusters.pop(); input.findings.pop(); input.evidence.pop(); input.omitted.clusters += 1;
   }
   input.omitted.findings = source.findings.length - input.findings.length;
   input.omitted.synopses = synopses.length - (input.baseline?.synopses.length ?? 0);
@@ -114,8 +113,7 @@ export function buildSynthesisInput(source: {
 
 /** A malformed item never discards the overall assessment or another valid item. */
 export function parseSynthesisSummary(text: string, input: SynthesisInput): SynthesisSummary | null {
-  let value: unknown;
-  try { value = JSON.parse(text); } catch { return null; }
+  const value = extractModelJson(text, { partial: true });
   if (!isRecord(value) || typeof value.overallAssessment !== 'string' || !value.overallAssessment.trim()) return null;
   const validRefs = new Set(input.evidence.map((evidence) => evidence.ref));
   const refsOf = (item: Record<string, unknown>): string[] => Array.isArray(item.evidenceRefs)

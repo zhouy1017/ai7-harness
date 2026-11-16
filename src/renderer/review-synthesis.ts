@@ -11,7 +11,7 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
   heading.textContent = `全书审阅统合总结${value.summary === null ? '' : ` · ${value.summary.recurringProblems.length} 组共性问题`}`;
   if (jump !== undefined) {
     const preview = document.createElement('span'); preview.className = 'review-synthesis-preview';
-    preview.textContent = value.summary?.overallAssessment ?? value.detail; heading.append(preview);
+    preview.textContent = (value.missingCategories.length ? '仅依据已读范围。' : '') + (value.summary?.overallAssessment ?? value.detail); heading.append(preview);
   }
   root.append(heading);
   if (modelLabel) {
@@ -22,7 +22,7 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
     for (const ref of refs) {
       const evidence = value.evidence.find((entry) => entry.ref === ref);
       if (evidence === undefined) continue;
-      if (evidence.status === 'absent' || evidence.blockId === null) {
+      if (evidence.blockId === null) {
         const absent = document.createElement('span'); absent.textContent = ` [${ref}] ${evidence.chapterLabel}（已不在当前稿件中）「${evidence.quote}」`; node.append(absent);
       } else {
         const link = document.createElement('button'); link.type = 'button'; link.className = 'quiet';
@@ -39,7 +39,7 @@ export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel
     for (const item of value.summary.recurringProblems) paragraph(`${item.title}：${item.explanation}${item.priority ? `；${item.priority}` : ''}`, item.evidenceRefs);
     for (const item of value.summary.contextualExplanations) paragraph(`结合全书可解释的情况：${item.explanation}`, item.evidenceRefs);
     for (const [index, priority] of value.summary.priorities.entries()) paragraph(`建议先处理 ${index + 1}：${priority}`);
-    if (value.missingCategories.length) paragraph(`以下类别未完整完成：${value.missingCategories.join('、')}。`);
+    if (value.missingCategories.length) paragraph(`以下内容未完整覆盖：${value.missingCategories.join('、')}。`);
     if (value.omissionLabel !== null) paragraph(value.omissionLabel);
   }
   return root;

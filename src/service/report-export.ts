@@ -82,7 +82,7 @@ function layoutOf(input: ReportExportInput): ReportLayout {
   const stateLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.stateLabel] as const));
   return {
     title: `${input.bookTitle} · ${REVIEW_REPORT_HEADING}`,
-    synthesis: record.synthesis === undefined ? [] : ['全书审阅统合总结', ...reviewSynthesisLines(record.synthesis)],
+    synthesis: record.synthesis?.summary == null ? [] : ['全书审阅统合总结', ...reviewSynthesisLines(record.synthesis)],
     meta: `${record.run.label}审阅 · ${record.run.scopeLabel} · 稿件修订版 ${record.run.manuscript.revisionLabel} · 报告${reviewReportVersionLine(input.version, localInstantLabel(input.generatedAt))}${record.run.modelLabel ? ` · ${record.run.modelLabel}` : ''}`,
     overview: {
       title: record.overview.title,
@@ -375,7 +375,7 @@ function publishedReportDocx(input: ReportExportInput): Uint8Array {
     publishedParagraph(reviewed.join(' · '), center, `<w:color w:val="555555"/>${size(22)}`),
     publishedParagraph(`审阅对象：《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}｜审阅日期：${publishedDate(input.generatedAt)}`,
       `<w:spacing w:after="240"/>${center}`, `<w:color w:val="777777"/>${size(19)}`),
-    ...(record.synthesis === undefined ? [] : [styled('全书审阅统合总结', 'Heading1'),
+    ...(record.synthesis?.summary == null ? [] : [styled('全书审阅统合总结', 'Heading1'),
       ...(record.run.modelLabel === undefined ? [] : [publishedParagraph(record.run.modelLabel)]),
       ...reviewSynthesisLines(record.synthesis).map((line) => publishedParagraph(line))]),
     styled('一、审阅说明', 'Heading1'),

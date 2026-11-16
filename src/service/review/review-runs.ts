@@ -2799,6 +2799,28 @@ export class ReviewRunStore {
     });
   }
 
+  #synthesisEligible(snapshot: RunSnapshot): boolean {
+    const members = snapshot.categories.filter(entry => entry.entry.synthesisKey === undefined && entry.task !== null);
+    return new Set(this.#synthesisUnits(snapshot, members).map(unit => unit.ordinal)).size > 1 &&
+      this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).some(finding => members.some(member => member.categoryId === finding.categoryId));
+  }
+
+  #runUsage(snapshot: RunSnapshot): { requests: number; inputTokens: number; outputTokens: number } {
+    const total = { requests: 0, inputTokens: 0, outputTokens: 0 };
+    for (const entry of snapshot.categories) {
+      if (entry.task === null) continue;
+      const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(entry.task.taskIntentId);
+      if (row === undefined) continue;
+      const outcome = recordOf(text(row.canonical_json), text(row.sha256));
+      const report = isRecord(outcome.report) ? outcome.report : null;
+      for (const stage of Object.values(isRecord(report?.usagePerStage) ? report.usagePerStage : {})) {
+        if (!isRecord(stage)) continue;
+        for (const key of ['requests', 'inputTokens', 'outputTokens'] as const) total[key] += typeof stage[key] === 'number' ? stage[key] : 0;
+      }
+    }
+    return total;
+  }
+
   #freezeSynthesisInput(snapshot: RunSnapshot, category: SnapshotCategory): boolean {
     const kept = this.#db.prepare('SELECT input_json FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
     if (kept?.input_json != null) return true;
@@ -2821,7 +2843,17 @@ export class ReviewRunStore {
         const unit = recordOf(text(row.canonical_json), text(row.sha256));
         return typeof unit.synopsis === 'string' ? [{ unitOrdinal: integer(row.unit_ordinal), synopsis: unit.synopsis }] : [];
       });
-    const missingCategories = modelCategories.filter((entry) => !this.#events(snapshot.reviewRunId, entry.categoryId).some((event) => event.state === 'materialized')).map((entry) => entry.entry.label);
+    const coverage = modelCategories.map(entry => {
+      const units = this.#synthesisUnits(snapshot, [entry]);
+      const revisionId = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized')?.resultSetRevisionId;
+      const closed = new Set(revisionId == null ? [] : this.#db.prepare("SELECT unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed'").all(revisionId).map(row => integer(row.unit_ordinal)));
+      return { categoryId: entry.categoryId, label: entry.entry.label, unitsRead: units.filter(unit => closed.has(unit.ordinal)).length,
+        unitsTotal: units.length, missingUnitOrdinals: units.filter(unit => !closed.has(unit.ordinal)).map(unit => unit.ordinal) };
+    });
+    const baselineUnits = baseline === undefined ? [] : this.#db.prepare('SELECT unit_ordinal, state FROM analysis_unit_results WHERE revision_id = ? ORDER BY unit_ordinal').all(text(baseline.revision_id));
+    const baselineMissing = baselineUnits.filter(unit => unit.state !== 'closed').map(unit => integer(unit.unit_ordinal));
+    const missingCategories = coverage.filter(entry => entry.unitsRead < entry.unitsTotal).map(entry => `${entry.label}（已读 ${entry.unitsRead}/${entry.unitsTotal} 个阅读范围；未读第 ${entry.missingUnitOrdinals.join('、')} 范围）`);
+    if (baselineMissing.length > 0) missingCategories.push(`基线概述（缺少第 ${baselineMissing.join('、')} 阅读范围）`);
     const synthesisLedger = this.#categoryLedger(category, snapshot);
     const synthesisPlan = synthesisLedger.frozenPlan(category.task!.taskIntentId, category.task!.planEnvelopeDigest);
     const route = (synthesisPlan.components['provider-resolution-plan'] as { executionRoute: { kind: string; model?: string } }).executionRoute;
@@ -2834,8 +2866,8 @@ export class ReviewRunStore {
       const unit = manifestUnits.find((candidate) => finding.blockPosition !== null && finding.blockPosition >= candidate.startPosition && finding.blockPosition <= candidate.endPosition);
       const chapterOrdinal = unit?.sectionOrdinal ?? 1;
       return { findingId: finding.findingId, categoryId: finding.categoryId, clauseId: finding.clauseRef ?? '', severity: finding.severity,
-        note: finding.note, quote: finding.quote, chapterOrdinal, chapterLabel: unit?.headingText ?? (unit === undefined ? '全书' : `第 ${unit.ordinal} 部分 · 段落 ${unit.startPosition}–${unit.endPosition}`) };
-    }), missingCategories, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), synopses } }, requestBytes);
+        note: finding.note, quote: finding.quote, blockId: finding.blockId, chapterOrdinal, chapterLabel: unit?.headingText ?? (unit === undefined ? '全书' : `第 ${unit.ordinal} 部分 · 段落 ${unit.startPosition}–${unit.endPosition}`) };
+    }), missingCategories, coverage, baseline: baseline === undefined ? null : { revisionId: text(baseline.revision_id), missingUnitOrdinals: baselineMissing, synopses } }, requestBytes);
     const record = canonicalRecord(input);
     const priorUsage = { inputTokens: 0, outputTokens: 0 };
     for (const member of modelCategories) {
@@ -2871,13 +2903,14 @@ export class ReviewRunStore {
     if (row === undefined) return {};
     const saved = row.summary_json === null ? null : recordOf(text(row.summary_json), text(row.summary_digest));
     if (saved?.notNeeded === true) return {};
+    if (!this.#driving.has(snapshot.reviewRunId) && !this.#synthesisEligible(snapshot) && !this.#runStateView(snapshot).categories.some(view => view.category.entry.synthesisKey === undefined && view.pending)) return {};
     const input = row.input_json === null ? null : recordOf(text(row.input_json), text(row.input_digest)) as unknown as SynthesisInput;
     const summary = saved?.summary == null || input === null ? null : parseSynthesisSummary(JSON.stringify(saved.summary), input);
     const event = this.#events(snapshot.reviewRunId, category.categoryId).at(-1);
     const terminal = event !== undefined && TERMINAL_CATEGORY_EVENTS.has(event.state);
     const runId = category.task === null ? null : this.#runRecordOf(category.task.taskIntentId);
     const ledgerState = runId === null ? null : this.#categoryLedger(category, snapshot).currentRunState(runId);
-    const paused = ledgerState === 'paused' || ledgerState === 'resumable';
+    const paused = event?.state !== 'interrupted' && (ledgerState === 'paused' || ledgerState === 'resumable');
     const findings = new Map(this.#findingViews(snapshot.reviewRunId, snapshot.manuscript.branchId, null).map((finding) => [finding.findingId, finding]));
     if (terminal && input === null) {
       const modelCategories = snapshot.categories.filter(member => member.task !== null && member.entry.synthesisKey === undefined);
@@ -2886,7 +2919,7 @@ export class ReviewRunStore {
         new Set(this.#synthesisUnits(snapshot, modelCategories).map(unit => unit.ordinal)).size < 2) return {};
     }
     return { synthesis: { state: saved?.budgetReached === true ? 'budget' : summary !== null ? 'completed' : terminal && !paused ? 'missing' : event?.state === 'dispatched' && !paused ? 'running' : 'pending',
-      detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? '已形成全书审阅统合总结。' : terminal && !paused ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
+      detail: saved?.budgetReached === true ? '本次审阅已用完预算，未再发送统合请求；逐条发现仍可处理。' : summary !== null ? (input?.missingCategories.length ? '统合仅依据已读范围；未读部分仍需审阅。' : '已形成全书审阅统合总结。') : terminal && !paused ? '统合总结暂缺，逐条发现仍可处理；可新建一次审阅重试。'
         : paused ? '统合已暂停；继续审阅后接着完成。' : event?.state === 'dispatched' ? '正在统合各章发现。' : '各章审阅后将统合已有发现。',
       summary, missingCategories: input?.missingCategories ?? [],
       omissionLabel: input === null || Object.values(input.omitted).every((count) => count === 0) ? null
@@ -2895,7 +2928,7 @@ export class ReviewRunStore {
         const finding = findings.get(entry.findingId);
         return { ref: entry.ref, findingId: entry.findingId, chapterLabel: entry.chapterLabel, quote: entry.quote,
           status: finding === undefined || finding.blockPosition === null ? 'absent' : finding.ignoreReason !== null ? 'ignored' : finding.markStatus === 'removed' ? 'absent' : finding.status,
-          blockId: finding?.blockPosition == null ? null : finding.blockId };
+          blockId: finding?.blockPosition != null ? finding.blockId : entry.blockId != null && this.#db.prepare('SELECT 1 FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(snapshot.manuscript.branchId, entry.blockId) !== undefined ? entry.blockId : null };
       }) } };
   }
 
@@ -3207,6 +3240,16 @@ export class ReviewRunStore {
       }
       reconciled.add(kind);
       settled += ledger.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.ownsCategoryRun(runRecordId) }).settled;
+    }
+    for (const row of rows) {
+      if (text(row.category_id) !== RUN_SYNTHESIS_CATEGORY) continue;
+      const snapshot = this.#run(text(row.review_run_id));
+      const category = snapshot.categories.find(entry => entry.categoryId === RUN_SYNTHESIS_CATEGORY)!;
+      const ledger = this.#categoryLedger(category, snapshot), runId = this.#runRecordOf(category.task!.taskIntentId);
+      if (runId !== null && ledger.currentRunState(runId) === 'resumable') {
+        ledger.recordRunState(runId, 'interrupted', { detail: '上次关闭时统合请求尚未完成，统合总结暂缺；逐条发现仍可处理。' });
+        this.#recordEvent(snapshot.reviewRunId, category.categoryId, 'interrupted', '统合总结暂缺，逐条发现仍可处理。', { runRecordId: runId });
+      }
     }
     return settled;
   }
@@ -3745,6 +3788,7 @@ export class ReviewRunStore {
         version,
         generatedAt,
         run: {
+          usage: this.#runUsage(snapshot),
           ...(models.length === 0 ? {} : { modelLabel: models.join('、') }),
           ordinal: snapshot.ordinal,
           label: `第 ${snapshot.ordinal} 次`,
@@ -4925,7 +4969,7 @@ export class ReviewRunStore {
     const { state, canContinue } = reviewRunState({
       authorized: authorization !== null,
       driving,
-      categories: categories.filter((view) => view.category.entry.synthesisKey === undefined || view.pending).map((view) => ({ pending: view.pending, materialized: view.materialized !== null,
+      categories: categories.filter((view) => view.category.entry.synthesisKey === undefined || view.pending && this.#synthesisEligible(snapshot)).map((view) => ({ pending: view.pending, materialized: view.materialized !== null,
         retained: typeof view.retained?.record.findingCount === 'number' && view.retained.record.findingCount > 0 })),
       stop,
       waiting,
@@ -5320,6 +5364,7 @@ export class ReviewRunStore {
     const after = page.findingsAfterOrdinal;
     return {
       projection: {
+        usage: this.#runUsage(snapshot),
         ...this.#modelAttribution(snapshot),
         ...this.#synthesisOf(snapshot),
         ...(snapshot.localPlan === undefined ? {} : { localCheck: (() => {

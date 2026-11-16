@@ -141,11 +141,14 @@ export class UsageLedger {
     for (const outcome of outcomes) {
       // A Task Outcome recorded before the Run Report existed holds no usage: said apart, never counted as zero.
       if (outcome.report_type !== 'object') {
-        if (outcome.global_dialogue !== 1) unrecordedRuns += 1;
+        if (outcome.global_dialogue !== 1 && outcome.kind !== 'editorial-review/run-synthesis') unrecordedRuns += 1;
         continue;
       }
       const recordedAt = String(outcome.recorded_at);
-      const kind = String(outcome.kind);
+      const internal = outcome.kind === 'editorial-review/run-synthesis';
+      const reviewId = reviewRuns.get(String(outcome.task_intent_id));
+      const source = internal ? outcomes.find(entry => entry.kind !== 'editorial-review/run-synthesis' && reviewRuns.get(String(entry.task_intent_id)) === reviewId) : undefined;
+      const kind = String(source?.kind ?? (internal ? 'review-run' : outcome.kind));
       const bookId = outcome.global_dialogue === 1 ? 'global-agent' : String(outcome.book_id);
       const bookTitle = String(outcome.title);
       const key = groupBy === 'book' ? bookId : groupBy === 'taskKind' ? kind : periodOf(recordedAt, range);
@@ -158,13 +161,13 @@ export class UsageLedger {
         rows.set(key, row);
       }
       // Dialogue tokens contribute to usage, but a Book-less attempt creates no AI7 Run, count or report link.
-      const runCount = outcome.global_dialogue === 1 ? 0 : 1;
+      const runCount = outcome.global_dialogue === 1 || internal ? 0 : 1;
       row.runCount += runCount;
       row.inputTokens += usage.inputTokens;
       row.outputTokens += usage.outputTokens;
       accumulate(row.byRoute, route, usage.inputTokens, usage.outputTokens, runCount);
       // A Book-less turn has no Run report or Book link to manufacture.
-      if (outcome.global_dialogue !== 1 && ((row.runCount > runOffset && row.runs.length < USAGE_ROW_RUN_LINKS) || outcome.run_record_id === runRecordId)) {
+      if (!internal && outcome.global_dialogue !== 1 && ((row.runCount > runOffset && row.runs.length < USAGE_ROW_RUN_LINKS) || outcome.run_record_id === runRecordId)) {
         const taskIntentId = String(outcome.task_intent_id);
         const link: UsageRunLinkProjection = {
           runRecordId: String(outcome.run_record_id), taskIntentId, bookId, bookTitle, taskKind: kind,

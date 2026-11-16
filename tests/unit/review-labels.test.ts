@@ -196,9 +196,9 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReadConsequence('changed', manuscript, none)).toBe('每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审');
     expect(reviewReadConsequence('selection', manuscript, none)).toBe('稿件里选中的文字');
     expect(reviewSendConsequence([])).toBe('选好类别后显示');
-    expect(reviewSendConsequence([{ label: '情节逻辑与前后一致', modelFree: true }])).toBe('只读基线分析的线索，不发送任何内容。');
-    expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }])).toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务。' + REVIEW_SYNTHESIS_PLAN_LINE);
-    expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }, { label: '情节逻辑与前后一致', modelFree: true }]))
+    expect(reviewSendConsequence([{ label: '情节逻辑与前后一致', modelFree: true }], true)).toBe('只读基线分析的线索，不发送任何内容。');
+    expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }], true)).toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务。' + REVIEW_SYNTHESIS_PLAN_LINE);
+    expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }, { label: '情节逻辑与前后一致', modelFree: true }], true))
       .toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务；「情节逻辑与前后一致」只读基线分析的线索，不发送。' + REVIEW_SYNTHESIS_PLAN_LINE);
     expect(reviewChapterOptionLabel(third)).toBe('第三章（段落 26–43）');
   });

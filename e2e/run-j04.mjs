@@ -2894,14 +2894,14 @@ async function main() {
           await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
           await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
         }
-        await assertRenderer(renderer, `(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect();return root && !root.open && r && r.top<innerHeight && r.bottom>0 && root.querySelector('summary').textContent.includes('组共性问题') && !/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent);})()`, `review-synthesis-${viewport}-compact-ordinary`);
+        await assertRenderer(renderer, `(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect();return root && !root.open && r && r.top>=0 && r.bottom<=innerHeight && root.querySelector('summary').textContent.includes('组共性问题') && !/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent);})()`, `review-synthesis-${viewport}-compact-ordinary`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
         await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-keyboard-evidence`);
         await pointerClick(renderer, waitFor, `[data-synthesis-evidence="${synthesisEvidence.ref}"]`, `review-synthesis-${viewport}-citation`);
-        await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${synthesisEvidence.blockId}"]')!==null`, `review-synthesis-${viewport}-passage`);
+        await waitFor(renderer, `(() => { const selection=getSelection(), anchor=selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement; return anchor?.closest('[data-block-id]')?.dataset.blockId===${JSON.stringify(synthesisEvidence.blockId)}; })()`, `review-synthesis-${viewport}-passage`);
         await pointerClick(renderer, waitFor, SIDEBAR.section('review'), `review-synthesis-${viewport}-back`);
         await waitFor(renderer, `document.querySelector('[data-screen="book-review"] details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-returned`);
       }
@@ -3803,8 +3803,7 @@ async function main() {
     const leafUsage = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book'})`);
     const leafRuns = leafUsage.rows.find((row) => row.key === leafBook.bookId).runs;
     const leafSourceRun = leafRuns.find(run => run.taskIntentId === leafPrepared.categories[0].taskIntentId);
-    requireJourney(leafRuns.length === 2 && leafSourceRun !== undefined &&
-      leafRuns.filter(run => run.taskKind === 'editorial-review/run-synthesis').length === 1 &&
+    requireJourney(leafRuns.length === 1 && leafSourceRun !== undefined &&
       leafRuns.every(run => run.reviewRunId === leafPrepared.reviewRunId) && leafReviewed.synthesis?.state === 'completed',
     'stock-leaf-category-and-final-summary', leafRuns);
     const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafSourceRun.runRecordId)}})`);

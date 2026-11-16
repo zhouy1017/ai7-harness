@@ -258,13 +258,14 @@ export function reviewConsequenceEstimate(selected: ReadonlyArray<{ label: strin
   chapters: { from: ReviewChapterOptionProjection | null; to: ReviewChapterOptionProjection | null }): { read: string; send: string; notDo: string; cost: string } {
   const range = chapters.from === null || chapters.to === null ? null : { startPosition: chapters.from.position, endPosition: chapters.to.endPosition };
   const calls = selected.map((entry) => estimateReviewCalls(entry, scope, workspace.scopeUnitCounts, range));
+  const synthesis = (scope === 'whole' || scope === 'chapters') && selected.some(entry => !entry.modelFree && (estimateReviewCalls({ ...entry, crossChapter: false }, scope, workspace.scopeUnitCounts, range) ?? 0) > 1);
   const scopeName = scope === null ? '所选范围' : REVIEW_SCOPE_LABELS[scope];
   return { read: selected.length === 0 ? '选好类别后显示' : reviewReadConsequence(scope, workspace.manuscript, chapters),
     send: selected.length === 0 ? '选好类别后显示' : selected.every((entry) => entry.modelFree) ? '只在本机读取，不发送任何内容。'
-      : reviewSendConsequence(selected).replace('所读范围内的稿件正文', `${scopeName}的正文`),
+      : reviewSendConsequence(selected, synthesis).replace('所读范围内的稿件正文', `${scopeName}的正文`),
     notDo: REVIEW_NOT_DO,
     cost: selected.length === 0 ? '选好类别后显示' : calls.some((count) => count === null) ? '选好范围后显示调用估计'
-      : `约 ${calls.reduce<number>((sum, count) => sum + (count ?? 0), 0)} 次模型调用` };
+      : `约 ${calls.reduce<number>((sum, count) => sum + (count ?? 0), synthesis ? 1 : 0)} 次模型调用` };
 }
 export const REVIEW_PICK_CATEGORY = '请至少选择一个审阅类别。';
 export const REVIEW_PICK_SCOPE = '请选择审阅范围。';
@@ -301,12 +302,12 @@ export function reviewReadConsequence(
  * 会发送: the Outbound Data Category at full rank (V2-UX-LAYER-002). The leads read the baseline analysis
  * only; every other category sends what it reads with its own guideline clauses.
  */
-export function reviewSendConsequence(selected: ReadonlyArray<{ readonly label: string; readonly modelFree: boolean }>): string {
+export function reviewSendConsequence(selected: ReadonlyArray<{ readonly label: string; readonly modelFree: boolean }>, synthesis = false): string {
   if (selected.length === 0) return '选好类别后显示';
   if (selected.every((category) => category.modelFree)) return '只读基线分析的线索，不发送任何内容。';
   const free = selected.filter((category) => category.modelFree).map((category) => `「${category.label}」`);
   const sent = '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务';
-  return (free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`) + REVIEW_SYNTHESIS_PLAN_LINE;
+  return (free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`) + (synthesis ? REVIEW_SYNTHESIS_PLAN_LINE : '');
 }
 
 // ---- the plan ---------------------------------------------------------------------------------------

@@ -295,3 +295,10 @@ describe('the 审阅报告 as a file', () => {
       '1:一、审阅说明', '1:二、问题统计', '1:三、建议优先处理的重点问题', '1:四、逐项问题清单', '2:第一章 示例', '2:第二章 示例']);
   });
 });
+
+it.each(['missing', 'budget'] as const)('omits %s synthesis from a published DOCX (#1433 R9d)', state => {
+  const result = renderReportExport(input({ schema: 'ai7.review.report/2', synthesis: { ...SAMPLE1_SYNTHESIS, state, summary: null,
+    detail: '统合总结暂缺，可新建审阅重试。' } }), 'docx', { emit: true });
+  const xml = strFromU8(unzipSync(result.bytes!)['word/document.xml']!);
+  expect(xml).not.toContain('全书审阅统合总结'); expect(xml).not.toContain('重试');
+});

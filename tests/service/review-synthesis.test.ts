@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve, relative, isAbsolute } from 'node:path';
+import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
+import { basename, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { unzipSync } from 'fflate';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { backup, DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
@@ -25,6 +25,7 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { reportContentDigest } from '../../src/service/review/review-report.js';
 import { RUN_SYNTHESIS_SCHEMA_SQL } from '../../src/service/review/run-synthesis-storage.js';
+import { SYNTHESIS_TEXT_LIMIT } from '../../src/service/review/run-synthesis-contract.js';
 import { TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION } from '../support/review-categories.js';
 
 const TYPOS = 'typos-and-usage', STYLE = 'style-and-format';
@@ -33,28 +34,38 @@ let roots: ServiceTestRoots;
 let requestGovernor: ModelRequestGovernor;
 let launchPolicy: LaunchPolicyProjection;
 let heldReleases: Array<() => void>;
+let restatedBranch: string | null = null;
 type Book = Awaited<ReturnType<typeof importSample1Book>>;
 interface Session { store: EditorialStore; owner: ReturnType<typeof capturedOrdinaryExecution>['owner']; driver: ReviewRunDriver; capture: ReturnType<typeof capturedOrdinaryExecution> }
-beforeEach(async () => { roots = await createServiceTestRoots('ai7-review-synthesis-'); requestGovernor = new ModelRequestGovernor(); heldReleases = []; });
+beforeEach(async () => { roots = await createServiceTestRoots('ai7-review-synthesis-'); requestGovernor = new ModelRequestGovernor(); heldReleases = []; restatedBranch = null; });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); await roots.dispose(); });
 
 async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false): Promise<Session> {
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, dataRoot = roots.dataRoot): Promise<Session> {
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-cross-chapter-controls');
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+  const store = await EditorialStore.open(dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   const bases = new Map([[TYPOS, reviewCategoryKindDefinition(TYPOS_AND_USAGE)], [STYLE, reviewCategoryKindDefinition(STYLE_AND_FORMAT)], ...(literary ? [['literary-expression', reviewCategoryKindDefinition(LITERARY_EXPRESSION)] as const] : [])]);
-  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, dataRoot, requestGovernor, (request, message) => {
     if (sample1SynthesisAnswer(message) !== undefined) return synthesisAnswer(message);
     const header = parseReviewCategoryUnitMessageHeader(message);
+    if (request.stage === 'units' && header !== null && header.ordinal === failedUnit) return { kind: 'adapter-failure', code: 'CAPTURED_UNIT_GAP', message: 'Captured unit gap', status: 400 };
     if (request.stage === 'units' && header !== null && bases.has(header.categoryId)) {
       const response = resolveFixtureEntry(fixture.entries, header.ordinal, bases.get(header.categoryId)!.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+      if (restatedNotes && response?.kind === 'unit-result') {
+        const value = JSON.parse(response.text);
+        const paragraph = store.baselineAnalysisLedger.readWorkingBlocks(restatedBranch!).find(block => block.text.length > 100)?.text;
+        if (paragraph !== undefined) for (const finding of value.findings ?? []) finding.note = paragraph;
+        return { ...response, text: JSON.stringify(value) };
+      }
       return !emptyFindings ? response : { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     }
     if (parseReviewCrossChapterMessage(message) !== null) return { kind: 'unit-result', text: JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     if (parseFactualReviewUnitMessageHeader(message) !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
     const baseline = parseUnitMessageHeader(message);
+    if (request.stage === 'units' && baseline?.ordinal === failedUnit) return { kind: 'adapter-failure', code: 'CAPTURED_UNIT_GAP', message: 'Captured unit gap', status: 400 };
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
     if (request.stage === 'units' && header !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
+    if (failedUnit > 0 && request.stage === 'cross-unit-reduction') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1', findings: [], notes: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     const content = request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
       .map((ref) => ({ ref, disposition: '成立', reason: 'SampleBook 精确引文核对。' })) }
       : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
@@ -69,10 +80,11 @@ async function closeCapturedSession(session: Session): Promise<void> {
   try { session.capture.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
 async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>, synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false): Promise<void> {
-  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary);
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0): Promise<void> {
+  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary, restatedNotes, failedUnit);
   try {
     const book = await importSample1Book(session.store, roots.codeRoot, 'sample1 全书审阅统合');
+    restatedBranch = book.branchId;
     await pinEditorialWorkspaceProfileRevision2(session.store, book.bookId);
     recordMissingCredentialConnection(session.store, '统合正式请求捕获');
     await body(session, book);
@@ -106,8 +118,6 @@ it('sends one structured synthesis request in ordinary production, preserves fin
     expect(new Set(run.synthesis!.evidence.map(entry => entry.chapterLabel)).size).toBeGreaterThan(1);
     expect(payload.evidence.every((entry: Record<string, unknown>) => !Object.hasOwn(entry, 'chapterLabel'))).toBe(true);
     expect(payload.findings.every((finding: { ref: string }) => /^f\d+$/u.test(finding.ref))).toBe(true);
-    const entireRequest = requests[0]!.messages.map(message => message.content).join('\n');
-    for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter((block) => block.text.length > 160)) expect(entireRequest).not.toContain(block.text);
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun(input, launchPolicy));
     expect(session.capture!.wireRequests).toHaveLength(session.capture!.requests.length);
     expect(session.capture!.wireRequests.filter((request) => request.messages.some((message) => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))).toHaveLength(1);
@@ -153,14 +163,18 @@ it.each(['pause', 'cancel'] as const)('preserves ordinary findings and launch bi
         expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
         expect(session.capture!.wireRequests.every(request => request.model === model)).toBe(true);
       } else {
+        expect(session.capture.abortedRequests).toHaveLength(1);
+        expect(workspace(session, book).run!.synthesis?.state).toBe('missing');
         expect(workspace(session, book).run!.state).toBe('cancelled');
-        expect(() => session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy)).not.toThrow();
+        const fresh = session.store.launchReviewRun({ ...input, clientCommandId: randomUUID() }, launchPolicy);
+        await driveLaunchedReviewRun(session.driver, fresh);
+        expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
       }
-      expect(workspace(session, book, run.reviewRunId).run!.findings).toHaveLength(before.findings.length);
+      expect(workspace(session, book, run.reviewRunId).run!.findings).toEqual(before.findings);
       const sent = session.capture!.wireRequests.filter(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')));
-      expect(sent).toHaveLength(1);
-    }, sample1SynthesisAnswer, { stageHold: async (stage) => {
-      if (stage === 'cross-unit-reduction' && !stoppedOnce) { stoppedOnce = true; reached(); await gate; }
+      expect(sent).toHaveLength(action === 'cancel' ? 2 : 1);
+    }, sample1SynthesisAnswer, { transportHold: async (_request, message) => {
+      if (sample1SynthesisAnswer(message) !== undefined && !stoppedOnce) { stoppedOnce = true; reached(); await gate; }
     } });
   } finally { release(); }
 });
@@ -280,17 +294,18 @@ it('reuses only the closed baseline chapter synopsis chain in the ordinary synth
     const input = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
     expect(input.baseline.synopses.length).toBeGreaterThan(1);
     expect(input.baseline.synopses.every((unit: { unitOrdinal: number; synopsis: string }) => Number.isSafeInteger(unit.unitOrdinal) && typeof unit.synopsis === 'string')).toBe(true);
-    expect(Object.keys(input.baseline)).toEqual(['synopses']);
+    expect(Object.keys(input.baseline).sort()).toEqual(['missingUnitOrdinals', 'synopses']);
     expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
   });
 });
 
-it('includes synthesis within the frozen ordinary run ceiling and preserves findings when it is spent (#1433)', async () => {
+it.each([0, 1])('keeps the pre-dispatch ceiling rule with %i tokens remaining and counts synthesis usage (#1433 R8)', async remaining => {
   await withCapturedReviewBook(async (session, sample) => {
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: sample.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
     const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
     const usage = session.store.inspectReviewCategory(sample.bookId, definition).taskOutcome!.report!.usagePerStage;
-    const maxTotalTokens = Object.values(usage).reduce((sum, stage) => sum + stage.inputTokens + stage.outputTokens, 0);
+    const priorTotal = Object.values(usage).reduce((sum, stage) => sum + stage.inputTokens + stage.outputTokens, 0);
+    const maxTotalTokens = priorTotal + remaining;
     expect(maxTotalTokens).toBeGreaterThan(0);
     const book = await importSample1Book(session.store, roots.codeRoot, 'sample1 有限统合预算');
     await pinEditorialWorkspaceProfileRevision2(session.store, book.bookId);
@@ -305,10 +320,11 @@ it('includes synthesis within the frozen ordinary run ceiling and preserves find
     session.store.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.map(category => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
     await session.driver.drive(run.reviewRunId);
     const finished = workspace(session, book).run!;
-    expect(finished.synthesis?.state).toBe('budget');
-    expect(finished.synthesis?.detail).toContain('预算');
+    expect(finished.synthesis?.state).toBe(remaining === 0 ? 'budget' : 'completed');
+    if (remaining === 0) expect(finished.synthesis?.detail).toContain('预算');
+    else { expect(finished.usage!.inputTokens + finished.usage!.outputTokens).toBe(priorTotal + 1080); expect(finished.usage!.inputTokens + finished.usage!.outputTokens).toBeGreaterThan(maxTotalTokens); }
     expect(finished.findings.length).toBeGreaterThan(0);
-    expect(session.capture.wireRequests.filter(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))).toHaveLength(1);
+    expect(session.capture.wireRequests.filter(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))).toHaveLength(remaining === 0 ? 1 : 2);
   });
 });
 
@@ -332,29 +348,28 @@ it('waits offline and reconnects the final synthesis on the launched ordinary mo
   });
 });
 
-it('continues a shutdown-interrupted ordinary synthesis from its retained response without sending twice (#1433)', async () => {
+it('settles a graceful stop during the ordinary transport request without resending synthesis (#1433)', async () => {
   let reached!: () => void, release!: () => void;
   const held = new Promise<void>(resolve => { reached = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; }); heldReleases.push(release);
-  const first = await openCapturedSession(sample1SynthesisAnswer, { stageHold: async stage => { if (stage === 'cross-unit-reduction') { reached(); await gate; } } });
-  let book!: Book, input!: { bookId: string; clientCommandId: string; categoryIds: string[]; scope: ReviewRunScopeRequest }, runId!: string;
+  const first = await openCapturedSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
+  let book!: Book, runId!: string;
   try {
     book = await importSample1Book(first.store, roots.codeRoot, 'sample1 统合运行重启');
     await pinEditorialWorkspaceProfileRevision2(first.store, book.bookId); recordMissingCredentialConnection(first.store, '统合运行重启');
-    input = { bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE };
-    runId = first.store.launchReviewRun(input, launchPolicy).projection.run!.reviewRunId;
-    const driving = first.driver.drive(runId);
-    await Promise.race([held, driving.then(() => { throw new Error('synthesis-ended-before-restart'); })]);
-    expect(workspace(first, book).run!.findings.length).toBeGreaterThan(0);
+    runId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
+    const driving = first.driver.drive(runId); await held;
+    await first.owner.dispose(); await driving;
+    expect(first.capture.abortedRequests).toHaveLength(1);
+    expect(workspace(first, book).run!.synthesis?.state).toBe('missing');
+    expect(workspace(first, book).run!.canContinue).toBe(false);
   } finally { await closeCapturedSession(first); }
   const second = await openCapturedSession();
   try {
-    const replay = second.store.launchReviewRun(input, launchPolicy);
-    expect(replay.repeated).toBe(true);
-    await driveLaunchedReviewRun(second.driver, replay);
-    expect(workspace(second, book, runId).run!.synthesis?.state, synthesisOutcome(second, book)).toBe('completed');
+    second.store.reconcileStoppedReviewCategoryRuns();
+    await second.driver.drive(runId);
+    expect(workspace(second, book, runId).run!.synthesis?.state).toBe('missing');
     expect(second.capture.requests).toHaveLength(0);
-    expect(first.capture.requests.filter(request => request.stage === 'cross-unit-reduction')).toHaveLength(1);
   } finally { await closeCapturedSession(second); }
 });
 
@@ -534,4 +549,110 @@ it('keeps a prepared multi-category synthesis on the edited combined ceiling and
     await session.driver.drive(run.reviewRunId);
     expect(workspace(session, book).run!.synthesis?.state, synthesisOutcome(session, book)).toBe('completed');
   });
+});
+
+
+it('bounds every contiguous manuscript run in the captured ordinary request when finding notes restate whole paragraphs (#1433 R1)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const request = session.capture.wireRequests.find(request => request.messages.some(message => sample1SynthesisAnswer(message.content) !== undefined))!;
+    const allMessages = request.messages.map(message => message.content).join('\n');
+    const payload = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
+    expect(payload.clusters.every((cluster: Record<string, unknown>) => !Object.hasOwn(cluster, 'topic') && typeof cluster.representativeRef === 'string')).toBe(true);
+    expect(payload.findings.every((finding: { summary: string }) => [...finding.summary].length <= SYNTHESIS_TEXT_LIMIT)).toBe(true);
+    let oversized = false;
+    for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId)) {
+      const words = [...block.text];
+      for (let offset = 0; offset + SYNTHESIS_TEXT_LIMIT < words.length; offset += 1)
+        if (allMessages.includes(words.slice(offset, offset + SYNTHESIS_TEXT_LIMIT + 1).join(''))) oversized = true;
+    }
+    expect(oversized).toBe(false);
+    expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
+  }, sample1SynthesisAnswer, {}, false, false, true);
+});
+
+it('discloses partial category coverage and missing baseline units in the request and editorial summary (#1433 R3)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    const baseline = session.store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, launchPolicy);
+    session.owner.admitAndDispatch(baseline.runRecordId, session.store.baselineAnalysisLedger); await session.owner.whenIdle();
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const request = session.capture.wireRequests.find(request => request.messages.some(message => sample1SynthesisAnswer(message.content) !== undefined))!;
+    const payload = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
+    expect(payload.coverage[0]).toMatchObject({ unitsRead: 7, unitsTotal: 8, missingUnitOrdinals: [8] });
+    expect(payload.baseline.missingUnitOrdinals).toEqual([8]);
+    const summary = workspace(session, book).run!.synthesis!;
+    expect(summary.state).toBe('completed');
+    expect(summary.detail).toContain('已读范围');
+    expect(summary.missingCategories.some(label => label.includes('7/8'))).toBe(true);
+    expect(summary.missingCategories.some(label => label.includes('基线概述') && label.includes('8'))).toBe(true);
+  }, sample1SynthesisAnswer, {}, false, false, false, 8);
+});
+
+it('hides the internal synthesis from capture choices and usage links while accounting for its request (#1433 R4 R8)', async () => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    const run = workspace(session, book).run!;
+    const library = session.store.procedureLibrary({ action: 'inspect' });
+    expect(library.completedRuns.some(entry => entry.executorKind === 'editorial-review/run-synthesis')).toBe(false);
+    expect(library.procedures.some(entry => entry.executorKind === 'editorial-review/run-synthesis')).toBe(false);
+    const usage = session.store.inspectUsage({ range: 'all', groupBy: 'book' }).rows.find(row => row.key === book.bookId)!;
+    expect(usage.runs).toHaveLength(1);
+    expect(usage.runs.some(entry => entry.taskKind === 'editorial-review/run-synthesis')).toBe(false);
+    expect({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }).toEqual({ inputTokens: run.usage!.inputTokens, outputTokens: run.usage!.outputTokens });
+    const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
+    expect(report.record.run.usage).toEqual(run.usage);
+    const source = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).taskOutcome!.report!;
+    const sourceTokens = Object.values(source.usagePerStage).reduce((sum, stage) => sum + stage.inputTokens + stage.outputTokens, 0);
+    expect(run.usage!.inputTokens + run.usage!.outputTokens - sourceTokens).toBe(1080);
+  });
+});
+
+it('offers no continuation when shutdown leaves no findings eligible for synthesis (#1433 R5)', async () => {
+  let reached!: () => void, release!: () => void;
+  const held = new Promise<void>(resolve => { reached = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; }); heldReleases.push(release);
+  await withCapturedReviewBook(async (session, book) => {
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
+    const driving = session.driver.drive(launched.projection.run!.reviewRunId); await held;
+    await session.owner.dispose(); await driving;
+    const run = workspace(session, book).run!;
+    expect(run.state).toBe('failed'); expect(run.canContinue).toBe(false);
+    expect(run.synthesis).toBeUndefined();
+    expect(session.capture.requests.some(request => request.stage === 'cross-unit-reduction')).toBe(false);
+  }, sample1SynthesisAnswer, { transportHold: async request => { if (request.stage === 'units') { reached(); await gate; } } });
+});
+
+it('reconciles a crash snapshot taken inside the synthesis transport at startup without resending (#1433 R7 R9c)', async () => {
+  let reached!: () => void, release!: () => void;
+  const held = new Promise<void>(resolve => { reached = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; }); heldReleases.push(release);
+  const first = await openCapturedSession(sample1SynthesisAnswer, { transportHold: async (_request, message) => { if (sample1SynthesisAnswer(message) !== undefined) { reached(); await gate; } } });
+  const crashRoot = join(roots.inputRoot, 'crash-data');
+  let book!: Book, runId!: string, findings: unknown;
+  try {
+    book = await importSample1Book(first.store, roots.codeRoot, 'sample1 统合崩溃快照');
+    await pinEditorialWorkspaceProfileRevision2(first.store, book.bookId); recordMissingCredentialConnection(first.store, '统合崩溃快照');
+    runId = first.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy).projection.run!.reviewRunId;
+    void first.driver.drive(runId); await held;
+    findings = workspace(first, book).run!.findings;
+    await cp(roots.dataRoot, crashRoot, { recursive: true, filter: source => !['ai7.sqlite', 'ai7.sqlite-wal', 'ai7.sqlite-shm'].includes(basename(source)) });
+    const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
+    try { await backup(db, join(crashRoot, 'store/ai7.sqlite')); } finally { db.close(); }
+  } finally { await closeCapturedSession(first); }
+  const second = await openCapturedSession(sample1SynthesisAnswer, {}, false, false, false, 0, crashRoot);
+  try {
+    second.store.reconcileStoppedReviewCategoryRuns();
+    const run = workspace(second, book, runId).run!;
+    expect(run.synthesis?.state).toBe('missing'); expect(run.canContinue).toBe(false);
+    expect(run.findings).toEqual(findings);
+    await second.driver.drive(runId); expect(second.capture.requests).toHaveLength(0);
+  } finally { await closeCapturedSession(second); }
+});
+
+it.each([['```json\n', '\n```'], ['审阅总结：\n', '\n请逐条核对。']])('accepts the fenced or prose-wrapped ordinary synthesis answer %s (#1433 R6)', async (prefix, suffix) => {
+  await withCapturedReviewBook(async (session, book) => {
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
+    expect(workspace(session, book).run!.synthesis!.summary!.recurringProblems.length).toBeGreaterThan(0);
+  }, message => { const answer = sample1SynthesisAnswer(message); return answer?.kind === 'unit-result' ? { ...answer, text: prefix + answer.text + suffix } : answer; });
 });

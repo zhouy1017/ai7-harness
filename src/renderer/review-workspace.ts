@@ -1,4 +1,4 @@
-import { rendererApi } from './navigation-generation.js';
+import { navigation, rendererApi } from './navigation-generation.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
@@ -1076,9 +1076,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     section.append(heading);
     if (run.synthesis !== undefined) {
       const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
-        if (evidence.blockId !== null) void options.goToText({ manuscriptId: run.manuscript.manuscriptId,
-          branchId: run.manuscript.branchId, blockId: evidence.blockId, markId: null });
+        if (destroyed || evidence.blockId === null) return;
+        const current = navigation.read(host);
+        const finding = run.findings.find(entry => entry.findingId === evidence.findingId);
+        options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
+        void options.goToText({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
+          blockId: evidence.blockId, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null })
+          .catch(error => { if (current.isCurrent()) options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error'); });
       }) as HTMLDetailsElement;
+      if (run.usage !== undefined) summary.append(el('p', 'review-run-usage', `本次共进行了 ${run.usage.requests} 次模型调用。`));
       summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
       summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
       section.append(summary);
@@ -2026,6 +2032,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const overview = part('overview', record.overview.title, table);
     if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
+      ...(record.run.usage === undefined ? [] : [el('p', 'review-report-usage', `本次共进行了 ${record.run.usage.requests} 次模型调用。`)]),
       ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.run.modelLabel)]),
       overview,
       part('must-items', record.mustItems.title, must),
