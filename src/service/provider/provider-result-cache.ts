@@ -320,7 +320,7 @@ export function providerSemanticDigest(body: string): string {
     return lines.map((line, index) => {
       if (index === 0) return line;
       if (/^单元 \d+：blk_[0-9a-f]{24}/u.test(line)) return line.replace(/blk_[0-9a-f]{24}/gu, identity);
-      return line.replace(/^(\[)(blk_[0-9a-f]{24})(\])/u, (_match, before: string, id: string, after: string) => `${before}${identity(id)}${after}`)
+      return line.replace(/^((?:\[[1-9][0-9]*\] )?\[)(blk_[0-9a-f]{24})(\])/u, (_match, before: string, id: string, after: string) => `${before}${identity(id)}${after}`)
         .replace(/^(- \[)([A-Za-z0-9_-]{1,64})(\]（)/u, (_match, before: string, id: string, after: string) => `${before}${identity(id)}${after}`);
     }).join('\n');
   };

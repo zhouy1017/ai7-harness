@@ -25,7 +25,7 @@ export async function clarificationRun(store: EditorialStore, dataRoot: string, 
   const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'));
   database.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
   const route = { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage };
-  const definition = ambiguous ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition()) : baselineAnalysisKindDefinition();
+  const definition = ambiguous ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition('retained-v2')) : baselineAnalysisKindDefinition('retained-v2');
   const ledger = new BaselineAnalysisStore(database, new BoundedManuscriptStore(database), route, definition);
   ledger.bindLaunch({ operationalScope: 'development-ci', live: null, policy, localFixtureRuntime: () => store.localFixtureRuntime() });
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor: caseRequestGovernor(store), ledger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });

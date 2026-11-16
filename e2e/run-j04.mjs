@@ -46,8 +46,9 @@ const SAMPLE1_UNITS = 8;
 const SAMPLE1_UNIT_RANGES = [[1, 15], [16, 25], [26, 43], [44, 59], [60, 68], [69, 75], [76, 92], [93, 97]];
 const SIDECAR_REVISION_2_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
-/** The baseline prompt contract every current Run asks under (/2, Issue #826). */
-const PROMPT_CONTRACT_DIGEST = '89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386';
+/** Current ordinal citations (/3); the historical range replay retains /2. */
+const PROMPT_CONTRACT_DIGEST = '0873454949bb92adc50284fb102baaf7e1759565f5841724ac38446988d2688d';
+const RETAINED_V2_PROMPT_CONTRACT_DIGEST = '89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386';
 /** Prompt contract /1, which the recorded 2026-10-12 Run was asked under and its replay asks again. */
 const RECORDED_PROMPT_CONTRACT_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5';
 /** The baseline's sampling contract /2 (Issue #826), which a current plan pins. */
@@ -3597,7 +3598,7 @@ async function main() {
       JSON.stringify(rangeFixture.entries.map((entry) => entry.capture.subject)) === JSON.stringify(['unit', 'unit', 'reduction', 'sampling', 'sampling', 'sampling']) &&
       rangeFixture.entries.every((entry) => entry.capture.model === 'deepseek-v4.1-flash' && entry.capture.route === 'opencode-go' &&
         entry.capture.evidenceScope === 'namespaced' && entry.capture.capturedAt.startsWith('2026-10-13') &&
-        entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
+        entry.capture.taskPromptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST) &&
       rangeFixture.entries.filter((entry) => entry.capture.subject === 'sampling').every((entry) => entry.capture.promptContractDigest === SAMPLING_CONTRACT_DIGEST),
     'range-recorded-source-provenance');
 
@@ -3665,7 +3666,7 @@ async function main() {
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
         JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&
-      rangeRecordedPrepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+      rangeRecordedPrepared.planEnvelope?.promptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST &&
       rangeRecordedPrepared.executionPlan?.assurancePromptContractDigest === SAMPLING_CONTRACT_DIGEST &&
       rangeRecordedPrepared.actions?.canAuthorize === false, 'range-recorded-prepared-plan');
 
@@ -3678,7 +3679,7 @@ async function main() {
     requireJourney(rangeRecorded?.run?.state === 'completed' && rangeRecorded.taskOutcome?.classification === 'completed' &&
       rangeRevision?.ordinal === 2 && rangeRecorded.taskOutcome.resultSetRevisionId === rangeRevision.revisionId &&
       JSON.stringify(rangeRecorded.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
-      rangeRecorded.run.attempt?.executionBinding?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+      rangeRecorded.run.attempt?.executionBinding?.promptContractDigest === RETAINED_V2_PROMPT_CONTRACT_DIGEST &&
       rangeRevision.adapterPin?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY && rangeRevision.adapterPin.fixtureSha256 === rangeFixtureDigest,
     'range-recorded-settled-run');
     // Eight units closed: units 1 and 2 recomputed from the recorded /2 answers, the other six reused from the /1 revision.

@@ -4,6 +4,7 @@ import {
   BASELINE_PROMPT_CONTRACT_DIGEST,
   BASELINE_PROMPT_CONTRACT_V1,
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
+  BASELINE_PROMPT_CONTRACT_V2_DIGEST,
   unitRequestDigest,
 } from '../../src/service/analysis/contract.js';
 import {
@@ -12,7 +13,7 @@ import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
 } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cross-unit-contract.js';
+import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST as BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cross-unit-contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
 import {
   BASELINE_SCHEMA_DIGEST,
@@ -107,7 +108,7 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     for (const key of ['kind', 'contractVersion', 'unitResultSchema', 'revisionSchema', 'successorRevisionSchema', 'reducerDigest', 'outOfScope'] as const) {
       expect(retained[key]).toEqual(current[key]);
     }
-    expect(retained.crossUnit).toEqual(current.crossUnit);
+    expect(retained.crossUnit).not.toEqual(current.crossUnit);
     // Each selection binds its sampling contract with it: the current baseline samples under /2, the retained /1 under
     // sampling /1 as the recorded Run did, and the factual kind stays on sampling /1.
     expect(current.assurance).toMatchObject({ prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2, promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
@@ -128,8 +129,8 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     }
   });
 
-  it('names no third contract', () => {
-    for (const unknown of ['v1', 'retained-v2', 'toString', '__proto__', 'hasOwnProperty']) {
+  it('refuses unknown contract names', () => {
+    for (const unknown of ['v1', 'unknown', 'toString', '__proto__', 'hasOwnProperty']) {
       expect(() => baselineAnalysisKindDefinition(unknown as BaselinePromptContractSelection)).toThrowError(/ANALYSIS_PROMPT_CONTRACT_UNKNOWN/u);
     }
   });
@@ -230,4 +231,15 @@ describe('the sampling contract a frozen plan names (Issue #826 stage pin)', () 
     expect(assuranceContractMoved(factualReviewKindDefinition(), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST)).toBe(false);
     expect(assuranceContractMoved({ assurance: null }, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST)).toBe(false);
   });
+});
+
+it('retains /2 only for the J-04 range recording with its original provenance', () => {
+  const identity = 'sample1-recorded-v41-range';
+  const fixture = { identity, lineage: [{ identity, sha256: SYNTHETIC_SHA }], entries: new Map([['unit', entry(1, capture({
+    taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_V2_DIGEST, promptContractDigest: BASELINE_PROMPT_CONTRACT_V2_DIGEST,
+  }))]]) };
+  expect(baselinePromptContractForLaunch({ operationalScope: 'development-ci', journey: 'J-04', fixture })).toBe('retained-v2');
+  expect(() => baselinePromptContractForLaunch({ operationalScope: 'ordinary-production', journey: 'J-04', fixture })).toThrow();
+  expect(() => baselinePromptContractForLaunch({ operationalScope: 'development-ci', journey: 'J-09', fixture })).toThrow();
+  expect(() => baselinePromptContractForLaunch({ operationalScope: 'development-ci', journey: 'J-04', fixture: { ...fixture, entries: new Map([['unit', entry(1, capture())]]) } })).toThrow();
 });

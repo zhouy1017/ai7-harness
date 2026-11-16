@@ -93,6 +93,13 @@ export function modelNumber(value: unknown): number {
   return typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
 }
 
+/** Integer references accept plain decimal strings, never exponent, radix or fractional notation. */
+export function modelInteger(value: unknown): number {
+  if (typeof value === 'string' && !/^[+-]?\d+$/u.test(value.trim())) return NaN;
+  const number = modelNumber(value);
+  return Number.isSafeInteger(number) ? number : NaN;
+}
+
 export type { ModelResultSalvage, SalvagedModelResult } from '../../shared/protocol/analysis.js';
 
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;

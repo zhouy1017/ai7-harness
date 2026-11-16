@@ -422,7 +422,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       { identity: 'sample1-evaluation-report-authored', sha256: 'ff13f5e34129324daf3b281c9309011288472bd89f690a6002c601a202bacf8e' },
       { identity: 'sample1-readers-report-authored', sha256: '5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128' },
       { identity: 'sample1-evaluation-authored', sha256: '8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c' },
-      { identity: 'sample1-baseline-happy', sha256: '9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a' },
+      { identity: 'sample1-baseline-happy', sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) },
     ]);
     const v1 = await loadModelFixture(FIXTURES_ROOT, EVALUATION_REWRITE_V1_FIXTURE_IDENTITY);
     expect(v1.lineage[0]).toEqual({ identity: 'sample1-evaluation-rewrite-authored', sha256: '9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194' });

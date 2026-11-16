@@ -15,7 +15,9 @@ import {
 } from '../../src/service/analysis/contract.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST,
   buildCrossUnitMessage,
+  crossUnitRows,
   citedBlocksByUnit,
   crossUnitRequestDigest,
   parseCrossUnitMessageHeader,
@@ -257,8 +259,8 @@ describe('model fixture loading', () => {
   it('(vi) sample1-baseline-transient-retry layers a first-attempt PROVIDER_ERROR 503 for unit 5 over shape (ii)', async () => {
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
     expect(transient.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-transient-retry', 'sample1-baseline-one-unit-failure', 'sample1-baseline-happy']);
-    const unit5 = '8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9';
-    const unit2 = '6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b';
+    const unit5 = '57b76db8086ad0e040450c7ac70668282cc7d5cfcd4c7c27ef6a8e5175884ffd';
+    const unit2 = 'e6b0ef17d9a35579308c3f75be5b1b7b6d5dc50759d45692af78997a0d7cf7ec';
     expect(resolveFixtureEntry(transient.entries, 5, unit5, 1)?.response).toMatchObject({ kind: 'adapter-failure', code: 'PROVIDER_ERROR', status: 503 });
     expect(resolveFixtureEntry(transient.entries, 5, unit5, 2)?.response).toMatchObject({ kind: 'unit-result', usage: { inputTokens: 1400, outputTokens: 180 } });
     expect(classifyModelFailure({ code: 'PROVIDER_ERROR', message: '', status: 503 }, codes).retrySafe).toBe(true);
@@ -306,7 +308,7 @@ describe('model fixture loading', () => {
     // The J-10 fixture: unit 4's first attempt only, over the happy fixture, which answers its second.
     const journey = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
     expect(journey.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-outcome-unknown', 'sample1-baseline-happy']);
-    const unit4 = '8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2';
+    const unit4 = '2124bcc317fa26aeb8506fe820aad0531c8fbaba12e822f865c85f03587a4ce1';
     expect(resolveFixtureEntry(journey.entries, 4, unit4, 1)?.response.kind).toBe('outcome-unknown');
     expect(resolveFixtureEntry(journey.entries, 4, unit4, 2)?.response.kind).toBe('unit-result');
     expect(journey.entries.size).toBe(happy.entries.size + 1);
@@ -470,10 +472,7 @@ describe('cross-unit reduction replay', () => {
     findings: [{
       kind: 'contradiction',
       description: '合成矛盾：单元 1 与单元 3 对合成之城的方位陈述不一致。',
-      sides: [
-        { unitOrdinal: 1, sourceRanges: [{ blockId: '{{unit:1:block:2}}', fromGrapheme: null, toGrapheme: null }] },
-        { unitOrdinal: 3, sourceRanges: [{ blockId: '{{unit:3:block:2}}', fromGrapheme: null, toGrapheme: null }] },
-      ],
+      rowRefs: ['r3', 'r4'],
       confidence: 'medium',
     }],
     notes: [],
@@ -501,18 +500,41 @@ describe('cross-unit reduction replay', () => {
     };
   }
 
-  it('answers the reduction from its ordinal-0 entry with every cited block substituted', async () => {
+  it('replays a frozen old reduction even when the task contract is wrapped', async () => {
+    const fixture = await loadModelFixture(root, 'reduction');
+    const original = [...fixture.entries.values()][0]!;
+    const digest = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST, unitSetDigest(CLOSED));
+    const old = { ...fixture, entries: new Map([[fixtureEntryKey(0, digest), { ...original, requestDigest: digest }]]) };
+    const adapter = new Ai7LocalDeterministicAdapter(old, 'a'.repeat(64), codes, { crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_V1_DIGEST });
+    const chunks = await collect(adapter.stream(reductionRequest(buildCrossUnitMessage(CLOSED, 8, false))));
+    expect(chunks.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 700, outputTokens: 90 } });
+  });
+
+  it('answers indexed reduction references from the frozen stage key', async () => {
     const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
     const chunks = await collect(adapter.stream(reductionRequest(MESSAGE)));
     const replayed = chunks.find((chunk) => chunk.type === 'block-end');
     const text = replayed?.type === 'block-end' && replayed.block.type === 'text' ? replayed.block.text : '';
     expect(text).not.toContain('{{unit:');
-    const parsed = parseCrossUnitResult(text, { closedOrdinals: [1, 3], citedBlocksByUnit: citedBlocksByUnit(CLOSED) });
+    const parsed = parseCrossUnitResult(text, { closedOrdinals: [1, 3], citedBlocksByUnit: citedBlocksByUnit(CLOSED), rows: crossUnitRows(CLOSED) });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     // Each side cites the exact block the message listed second for its own unit.
     expect(parsed.result.findings[0]!.sides.map((side) => side.sourceRanges[0]!.blockId)).toEqual([BLOCK_B, BLOCK_D]);
     expect(chunks.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 700, outputTokens: 90 } });
+  });
+
+  it('keeps wrapped reduction fixture keys distinct from the bare stage key', async () => {
+    const fixture = await loadModelFixture(root, 'reduction');
+    const stageDigest = '8'.repeat(64);
+    const options = { crossUnitPromptContractDigest: stageDigest };
+    const refused = await collect(new Ai7LocalDeterministicAdapter(fixture, '9'.repeat(64), codes, options).stream(reductionRequest(MESSAGE)));
+    expect(refused.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error' } });
+    const original = [...fixture.entries.values()][0]!;
+    const requestDigest = crossUnitRequestDigest(stageDigest, unitSetDigest(CLOSED));
+    const wrapped = { ...fixture, entries: new Map([[fixtureEntryKey(0, requestDigest), { ...original, requestDigest }]]) };
+    const chunks = await collect(new Ai7LocalDeterministicAdapter(wrapped, '9'.repeat(64), codes, options).stream(reductionRequest(MESSAGE)));
+    expect(chunks.find((chunk) => chunk.type === 'usage')).toBeDefined();
   });
 
   it('fails closed when the closed unit set is not the one the entry answers', async () => {
@@ -685,6 +707,25 @@ describe('assurance sampling replay', () => {
  * hand-written ordinal-0 entry be keyed at all, and this suite is what keeps it honest.
  */
 describe('sample1 cross-unit reduction entries', () => {
+  it('authors happy-path fixtures with ordinal unit answers and row-index reduction answers', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const entries = [...fixture.entries.values()].filter((entry) => entry.response.kind === 'unit-result');
+    const units = entries.filter((entry) => entry.unitOrdinal > 0);
+    expect(units).toHaveLength(9);
+    for (const entry of units) {
+      if (entry.response.kind !== 'unit-result') throw new Error('EXPECTED_UNIT_RESULT');
+      const body = JSON.parse(entry.response.text);
+      for (const item of ['entities', 'events', 'relationships', 'settingClaims', 'conflicts', 'unresolved'].flatMap((section) => body[section])) {
+        expect(Array.isArray(item.blockOrdinals)).toBe(true);
+      }
+      expect(entry.response.text).not.toContain('sourceRanges');
+    }
+    const reductions = entries.filter((entry) => entry.response.kind === 'unit-result' && entry.response.text.includes('cross-unit-result/1'));
+    expect(reductions).toHaveLength(1);
+    expect(reductions[0]!.response).toMatchObject({ text: expect.stringContaining('rowRefs') });
+    expect(reductions[0]!.response).not.toMatchObject({ text: expect.stringContaining('sourceRanges') });
+  });
+
   /** Enough synthetic identities for any unit of the sample1 manifest; distinct per unit and per position. */
   function syntheticBlockIds(unitOrdinal: number): string[] {
     return Array.from({ length: 32 }, (_item, index) => `blk_${String(unitOrdinal).padStart(2, '0')}${String(index + 1).padStart(2, '0')}${'0'.repeat(20)}`);
@@ -732,9 +773,9 @@ describe('sample1 cross-unit reduction entries', () => {
     const setC = unitSetDigest(closedSet(happy, EIGHT, ORIGINAL_UNIT_ONE));
     expect(new Set([setA, setB, setC]).size).toBe(3);
     expect([setA, setB, setC]).toEqual([
-      '07dcb9d6dc825a008ba491c8f0fcb236252b8dba68ceaa1be738b2614473857f',
-      '330f5f44073d4758826cbe384c615677ff1e53fa55c546ac7b30bbb218d682e1',
-      '487d3aa59a9aa024db456117b35d6c46ea52590b2e1bf6a5d901dddcab9eaeac',
+      '03428b1897d5cda554fe103faee80a04e176a2a2e40bdfbdae9501a768c26ae8',
+      '397f9aacb088456f5d8074837b963bb11572c9bc71d486116583072a0f7fff6b',
+      '4a9f9b5d4b2f06b454dbf91c00cb313d2f2a55574d7681930c1c059db5814c16',
     ]);
 
     // The variants restate no reduction entry of their own: the two seven-unit sets are a property of
