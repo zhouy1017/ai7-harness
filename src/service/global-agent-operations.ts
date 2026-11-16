@@ -1,3 +1,4 @@
+import { editorialMemoryGovernanceItem, governedMemoryItems, preferenceItems, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { procedureStopped } from './procedures/editable.js';
 import { sha256Hex } from './analysis/canonical.js';
@@ -79,6 +80,17 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
     const memory = host.memoryFacade();
     const basis = memory.globalSourceBasis(operationalScope);
     const facts = memory.globalSources(operationalScope, internalGlobalOriginalFieldsSelected(host), basis);
+    const base = basis.preference === null ? null : { ...basis.preference, lines: basis.preference.governance?.baseLines ?? basis.preference.lines };
+    const redact = (text: string) => memory.redact(text, facts.names);
+    const items = governedMemoryItems(preferenceItems(base), facts.legacyDirectives).map(item => ({ ...item, text: redact(item.text),
+      revisionId: item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base') }));
+    const mutableMemories = facts.revisions.map(entry => ({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: redact(entry.current.title) }));
+    const sources: GlobalAgentSourceCandidate[] = [
+      ...facts.revisions.flatMap(entry => entry.sourceRevision === null ? [] : [{ itemId: entry.current.itemId,
+        revisionId: entry.sourceRevision, kind: 'memory' as const, title: redact(entry.current.title), text: redact(entry.current.title) }]),
+      ...facts.legacy.map(entry => ({ itemId: entry.itemId, revisionId: entry.versionId, kind: 'memory' as const, title: redact(entry.title), text: redact(entry.title) })),
+      ...supervisionSourceCandidates(basis.directives).map(entry => ({ ...entry, text: redact(entry.text) })),
+    ];
     const blocked = operationalScope === 'ordinary-production' && host.getConfiguredModelRoleBinding('fast-interaction') === null
       ? MODEL_SERVICE_SETUP_REQUIRED_REASON : GLOBAL_AGENT_POLICY_BLOCKED;
     return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : blocked,
@@ -87,11 +99,11 @@ export function inspectGlobalAgent(host: GlobalAgentOperationsHost, live: (attem
         : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
       categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
       books: host.authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
-      items: facts.items, sourceCandidates: [
-        ...facts.preferences.map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
+      items: [...items, ...mutableMemories], sourceCandidates: [
+        ...items.filter(item => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
           title: `本社审阅偏好 · ${reviewCategoryDisplayLabel(item.categoryId, reviewCategoryEntry(item.categoryId)?.label)}`, text: item.text })),
-        ...facts.sources,
-      ], directives: facts.directives, history: internalGlobalAgentHistory(host, live) };
+        ...sources,
+      ], directives: basis.directives, history: internalGlobalAgentHistory(host, live) };
   });
 }
 

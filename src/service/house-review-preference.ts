@@ -1,3 +1,4 @@
+import { referencedRules } from './learning/memory-facade.js';
 import type { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems } from './learning/supervision-directives.js';
@@ -973,9 +974,7 @@ export function houseReviewPreferenceKindDefinition(base: AnalysisKindDefinition
   valid(preference.selection === undefined || preference.lines.length <= (preference.editorialMemory === undefined ? 5 : 15) &&
     preference.selection.lineIndexes.length === preference.lines.length &&
     new Set(preference.selection.lineIndexes).size === preference.lines.length);
-  const referencedRuleVersions: ReferencedRuleVersion[] = preference.selection === undefined ? [] : preference.lines.map((text, index) => ({
-    versionId: preference.versionId, ordinal: preference.ordinal, lineIndex: preference.selection!.lineIndexes[index]!, text,
-  }));
+  const referencedRuleVersions: ReferencedRuleVersion[] = referencedRules(preference);
   const memory = preference.editorialMemory === undefined ? null : composeEditorialMemoryBlock(preference.lines.map((text, index) => ({
     text, versionId: preference.versionId, ordinal: preference.ordinal, lineIndex: index,
     categoryId: preference.editorialMemory!.categories[index]!, bookId: null, active: true, confidence: 0, recordedAt: '2000-01-01T00:00:00.000Z',

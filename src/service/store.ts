@@ -18633,7 +18633,10 @@ export class EditorialStore {
     const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
       materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
         wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
-    const ledger = this.#memoryFacade();
+    // This import's three operations historically shared one ledger/read proof across its writes.
+    // A facade factory per method would re-read controls here; retain that operation-local lifetime.
+    const learning = this.#learningLedger();
+    const ledger = new EditorialMemoryFacade(this.#authority, () => learning);
     const controls = ledger.wordImportControls(bookId, materials);
     if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
       'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');

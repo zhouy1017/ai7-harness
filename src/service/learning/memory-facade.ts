@@ -1,10 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { GlobalAgentSourceCandidate, GlobalMemoryItem, HouseReviewPreferenceUse, HouseReviewPreferenceVersion, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
+import type { GlobalMemoryItem, HouseReviewPreferenceUse, HouseReviewPreferenceVersion, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel, preferenceNames, withoutNames } from '../house-review-preference.js';
 import { EditorialLearningLedger } from './ledger.js';
 import { requireStore } from '../store-records.js';
 import { editorialMemoryDigest, editorialMemoryPrompt, type EditorialMemorySnapshot } from './editorial-memory.js';
-import { SupervisionDirectives, editorialMemoryGovernanceItem, governedMemoryItems, preferenceItems, supervisionSourceCandidates } from './supervision-directives.js';
+import { SupervisionDirectives } from './supervision-directives.js';
 
 export { housePreferenceLabel, editorialMemoryDigest };
 export type { EditorialMemorySnapshot };
@@ -19,6 +19,12 @@ export function dialogueMemoryContext(book: { bookId: string; workspace: boolean
 
 export function analysisUsesAutomaticMemory(scope: TrustedOperationalScope, version: string | null | undefined, sourceKind: string): boolean {
   return !sourceKind.startsWith('editorial-review/') && scope === 'ordinary-production' && version === 'v35';
+}
+
+/** Original selection indexes are attribution; synthetic block positions are not. */
+export function referencedRules(preference: HouseReviewPreferenceUse) {
+  return preference.selection === undefined ? [] : preference.lines.map((text, index) => ({ versionId: preference.versionId,
+    ordinal: preference.ordinal, lineIndex: preference.selection!.lineIndexes[index]!, text }));
 }
 
 /** Both values always use the same already-selected snapshot; the existing digest algebra is unchanged. */
@@ -56,11 +62,7 @@ export class EditorialMemoryFacade {
   refreshGovernance(...args: Parameters<HouseReviewPreferenceLedger['refreshGovernance']>) { return this.#preferences().refreshGovernance(...args); }
   governanceChanged(taskIntentId: string) { return this.#preferences().governanceChanged(taskIntentId, () => this.peopleNames()); }
 
-  /** Selected indexes are immutable attribution, not the positions used to format a synthetic prompt block. */
-  referencedRules(preference: HouseReviewPreferenceUse) {
-    return preference.selection === undefined ? [] : preference.lines.map((text, index) => ({ versionId: preference.versionId,
-      ordinal: preference.ordinal, lineIndex: preference.selection!.lineIndexes[index]!, text }));
-  }
+  referencedRules(preference: HouseReviewPreferenceUse) { return referencedRules(preference); }
 
   names(preference: HouseReviewPreferenceVersion | null): string[] {
     return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], this.peopleNames());
@@ -68,7 +70,7 @@ export class EditorialMemoryFacade {
   redact(text: string, names: readonly string[]) { return withoutNames(text, names); }
   directives(scope: TrustedOperationalScope) { return new SupervisionDirectives(this.db).history(scope); }
   recordSupervision(scope: TrustedOperationalScope, input: RecordLearningSupervisionInput, items: readonly GlobalMemoryItem[]) {
-    const memoryTargets = input.targets.filter(pin => this.db.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId));
+    const memoryTargets = new SupervisionDirectives(this.db).memoryTargets(input.targets);
     requireStore(memoryTargets.length === 0 || memoryTargets.length === input.targets.length, 'LEARNING_SUPERVISION_INVALID', '请分别治理记忆与偏好条目。');
     const directive = new SupervisionDirectives(this.db).record(scope, input, items);
     if (memoryTargets.length > 0) this.learning().govern(directive, memoryTargets);
@@ -81,36 +83,22 @@ export class EditorialMemoryFacade {
     return { preference: this.history(scope).at(-1) ?? null, directives: this.directives(scope) };
   }
 
-  /** The caller's policy admission stays between the same two read phases; no task callback is needed here. */
+  /** Read raw memory/source facts at the original points; the Global Agent owns their projection. */
   globalSources(scope: TrustedOperationalScope, originalFields: boolean, basis: ReturnType<EditorialMemoryFacade['globalSourceBasis']>) {
-    const { preference, directives } = basis;
-    const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
-    const names = originalFields ? [] : this.names(preference);
-    const legacyDirectives = directives.filter(directive => !directive.targets.some(pin =>
-      this.db.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId)));
-    const items = governedMemoryItems(preferenceItems(base), legacyDirectives).map(item => ({ ...item, text: withoutNames(item.text, names),
-      revisionId: item.revisionId + '@' + (directives.at(-1)?.directiveId ?? 'base') }));
-    const memories: GlobalAgentSourceCandidate[] = [];
-    const mutableMemories: GlobalMemoryItem[] = [];
+    const names = originalFields ? [] : this.names(basis.preference);
+    const legacyDirectives = new SupervisionDirectives(this.db).legacyDirectives(basis.directives);
     const learning = this.learning();
-    // The existing governance hook obtains its own read context here; retain that second factory call.
-    for (const entry of this.learning().revisions(scope)) {
-      mutableMemories.push({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: withoutNames(entry.current.title, names) });
-      if (entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2') memories.push({ itemId: entry.current.itemId,
-        revisionId: learning.sourcePinRevision(entry.current.itemId, entry.current.versionId), kind: 'memory',
-        title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
-    }
+    // The old governance hook obtained a second read context here; preserve that read order.
+    const revisions = this.learning().revisions(scope).map(entry => ({ ...entry,
+      sourceRevision: entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2'
+        ? learning.sourcePinRevision(entry.current.itemId, entry.current.versionId) : null }));
+    const legacy = [];
     for (let itemOffset: number | null = 0; itemOffset !== null;) {
       const page = learning.inspect({ signalOffset: 0, itemOffset });
-      for (const entry of page.items) {
-        if (entry.current.schema === 'ai7.global-editorial-memory/2') continue;
-        if (entry.usable) memories.push({ itemId: entry.current.itemId, revisionId: entry.current.versionId,
-          kind: 'memory', title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
-      }
+      for (const entry of page.items) if (entry.current.schema !== 'ai7.global-editorial-memory/2' && entry.usable) legacy.push(entry.current);
       itemOffset = page.nextItemOffset;
     }
-    return { items: [...items, ...mutableMemories], preferences: items.filter(item => item.state === 'active'),
-      sources: [...memories, ...supervisionSourceCandidates(directives).map(entry => ({ ...entry, text: withoutNames(entry.text, names) }))], directives };
+    return { names, legacyDirectives, revisions, legacy };
   }
 
   captureDecision(...args: Parameters<EditorialLearningLedger['captureDecision']>) { return this.learning().captureDecision(...args); }

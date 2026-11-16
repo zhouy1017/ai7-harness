@@ -2,36 +2,63 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { beforeAll, expect, it } from 'vitest';
-import type { memoryCompatibilityPacket } from '../support/memory-facade-compatibility.js';
 
-type Packet = Awaited<ReturnType<typeof memoryCompatibilityPacket>>;
-let expected: Packet;
-let actual: Packet;
+type Pins = { blocks: Array<{ surface: string; block: string | null }>; snapshots: Record<string, unknown>;
+  contexts: Array<{ surface: string; bookId: string | null; taskKind: string }>; events: Array<{ unitPreferenceReferences: unknown }>;
+  records: Record<string, unknown[]>; timing: { points: unknown[]; reads: number; order: string }; frozen: unknown[];
+  automaticDigest: string; preferenceDigests: string[] };
+let expected: Pins;
+let actual: Pins;
+// These literals were produced by the BASE, not by the facade. A future memory behaviour change must
+// deliberately review/update the affected memory literals; unrelated prompts and transport bytes are not pinned.
+// The full request/table packet is opt-in one-time PR evidence in .cache, never a permanent expectation.
 beforeAll(async () => {
-  const { base, ...packet } = JSON.parse(await readFile(resolve('tests/fixtures/database/sample1-memory-base.json'), 'utf8'));
-  expect(base).toBe('73a3e75fa16e5ba48d8467c4fbb98a68f62fd90c');
-  expected = packet;
-  const interpreter: { memoryCompatibilityPacketFrom(): Promise<Packet> } = await import(pathToFileURL(resolve('tools/memory-compatibility-packet.mjs')).href);
+  const { base, ...pins } = JSON.parse(await readFile(resolve('tests/fixtures/database/sample1-memory-base.json'), 'utf8'));
+  expect(base).toBe('73a3e75fa16e5ba48d8467c4fbb98a68f62fd90c'); expected = pins;
+  const interpreter: { memoryCompatibilityPacketFrom(): Promise<Pins> } = await import(pathToFileURL(resolve('tools/memory-compatibility-packet.mjs')).href);
   actual = await interpreter.memoryCompatibilityPacketFrom();
 }, 180_000);
 
-it.each(['analysis', 'review', 'review-synthesis', 'factual-first-synthesis', 'fast-role', 'dialogue', 'global-agent'])(
-  'keeps the base ordinary-production %s request bytes on sample1 (#1498)', surface => {
-    const base = expected.requests.filter(request => request.surface === surface);
-    expect(base.length).toBeGreaterThan(0);
-    expect(actual.requests.filter(request => request.surface === surface)).toEqual(base);
-  });
-
-it('keeps base snapshots, frozen digests, rule attribution and stored memory records (#1498)', () => {
+it('pins original rule indexes in stored category events and finding attribution (#1498)', () => {
+  expect(actual.events.length).toBeGreaterThan(0);
+  expect(actual.events).toEqual(expected.events);
+  expect(actual.snapshots.reviewAttribution).toEqual(expected.snapshots.reviewAttribution);
+});
+it('pins the 15-line and exact 1200-grapheme whole-line boundaries (#1498)', () => {
+  expect(actual.snapshots.characterCount).toBe(1200);
+  for (const key of ['lineLimit', 'characterLimit', 'excluded', 'disabled', 'restored']) expect(actual.snapshots[key]).toEqual(expected.snapshots[key]);
+});
+it('pins ignored, decision, manual and both Word capture rows plus curation publication (#1498)', () => {
+  expect(actual.records.learning_signals).toEqual(expected.records.learning_signals);
+  expect(actual.records.global_editorial_memory_item_versions).toEqual(expected.records.global_editorial_memory_item_versions);
+  expect(actual.snapshots.curation).toEqual(expected.snapshots.curation);
+  expect(JSON.stringify(actual.snapshots.curation)).toContain('"actor":"AI7"');
+});
+it('pins Global Agent name redaction and the adds-text governance bound (#1498)', () => {
+  expect(actual.snapshots.redactedSources).toEqual(expected.snapshots.redactedSources);
+  expect(JSON.stringify(actual.snapshots.redactedSources)).not.toContain('合成人名甲');
+  expect(actual.snapshots.governanceBound).toEqual(expected.snapshots.governanceBound);
+  expect(actual.snapshots.governanceBound).toContain('GLOBAL_AGENT_MEMORY_LIMIT');
+});
+it('pins custom-category selection and the distinct workspace request context (#1498)', () => {
+  expect(actual.snapshots.customCategory).toEqual(expected.snapshots.customCategory);
+  expect(actual.contexts).toEqual(expected.contexts);
+  expect(actual.contexts).toContainEqual(expect.objectContaining({ surface: 'agent-workspace', taskKind: 'agent-workspace' }));
+});
+it('pins memory blocks carried by every exercised ordinary request family (#1498)', () => {
+  expect(actual.blocks).toEqual(expected.blocks);
+  for (const surface of ['analysis', 'clarification', 'review', 'review-synthesis', 'factual-first-synthesis', 'fast-role', 'scoped-edit', 'conflict-regenerate', 'dialogue', 'agent-workspace', 'global-agent', 'curation'])
+    expect(actual.blocks.some(entry => entry.surface === surface)).toBe(true);
+});
+it('pins memory snapshots, separate digest formulas and preference records (#1498)', () => {
   expect(actual.snapshots).toEqual(expected.snapshots);
+  expect(actual.automaticDigest).toBe(expected.automaticDigest);
+  expect(actual.preferenceDigests).toEqual(expected.preferenceDigests);
   expect(actual.frozen).toEqual(expected.frozen);
-  expect(actual.bindings).toEqual(expected.bindings);
   expect(actual.records).toEqual(expected.records);
 });
-
-it('reads and writes memory at the base transaction and request-lifecycle points (#1498)', () => {
+it('pins every memory read in order with its transaction flag (#1498)', () => {
+  // Lossless dictionary + run-length encoding: no occurrence is dropped.
+  expect(actual.timing.reads).toBeGreaterThan(actual.timing.points.length);
   expect(actual.timing).toEqual(expected.timing);
-  const dialogue = actual.requests.find(request => request.surface === 'dialogue')!;
-  // The rule was changed after askAboutSelection and before begin, exactly where the base reads it.
-  expect(dialogue.body).toContain('在提问后派发前确认的准则。');
 });

@@ -21,7 +21,7 @@ import { HouseWordLists } from './house-word-list.js';
 import { HouseWordListError } from '../../shared/protocol/house-word-list.js';
 import { LOCAL_REVIEW_CATEGORY, LOCAL_REVIEW_CATEGORY_V3, REVIEW_CATEGORY_CONFIGURATION_SCHEMA } from './category-configuration.js';
 import type { LocalCheckOptions } from '../../shared/protocol/procedures.js';
-import { EditorialMemoryFacade, housePreferenceLabel } from '../learning/memory-facade.js';
+import { type EditorialMemoryFacade, housePreferenceLabel } from '../learning/memory-facade.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 import type { ReferencedRuleVersion } from '../../shared/protocol/learning.js';
 import type { HouseReviewPreferenceUse, LearningLedgerMaterialKind, ReviewRunInfluenceProjection } from '../../shared/protocol.js';
@@ -767,7 +767,7 @@ function boundedTitle(title: string): string {
  */
 export interface ReviewRunLedgers {
   executionFor?(binding: import('../launch-policy.js').ConfiguredProviderBinding): LaunchBinding;
-  memoryFacade?: () => EditorialMemoryFacade;
+  memoryFacade: () => EditorialMemoryFacade;
   ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null, contractVersion?: 1 | 2): BaselineAnalysisStore;
   /**
    * The house's 本社审阅偏好 for one category of one Book (Issue #911): its use when the category has lines and the kind's one rule
@@ -4424,7 +4424,7 @@ export class ReviewRunStore {
     });
   }
 
-  #memoryFacade(): EditorialMemoryFacade { return this.#ledgers.memoryFacade?.() ?? new EditorialMemoryFacade(this.#db); }
+  #memoryFacade(): EditorialMemoryFacade { return this.#ledgers.memoryFacade(); }
 
   /** The 本社审阅偏好 version a category's Task pinned and the materials behind what it read (Issue #912); `null` for none. */
   #influenceOf(category: SnapshotCategory): ReturnType<EditorialMemoryFacade['pinnedInfluence']> {
