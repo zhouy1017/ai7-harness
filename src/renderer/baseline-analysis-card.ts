@@ -1,3 +1,4 @@
+import { rendererApi } from './navigation-generation.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
@@ -147,7 +148,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       returnToRange.disabled = true;
       setStatus('正在打开对应稿件范围…', 'busy');
       try {
-        const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } });
+        const opened = await rendererApi.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } });
         await leaveReturnChip(opened.bookId, manuscriptId, branchId);
         if (screen.firstElementChild !== origin) return;
         await openEditorWindow(opened, bookTitle);
@@ -366,7 +367,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const more = button(ANALYSIS_MORE_REPORT_ROWS, 'secondary', async () => {
         more.disabled = true;
         try {
-          const page = await window.ai7.getAnalysisRunReportRows({ taskIntentId: report.taskIntentId, afterOrdinal: report.unitPage!.nextOrdinal! });
+          const page = await rendererApi.getAnalysisRunReportRows({ taskIntentId: report.taskIntentId, afterOrdinal: report.unitPage!.nextOrdinal! });
           if (!more.isConnected) return;
           if (page.reportDigest !== report.reportDigest) throw new Error(ANALYSIS_READ_FAILED);
           const updated = renderRunReport({ ...report, unitRows: [...(report.unitRows ?? []), ...page.rows],
@@ -584,13 +585,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         if (afterOrdinal === null) return;
         more.disabled = true;
         try {
-          const page = await window.ai7.getAnalysisRevisionUnits({ revisionId: revision.revisionId, afterOrdinal });
+          const page = await rendererApi.getAnalysisRevisionUnits({ revisionId: revision.revisionId, afterOrdinal });
           if (!more.isConnected) return;
           if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= afterOrdinal) throw new Error(ANALYSIS_READ_FAILED);
           let manifestCursor = afterOrdinal;
           // A read-only earlier revision names its ranges by ordinal on every page, as its first page does.
           while (!view.historical && page.units.some((unit) => !manifestUnits.has(unit.unitOrdinal))) {
-            const manifestPage = await window.ai7.getCoverageManifestUnits({ taskIntentId: revision.provenance.taskIntentId, afterOrdinal: manifestCursor });
+            const manifestPage = await rendererApi.getCoverageManifestUnits({ taskIntentId: revision.provenance.taskIntentId, afterOrdinal: manifestCursor });
             if (manifestPage.manifestDigest !== revision.coverageManifestDigest) throw new Error(ANALYSIS_READ_FAILED);
             for (const unit of manifestPage.units) {
               const { blockIds, blockDigests: _digests, overlapBlockIds: _overlap, ...summary } = unit;
@@ -664,7 +665,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     technical.append(element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
     synopsis.append(technical);
     void mountAnalysisFeedback({
-      card, metric: feedbackMetric, revisionId: revision.revisionId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails,
+      card, metric: feedbackMetric, revisionId: revision.revisionId, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, technicalDetails,
     }).load();
   }
 
@@ -770,7 +771,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const legacyPrepared = host.querySelector('.baseline-analysis-card')?.getAttribute('data-analysis-state') === 'prepared';
     if (quick === null && !input.reconfirm && !legacyPrepared) {
       taskDrawer.openLaunch({ bookId: host.dataset['analysisBookId']!, operation: 'launchBaselineAnalysis', title: '分析',
-        input: { goal: input.goal as Parameters<typeof window.ai7.launchBaselineAnalysis>[0]['goal'], update: input.update } }, () => controls.start);
+        input: { goal: input.goal as Parameters<typeof rendererApi.launchBaselineAnalysis>[0]['goal'], update: input.update } }, () => controls.start);
       return;
     }
     const { start, cancel, others } = controls;
@@ -779,7 +780,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     cancel.hidden = false;
     setStatus(technicalWords('正在为任务保存修订版…', '正在准备分析…'), 'busy');
     try {
-      const initial = await window.ai7.prepareBaselineAnalysis(input as Parameters<typeof window.ai7.prepareBaselineAnalysis>[0]);
+      const initial = await rendererApi.prepareBaselineAnalysis(input as Parameters<typeof rendererApi.prepareBaselineAnalysis>[0]);
       cancel.dataset['serviceJobId'] = initial.jobId;
       const completed = await awaitServiceJob(initial, (job) => {
         cancel.dataset['serviceJobId'] = job.jobId;
@@ -803,8 +804,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         if (preview) { openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null); return; }
         const ref = completed.result.taskIntent?.taskIntentId;
         if (ref === undefined) throw new Error('任务计划尚未准备完成。');
-        await startPreparedTask(window.ai7, 'baseline-analysis', ref);
-        renderBaselineAnalysis(host, await window.ai7.inspectBaselineAnalysis(), bookTitle);
+        await startPreparedTask(rendererApi, 'baseline-analysis', ref);
+        renderBaselineAnalysis(host, await rendererApi.inspectBaselineAnalysis(), bookTitle);
         setStatus('已开始分析', 'success');
       }
     } catch (error) {
@@ -827,7 +828,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     setStatus(`正在按默认执行规则「${rule.name}」开始…`, 'busy');
     let result: QuickStartBaselineAnalysisResult;
     try {
-      result = await window.ai7.quickStartBaselineAnalysis({ taskIntentId, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
+      result = await rendererApi.quickStartBaselineAnalysis({ taskIntentId, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
     } catch (error) {
       // The plan stands prepared: the bar starts it as usual.
       setStatus(rendererErrorMessage(error, '快速开始没有开始任务；计划已准备，可在任务计划里开始。'), 'error');
@@ -853,7 +854,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (!jobId) return;
       cancel.disabled = true;
       try {
-        await window.ai7.cancelServiceJob({ jobId });
+        await rendererApi.cancelServiceJob({ jobId });
       } catch (error) {
         cancel.disabled = false;
         setStatus(rendererErrorMessage(error, '无法取消基线稿件分析准备。'), 'error');
@@ -958,7 +959,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
               expectedExact.textContent = '';
               start.disabled = !action.available;
               try {
-                const picked = await window.ai7.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
+                const picked = await rendererApi.getBaselineAnalysisRangePlan({ unitOrdinal: option.unitOrdinal });
                 if (!radio.checked || !block.isConnected) return;
                 if (picked.selectedRange.startPosition !== option.startPosition || picked.selectedRange.endPosition !== option.endPosition) throw new Error(ANALYSIS_READ_FAILED);
                 block.dataset['expectedReused'] = String(picked.expected.reused);
@@ -989,7 +990,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           const more = button(ANALYSIS_MORE_CHOICES, 'secondary', async () => {
             more.disabled = true;
             try {
-              const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+              const page = await rendererApi.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
                 revisionId: null, path: 'updateControls.actions.reanalyze-range.options', afterOrdinal: after! });
               if (!more.isConnected) return;
               if (page.path !== 'updateControls.actions.reanalyze-range.options' || page.nextOrdinal !== null && page.nextOrdinal <= after!) throw new Error(ANALYSIS_READ_FAILED);
@@ -1068,7 +1069,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const open = async (revisionId: string | null): Promise<void> => {
       setStatus(revisionId === null ? technicalWords('正在返回最新修订版…', '正在返回最新分析…') : technicalWords('正在只读打开历史修订版…', '正在打开历史分析…'), 'busy');
       try {
-        const next = await window.ai7.inspectBaselineAnalysis({ revisionId });
+        const next = await rendererApi.inspectBaselineAnalysis({ revisionId });
         if (host.isConnected && next.bookId === host.dataset['analysisBookId']) {
           renderBaselineAnalysis(host, next, bookTitle);
           setStatus(revisionId === null ? technicalWords('已返回最新修订版。', '已返回最新分析。') : technicalWords('历史修订版已只读打开。', '已打开历史分析。'), 'success');
@@ -1121,7 +1122,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const more = button(ANALYSIS_EARLIER_HISTORY, 'secondary', async () => {
         more.disabled = true;
         try {
-          const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+          const page = await rendererApi.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
             revisionId: projection.inspectedRevision?.revision.revisionId ?? null, path: 'history.entries', afterOrdinal: before! });
           if (!more.isConnected) return;
           if (page.path !== 'history.entries' || before !== 0 && page.nextOrdinal !== null && page.nextOrdinal >= before!) throw new Error(ANALYSIS_READ_FAILED);
@@ -1151,7 +1152,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       host.replaceChildren(loading);
       void Promise.all(pending.map((revision) => {
         if (revision == null) throw new Error(ANALYSIS_READ_FAILED);
-        return hydrateAnalysisRevision(window.ai7, revision);
+        return hydrateAnalysisRevision(rendererApi, revision);
       })).then((overviews) => {
         if (!host.contains(loading)) return;
         const hydrate = (revision: BaselineAnalysisProjection['resultSetRevision']) => revision === null ? null : {
@@ -1210,7 +1211,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       belongs: (next) => host.isConnected && host.dataset['analysisBookId'] === (next?.bookId ?? projection.bookId),
       read: () => {
         const inspected = projection.inspectedRevision?.revision.revisionId ?? null;
-        return window.ai7.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
+        return rendererApi.inspectBaselineAnalysis(inspected === null ? undefined : { revisionId: inspected });
       },
       unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
       again: () => analysisFollowDelayMs(projection.state),
@@ -1239,7 +1240,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const records = panels.history;
     mountCustomAnalysisTab(panels.custom, {
       bookId: projection.bookId,
-      api: window.ai7,
+      api: rendererApi,
       setStatus,
       errorMessage: rendererErrorMessage,
       openPlan: (taskIntentId) => openTaskPlan(projection.bookId, 'baseline-analysis', taskIntentId),
@@ -1315,7 +1316,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const more = button(`${label} · ${ANALYSIS_MORE_CHOICES}`, 'secondary', async () => {
         more.disabled = true;
         try {
-          const page = await window.ai7.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
+          const page = await rendererApi.getBaselineAnalysisPage({ taskIntentId: projection.taskIntent!.taskIntentId,
             revisionId: projection.inspectedRevision?.revision.revisionId ?? null, path, afterOrdinal: meta.nextOrdinal! });
           if (!more.isConnected) return;
           if (page.path !== path || page.nextOrdinal !== null && page.nextOrdinal <= meta.nextOrdinal!) throw new Error(ANALYSIS_READ_FAILED);

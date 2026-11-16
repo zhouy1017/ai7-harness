@@ -1,3 +1,4 @@
+import { rendererApi } from './navigation-generation.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
@@ -2844,7 +2845,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const newChooser = state.chooser === undefined;
     const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
     if (newChooser) { state.choicePending = true; void (async () => {
-      const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), window.ai7.getPreferences()]);
+      const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), rendererApi.getPreferences()]);
       if (!state.dismissed) {
         if (state.executionConfig === undefined) { state.executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices']['review-run'] ?? {} : {}; state.rememberedChoice = Object.keys(state.executionConfig).length > 0; }
         if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, state.executionConfig);

@@ -1507,6 +1507,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'library-search',
     'restart-keeps-people',
     'evaluation-book-imported',
+    'navigation-late-answer',
     'evaluation-open',
     'evaluation-start',
     'evaluation-score',

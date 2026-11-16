@@ -43,6 +43,8 @@ export interface LaunchArguments {
   unitHoldPath: string | undefined;
   /** J-16 only (Issue #52, S17a): the file whose number says how many text deltas a dialogue answer may stream. */
   answerHoldPath: string | undefined;
+  /** J-11 only: hold the leave acknowledgement after main has revoked Book ownership. */
+  navigationAnswerHoldPath: string | undefined;
   /** J-09 only (Issue #95, S39): the 后台分析登记 quiet period in milliseconds, within its bounds. */
   backgroundQuietMs: number | undefined;
   /** J-11 only (Issue #429, EVAL-011a): the calibration gate in Books, 2–10, so the Journey proves the house offset with two Books. */
@@ -96,6 +98,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
           key === '--j16-answer-hold-path' ||
+          key === '--j11-navigation-answer-hold-path' ||
           key === CALIBRATION_MIN_BOOKS_ARGUMENT ||
           key === BACKGROUND_QUIET_ARGUMENT ||
           key === '--j05-apply-control' ||
@@ -288,6 +291,8 @@ export function parseArguments(argv: string[]): LaunchArguments {
     ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
       process.env.AI7_E2E_JOURNEY === 'J-13' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
+  const navigationAnswerHoldPath = values.get('--j11-navigation-answer-hold-path');
+  requireDesktop(navigationAnswerHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-11' && isAbsolute(navigationAnswerHoldPath)));
   const answerHoldPath = values.get('--j16-answer-hold-path');
   requireDesktop(answerHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(answerHoldPath)));
   // J-09's 后台分析登记 pace (Issue #95, S39): J-09's own, development-ci only, beside the adapter, within its bounds.
@@ -309,7 +314,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
         applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && injectedDiagnosticsFolder === undefined && connectivityPath === undefined &&
-        unitHoldPath === undefined && answerHoldPath === undefined && backgroundQuietValue === undefined && calibrationMinBooksValue === undefined),
+        unitHoldPath === undefined && answerHoldPath === undefined && navigationAnswerHoldPath === undefined && backgroundQuietValue === undefined && calibrationMinBooksValue === undefined),
   );
   return {
     dataRoot,
@@ -326,6 +331,7 @@ export function parseArguments(argv: string[]): LaunchArguments {
     connectivityPath,
     unitHoldPath,
     answerHoldPath,
+    navigationAnswerHoldPath,
     backgroundQuietMs: backgroundQuietMs ?? undefined,
     calibrationMinBooks: calibrationMinBooks ?? undefined,
     applyControl,

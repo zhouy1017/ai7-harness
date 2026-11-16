@@ -218,6 +218,7 @@ export function registerRendererHandlers(
   appearanceWindows: () => Iterable<OwnedRendererWindow>,
   notificationWindows: () => ReadonlyArray<OwnedRendererWindow>,
   journalFaultArmed: boolean,
+  navigationAnswerHoldPath?: string,
 ): () => void {
   const notifier = createNotifier({
     preferences: () => preferences.read().values,
@@ -1845,10 +1846,21 @@ export function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.leaveBookWorkbench, (event) =>
     envelope(async () => {
       const owned = requireSender(event);
-      return serializeEffect(async () => {
+      const result = await serializeEffect(async () => {
         leaveBookWorkbench(owned);
         return { state: 'library' as const };
       });
+      // Armed only by J-11's development-ci launch. The hold never blocks main's effect queue.
+      if (navigationAnswerHoldPath !== undefined && await readFile(navigationAnswerHoldPath, 'utf8').catch(() => '') === 'hold') {
+        await writeFile(`${navigationAnswerHoldPath}.held`, 'held');
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline && await readFile(navigationAnswerHoldPath, 'utf8').catch(() => '') === 'hold') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        }
+        // The next main-loop turn follows the IPC promise's reply microtasks.
+        setImmediate(() => { void writeFile(`${navigationAnswerHoldPath}.released`, 'released').catch(() => undefined); });
+      }
+      return result;
     }),
   );
   ipcMain.handle(
@@ -3758,7 +3770,7 @@ export async function runApplication(): Promise<void> {
         injectedPickerPath: undefined, injectedSavePath: undefined, injectedFolderPath: undefined,
         injectedDiagnosticsFolder: undefined, importControl: undefined, foregroundExecutionControl: undefined,
         recoveryControl: undefined, modelAdapterControl: undefined, connectivityPath: undefined, unitHoldPath: undefined,
-        answerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
+        answerHoldPath: undefined, navigationAnswerHoldPath: undefined, backgroundQuietMs: undefined, calibrationMinBooks: undefined,
         applyControl: undefined, observeJ12Reveal: false, launcherPid: 0, journalFaultArmed: false,
       };
     } else {
@@ -4528,6 +4540,7 @@ export async function runApplication(): Promise<void> {
       () => ownedWindows.values(),
       () => [...ownedWindows.values()],
       launch.journalFaultArmed,
+      launch.navigationAnswerHoldPath,
     );
     startupLocation = reachStartup('renderer-first-paint');
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

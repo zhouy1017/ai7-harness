@@ -1,3 +1,5 @@
+import { rendererApi } from './navigation-generation.js';
+import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
 import { filterChoices, stateTerm } from './components/controls.js';
 import { EXEMPLARS_FILTER_EMPTY, EXEMPLAR_ELIGIBILITY_LABELS, exemplarTitle, exemplarKind, exemplarKindFilter, exemplarFacts, readersReportExemplarFacts, readersReportExemplarAdmission } from './knowledge-base-labels.js';
@@ -61,7 +63,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it; `materialId` is
    * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
    */
-  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null): Promise<void> {
+  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null, current: NavigationCheckpoint = navigation.begin(), notice?: string): Promise<void> {
     if (tab === 'home') {
       const content = panel();
       content.classList.add('knowledge-base');
@@ -71,45 +73,50 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(button('返回', 'quiet', () => void returnToOrigin()));
       content.append(element('h2', undefined, KNOWLEDGE_BASE_TITLE), home, back);
       replaceScreen('knowledge-base', content);
+      const page = navigation.read(content);
       options.rememberReturn(content, () => renderKnowledgeBase());
-      await mountKnowledgeBaseHome(home, window.ai7, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
-      if (content.isConnected) setStatus('知识库已打开');
+      await mountKnowledgeBaseHome(home, rendererApi, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
+      if (page.isCurrent()) setStatus(notice ?? '知识库已打开');
       return;
     }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
-      await renderKnowledgeBase();
-      setStatus('该页在开发者模式下显示');
+      await renderKnowledgeBase('home', false, null, current, '该页在开发者模式下显示');
       return;
     }
     if (tab === 'rules') {
       const { content } = knowledgeBasePage(tab, tabFocused);
+      const page = navigation.read(content);
       setStatus('正在读取工序与规则…', 'busy');
       try {
-        const [rules, procedures] = await Promise.all([window.ai7.inspectDefaultExecutionRules(), window.ai7.inspectKnowledgeProcedures()]);
-        if (!content.isConnected || !technicalLayerVisible) return;
+        const [rules, procedures] = await Promise.all([rendererApi.inspectDefaultExecutionRules(), rendererApi.inspectKnowledgeProcedures()]);
+        if (!page.isCurrent() || !technicalLayerVisible) return;
         renderKnowledgeBaseProjection(rules, tabFocused, procedures);
         setStatus('工序与规则已打开');
       } catch (error) {
-        if (!content.isConnected || !technicalLayerVisible) return;
+        if (!page.isCurrent() || !technicalLayerVisible) return;
         setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
       }
       return;
     }
     const { content, panelNode } = knowledgeBasePage(tab, tabFocused);
+    const page = navigation.read(content);
     // 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005): the profile each 评估 version snapshots, and its use.
     if (tab === 'memory') {
       try {
-        await mountReviewPreferences(panelNode, window.ai7, openWordSourceVersion);
-        if (content.isConnected) setStatus('本社审阅偏好已打开');
-      } catch (error) { setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
+        await mountReviewPreferences(panelNode, rendererApi, openWordSourceVersion);
+        if (page.isCurrent()) setStatus('本社审阅偏好已打开');
+      } catch (error) { if (!page.isCurrent()) return; setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
       return;
     }
     if (tab === 'evaluation') {
       setStatus('正在读取评估方案…', 'busy');
       try {
-        renderEvaluationProfiles(panelNode, await window.ai7.inspectEvaluationProfiles(), { api: window.ai7, status: setStatus, error: rendererErrorMessage });
-        if (content.isConnected) setStatus('评估方案已打开');
+        const profiles = await rendererApi.inspectEvaluationProfiles();
+        if (!page.isCurrent()) return;
+        renderEvaluationProfiles(panelNode, profiles, { api: rendererApi, status: setStatus, error: rendererErrorMessage });
+        if (page.isCurrent()) setStatus('评估方案已打开');
       } catch (error) {
+        if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, '无法读取评估方案。'), 'error');
       }
       return;
@@ -117,9 +124,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (tab === 'exemplars') {
       setStatus(EXEMPLARS_STATUS.loading, 'busy');
       try {
-        await renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
-        if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
+        const exemplars = await rendererApi.inspectExemplars({ after: null });
+        if (!page.isCurrent()) return;
+        await renderExemplars(panelNode, exemplars);
+        if (page.isCurrent()) setStatus(EXEMPLARS_STATUS.opened);
       } catch (error) {
+        if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
       }
       return;
@@ -128,12 +138,13 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (tab === 'library') {
       setStatus(LIBRARY_STATUS.loading, 'busy');
       const surface = mountLibraryMaterials({
-        root: panelNode, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, focusMaterialId: materialId,
+        root: panelNode, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, technicalDetails, focusMaterialId: materialId,
       });
       try {
         await surface.load();
-        if (content.isConnected) setStatus(LIBRARY_STATUS.opened);
+        if (page.isCurrent()) setStatus(LIBRARY_STATUS.opened);
       } catch (error) {
+        if (!page.isCurrent()) return;
         setStatus(rendererErrorMessage(error, LIBRARY_STATUS.unavailable), 'error');
       }
       return;
@@ -143,11 +154,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       return;
     }
     setStatus(GUIDELINE_STATUS.loading, 'busy');
-    const surface = mountReviewGuidelines({ root: panelNode, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+    const surface = mountReviewGuidelines({ root: panelNode, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
     try {
       await surface.load();
-      if (content.isConnected) setStatus(GUIDELINE_STATUS.opened);
+      if (page.isCurrent()) setStatus(GUIDELINE_STATUS.opened);
     } catch (error) {
+      if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, GUIDELINE_STATUS.unavailable), 'error');
     }
   }
@@ -163,16 +175,16 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     let catalogue = [...projection.books];
     let cursor = projection.nextCursor;
     while (cursor !== null) {
-      const next = await window.ai7.inspectExemplars({ after: cursor });
+      const next = await rendererApi.inspectExemplars({ after: cursor });
       if (!root.isConnected) return;
       catalogue.push(...next.books);
       cursor = next.nextCursor;
     }
     if (!root.isConnected) return;
     const surface = {
-      api: window.ai7, status: setStatus, error: rendererErrorMessage,
+      api: rendererApi, status: setStatus, error: rendererErrorMessage,
       refresh: async () => {
-        const next = await window.ai7.inspectExemplars({ after: null });
+        const next = await rendererApi.inspectExemplars({ after: null });
         if (!root.isConnected) return;
         root.replaceChildren();
         await renderExemplars(root, next, filters, offset);
@@ -323,7 +335,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
           admit.disabled = true;
           setStatus(EXEMPLAR_READERS_REPORT_STATUS.admitting, 'busy');
           try {
-            const next = await window.ai7.admitReadersReportExemplar({
+            const next = await rendererApi.admitReadersReportExemplar({
               bookId: book.bookId, template: entry.template, revisionDigest: entry.revisionDigest, expectedDecisions: entry.admission.decisions,
             });
             if (!items.isConnected) return;
@@ -351,10 +363,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * A Book's 学习准入待处理 deep link still opens that exact Book in the developer eligibility view.
    */
   async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'preferences', bookId: string | null = null, tabFocused = false,
-    openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
+    openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null, current: NavigationCheckpoint = navigation.begin(), notice?: string): Promise<void> {
     if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
-      await renderQualityLearning('preferences', null);
-      setStatus('该页在开发者模式下显示');
+      await renderQualityLearning('preferences', null, false, null, null, current, '该页在开发者模式下显示');
       return;
     }
     const qualityTabs = visibleQualityLearningTabs(technicalLayerVisible);
@@ -411,23 +422,26 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back,
     );
     replaceScreen('quality-learning', content);
+    const page = navigation.read(content);
     options.rememberReturn(content, () => renderQualityLearning(tab, bookId, false, openMaterial, returnToReview));
     if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
     const status = tab === 'preferences' ? REVIEW_PREFERENCES_STATUS : tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : tab === 'learning' ? LEARNING_STATUS : LEARNING_AUDIT_STATUS;
     setStatus(status.loading, 'busy');
-    const surface = tab === 'preferences' ? { load: () => mountReviewPreferences(host, window.ai7, openWordSourceVersion) } : tab === 'feedback'
-      ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
+    const surface = tab === 'preferences' ? { load: () => mountReviewPreferences(host, rendererApi, openWordSourceVersion) } : tab === 'feedback'
+      ? mountFeedbackHistory({ root: host, api: rendererApi, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
       : tab === 'learning'
-        ? mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
-        : mountLearningAudit({ root: host, api: window.ai7, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, openMaterial });
+        ? mountLearningMaterials({ root: host, bookId, api: rendererApi, openSource: openLearningMaterialSource, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
+        : mountLearningAudit({ root: host, api: rendererApi, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, openMaterial });
     try {
       await surface.load();
+      if (!page.isCurrent()) return;
       if (tab === 'feedback' && technicalLayerVisible) {
         const metrics = element('div'); section.append(metrics);
-        await mountEditQualitySignals(metrics, window.ai7);
+        await mountEditQualitySignals(metrics, rendererApi);
       }
-      if (content.isConnected) setStatus(status.opened);
+      if (page.isCurrent()) setStatus(notice ?? status.opened);
     } catch (error) {
+      if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, status.unavailable), 'error');
     }
   }
@@ -507,7 +521,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       section.dataset['procedureCount'] = String(procedures.preinstalled.length);
       const captured = element('div', 'knowledge-captured');
       const list = element('div', 'procedure-library');
-      void mountEditableProcedureLibrary(list, window.ai7, async (book, kind, procedure) => {
+      void mountEditableProcedureLibrary(list, rendererApi, async (book, kind, procedure) => {
         await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
           if (['baseline-analysis', 'baseline-manuscript-analysis'].includes(kind)) renderBookAnalysis(route.bookId, route.bookTitle);
           else if (kind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
@@ -520,7 +534,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const surface = mountCapturedProcedures({
         root: captured,
         embeddedCatalog: true,
-        api: window.ai7,
+        api: rendererApi,
         setStatus,
         errorMessage: rendererErrorMessage,
         technicalDetails,
@@ -557,10 +571,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       });
       // 自定义分析维度 (Issue #922, slice 7f; ADR 0090 item 4): the house's own per-unit questions, beside its 工序.
       const custom = element('div', 'knowledge-custom');
-      const customSurface = mountCustomAnalysisDimensions({ root: custom, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, localInstantLabel });
+      const customSurface = mountCustomAnalysisDimensions({ root: custom, api: rendererApi, setStatus, errorMessage: rendererErrorMessage, technicalDetails, localInstantLabel });
       const imported = element('section', 'knowledge-imported-skills');
       panelNode.append(section, custom, imported, element('h3', undefined, RULES_HEADING));
-      void mountImportedSkills({ root: imported, api: window.ai7, setStatus, errorMessage: rendererErrorMessage }).load().catch((error: unknown) => {
+      void mountImportedSkills({ root: imported, api: rendererApi, setStatus, errorMessage: rendererErrorMessage }).load().catch((error: unknown) => {
         if (imported.isConnected) imported.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取外部 Skill。')));
       });
       void surface.load().catch((error: unknown) => {
@@ -604,9 +618,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const off = button('停用', 'secondary', async () => {
           off.disabled = true;
           setStatus('正在停用默认执行规则…', 'busy');
+          const origin = navigation.route();
           try {
-            await window.ai7.deactivateDefaultExecutionRule({ ruleId: rule.ruleId });
-            await renderKnowledgeBase('rules');
+            await rendererApi.deactivateDefaultExecutionRule({ ruleId: rule.ruleId });
+            if (origin.isCurrent()) await renderKnowledgeBase('rules', false, null, origin);
             setStatus(`已停用默认执行规则：${rule.name}；快速开始不再使用它。`, 'success');
           } catch (error) {
             off.disabled = false;
