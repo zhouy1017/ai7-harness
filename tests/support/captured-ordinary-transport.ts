@@ -5,6 +5,7 @@ import { BaselineAnalysisExecutionOwner, type ExecutionOwnerDependencies, type M
 import type { AnalysisRequestIdentity, LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { assuranceSamplingRequestDigest, parseAssuranceSamplingListedRefs, parseAssuranceSamplingMessageHeader } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { modelProfileFor } from '../../src/service/provider/model-profile.js';
 import type { ModelServiceRouteId } from '../../src/shared/protocol/model-service.js';
 import { clarificationMessageRequestDigest } from '../../src/service/provider/clarification-contract.js';
 import { parseCrossUnitCitedBlocks } from '../../src/service/analysis/cross-unit-contract.js';
@@ -69,6 +70,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const message = body.messages.findLast((entry) => entry.role === 'user')?.content;
     if (typeof message !== 'string') return refuse();
     const sessionId = new Headers(init.headers).get(OPENCODE_GO_SESSION_HEADER);
+    if (route === 'opencode-go' && sessionId === null) return refuse('session-header-missing');
     const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     let request: AnalysisRequestIdentity | undefined;
     let runRecordId: string | undefined;
@@ -116,6 +118,9 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     const text = substituteAssuranceSamplingBlockPlaceholders(substituteAssuranceSamplingRefPlaceholders(
       substituteCrossUnitBlockPlaceholders(substituteBlockPlaceholders(response.text, ownBlockIdsOf(message)), parseCrossUnitCitedBlocks(message)),
       parseAssuranceSamplingListedRefs(message)), message);
+    if (modelProfileFor(allowed.route, body.model)?.capabilities.requestShape === 'anthropic-messages')
+      return new Response(JSON.stringify({ model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn',
+        usage: { input_tokens: response.usage.inputTokens, output_tokens: response.usage.outputTokens } }), { status: 200 });
     return new Response(JSON.stringify({ model: body.model,
       choices: [{ message: { content: text }, finish_reason: 'stop' }],
       usage: { prompt_tokens: response.usage.inputTokens, completion_tokens: response.usage.outputTokens } }), { status: 200 });

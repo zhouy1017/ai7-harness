@@ -169,10 +169,11 @@ describe('frozen baseline chapter context on ordinary downstream final steps (#1
   it.each(['partial', 'header-only', 'none'] as const)(
     'freezes registered model capacity and records the actual final input with %s room (#1500 R1 R2)', async room => {
       const target = await book('initial-evaluation'), answer = await lifecycleAnswers('initial-evaluation');
-      const provider = JSON.parse(readFileSync(join(roots.codeRoot, 'config/providers/baidu-qianfan.json'), 'utf8'));
-      const registered = provider.routes[0], model = registered.models.find((entry: { context: { tokens: number | null } }) => entry.context.tokens !== null);
+      const provider = JSON.parse(readFileSync(join(roots.codeRoot, 'config/providers/anthropic-claude.json'), 'utf8'));
+      const registered = provider.routes[0], model = registered.models.filter((entry: { context: { tokens: number | null } }) => entry.context.tokens !== null).sort((a: { context: { tokens: number } }, b: { context: { tokens: number } }) => a.context.tokens - b.context.tokens)[0];
       const route = MODEL_SERVICE_ROUTES.find(route => route === registered.routeId)!;
-      const paragraph = store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).find(block => [...block.text].length > 400)!.text.replace(/\s/gu, '');
+      expect(route).toBeDefined();
+      const paragraph = store.baselineAnalysisLedger.readWorkingBlocks(target.branchId).find(block => [...block.text].length > 400)!.text.replace(/[^\p{Script=Han}]/gu, '');
       const values = new Map<number, { schema: string; unitOrdinal: number; observations: Array<{ itemId: string; blockOrdinals: number[]; note: string }> }>();
       const closed = new Map<number, { state: 'closed'; unitOrdinal: number; result: unknown }>();
       ordinary(request => {
