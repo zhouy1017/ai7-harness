@@ -18,7 +18,10 @@ function callsBookGuard(node: ts.Node, seen = new Set<ts.Declaration>()): boolea
       : ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : '';
     if (guards.has(name)) return true;
     if (ts.isIdentifier(node.expression)) {
-      for (const declaration of checker.getSymbolAtLocation(node.expression)?.declarations ?? []) {
+      const symbol = checker.getSymbolAtLocation(node.expression);
+      const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) ? checker.getAliasedSymbol(symbol) : symbol;
+      if (target && guards.has(target.name)) return true;
+      for (const declaration of target?.declarations ?? []) {
         if (seen.has(declaration)) continue;
         seen.add(declaration);
         const body = ts.isFunctionDeclaration(declaration) ? declaration.body

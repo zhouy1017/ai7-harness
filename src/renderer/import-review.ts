@@ -745,14 +745,22 @@ export function createImportReview(options: ImportReviewOptions) {
     });
   }
 
+  async function presentImportCompletion(result: ImportCommitProjection, recoveryReturn: RecoveryReturnContext | undefined, follow: NavigationCheckpoint): Promise<void> {
+    const shown = follow.isCurrent();
+    if (shown) renderImported(result, recoveryReturn);
+    setStatus(result.completionLabel, 'success');
+    if (shown) return; // The visible completion still belongs to the existing paint acknowledgement.
+    try { await rendererApi.acknowledgeImportCompletion({ commitId: result.commitId }); }
+    catch { setStatus('导入已由权威记录证明；完成提示将在下次启动时再次显示。', 'error'); }
+  }
+
   async function finishImport(review: ReviewBeforeImportProjection, recoveryReturn?: RecoveryReturnContext, follow: NavigationCheckpoint = shellNavigation.route()): Promise<void> {
     if (review.reviewDigest === null) { if (follow.isCurrent()) renderReview(review, undefined, recoveryReturn); return; }
     try {
       const result = await rendererApi.commitNewBookImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
       void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'first-manuscript' }).catch(() => setStatus('未能记住导入设置。', 'error'));
-      if (follow.isCurrent()) renderImported(result, recoveryReturn);
-    setStatus(result.completionLabel, 'success');
+      await presentImportCompletion(result, recoveryReturn, follow);
     } catch (error) {
       if (['IMPORT_COMMIT_OUTCOME_UNCERTAIN', 'REVIEW_CHANGED', 'SNAPSHOT_RESELECTION_REQUIRED', 'DRAFT_VERSION_CHANGED'].some((code) => hasErrorCode(error, code))) { if (follow.isCurrent()) await initializeStartup(); else setStatus(rendererErrorMessage(error, '导入未完成。'), 'error'); return; }
       throw error;
@@ -762,8 +770,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const result = await rendererApi.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
       reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
     void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'source-only' }).catch(() => setStatus('未能记住导入设置。', 'error'));
-    if (follow.isCurrent()) renderImported(result, recoveryReturn);
-    setStatus(result.completionLabel, 'success');
+    await presentImportCompletion(result, recoveryReturn, follow);
   }
 
   function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
@@ -899,8 +906,7 @@ export function createImportReview(options: ImportReviewOptions) {
             reviewDigest: review.reviewDigest,
             commitAttemptId: review.commitAttemptId,
           });
-          setStatus(result.completionLabel, 'success');
-          if (follow.isCurrent()) renderImported(result, recoveryReturn);
+          await presentImportCompletion(result, recoveryReturn, follow);
         } catch (error) {
           if (
             hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
@@ -1232,8 +1238,7 @@ export function createImportReview(options: ImportReviewOptions) {
           if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
             throw new Error('重新导入提交任务未返回完成凭据。');
           }
-          if (follow.isCurrent()) renderImported(result, recoveryReturn);
-          setStatus(result.completionLabel, 'success');
+          await presentImportCompletion(result, recoveryReturn, follow);
         } catch (error) {
           if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
             hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
@@ -1350,8 +1355,7 @@ export function createImportReview(options: ImportReviewOptions) {
             reviewDigest: review.reviewDigest!,
             commitAttemptId: review.commitAttemptId,
           });
-          setStatus(result.completionLabel, 'success');
-          if (follow.isCurrent()) renderImported(result, recoveryReturn);
+          await presentImportCompletion(result, recoveryReturn, follow);
         } catch (error) {
           if (
             hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||

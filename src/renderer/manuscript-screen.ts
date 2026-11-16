@@ -129,7 +129,7 @@ interface ManuscriptScreenOptions {
   renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string, focus?: { tab: 'entities' | 'events' | 'relationships' | 'settings' }): void;
   renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null): void;
   renderBookDeliverables(bookId: string, bookTitle: string): void;
-  renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void;
+  renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string; onDocument: boolean }, bookTitle: string): void;
   renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void>;
   returnToRecoveryComparison(attentionId: string): Promise<void>;
   /** 本书稿件 (Issue #1403): the Book's manuscript, and one of its derivative documents, opened on this surface. */
@@ -410,7 +410,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       if (!(await settleLocalEdit())) return;
       await rememberEntryPosition();
       if (destroyed) return;
-      renderProposalConflict({ bookId: currentWindow.bookId, manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, markId }, bookTitle);
+      renderProposalConflict({ bookId: currentWindow.bookId, manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, markId, onDocument: isDocument }, bookTitle);
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法打开稿件冲突。'), 'error');
     }

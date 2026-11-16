@@ -7,6 +7,7 @@ export class NavigationGeneration {
   private intent = 0;
   private page = 0;
   private destination: string | symbol | undefined;
+  private readonly presentationFailures = new WeakMap<object, NavigationCheckpoint>();
   bookId: string | null = null;
 
   begin(): NavigationCheckpoint {
@@ -31,6 +32,19 @@ export class NavigationGeneration {
   read(root: HTMLElement): NavigationCheckpoint {
     const page = this.page;
     return { isCurrent: () => page === this.page && root.isConnected };
+  }
+
+  /** A synchronous paint may commit its destination before throwing. Its own
+   * commit does not abandon the error, but any later navigation still does. */
+  present(draw: () => void): void {
+    try { draw(); } catch (error) {
+      if (error !== null && typeof error === 'object') this.presentationFailures.set(error, this.route());
+      throw error;
+    }
+  }
+
+  errorIsCurrent(error: unknown, origin: NavigationCheckpoint): boolean {
+    return origin.isCurrent() || (error !== null && typeof error === 'object' && this.presentationFailures.get(error)?.isCurrent() === true);
   }
 }
 
