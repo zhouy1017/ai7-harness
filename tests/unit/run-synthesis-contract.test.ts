@@ -52,7 +52,6 @@ describe('whole-book synthesis contract', () => {
       revisionId: 'baseline', synopses: Array.from({ length: 220 }, (_, index) => ({ unitOrdinal: 220 - index, synopsis: findings[index % findings.length]!.note.repeat(40) })),
     } }, 4096);
     expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(4096);
-    expect(Buffer.byteLength(JSON.stringify(JSON.parse(synthesisMessage(input)).baseline))).toBeLessThanOrEqual(1024);
     expect(input.omitted.findings + input.omitted.synopses).toBeGreaterThan(0);
     const refs = new Set(input.evidence.map((entry) => entry.ref));
     expect(input.clusters.every((cluster) => cluster.evidenceRefs.every((ref) => refs.has(ref)))).toBe(true);
@@ -67,9 +66,7 @@ it.each([[300, 40], [300, 120], [150, 200]])('keeps every cluster citable and ba
   const input = buildSynthesisInput({ findings: source, missingCategories: [], baseline: { revisionId: 'baseline',
     synopses: Array.from({ length: 40 }, (_, index) => ({ unitOrdinal: index + 1, synopsis: findings[index % findings.length]!.note.repeat(20) })) } });
   expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
-  expect(Buffer.byteLength(synthesisMessage(input), 'utf8')).toBeLessThanOrEqual(96 * 1024);
   expect(input.baseline!.synopses.length).toBeGreaterThan(0);
-  expect(Buffer.byteLength(JSON.stringify(JSON.parse(synthesisMessage(input)).baseline))).toBeLessThanOrEqual(24 * 1024);
   expect(input.clusters.length).toBeGreaterThan(0);
   expect(input.clusters.every(cluster => cluster.evidenceRefs.length > 0 && input.findings.some(finding => finding.ref === cluster.representativeRef) && cluster.evidenceRefs.every(ref => input.evidence.some(evidence => evidence.ref === ref)))).toBe(true);
   expect(input.findings.length).toBeLessThanOrEqual(200);
@@ -111,4 +108,26 @@ it('compresses coverage ordinals without cutting a number (#1433 re-review 4)', 
   const label = `未读第 ${reviewSynthesisOrdinalRanges([...Array.from({ length: 37 }, (_, index) => index + 1), 40])} 范围`;
   const input = buildSynthesisInput({ findings, missingCategories: [label], baseline: null });
   expect(input.missingCategories).toEqual(['未读第 1–37、40 范围']);
+});
+
+it.each([3, 600])('preserves all 40 baseline units with %i findings, expands into spare room and discloses even shortening (#1433 final additions)', count => {
+  const source = Array.from({ length: count }, (_, index) => ({ ...findings[0]!, findingId: `baseline-budget-${index}`,
+    note: `${index}: ${findings[0]!.note.repeat(20)}`, quote: findings[0]!.quote.repeat(20) }));
+  const input = buildSynthesisInput({ findings: source, missingCategories: [], baseline: { revisionId: 'baseline',
+    synopses: Array.from({ length: 40 }, (_, index) => ({ unitOrdinal: index + 1, synopsis: findings[0]!.note.repeat(100) })) } });
+  expect(input.baseline!.synopses.map(unit => unit.unitOrdinal)).toEqual(Array.from({ length: 40 }, (_, index) => index + 1));
+  expect(input.omitted.synopses).toBe(0);
+  expect(Buffer.byteLength(synthesisMessage(input))).toBeLessThanOrEqual(96 * 1024);
+  const lengths = input.baseline!.synopses.map(unit => [...unit.synopsis].length);
+  expect(new Set(lengths).size).toBe(1);
+  if (count === 3) {
+    expect(lengths.every(length => length === 400)).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(JSON.parse(synthesisMessage(input)).baseline))).toBeGreaterThan(24 * 1024);
+    expect(reviewSynthesisOmissionLabel(input.omitted)).toBeNull();
+  } else {
+    expect(lengths.every(length => length > 0 && length < 400)).toBe(true);
+    expect(input.omitted.shortenedSynopses).toBe(40);
+    expect(reviewSynthesisOmissionLabel(input.omitted)).toContain('40 段概述已缩短');
+    expect(input.clusters.every(cluster => cluster.evidenceRefs.length > 0)).toBe(true);
+  }
 });

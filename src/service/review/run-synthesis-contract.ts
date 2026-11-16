@@ -23,7 +23,7 @@ export interface SynthesisInput {
   findings: Array<{ ref: string; categoryId: string; clauseId: string; severity: string; summary: string; evidenceRefs: string[] }>;
   evidence: Array<{ ref: string; findingId: string; representativeRef?: string; blockId?: string | null; chapterOrdinal: number; chapterLabel: string; quote: string }>;
   baseline: null | { revisionId: string; missingUnitOrdinals?: number[]; synopses: Array<{ unitOrdinal: number; synopsis: string }> };
-  omitted: { findings: number; clusters: number; synopses: number };
+  omitted: { findings: number; clusters: number; synopses: number; shortenedSynopses?: number };
 }
 
 export type SynthesisSummary = ReviewSynthesisSummary;
@@ -54,8 +54,9 @@ const topicKey = (value: string): string => value.normalize('NFKC').replace(/\s+
 
 /** Notes and quotations are at most 80 graphemes; baseline synopses have their own 400-grapheme bound. A note is sent once, on its representative finding; clusters carry references only.
  * Keep one citable representative per cluster, ordered by occurrence count (stable ties). Reserve
- * the baseline's own quarter-budget (at most 24 KiB); trim its tail only inside that budget. Fit the
- * remaining request by dropping whole least-frequent clusters, never orphaning a kept cluster.
+ * the baseline's own quarter-budget (at most 24 KiB), shortening evenly before dropping its tail.
+ * Fit findings by dropping whole least-frequent clusters, never orphaning a kept cluster. After
+ * additional evidence, expand the synopsis chain into remaining room up to the total request cap.
  */
 export const SYNTHESIS_TEXT_LIMIT = 80;
 export function buildSynthesisInput(source: {
@@ -90,23 +91,31 @@ export function buildSynthesisInput(source: {
       findingRefs: [finding.findingId], evidenceRefs: [ref] });
   }
   const synopses = [...(source.baseline?.synopses ?? [])].sort((a, b) => a.unitOrdinal - b.unitOrdinal);
+  const candidates = synopses.slice(0, 200).map(unit => ({ unitOrdinal: unit.unitOrdinal, synopsis: bounded(unit.synopsis, 400) }));
   const baselineBudget = Math.min(24 * 1024, Math.floor(ceiling / 4));
   const baselineBytes = (synopses: Array<{ unitOrdinal: number; synopsis: string }>): number => bytes({ synopses, missingUnitOrdinals: input.baseline?.missingUnitOrdinals ?? [] });
-  for (const unit of synopses.slice(0, 200)) {
-    const entry = { unitOrdinal: unit.unitOrdinal, synopsis: bounded(unit.synopsis, 400) };
-    if (baselineBytes([...input.baseline!.synopses, entry]) > baselineBudget) break;
-    input.baseline!.synopses.push(entry);
-  }
-  // Even a small model receives at least the first available synopsis within its reserved budget.
-  if (input.baseline !== null && input.baseline.synopses.length === 0 && synopses.length > 0) {
-    const entry = { unitOrdinal: synopses[0]!.unitOrdinal, synopsis: bounded(synopses[0]!.synopsis, 400) };
-    while (baselineBytes([entry]) > baselineBudget && entry.synopsis.length > 0) entry.synopsis = bounded(entry.synopsis, [...entry.synopsis].length - 1);
-    input.baseline.synopses.push(entry);
-  }
+  const fitBaseline = (accept: () => boolean): void => {
+    if (input.baseline === null) return;
+    const set = (count: number, length: number): void => {
+      input.baseline!.synopses = candidates.slice(0, count).map(unit => ({ ...unit, synopsis: bounded(unit.synopsis, length) }));
+    };
+    // Preserve the whole chapter chain before text length; only remove tail units if even one
+    // grapheme per chapter cannot fit. A common text cap shortens all chapters evenly.
+    let low = 0, high = candidates.length;
+    while (low < high) { const count = Math.ceil((low + high) / 2); set(count, 1); if (accept()) low = count; else high = count - 1; }
+    const count = low;
+    low = 1; high = 400;
+    while (low < high) { const length = Math.ceil((low + high) / 2); set(count, length); if (accept()) low = length; else high = length - 1; }
+    set(count, low);
+  };
+  fitBaseline(() => baselineBytes(input.baseline!.synopses) <= baselineBudget);
   const updateOmissions = (): void => {
     input.omitted.findings = source.findings.length - input.clusters.reduce((sum, cluster) => sum + cluster.count, 0);
     input.omitted.clusters = grouped.size - input.clusters.length;
     input.omitted.synopses = synopses.length - (input.baseline?.synopses.length ?? 0);
+    const shortened = input.baseline?.synopses.filter((unit, index) => unit.synopsis !== candidates[index]!.synopsis).length ?? 0;
+    if (shortened > 0) input.omitted.shortenedSynopses = shortened;
+    else delete input.omitted.shortenedSynopses;
   };
   const fits = (): boolean => { updateOmissions(); return Buffer.byteLength(synthesisMessage(input), 'utf8') <= ceiling; };
   while (!fits() && input.clusters.length > 0) {
@@ -127,6 +136,7 @@ export function buildSynthesisInput(source: {
       if (!fits()) { input.evidence.pop(); cluster.evidenceRefs.pop(); input.findings[index]!.evidenceRefs.pop(); }
     }
   }
+  fitBaseline(fits);
   updateOmissions();
   return input;
 }

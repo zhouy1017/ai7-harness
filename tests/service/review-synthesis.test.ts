@@ -41,7 +41,7 @@ beforeEach(async () => { roots = await createServiceTestRoots('ai7-review-synthe
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); await roots.dispose(); });
 
 async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, dataRoot = roots.dataRoot): Promise<Session> {
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, dataRoot = roots.dataRoot, restatedSynopses = false): Promise<Session> {
   const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-review-cross-chapter-controls');
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   const bases = new Map([[TYPOS, reviewCategoryKindDefinition(TYPOS_AND_USAGE)], [STYLE, reviewCategoryKindDefinition(STYLE_AND_FORMAT)], ...(literary ? [['literary-expression', reviewCategoryKindDefinition(LITERARY_EXPRESSION)] as const] : [])]);
@@ -65,9 +65,18 @@ async function openCapturedSession(synthesisAnswer = sample1SynthesisAnswer,
     if (parseFactualReviewUnitMessageHeader(message) !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
     const baseline = parseUnitMessageHeader(message);
     if (request.stage === 'units' && baseline?.ordinal === failedUnit) return { kind: 'adapter-failure', code: 'CAPTURED_UNIT_GAP', message: 'Captured unit gap', status: 400 };
-    if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
+    if (request.stage === 'units' && baseline !== null) {
+      const response = resolveFixtureEntry(fixture.entries, baseline.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
+      if (!restatedSynopses || response?.kind !== 'unit-result') return response;
+      let value;
+      try { value = JSON.parse(response.text); } catch { return response; }
+      if (typeof value.synopsis !== 'string') return response;
+      const paragraph = store.baselineAnalysisLedger.readWorkingBlocks(restatedBranch!).find(block => [...block.text].length > 400)?.text;
+      if (paragraph !== undefined) value.synopsis = paragraph;
+      return { ...response, text: JSON.stringify(value) };
+    }
     if (request.stage === 'units' && header !== null) return { kind: 'adapter-failure', code: 'CAPTURED_CATEGORY_FAILED', message: 'Captured category failure', status: 400 };
-    if (failedUnit > 0 && request.stage === 'cross-unit-reduction') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1', findings: [], notes: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+    if ((failedUnit > 0 || restatedSynopses) && request.stage === 'cross-unit-reduction') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1', findings: [], notes: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
     const content = request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
       .map((ref) => ({ ref, disposition: '成立', reason: 'SampleBook 精确引文核对。' })) }
       : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
@@ -82,8 +91,8 @@ async function closeCapturedSession(session: Session): Promise<void> {
   try { session.capture.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
 async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>, synthesisAnswer = sample1SynthesisAnswer,
-  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0): Promise<void> {
-  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary, restatedNotes, failedUnit);
+  controls: Parameters<typeof capturedOrdinaryExecution>[5] = {}, emptyFindings = false, literary = false, restatedNotes = false, failedUnit = 0, restatedSynopses = false): Promise<void> {
+  const session = await openCapturedSession(synthesisAnswer, controls, emptyFindings, literary, restatedNotes, failedUnit, roots.dataRoot, restatedSynopses);
   try {
     const book = await importSample1Book(session.store, roots.codeRoot, 'sample1 全书审阅统合');
     restatedBranch = book.branchId;
@@ -554,23 +563,37 @@ it('keeps a prepared multi-category synthesis on the edited combined ceiling and
 });
 
 
-it('bounds every contiguous manuscript run in the captured ordinary request when finding notes restate whole paragraphs (#1433 R1)', async () => {
+it.each([false, true])('bounds every contiguous manuscript run with paragraph-restating notes and baseline %s (#1433 R1 final additions)', async withBaseline => {
   await withCapturedReviewBook(async (session, book) => {
+    if (withBaseline) {
+      const baseline = session.store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, launchPolicy);
+      session.owner.admitAndDispatch(baseline.runRecordId, session.store.baselineAnalysisLedger); await session.owner.whenIdle();
+    }
     await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
     const request = session.capture.wireRequests.find(request => request.messages.some(message => sample1SynthesisAnswer(message.content) !== undefined))!;
     const allMessages = request.messages.map(message => message.content).join('\n');
     const payload = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
     expect(payload.clusters.every((cluster: Record<string, unknown>) => !Object.hasOwn(cluster, 'topic') && typeof cluster.representativeRef === 'string')).toBe(true);
     expect(payload.findings.every((finding: { summary: string }) => [...finding.summary].length <= SYNTHESIS_TEXT_LIMIT)).toBe(true);
+    expect(payload.evidence.every((evidence: { quote: string }) => [...evidence.quote].length <= SYNTHESIS_TEXT_LIMIT)).toBe(true);
+    const bound = withBaseline ? 400 : SYNTHESIS_TEXT_LIMIT;
+    if (withBaseline) {
+      expect(payload.baseline.synopses.some((unit: { synopsis: string }) => [...unit.synopsis].length === 400)).toBe(true);
+      expect(payload.baseline.synopses.every((unit: { synopsis: string }) => [...unit.synopsis].length <= 400)).toBe(true);
+      const paragraph = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find(block => [...block.text].length > 400);
+      expect(paragraph !== undefined && payload.baseline.synopses.some((unit: { synopsis: string }) => unit.synopsis === [...paragraph.text].slice(0, 400).join(''))).toBe(true);
+      expect(REVIEW_SYNTHESIS_PLAN_LINE).toContain('每段最多 400 字');
+      expect(REVIEW_SYNTHESIS_PLAN_LINE).toContain('各最多 80 字');
+    }
     let oversized = false;
     for (const block of session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId)) {
       const words = [...block.text];
-      for (let offset = 0; offset + SYNTHESIS_TEXT_LIMIT < words.length; offset += 1)
-        if (allMessages.includes(words.slice(offset, offset + SYNTHESIS_TEXT_LIMIT + 1).join(''))) oversized = true;
+      for (let offset = 0; offset + bound < words.length; offset += 1)
+        if (allMessages.includes(words.slice(offset, offset + bound + 1).join(''))) oversized = true;
     }
     expect(oversized).toBe(false);
     expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
-  }, sample1SynthesisAnswer, {}, false, false, true);
+  }, sample1SynthesisAnswer, {}, false, false, true, 0, withBaseline);
 });
 
 it('discloses partial category coverage and missing baseline units in the request and editorial summary (#1433 R3)', async () => {
