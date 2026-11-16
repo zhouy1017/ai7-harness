@@ -3,7 +3,7 @@ import { AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
 import { prepareScopedEdit, finishScopedEdit } from '../../src/service/fast-role/scoped-edit.js';
 import { editorialMemoryDigest } from '../../src/service/learning/editorial-memory.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
-import { houseReviewPreferenceKindDefinition } from '../../src/service/house-review-preference.js';
+import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition } from '../../src/service/house-review-preference.js';
 import { strictEqual, ok } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -287,6 +287,11 @@ export async function memoryCompatibilityPacket() {
     capture.assertMatched();
     const db = new DatabaseSync(join(roots.dataRoot, 'store/ai7.sqlite'), { readOnly: true });
     try {
+      surface = 'transaction-placement';
+      db.exec('BEGIN');
+      new HouseReviewPreferenceLedger(db).history('ordinary-production');
+      db.exec('COMMIT');
+      surface = 'packet-readback';
       const tables = ['learning_signals', 'editorial_learning_controls', 'global_editorial_memory_items', 'global_editorial_memory_item_versions', 'house_review_preference_versions', 'learning_supervision_directives', 'review_run_preference_pins', 'review_run_category_events'];
       const records = Object.fromEntries(tables.map(table => [table, db.prepare('SELECT * FROM ' + table + ' ORDER BY rowid').all()]));
       const envelopes = db.prepare("SELECT t.kind,p.canonical_json,p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id=p.task_intent_id WHERE p.component='plan-envelope' ORDER BY p.rowid").all();

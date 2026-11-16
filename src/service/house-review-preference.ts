@@ -1,4 +1,4 @@
-import { referencedRules } from './learning/memory-facade.js';
+import { referencedRules } from './learning/rule-references.js';
 import type { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems } from './learning/supervision-directives.js';

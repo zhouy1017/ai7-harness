@@ -5,7 +5,7 @@ import { beforeAll, expect, it } from 'vitest';
 
 type Pins = { blocks: Array<{ surface: string; block: string | null }>; snapshots: Record<string, unknown>;
   contexts: Array<{ surface: string; bookId: string | null; taskKind: string }>; events: Array<{ unitPreferenceReferences: unknown }>;
-  records: Record<string, unknown[]>; timing: { points: unknown[]; reads: number; order: string }; frozen: unknown[];
+  records: Record<string, unknown[]>; attributionLists: unknown[]; timing: { points: unknown[]; order: string }; frozen: unknown[];
   automaticDigest: string; preferenceDigests: string[] };
 let expected: Pins;
 let actual: Pins;
@@ -21,6 +21,7 @@ beforeAll(async () => {
 
 it('pins original rule indexes in stored category events and finding attribution (#1498)', () => {
   expect(actual.events.length).toBeGreaterThan(0);
+  expect(actual.attributionLists).toEqual(expected.attributionLists);
   expect(actual.events).toEqual(expected.events);
   expect(actual.snapshots.reviewAttribution).toEqual(expected.snapshots.reviewAttribution);
 });
@@ -57,8 +58,8 @@ it('pins memory snapshots, separate digest formulas and preference records (#149
   expect(actual.frozen).toEqual(expected.frozen);
   expect(actual.records).toEqual(expected.records);
 });
-it('pins every memory read in order with its transaction flag (#1498)', () => {
-  // Lossless dictionary + run-length encoding: no occurrence is dropped.
-  expect(actual.timing.reads).toBeGreaterThan(actual.timing.points.length);
+it('pins distinct memory read order and transaction placement (#1498)', () => {
+  // Consecutive repeats are cache details; transitions and actual execution flags are memory timing.
+  expect(actual.timing.points).toContainEqual(expect.objectContaining({ surface: 'transaction-placement', inTransaction: true }));
   expect(actual.timing).toEqual(expected.timing);
 });

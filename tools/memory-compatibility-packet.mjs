@@ -23,7 +23,8 @@ export async function memoryCompatibilityPacketFrom(revision = null, { full = fa
       // Historical substitution covers .ts only. If a memory owner gains another source extension, extend this before authoring.
       builder.onLoad({ filter: /\.ts$/ }, async args => {
         const path = relative(root, args.path).replaceAll('\\', '/');
-        if (!path.startsWith('src/') && (!path.startsWith('tests/support/') || path === 'tests/support/memory-facade-compatibility.ts')) return;
+        if (!path.startsWith('src/') && !path.startsWith('tests/support/')) return;
+        if (path === 'tests/support/memory-facade-compatibility.ts' && mutation?.path !== path) return;
         const source = revision === null ? await readFile(args.path, 'utf8')
           : (await execute('git', ['show', revision + ':' + path], { cwd: root, windowsHide: true, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' })).stdout;
         if (path !== mutation?.path) return { contents: source, loader: 'ts' };
@@ -42,7 +43,7 @@ export async function memoryCompatibilityPacketFrom(revision = null, { full = fa
   return JSON.parse(await readFile(packet, 'utf8'));
 }
 
-/** Select memory facts without rewriting any value. Dictionary encoding retains EVERY read in its original order. */
+/** Select memory facts without rewriting their values. Timing retains distinct transitions, not cache-dependent repeats. */
 export function memorySpecificPins(packet) {
   const blocks = [];
   for (const request of packet.requests) {
@@ -65,26 +66,27 @@ export function memorySpecificPins(packet) {
     if (index === -1) { index = points.length; points.push(point); }
     return index;
   });
+  const attributionLists = [];
   const events = packet.records.review_run_category_events.flatMap(row => {
     const event = JSON.parse(row.canonical_json);
     return event.unitPreferenceReferences === undefined ? [] : [{ reviewRunId: row.review_run_id, categoryId: row.category_id,
-      sequence: row.sequence, unitPreferenceReferences: event.unitPreferenceReferences }];
+      sequence: row.sequence, unitPreferenceReferences: event.unitPreferenceReferences.map(reference => {
+        const { referencedRuleVersions, ...unit } = reference;
+        let ruleList = attributionLists.findIndex(value => JSON.stringify(value) === JSON.stringify(referencedRuleVersions));
+        if (ruleList === -1) { ruleList = attributionLists.length; attributionLists.push(referencedRuleVersions); }
+        return { ...unit, ruleList };
+      }) }];
   });
   const records = Object.fromEntries(['learning_signals', 'global_editorial_memory_items',
     'global_editorial_memory_item_versions', 'learning_supervision_directives'].map(table => [table, packet.records[table]]));
   records.review_run_preference_pins = packet.records.review_run_preference_pins.map(row => JSON.parse(row.canonical_json).preference);
   // The current published row is enough; retaining all predecessor publications repeats the same lines quadratically.
   records.house_review_preference_versions = packet.records.house_review_preference_versions.slice(-1);
-  const runs = [];
-  for (const index of order) {
-    const last = runs.at(-1);
-    if (last?.index === index) last.count++;
-    else runs.push({ index, count: 1 });
-  }
   const frozen = packet.frozen.map(value => ({ kind: value.kind, editorialMemory: value.editorialMemory }));
   return { blocks, snapshots, contexts: packet.contexts, automaticDigest: packet.automaticDigest, preferenceDigests: packet.preferenceDigests,
     frozen: frozen.filter((value, index) => frozen.findIndex(other => JSON.stringify(value) === JSON.stringify(other)) === index),
-    events, records, timing: { points, reads: order.length, order: runs.map(run => run.index.toString(36) + ':' + run.count.toString(36)).join(',') } };
+    attributionLists, events, records, timing: { points,
+      order: order.filter((index, position) => position === 0 || order[position - 1] !== index).map(index => index.toString(36)).join(',') } };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

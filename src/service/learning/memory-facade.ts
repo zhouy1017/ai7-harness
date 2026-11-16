@@ -1,3 +1,4 @@
+import { referencedRules } from './rule-references.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { GlobalMemoryItem, HouseReviewPreferenceUse, HouseReviewPreferenceVersion, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
 import { HouseReviewPreferenceLedger, housePreferenceLabel, preferenceNames, withoutNames } from '../house-review-preference.js';
@@ -19,12 +20,6 @@ export function dialogueMemoryContext(book: { bookId: string; workspace: boolean
 
 export function analysisUsesAutomaticMemory(scope: TrustedOperationalScope, version: string | null | undefined, sourceKind: string): boolean {
   return !sourceKind.startsWith('editorial-review/') && scope === 'ordinary-production' && version === 'v35';
-}
-
-/** Original selection indexes are attribution; synthetic block positions are not. */
-export function referencedRules(preference: HouseReviewPreferenceUse) {
-  return preference.selection === undefined ? [] : preference.lines.map((text, index) => ({ versionId: preference.versionId,
-    ordinal: preference.ordinal, lineIndex: preference.selection!.lineIndexes[index]!, text }));
 }
 
 /** Both values always use the same already-selected snapshot; the existing digest algebra is unchanged. */
