@@ -26,7 +26,7 @@ function scene({ covered = false, moveOnPress = false, neverSettles = false } = 
     for (let attempt = 0; attempt < 10; attempt++) if (await target.evaluate(expression)) return;
     throw new Error(name);
   };
-  return { renderer, waitFor, events };
+  return { renderer, waitFor, events, blocker };
 }
 
 it('waits for a moving target to settle across animation frames before pressing (#1490)', async () => {
@@ -94,4 +94,33 @@ it('distinguishes a target that never settles from a covering element (#1433 hos
   expect(failure?.pointerFailure?.frames.every(frame => frame.contains)).toBe(true);
   expect(new Set(failure?.pointerFailure?.frames.map(frame => frame.rect[0])).size).toBe(4);
   expect(target.events).toEqual([]);
+});
+
+
+it('captures the covering ancestor chain and its rectangles only in the first frame (#1433)', async () => {
+  const target = scene({ covered: true });
+  let tableReads = 0, screenReads = 0;
+  const screen = { tagName: 'SECTION', id: 'editor-screen', className: 'editor-shell', getAttributeNames: () => ['data-screen'],
+    hasAttribute: (name: string) => name === 'data-screen', getBoundingClientRect: () => { screenReads++; return { left: 200, top: 30, width: 800, height: 700 }; } };
+  const table = { tagName: 'TABLE', id: '', className: 'manuscript-table', getAttributeNames: () => ['data-table-id'], parentElement: screen,
+    getBoundingClientRect: () => { tableReads++; return { left: 200, top: 300, width: 1800, height: 100 }; } };
+  Object.assign(target.blocker, { parentElement: table });
+  let failure: { pointerFailure?: { coveringAncestors: Array<{ tag: string; rect: number[] }> } } | undefined;
+  try { await pointerClick(target.renderer, target.waitFor, 'summary', 'covered-summary'); }
+  catch (error) { failure = error as typeof failure; }
+  expect(failure?.pointerFailure?.coveringAncestors.map(entry => entry.tag)).toEqual(['table', 'section']);
+  expect(failure?.pointerFailure?.coveringAncestors[0]?.rect).toEqual([200, 300, 1800, 100]);
+  expect(tableReads).toBe(1); expect(screenReads).toBe(1);
+});
+
+it('retains twelve ancestor rectangles while capping the complete structural detail at 4 KiB (#1433)', () => {
+  const descriptor = { tag: 'section', id: 'i'.repeat(64), classes: Array(6).fill('c'.repeat(32)), data: Array(6).fill('data-' + 'n'.repeat(27)) };
+  const rect = [12345678.1234567, -12345678.1234567, 12345678.1234567, 12345678.1234567];
+  const detail = pointerFailureDetail({ viewport: [1280, 800], target: descriptor,
+    frames: Array.from({ length: 4 }, () => ({ rect, point: rect.slice(0, 2), hit: descriptor, contains: false })),
+    coveringAncestors: Array.from({ length: 12 }, () => ({ ...descriptor, rect, textContent: 'private-payload' })) }) as { coveringAncestors: Array<{ rect: number[] }> } | null;
+  expect(detail?.coveringAncestors).toHaveLength(12);
+  expect(detail?.coveringAncestors.every(entry => JSON.stringify(entry.rect) === JSON.stringify(rect))).toBe(true);
+  expect(JSON.stringify(detail).length).toBeLessThanOrEqual(4096);
+  expect(JSON.stringify(detail)).not.toContain('private-payload');
 });

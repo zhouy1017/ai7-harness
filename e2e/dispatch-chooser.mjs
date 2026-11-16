@@ -22,12 +22,31 @@ export function pointerFailureDetail(value) {
     frames.push({ rect: frame.rect, point: frame.point, hit: describe(frame.hit), contains: frame.contains });
   }
   const detail = { viewport: value.viewport, target: describe(value.target), frames };
+  if (value.coveringAncestors !== undefined) {
+    if (!Array.isArray(value.coveringAncestors) || value.coveringAncestors.length > 12) return null;
+    detail.coveringAncestors = [];
+    for (const ancestor of value.coveringAncestors) {
+      if (!ancestor || !numbers(ancestor.rect, 4)) return null;
+      detail.coveringAncestors.push({ ...describe(ancestor), rect: ancestor.rect });
+    }
+  }
+  // Keep the structural chain and geometry first; shorten names if a heavily decorated DOM
+  // would exceed the CI-safe limit. Neither text nor attribute values enter this object.
+  const descriptions = [detail.target, ...frames.map(frame => frame.hit), ...(detail.coveringAncestors ?? [])].filter(Boolean);
+  for (const limit of [24, 16, 12]) {
+    if (JSON.stringify(detail).length <= 4096) return detail;
+    for (const entry of descriptions) {
+      entry.tag = entry.tag.slice(0, limit); entry.id = entry.id.slice(0, limit);
+      entry.classes = entry.classes.slice(0, 1).map(name => name.slice(0, limit));
+      entry.data = entry.data.slice(0, 1).map(name => name.slice(0, limit));
+    }
+  }
   return JSON.stringify(detail).length <= 4096 ? detail : null;
 }
 
 async function capturePointerFailure(renderer, selector) {
   try {
-    const detail = await renderer.evaluate(`(async () => {const describe=${pointerElementDescription.toString()},frames=[];let target=null;for(let index=0;index<4;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const node=document.querySelector(${JSON.stringify(selector)}),r=node?.getBoundingClientRect(),x=r?r.left+r.width/2:null,y=r?r.top+r.height/2:null;target=describe(node);const hit=r?document.elementFromPoint(x,y):null;frames.push({rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!node&&node.contains(hit)});}return {viewport:[innerWidth,innerHeight],target,frames};})()`);
+    const detail = await renderer.evaluate(`(async () => {const describe=${pointerElementDescription.toString()},frames=[],coveringAncestors=[];let target=null;for(let index=0;index<4;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const node=document.querySelector(${JSON.stringify(selector)}),r=node?.getBoundingClientRect(),x=r?r.left+r.width/2:null,y=r?r.top+r.height/2:null;target=describe(node);const hit=r?document.elementFromPoint(x,y):null;if(index===0)for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});if(ancestor.hasAttribute?.('data-screen'))break;}frames.push({rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!node&&node.contains(hit)});}return {viewport:[innerWidth,innerHeight],target,frames,coveringAncestors};})()`);
     return pointerFailureDetail(detail) ?? { unavailable: true };
   } catch { return { unavailable: true }; }
 }

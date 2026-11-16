@@ -330,7 +330,8 @@ describe('the label guard itself', () => {
 
 it('forwards bounded pointer failure metadata from a real child without changing its check or classification (#1433)', () => {
   const detail = { viewport: [1008, 681], target: { tag: 'summary', id: 'summary-toggle', classes: ['review-synthesis'], data: ['data-toggle'] },
-    frames: [{ rect: [20, 30, 200, 24], point: [120, 42], hit: { tag: 'div', id: 'sticky-bar', classes: ['overlay'], data: ['data-overlay'] }, contains: false }] };
+    frames: [{ rect: [20, 30, 200, 24], point: [120, 42], hit: { tag: 'div', id: 'sticky-bar', classes: ['overlay'], data: ['data-overlay'] }, contains: false }],
+    coveringAncestors: [{ tag: 'table', id: '', classes: ['manuscript-table'], data: ['data-table-id'], rect: [0, 0, 1800, 500] }] };
   const expression = `Object.assign(c.journeyCheckFailure('J-07', 'summary-pointer-target'), { pointerFailure: ${JSON.stringify(detail)} })`;
   const child = reported(J07_LOCATION, expression);
   const result = childResult(child.stderr), failure = controller.classifyJourneyResult(result, 'J-07');
