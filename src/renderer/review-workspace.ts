@@ -657,6 +657,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
   let excludedPages = 1;
   let excludedOpen = false;
+  const basisDisclosures = new Map<string, boolean>();
   let synthesisDisclosure: { runId: string; open: boolean } | null = null;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
@@ -1639,8 +1640,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     main.append(el('p', 'review-finding-note', finding.note));
     const referencedRules = findingReferencedRules(finding);
     if (referencedRules !== null) main.append(referencedRules);
-    if (finding.clauseRefs.length === 0) main.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
-    for (const clause of finding.clauseRefs) main.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
+    const basis = run.synthesis === undefined ? main : el('details', 'review-finding-basis-fold');
+    if (basis !== main) {
+      const disclosure = basis as HTMLDetailsElement;
+      disclosure.open = basisDisclosures.get(finding.findingId) ?? false;
+      disclosure.addEventListener('toggle', () => basisDisclosures.set(finding.findingId, disclosure.open));
+      basis.append(el('summary', undefined, '审阅依据'));
+      main.append(basis);
+    }
+    if (finding.clauseRefs.length === 0) basis.append(el('p', 'review-finding-basis', reviewBasisWords(category.basis)));
+    for (const clause of finding.clauseRefs) basis.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
     // Extraction's original non-verdict remains historical; this card's verified result owns the current three states.
     const stateLine = hasVerification && finding.stateLine === '未外部复核' ? null : finding.stateLine;
     const lines = [stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]

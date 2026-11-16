@@ -3131,3 +3131,5 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-run:has(> .review-synthesis) .review-results { margin-top: .35rem; padding-top: .35rem; }
 .review-run:has(> .review-synthesis) .review-results > h5 { display: inline; margin: .2rem 0; }
 .review-run:has(> .review-synthesis) .review-results-counts { display: inline; margin-left: .5rem; font-size: .86rem; }
+
+.review-finding-basis-fold > summary { min-height: 24px; cursor: pointer; color: var(--text-subdued); font-size: .9rem; }

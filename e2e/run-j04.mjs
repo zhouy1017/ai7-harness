@@ -2894,7 +2894,12 @@ async function main() {
           await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-collapse`);
           await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-collapsed`);
         }
-        await assertRenderer(renderer, `(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect();return root && !root.open && r && r.top>=0 && r.bottom<=innerHeight && root.querySelector('summary').textContent.includes('组共性问题') && !/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent);})()`, `review-synthesis-${viewport}-compact-ordinary`);
+        const synthesisLayout = await renderer.evaluate(`(() => {const root=document.querySelector('details.review-synthesis'),card=document.querySelector('article.review-finding'),r=card?.getBoundingClientRect();return {top:r?.top,bottom:r?.bottom,height:innerHeight,width:innerWidth,ok:!!(root && !root.open && r && r.top>=0 && r.bottom<=innerHeight && root.querySelector('summary').textContent.includes('组共性问题') && !/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(root.textContent))};})()`);
+        requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
+        await pointerClick(renderer, waitFor, 'article.review-finding .review-finding-basis-fold > summary', `review-synthesis-${viewport}-basis-open`);
+        await waitFor(renderer, `document.querySelector('article.review-finding .review-finding-basis-fold')?.open===true`, `review-synthesis-${viewport}-basis-ready`);
+        await pointerClick(renderer, waitFor, 'article.review-finding .review-finding-basis-fold > summary', `review-synthesis-${viewport}-basis-close`);
+        await waitFor(renderer, `document.querySelector('article.review-finding .review-finding-basis-fold')?.open===false`, `review-synthesis-${viewport}-basis-closed`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
         await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
