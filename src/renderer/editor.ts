@@ -1,4 +1,5 @@
 import { baseKeymap } from 'prosemirror-commands';
+import { BookOwnershipFailure } from './navigation-generation.js';
 import { keymap } from 'prosemirror-keymap';
 import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
@@ -128,7 +129,7 @@ interface MountOptions {
   scrollContainer: HTMLElement;
   platform: RendererApi['platform'];
   initialWindow: ManuscriptWindowProjection;
-  flushJournalEdit: RendererApi['flushJournalEdit'];
+  flushJournalEdit(input: JournalEditInput, action: object): ReturnType<RendererApi['flushJournalEdit']>;
   readManuscriptImageChunk?: RendererApi['readManuscriptImageChunk'];
   onStateChange(state: EditorUiState): void;
   onAnnouncement(message: string, tone: 'busy' | 'success' | 'error'): void;
@@ -429,6 +430,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let saving = false;
   let retryRequired = false;
   let retryPrepared: { input: JournalEditInput } | undefined;
+  let editAction: object = {};
+  let ownershipBlocked = false;
   // Optimistic structures in keystroke order. Each records the text it saw, so later typing cannot overtake its journal write.
   const structures: PendingStructure[] = [];
   let flushPromise: Promise<void> | undefined;
@@ -776,7 +779,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   /** The automatic retry (DUR-006): the same prepared edit, so the service's idempotency makes it one entry however often it runs. */
   const scheduleRetry = (): void => {
     clearRetryTimer();
-    if (!protection || protection.cause !== 'journal-unavailable' || destroyed) return;
+    if (!protection || protection.cause !== 'journal-unavailable' || destroyed || ownershipBlocked) return;
     const delay = retryDelayMs(protection.attempts);
     protection.nextRetryAt = Date.now() + delay;
     retryTimer = window.setTimeout(() => {
@@ -975,7 +978,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         announceState();
         options.onAnnouncement(technicalWords('正在自动写入修订日志；可继续编辑当前窗口。', '正在保存…'), 'busy');
         try {
-          const ack = await options.flushJournalEdit(prepared.input);
+          const ack = await options.flushJournalEdit(prepared.input, editAction);
           requireAcknowledgement(
             ack.clientEditId === prepared.input.clientEditId &&
               ack.branchId === windowProjection.branchId &&
@@ -1008,6 +1011,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           }
           retryPrepared = undefined;
           retryRequired = false;
+          ownershipBlocked = false;
           lastDurable = { sequence: ack.sequence, durableAt: ack.durableAt };
           applyEditableState();
           lastCompletion = ack.completionLabel;
@@ -1015,6 +1019,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         } catch (error) {
           retryPrepared = prepared;
           retryRequired = true;
+          ownershipBlocked = error instanceof BookOwnershipFailure;
           // The journal did not acknowledge: Editing Protection Mode (DUR-001). A moved target stops replay (DUR-007).
           enterProtection(interrupted ? 'service-stopped' : classifyJournalFailure(error) === 'drift' ? 'drift' : 'journal-unavailable');
           options.onAnnouncement(
@@ -1073,7 +1078,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       view.updateState(nextState);
       if (transaction.docChanged) checkBufferLimit();
       announceState();
-      if (transaction.docChanged) scheduleAutomaticFlush();
+      if (transaction.docChanged) { editAction = {}; ownershipBlocked = false; scheduleAutomaticFlush(); }
       else if (inputMode === 'reading-revision' && transaction.selectionSet && !composing && !view.composing &&
         previousBlock !== pointAtPosition(transaction.doc, transaction.selection.head).blockId) void flush();
     },
@@ -1229,7 +1234,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       void flush();
     },
     focus: () => view.focus(),
-    flush,
+    flush: () => { editAction = {}; ownershipBlocked = false; return flush(); },
     captureContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
     followNativeCaret: () => {
       const native = view.dom.ownerDocument.getSelection();
@@ -1353,6 +1358,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     protection: protectionView,
     retryWrite: () => {
+      editAction = {};
+      ownershipBlocked = false;
       if (protection && !protection.retrying) void runRetry();
     },
     affectedContent: () => {

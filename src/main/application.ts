@@ -29,6 +29,7 @@ import {
 } from 'electron';
 import {
   IPC_CHANNELS,
+  isNonActivatingBookOpen,
   SERVICE_PROTOCOL_VERSION,
   MAIN_EVENTS,
   EDIT_JOURNAL_FAULT_REFUSED_CODE,
@@ -192,6 +193,7 @@ export function registerRendererHandlers(
   requestBookWorkbench: (
     requester: OwnedRendererWindow,
     route: BookWorkbenchRoute,
+    nonActivating?: boolean,
   ) => Promise<BookWorkbenchOpenProjection>,
   serializeEffect: <Result>(operation: () => Promise<Result>) => Promise<Result>,
   claims: ApplicationAuthorityClaims,
@@ -1833,10 +1835,12 @@ export function registerRendererHandlers(
         return service.call('recordManuscriptEntryPosition', input);
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.openBookWorkbench, (event, input: BookWorkbenchRoute) =>
+  ipcMain.handle(IPC_CHANNELS.openBookWorkbench, (event, input: Parameters<RendererApi['openBookWorkbench']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
+      const nonActivating = isNonActivatingBookOpen(input);
+      if (nonActivating) return requestBookWorkbench(owned, { kind: 'book', bookId: input.bookId }, true);
       return requestBookWorkbench(owned, input);
     }),
   );
@@ -4079,6 +4083,7 @@ export async function runApplication(): Promise<void> {
       requester: OwnedRendererWindow,
       route: BookWorkbenchRoute,
       requestSequence: number | null,
+      nonActivating = false,
     ): Promise<BookWorkbenchOpenProjection> => {
       return serializeRoute(async () => {
       const resolved = await service!.call('resolveBookWorkbenchRoute', route);
@@ -4089,6 +4094,15 @@ export async function runApplication(): Promise<void> {
         );
       }
       const existing = bookWindows.get(resolved.bookId);
+      if (nonActivating) {
+        if ((existing && !existing.window.isDestroyed()) || requester.bookId !== null) return { route: resolved, target: 'held-elsewhere' };
+        // Acquire only a free Book for this Bookless window. No other window or capability is changed.
+        requester.bookId = resolved.bookId;
+        requester.route = resolved;
+        requester.routeGeneration += 1;
+        bookWindows.set(resolved.bookId, requester);
+        return { route: resolved, target: 'requesting-window' };
+      }
       if (existing && !existing.window.isDestroyed()) {
         if (existing.closeRisk) {
           throw new ServiceCallError(
@@ -4119,7 +4133,9 @@ export async function runApplication(): Promise<void> {
     const requestBookWorkbench = (
       requester: OwnedRendererWindow,
       route: BookWorkbenchRoute,
+      nonActivating = false,
     ): Promise<BookWorkbenchOpenProjection> => {
+      if (nonActivating) return serializeEffect(() => applyBookWorkbench(requester, route, null, true));
       const requestSequence = requester.routeRequestSequence + 1;
       requester.routeRequestSequence = requestSequence;
       return serializeEffect(() => applyBookWorkbench(requester, route, requestSequence));
