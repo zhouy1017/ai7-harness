@@ -2902,6 +2902,8 @@ async function main() {
         await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-keyboard-evidence`);
         await pointerClick(renderer, waitFor, `[data-synthesis-evidence="${synthesisEvidence.ref}"]`, `review-synthesis-${viewport}-citation`);
         await waitFor(renderer, `(() => { const selection=getSelection(), anchor=selection?.anchorNode instanceof Element ? selection.anchorNode : selection?.anchorNode?.parentElement; return anchor?.closest('[data-block-id]')?.dataset.blockId===${JSON.stringify(synthesisEvidence.blockId)}; })()`, `review-synthesis-${viewport}-passage`);
+        const synthesisMarkId = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId)?.markId;
+        if (synthesisMarkId != null) await waitFor(renderer, `document.querySelector('[data-mark-card="${synthesisMarkId}"]')!==null`, `review-synthesis-${viewport}-finding-card`);
         await pointerClick(renderer, waitFor, SIDEBAR.section('review'), `review-synthesis-${viewport}-back`);
         await waitFor(renderer, `document.querySelector('[data-screen="book-review"] details.review-synthesis')?.dataset.synthesisState==='completed'`, `review-synthesis-${viewport}-returned`);
       }

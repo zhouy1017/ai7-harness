@@ -598,6 +598,10 @@ it('hides the internal synthesis from capture choices and usage links while acco
     const library = session.store.procedureLibrary({ action: 'inspect' });
     expect(library.completedRuns.some(entry => entry.executorKind === 'editorial-review/run-synthesis')).toBe(false);
     expect(library.procedures.some(entry => entry.executorKind === 'editorial-review/run-synthesis')).toBe(false);
+    const tasks = session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap(group => group.items);
+    expect(tasks.filter(entry => entry.item.target.kind === 'review')).toHaveLength(1);
+    const attention = session.store.inspectGlobalAttention(() => null, false);
+    expect(JSON.stringify(attention.groups.flatMap(group => group.items.map(item => item.target)))).not.toContain('editorial-review/run-synthesis');
     const usage = session.store.inspectUsage({ range: 'all', groupBy: 'book' }).rows.find(row => row.key === book.bookId)!;
     expect(usage.runs).toHaveLength(1);
     expect(usage.runs.some(entry => entry.taskKind === 'editorial-review/run-synthesis')).toBe(false);

@@ -1072,7 +1072,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
-    heading.append(meta);
+    if (run.synthesis === undefined) heading.append(meta);
     section.append(heading);
     if (run.synthesis !== undefined) {
       const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
@@ -1085,6 +1085,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           .catch(error => { if (current.isCurrent()) options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error'); });
       }) as HTMLDetailsElement;
       if (run.usage !== undefined) summary.append(el('p', 'review-run-usage', `本次共进行了 ${run.usage.requests} 次模型调用。`));
+      summary.append(meta);
       summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
       summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
       section.append(summary);
