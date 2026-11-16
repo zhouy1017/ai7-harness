@@ -1,6 +1,4 @@
-import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
-import * as notificationFunctions from '../../src/renderer/notifications.js';
+import { NavigationGeneration } from '../../src/renderer/navigation-generation.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -44,34 +42,6 @@ function setup() {
 }
 afterEach(() => vi.restoreAllMocks());
 
-it('keeps a focused Book completion quiet even when its overview read finishes after returning (#1510)', async () => {
-  const restore = installMiniDom();
-  try {
-    const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-    let observerOptions = '';
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && node.expression.getText(source) === 'createNotificationObserver') observerOptions = node.arguments[0]!.getText(source);
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
-    const event = item({ group: 'recent', state: 'analysis-completed' });
-    const overview = composeTaskOverview(projection([event]), 2, () => null);
-    let release!: (value: TaskOverviewProjection) => void;
-    const read = vi.fn(() => new Promise<TaskOverviewProjection>(resolve => { release = resolve; }));
-    const opened = vi.fn(), quiet = vi.fn();
-    const screen = { firstElementChild: { dataset: { bookId: event.book.bookId } } };
-    const options = runInNewContext(ts.transpileModule(`(${observerOptions})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText,
-      { ...notificationFunctions, api: { notify: vi.fn(async () => {}), inspectTaskOverview: read }, document: { hasFocus: () => true }, screen,
-        localStorage: { getItem: () => 'on' }, showQuietNotice: quiet, openOverviewResult: opened });
-    createNotificationObserver({ ...options, startedAt: START })(projection([event]));
-    screen.firstElementChild.dataset.bookId = 'settings'; screen.firstElementChild.dataset.bookId = event.book.bookId;
-    release?.(overview); await Promise.resolve(); await Promise.resolve();
-    expect(quiet).toHaveBeenCalledExactlyOnceWith(event);
-    expect(opened).not.toHaveBeenCalled();
-    expect(read).not.toHaveBeenCalled();
-  } finally { restore(); }
-});
-
 it('keeps a delayed completion on its Book and opens only while that Book is still current', async () => {
   const restore = installMiniDom();
   try {
@@ -81,7 +51,7 @@ it('keeps a delayed completion on its Book and opens only while that Book is sti
     let release!: (value: TaskOverviewProjection) => void;
     const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
     const open = vi.fn();
-    const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
+    const options = { allowed: (bookId: string) => bookId === currentBookId, enabled: () => true, navigation: new NavigationGeneration().route(), read: () => reading, open };
     const pending = openCurrentBookCompletion(event, options);
     currentBookId = 'another-book'; release(overview); await pending;
     expect(open).not.toHaveBeenCalled();
@@ -102,7 +72,7 @@ it('keeps manuscript focus when a current-Book completion arrives or finishes re
     let release!: (value: TaskOverviewProjection) => void;
     const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
     const read = vi.fn(() => reading); const open = vi.fn();
-    const options = { currentBookId: () => event.book.bookId, enabled: () => true, read, open };
+    const options = { allowed: (bookId: string) => bookId === event.book.bookId, enabled: () => true, navigation: new NavigationGeneration().route(), read, open };
     text.focus();
     await openCurrentBookCompletion(event, { ...options, read: async () => overview });
     expect(open).not.toHaveBeenCalled();

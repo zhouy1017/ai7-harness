@@ -1,3 +1,6 @@
+import { createNotificationObserver, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { composeTaskOverview } from '../../src/service/task-overview.js';
+import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
@@ -8,7 +11,7 @@ import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.j
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
-const names = ['renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
+const names = ['canAutoOpenTaskResult', 'renderTaskOverview', 'renderBookReview', 'renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
 const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
 const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let settingsLoader='';
@@ -21,7 +24,13 @@ findImportLoaders(importSource);
 let failureCallback='';
 function findFailureCallback(node:ts.Node):void {if(ts.isCallExpression(node)&&node.expression.getText(source)==='reconcileBookWorkbenchApi'&&node.arguments[1]&&ts.isObjectLiteralExpression(node.arguments[1])){const property=node.arguments[1].properties.find((entry)=>entry.name?.getText(source)==='failed');if(property&&ts.isPropertyAssignment(property))failureCallback=property.initializer.getText(source);}ts.forEachChild(node,findFailureCallback);}
 findFailureCallback(source);
-const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+let completionObserverOptions = '';
+function findCompletionObserver(node: ts.Node): void {
+ if (ts.isCallExpression(node) && node.expression.getText(source) === 'createNotificationObserver') completionObserverOptions = node.arguments[0]!.getText(source);
+ ts.forEachChild(node, findCompletionObserver);
+}
+findCompletionObserver(source);
+const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const manuscriptSource = ts.createSourceFile('manuscript-screen.ts', readFileSync(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let journalSender='';
 function findJournalSender(node:ts.Node):void { if(ts.isPropertyAssignment(node)&&node.name.getText(manuscriptSource)==='flushJournalEdit')journalSender=node.initializer.getText(manuscriptSource);ts.forEachChild(node,findJournalSender); }
@@ -57,13 +66,17 @@ function harness(api: object = {}) {
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
  const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
   context = createContext({ navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+    localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion,
+    mountTaskOverview: vi.fn(() => ({ focus: vi.fn(), destroy: vi.fn() })),
+    mountReviewWorkspace: vi.fn(() => ({ start: vi.fn(), refresh: vi.fn(), destroy: vi.fn() })),
+    REVIEW_STATUS_LINES: { opened: '审阅已打开' },
     mountGlobalAgent: vi.fn(() => element('section')), renderBookOverview, renderBaselineAnalysis,
     HTMLElement, SETTINGS_HUB_GROUPS: [], settingsNavigation:()=>element('nav'), overviewDrawerBookId: null, screenReturns: {enter: vi.fn()},
     restoreCurrentScreen: vi.fn(), currentRecoveryReturn: () => undefined, recoveryReturnContexts: new WeakMap(),
     manuscriptOnScreen: null, taskResultWindow: null, authorityInterrupted: false, keyboardSettingsOff: undefined,
     reviewWorkspace: undefined, deliverablesSurface: undefined, derivativesSurface: undefined, proposalWorkspaceSurface: undefined,
     agentWorkspaceSurface: undefined, proposalConflictSurface: undefined, globalAttentionSurface: undefined, taskOverviewSurface: undefined,
-    leaveGuard: null, taskDrawer: {followScreen: vi.fn()}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(),
+    leaveGuard: null, taskDrawer: {followScreen: vi.fn(), close: vi.fn(), view: () => null}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(),
     SHELL_LABELS: {openingBook:'正在打开图书',bookUnavailable:'无法打开图书'},
     renderBookReview: vi.fn((bookId:string) => {const node=element('section');node.dataset['bookId']=bookId;replaceScreen('book-review',node);}),
     element, panel: () => element('section'), agentWorkspaceReturns: new WeakMap(), taskSurfaceRefresh: {},
@@ -91,6 +104,7 @@ function harness(api: object = {}) {
   });
   runInContext(program+ts.transpileModule("var sendEdit="+journalSender+";",{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText, context);
   context['renderError']=vi.fn(context['renderError'] as (...args:unknown[])=>void);
+  context['renderTaskOverview']=vi.fn(context['renderTaskOverview'] as (...args:unknown[])=>void);
   return { screen, setStatus, focus, shell, context, actions, renderBookOverview, renderBaselineAnalysis, replaceScreen,
     run: (expression: string) => runInContext(expression, context) as Promise<void> };
 }
@@ -677,4 +691,58 @@ it('opening another conflict supersedes pending navigation without an explicit b
  const pending=navigation.route();
  const options=page.context['conflictOptions'] as {openConflict(markId:string):void};options.openConflict('second');
  expect(pending.isCurrent()).toBe(false);expect(page.screen.firstElementChild?.getAttribute('data-conflict-mark-id')).toBe('second');
+});
+
+
+function completionProbe(read?: () => Promise<TaskOverviewProjection>) {
+ const item: GlobalAttentionItemProjection = { itemId:'analysis:completion',group:'recent',state:'analysis-completed',blocked:false,at:'2026-11-16T00:00:01Z',
+  book:{bookId:'completion-book',title:'测试图书'},object:{kind:'analysis',mode:'first-baseline'},facts:{progress:null,categories:[],revisionOrdinal:null},
+  nextStep:'view-run',target:{kind:'analysis',bookId:'completion-book',taskIntentId:'completion'},technical:[] };
+ const projection: GlobalAttentionProjection = {groups:[{key:'recent',items:[item],total:1}],actionableCount:0,running:false,processing:{state:'local'}};
+ const overview=composeTaskOverview(projection,2,()=>null), inspect=vi.fn(read ?? (async()=>overview));
+ const page=harness({notify:async()=>undefined,inspectTaskOverview:inspect,inspectBaselineAnalysis:async()=>({bookId:'completion-book'})});
+ const options=page.context['completionObserverOptions'] as Parameters<typeof createNotificationObserver>[0];
+ const observe=()=>createNotificationObserver({...options,focused:()=>true,startedAt:0})(projection);
+ return {...page,overview,inspect,observe};
+}
+
+it.each(['overview','panel'])('automatically opens a completion while watching the %s with the real shell loader (#1510)',async surface=>{
+ const page=completionProbe();
+ await page.run(surface==='overview' ? 'renderTaskOverview()' : "renderBookReview('completion-book','测试图书')");
+ if(surface==='panel') await page.run("taskDrawer.view=()=>({kind:'panel',bookId:'completion-book'})");
+ page.observe();await Promise.resolve();await Promise.resolve();
+ expect(page.context['showQuietNotice']).toHaveBeenCalledOnce();expect(page.context['openOverviewResult']).toHaveBeenCalledOnce();
+});
+
+it.each(['review','manuscript','analysis','settings','sheet','plan','dialogue','composer','launch','other-book-panel','off'])(
+ 'keeps a completion quiet on %s with the real shell destination (#1510)',async surface=>{
+ const page=completionProbe();
+ await page.run('renderTaskOverview()');
+ if(surface==='review') await page.run("renderBookReview('completion-book','测试图书')");
+ if(surface==='analysis') await page.run("renderBookAnalysis('completion-book','测试图书',undefined,{tab:'chapters'})");
+ if(surface==='manuscript') page.replaceScreen('editor');
+ if(surface==='settings') await page.run('renderKeyboardSettings()');
+ if(surface==='sheet'){const sheet=document.createElement('dialog');sheet.setAttribute('open','');miniDocument.body.append(sheet as unknown as MiniElement);}
+ if(['plan','dialogue','composer','launch','other-book-panel'].includes(surface)) await page.run(`taskDrawer.view=()=>({kind:${JSON.stringify(surface==='other-book-panel'?'panel':surface)},bookId:'other-book'})`);
+ if(surface==='off') await page.run("localStorage.getItem=()=> 'off'");
+ page.observe();await Promise.resolve();await Promise.resolve();
+ expect(page.context['showQuietNotice']).toHaveBeenCalledOnce();expect(page.context['openOverviewResult']).not.toHaveBeenCalled();expect(page.inspect).not.toHaveBeenCalled();
+});
+
+it('does not open a completion after leaving and returning through the real loaders (#1510)',async()=>{
+ const answer=Promise.withResolvers<TaskOverviewProjection>(),page=completionProbe(()=>answer.promise);
+ await page.run('renderTaskOverview()');page.observe();expect(page.inspect).toHaveBeenCalledOnce();
+ await page.run("renderBookReview('completion-book','测试图书')");await page.run('renderTaskOverview()');
+ answer.resolve(page.overview);await Promise.resolve();await Promise.resolve();
+ expect(page.context['openOverviewResult']).not.toHaveBeenCalled();expect(page.context['showQuietNotice']).toHaveBeenCalledOnce();
+});
+
+it.each(['sheet','off','plan'])('keeps a delayed completion quiet if %s changes during its read (#1510)',async change=>{
+ const answer=Promise.withResolvers<TaskOverviewProjection>(),page=completionProbe(()=>answer.promise);
+ await page.run('renderTaskOverview()');page.observe();expect(page.inspect).toHaveBeenCalledOnce();
+ if(change==='sheet'){const sheet=document.createElement('dialog');sheet.setAttribute('open','');miniDocument.body.append(sheet as unknown as MiniElement);}
+ if(change==='off') await page.run("localStorage.getItem=()=> 'off'");
+ if(change==='plan') await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book'})");
+ answer.resolve(page.overview);await Promise.resolve();await Promise.resolve();
+ expect(page.context['openOverviewResult']).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import type { NavigationCheckpoint } from './navigation-generation.js';
 import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection, TaskOverviewItemProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
@@ -71,11 +72,12 @@ export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => 
   return (item) => showToast(completionLabel(item), { tone: item.state, action: { label: QUIET_NOTICE_WORDS.view, run: () => open(item) } });
 }
 
-/** A completion read may finish after the editor switches Books, resumes writing or turns automatic results off. */
+/** Automatic results belong to the task surface that received the completion, never a later destination. */
 export async function openCurrentBookCompletion(item: GlobalAttentionItemProjection, options: {
-  currentBookId(): string | null; enabled(): boolean; read(): Promise<TaskOverviewProjection>; open(entry: TaskOverviewItemProjection): void;
+  allowed(bookId: string): boolean; enabled(): boolean; navigation: NavigationCheckpoint;
+  read(): Promise<TaskOverviewProjection>; open(entry: TaskOverviewItemProjection): void;
 }): Promise<void> {
-  const current = (): boolean => item.book.bookId !== null && options.currentBookId() === item.book.bookId && options.enabled() &&
+  const current = (): boolean => item.book.bookId !== null && options.navigation.isCurrent() && options.allowed(item.book.bookId) && options.enabled() &&
     !document.querySelector('[data-testid="manuscript-editor"]')?.contains(document.activeElement);
   if (!current()) return;
   const tasks = await options.read();

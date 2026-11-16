@@ -2837,8 +2837,10 @@ async function main() {
     const waitingItem = waitingAttention.groups.flatMap(group=>group.items).find(item=>item.itemId===`review:${preparedReview.reviewRunId}`);
     requireJourney(waitingItem?.group==='active' && waitingItem.state==='analysis-waiting-network' && waitingItem.nextStep==='view-review', 'review-waiting-attention', waitingItem);
     at('review-online-dispatch');
-    // #1510 diagnostic: hosted windows are focused; emulate that state on the background guest.
+    // #1510: exercise the focused hosted completion path on the background guest too.
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await assertRenderer(renderer, `document.hasFocus() && localStorage.getItem('ai7.task-overview.auto-result')!=='off'`, 'review-completion-focused-preference-on');
+    await renderer.evaluate(`(() => {const probe=window.__j04ReviewCompletion={noticed:false,opened:false};const record=()=>{if(document.querySelector('.task-result-window[data-task-result-kind="review"]'))probe.opened=true;const toast=document.querySelector('[data-toast]');if(toast?.dataset.tone==='review-completed')probe.noticed=true;};probe.observer=new MutationObserver(record);probe.observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-tone','data-task-result-kind']});record();})()`);
     await writeFile(connectivityPath, 'online');
     at('review-authorize');
     // The sheet launched the Run directly; each category starts from its frozen plan at its driver turn.
@@ -2866,11 +2868,12 @@ async function main() {
       settledReviewDrawer.bar?.state === 'started' && settledReviewDrawer.bar.status === '已完成' && barActions(settledReviewDrawer) === 'run-link:查看审阅:enabled',
       'review-drawer-settled-plan', settledReviewDrawer);
 
-    // #1510 diagnostic: no result action was clicked anywhere in this review flow.
+    // Completion is a quiet 查看 notice while the editor is working in 审阅, even with the preference on.
     await renderer.evaluate(`window.dispatchEvent(new Event('focus'))`);
-    await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult==='ready'`, 'completion-popup-reproduced');
-    const completionCover = await renderer.evaluate(`(() => {const window=document.querySelector('.task-result-window'),summary=document.querySelector('details.review-synthesis > summary'),r=summary.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {screen:document.querySelector('#screen').dataset.screen,kind:window.dataset.taskResultKind,ready:window.dataset.taskResult,cover:!!hit&&window.contains(hit),hit:hit?.tagName};})()`);
-    requireJourney(!completionCover.cover, 'completion-popup-cover-repro', completionCover);
+    await waitFor(renderer, `window.__j04ReviewCompletion?.noticed===true`, 'review-completion-quiet-notice');
+    await assertRenderer(renderer, `window.__j04ReviewCompletion.opened===false && !document.querySelector('.task-result-window')`, 'review-completion-no-popup');
+    await renderer.evaluate(`window.__j04ReviewCompletion.observer.disconnect();delete window.__j04ReviewCompletion`);
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 
     // #1433: the compact book summary leaves the first actionable finding visible and its evidence opens the passage.
     const synthesisDatabase = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });

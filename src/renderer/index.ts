@@ -855,13 +855,20 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
 const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)));
+/** Results may appear while watching tasks, but never over another working surface or sheet. */
+function canAutoOpenTaskResult(bookId: string): boolean {
+  if (document.querySelector('dialog[open]') !== null) return false;
+  const view = taskDrawer.view();
+  if (view !== null) return view.kind === 'panel' && view.bookId === bookId;
+  return screen.dataset['screen'] === 'task-overview';
+}
 const observeNotifications = createNotificationObserver({
   api: api,
   focused: () => document.hasFocus(),
   completed: (item) => {
     showQuietNotice(item);
     void openCurrentBookCompletion(item, {
-      currentBookId: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] ?? null,
+      allowed: canAutoOpenTaskResult, navigation: navigation.route(),
       enabled: () => localStorage.getItem('ai7.task-overview.auto-result') !== 'off',
       read: () => api.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
     }).catch(() => undefined);
