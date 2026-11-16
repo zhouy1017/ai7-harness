@@ -226,6 +226,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-04' };
+  if (localDebugEnabled()) selected.AI7_E2E_WINDOW = '1024x768'; // [DEBUG-1433-pointer] Match hosted native content bounds.
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -2906,22 +2907,21 @@ async function main() {
         await assertRenderer(renderer, `document.activeElement?.matches('[data-synthesis-evidence]')===true`, `review-synthesis-${viewport}-access-evidence`);
         for (const type of ['keyDown', 'keyUp']) await renderer.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
         await assertRenderer(renderer, `document.activeElement?.matches('details.review-synthesis > summary')===true`, `review-synthesis-${viewport}-keyboard-header`);
-        await pressEnter(renderer);
-        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-keyboard-collapse`);
-        await pressEnter(renderer);
-        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
         const findingScroll = await renderer.evaluate(`(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return {x:Math.min(innerWidth-24,r.left+r.width/2),y:innerHeight-48,deltaY:Math.max(0,r.bottom-innerHeight+24)};})()`);
         await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', deltaX: 0, ...findingScroll });
         await waitFor(renderer, `(() => {const r=document.querySelector('article.review-finding').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-scroll-card`);
-        // Wheel scrolling retains the header's keyboard focus. Continue with native Tab rather
-        // than forcing a pointer helper to scroll back while the wheel gesture may still settle.
+        try {
+          await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-collapse`);
+        } catch (error) {
+          if (!localDebugEnabled()) throw error;
+          const frames = await renderer.evaluate(`(async () => {const frames=[];for(let index=0;index<12;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const header=document.querySelector('details.review-synthesis > summary'),r=header?.getBoundingClientRect(),x=r?r.left+r.width/2:0,y=r?r.top+r.height/2:0,hit=r?document.elementFromPoint(x,y):null,describe=node=>node?{tag:node.tagName,id:node.id,className:node.className,position:getComputedStyle(node).position,zIndex:getComputedStyle(node).zIndex}:null,ancestors=[];for(let node=header?.parentElement;node&&ancestors.length<8;node=node.parentElement)ancestors.push({...describe(node),scrollTop:node.scrollTop,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight,rect:node.getBoundingClientRect().toJSON()});frames.push({time:performance.now(),viewport:[innerWidth,innerHeight],rect:r?.toJSON(),centre:[x,y],hit:describe(hit),headerContainsHit:!!header&&header.contains(hit),open:header?.parentElement.open,ancestors});}return frames;})()`);
+          requireJourney(false, `review-synthesis-${viewport}-access-collapse-hit-test`, { debug: '[DEBUG-1433-pointer]', error: error.message, nativeViewport: synthesisNativeViewport, frames });
+        }
+        await pressEnter(renderer);
+        await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-keyboard-expand`);
         for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.querySelector('article.review-finding').contains(document.activeElement)`)); tab += 1) await pressTab(renderer);
         await assertRenderer(renderer, `(() => {const card=document.querySelector('article.review-finding'),active=document.activeElement,r=active?.getBoundingClientRect();return card.contains(active)&&r.top>=0&&r.bottom<=innerHeight;})()`, `review-synthesis-${viewport}-expanded-keyboard-card`);
-        for (let tab = 0; tab < 128 && !(await renderer.evaluate(`document.activeElement?.matches('details.review-synthesis > summary')===true`)); tab += 1) {
-          for (const type of ['keyDown', 'keyUp']) await renderer.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
-        }
-        await assertRenderer(renderer, `document.activeElement?.matches('details.review-synthesis > summary')===true`, `review-synthesis-${viewport}-keyboard-return`);
-        await pressEnter(renderer);
+        await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-access-reset`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
         const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
         const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
