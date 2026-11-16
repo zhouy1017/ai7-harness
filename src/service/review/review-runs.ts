@@ -2837,7 +2837,12 @@ export class ReviewRunStore {
       this.#recordEvent(snapshot.reviewRunId, category.categoryId, 'refused', '本次无需全书统合。', { extra: { synthesisNotNeeded: true } });
       return false;
     }
-    const baseline = readClosedBaselineSynopses(this.#db, snapshot.bookId, snapshot.manuscript.revisionId);
+    let baseline: ReturnType<typeof readClosedBaselineSynopses>;
+    try { baseline = readClosedBaselineSynopses(this.#db, snapshot.bookId, snapshot.manuscript.revisionId); }
+    catch (error) {
+      if (error instanceof AnalysisError && error.code === 'BASELINE_SYNOPSIS_RECORD_INVALID') throw new ReviewRunError('REVIEW_RECORD_INVALID', error.message);
+      throw error;
+    }
     const coverage = modelCategories.map(entry => {
       const units = this.#synthesisUnits(snapshot, [entry]);
       const revisionId = this.#events(snapshot.reviewRunId, entry.categoryId).findLast(event => event.state === 'materialized' || this.#retained(event))?.resultSetRevisionId;

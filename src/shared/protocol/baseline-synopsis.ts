@@ -10,3 +10,8 @@ export interface FrozenBaselineSynopsisContext {
   readonly omittedUnitOrdinals: ReadonlyArray<number>;
   readonly shortenedUnitOrdinals: ReadonlyArray<number>;
 }
+
+export interface FrozenBaselineSynopsisPlan {
+  readonly baselineSynopsisContext?: FrozenBaselineSynopsisContext;
+  readonly baselineSynopsisUnavailable?: 'damaged-baseline';
+}

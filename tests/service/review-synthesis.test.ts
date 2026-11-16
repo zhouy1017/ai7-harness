@@ -1,3 +1,4 @@
+import { appendBaselineUnitVariant } from '../support/synopsis-reuse.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
 import { basename, dirname, resolve, relative, isAbsolute } from 'node:path';
@@ -307,6 +308,26 @@ it('reuses only the closed baseline chapter synopsis chain in the ordinary synth
     expect(input.baseline.synopses.every((unit: { unitOrdinal: number; synopsis: string }) => Number.isSafeInteger(unit.unitOrdinal) && typeof unit.synopsis === 'string')).toBe(true);
     expect(Object.keys(input.baseline).sort()).toEqual(['missingUnitOrdinals', 'synopses']);
     expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
+  });
+});
+
+it.each(['bad-digest', 'missing-synopsis'] as const)('preserves review baseline damage semantics for %s (#1500 R3 R4)', async variant => {
+  await withCapturedReviewBook(async (session, book) => {
+    const baseline = session.store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, launchPolicy);
+    session.owner.admitAndDispatch(baseline.runRecordId, session.store.baselineAnalysisLedger); await session.owner.whenIdle();
+    appendBaselineUnitVariant(roots.dataRoot, book.bookId, variant);
+    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    expect(workspace(session, book).run!.findings.length).toBeGreaterThan(0);
+    if (variant === 'bad-digest') {
+      expect(synthesisOutcome(session, book)).toContain('REVIEW_RECORD_INVALID');
+      expect(synthesisOutcome(session, book)).not.toContain('BASELINE_SYNOPSIS_RECORD_INVALID');
+    } else {
+      const request = session.capture.wireRequests.find(request => request.messages.some(message => message.content.includes('"schema":"ai7.review.run-synthesis-input/1"')))!;
+      const input = JSON.parse(request.messages.findLast(message => message.role === 'user')!.content);
+      expect(input.baseline.missingUnitOrdinals).toEqual([2]);
+      expect(input.baseline.synopses.some((unit: { unitOrdinal: number }) => unit.unitOrdinal === 2)).toBe(false);
+      expect(workspace(session, book).run!.synthesis?.state).toBe('completed');
+    }
   });
 });
 

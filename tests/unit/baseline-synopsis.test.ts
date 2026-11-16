@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { appendTaskBaselineSynopses, fitSynopsisChain, MAX_TASK_SYNOPSIS_BYTES, MAX_REVIEW_SYNTHESIS_BYTES, synopsisCandidates, taskSynopsisRequestDigest, taskSynopsisMessageRequestDigest,
   remainingSynopsisMessageBytes, reviewSynthesisRequestBytes } from '../../src/service/analysis/baseline-synopsis.js';
+import { taskSynopsisStageInputDigest } from '../../src/service/analysis/baseline-synopsis.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { baselineSynopsisSent, baselineSynopsisTechnical } from '../../src/shared/baseline-synopsis-wording.js';
 import type { FrozenBaselineSynopsisContext } from '../../src/shared/protocol/baseline-synopsis.js';
 
@@ -11,6 +13,35 @@ const note: string = fixture.entries.flatMap((entry: { response: { text: string 
 const context = (maximumMessageBytes: number | null): FrozenBaselineSynopsisContext => ({ revisionId: 'baseline-local-id', manuscriptRevisionId: 'manuscript-local-id',
   maximumMessageBytes, maximumSupplementBytes: MAX_TASK_SYNOPSIS_BYTES, synopses: synopsisCandidates(Array.from({ length: 40 }, (_, index) => ({ unitOrdinal: index + 1, synopsis: note.repeat(100) }))),
   missingUnitOrdinals: [41], omittedUnitOrdinals: [], shortenedUnitOrdinals: [] });
+
+it('describes send-time room and discloses omission when only the header would fit (#1500 R1)', () => {
+  const base = '全书综合\n' + note;
+  const full = appendTaskBaselineSynopses(base, context(null));
+  const headerBytes = Buffer.byteLength(full.slice(base.length, full.indexOf('\n{') + 1));
+  const frozen = context(Buffer.byteLength(base) + headerBytes);
+  expect(baselineSynopsisSent(frozen)).toContain('有余量');
+  expect(appendTaskBaselineSynopses(base, frozen)).toContain('全部省略');
+});
+
+it.each(['partial', 'header-only', 'none'])('records only the sent input with %s room for the chapter chain (#1500 R1)', room => {
+  const base = '全书综合\n' + note, full = appendTaskBaselineSynopses(base, context(null));
+  const headerBytes = Buffer.byteLength(full.slice(base.length, full.indexOf('\n{') + 1));
+  const frozen = context(Buffer.byteLength(base) + (room === 'partial' ? headerBytes + 2500 : room === 'header-only' ? headerBytes : 0));
+  const sent = appendTaskBaselineSynopses(base, frozen);
+  const input = taskSynopsisStageInputDigest('base-input', sent, frozen), request = taskSynopsisMessageRequestDigest('base-request', sent);
+  expect(Buffer.byteLength(sent)).toBeLessThanOrEqual(frozen.maximumMessageBytes!);
+  if (room === 'partial') {
+    const payload = JSON.parse(sent.slice(sent.indexOf('\n{') + 1));
+    expect(payload.shortenedUnitOrdinals.length + payload.omittedUnitOrdinals.length).toBeGreaterThan(0);
+    expect(input).toBe(canonicalRecord({ inputDigest: 'base-input', baselineSynopsisSent: payload }).digest);
+    expect(request).toBe(taskSynopsisRequestDigest('base-request', frozen));
+  } else if (room === 'header-only') {
+    expect(sent).toContain('全部省略');
+    expect(input).toBe(canonicalRecord({ inputDigest: 'base-input', baselineSynopsisOmitted: 'capacity' }).digest);
+    expect(request).toBe(canonicalRecord({ requestDigest: 'base-request', baselineSynopsisOmitted: 'capacity' }).digest);
+  } else { expect(sent).toBe(base); expect(input).toBe('base-input'); expect(request).toBe('base-request'); }
+  expect(input).not.toBe(taskSynopsisRequestDigest('base-input', frozen));
+});
 
 it.each([1024, 24 * 1024, 96 * 1024, null])('fits only the final message at %s bytes with truthful chapter disclosures (#1500)', maximum => {
   const frozen = context(maximum), before = JSON.stringify(frozen), base = '全书综合\n' + note;

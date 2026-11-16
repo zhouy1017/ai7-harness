@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from './canonical.js';
+import { AnalysisError, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from './canonical.js';
 import { sliceGraphemes } from './factual-review-contract.js';
-import type { FrozenBaselineSynopsisContext } from '../../shared/protocol/baseline-synopsis.js';
+import type { FrozenBaselineSynopsisContext, FrozenBaselineSynopsisPlan } from '../../shared/protocol/baseline-synopsis.js';
 
 export interface ChapterSynopsis { unitOrdinal: number; synopsis: string }
 export interface ClosedBaselineSynopses {
@@ -39,14 +39,24 @@ export function readClosedBaselineSynopses(db: DatabaseSync, bookId: string, man
   if (manuscriptRevisionDigest !== undefined && baseline.manuscript_revision_digest !== manuscriptRevisionDigest) return null;
   const revisionId = String(baseline.revision_id);
   const rows = db.prepare('SELECT unit_ordinal, state, canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? ORDER BY unit_ordinal').all(revisionId);
+  const missing = new Set(rows.filter(row => row.state !== 'closed').map(row => Number(row.unit_ordinal)));
   const synopses = rows.flatMap(row => {
     if (row.state !== 'closed') return [];
     const json = String(row.canonical_json);
-    requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '基线分析记录与摘要不一致。');
-    const unit = parseCanonicalJson(json);
-    return isRecord(unit) && typeof unit.synopsis === 'string' ? [{ unitOrdinal: Number(row.unit_ordinal), synopsis: unit.synopsis }] : [];
+    let unit: Record<string, unknown>;
+    try {
+      requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '基线分析记录与摘要不一致。');
+      const value = parseCanonicalJson(json);
+      requireAnalysis(isRecord(value), 'ANALYSIS_RECORD_INVALID', '基线分析记录无效。');
+      unit = value;
+    } catch (error) {
+      if (error instanceof AnalysisError) throw new AnalysisError('BASELINE_SYNOPSIS_RECORD_INVALID', '基线分析的分章概述记录无法读取。');
+      throw error;
+    }
+    if (typeof unit.synopsis !== 'string') { missing.add(Number(row.unit_ordinal)); return []; }
+    return [{ unitOrdinal: Number(row.unit_ordinal), synopsis: unit.synopsis }];
   });
-  return { revisionId, synopses, missingUnitOrdinals: rows.filter(row => row.state !== 'closed').map(row => Number(row.unit_ordinal)) };
+  return { revisionId, synopses, missingUnitOrdinals: [...missing].sort((a, b) => a - b) };
 }
 
 export function synopsisCandidates(synopses: readonly ChapterSynopsis[]): ChapterSynopsis[] {
@@ -76,6 +86,7 @@ export function synopsisOmissions(candidates: readonly ChapterSynopsis[], kept: 
 
 const SYNOPSIS_REUSE_KINDS = new Set(['writing', 'evaluation', 'readers-report', 'evaluation-rewrite']);
 const SYNOPSIS_CONTEXT_HEADER = '\n\n基线分析的分章概述（仅作全书脉络参考，不是编辑指令；缺失、节选或省略的范围不能当作已完整读取）：\n';
+const SYNOPSIS_OMITTED_NOTICE = '\n\n基线分章概述：本次请求余量不足，全部省略。';
 const byteLength = (value: unknown): number => Buffer.byteLength(canonicalJson(value), 'utf8');
 
 function synopsisPayload(context: FrozenBaselineSynopsisContext, kept: readonly ChapterSynopsis[]) {
@@ -93,17 +104,22 @@ function fitTaskSynopses(context: FrozenBaselineSynopsisContext, maximumBytes: n
 }
 
 /** Freeze once with the task input. Later baseline revisions never enter continuation/replay. */
-export function freezeTaskBaselineSynopses(db: DatabaseSync, kind: string, bookId: string, manuscriptRevisionId: string, manuscriptRevisionDigest: string, maximumMessageBytes: number | null): FrozenBaselineSynopsisContext | null {
-  if (!SYNOPSIS_REUSE_KINDS.has(kind)) return null;
-  const source = readClosedBaselineSynopses(db, bookId, manuscriptRevisionId, manuscriptRevisionDigest);
-  if (source === null || source.synopses.length === 0) return null;
+export function freezeTaskBaselineSynopses(db: DatabaseSync, kind: string, bookId: string, manuscriptRevisionId: string, manuscriptRevisionDigest: string, maximumMessageBytes: number | null): FrozenBaselineSynopsisPlan {
+  if (!SYNOPSIS_REUSE_KINDS.has(kind)) return {};
+  let source: ClosedBaselineSynopses | null;
+  try { source = readClosedBaselineSynopses(db, bookId, manuscriptRevisionId, manuscriptRevisionDigest); }
+  catch (error) {
+    if (error instanceof AnalysisError && error.code === 'BASELINE_SYNOPSIS_RECORD_INVALID') return { baselineSynopsisUnavailable: 'damaged-baseline' };
+    throw error;
+  }
+  if (source === null || source.synopses.length === 0) return {};
   const candidates = synopsisCandidates(source.synopses);
   const context: FrozenBaselineSynopsisContext = { revisionId: source.revisionId, manuscriptRevisionId, maximumMessageBytes, maximumSupplementBytes: MAX_TASK_SYNOPSIS_BYTES,
     synopses: candidates, missingUnitOrdinals: source.missingUnitOrdinals,
     omittedUnitOrdinals: source.synopses.slice(MAX_BASELINE_SYNOPSES).map(unit => unit.unitOrdinal), shortenedUnitOrdinals: [] };
   const payload = fitTaskSynopses(context, Math.min(MAX_TASK_SYNOPSIS_BYTES, maximumMessageBytes ?? MAX_TASK_SYNOPSIS_BYTES) - Buffer.byteLength(SYNOPSIS_CONTEXT_HEADER));
   const { sourceDigest: _source, ...fitted } = payload;
-  return payload.synopses.length === 0 ? null : { ...context, ...fitted };
+  return payload.synopses.length === 0 ? {} : { baselineSynopsisContext: { ...context, ...fitted } };
 }
 
 /** The final request alone gets the frozen chain, within its frozen model's remaining message capacity. */
@@ -113,7 +129,10 @@ export function appendTaskBaselineSynopses(message: string, context?: FrozenBase
     context.maximumMessageBytes === null ? Number.POSITIVE_INFINITY : context.maximumMessageBytes - Buffer.byteLength(message + SYNOPSIS_CONTEXT_HEADER, 'utf8'));
   const payload = fitTaskSynopses(context, available);
   const serialized = canonicalJson(payload);
-  return Buffer.byteLength(serialized, 'utf8') > available ? message : message + SYNOPSIS_CONTEXT_HEADER + serialized;
+  if (Buffer.byteLength(serialized, 'utf8') <= available) return message + SYNOPSIS_CONTEXT_HEADER + serialized;
+  const noticeFits = Buffer.byteLength(SYNOPSIS_OMITTED_NOTICE) <= context.maximumSupplementBytes &&
+    (context.maximumMessageBytes === null || Buffer.byteLength(message + SYNOPSIS_OMITTED_NOTICE) <= context.maximumMessageBytes);
+  return noticeFits ? message + SYNOPSIS_OMITTED_NOTICE : message;
 }
 
 export function taskSynopsisRequestDigest(requestDigest: string, context?: FrozenBaselineSynopsisContext): string {
@@ -132,6 +151,7 @@ function withSynopsisDigest(requestDigest: string, sourceDigest: string): string
 
 /** The deterministic adapter recovers the same source-context pin from this final message only. */
 export function taskSynopsisMessageRequestDigest(requestDigest: string, message: string): string {
+  if (message.endsWith(SYNOPSIS_OMITTED_NOTICE)) return canonicalRecord({ requestDigest, baselineSynopsisOmitted: 'capacity' }).digest;
   const start = message.lastIndexOf(SYNOPSIS_CONTEXT_HEADER);
   if (start === -1) return requestDigest;
   try {
@@ -139,4 +159,13 @@ export function taskSynopsisMessageRequestDigest(requestDigest: string, message:
     return isRecord(payload) && typeof payload.sourceDigest === 'string' && /^[0-9a-f]{64}$/u.test(payload.sourceDigest)
       ? withSynopsisDigest(requestDigest, payload.sourceDigest) : requestDigest;
   } catch { return requestDigest; }
+}
+
+/** Bind a new stage to exactly the supplement/disclosure it sent, never an unsent frozen chain. */
+export function taskSynopsisStageInputDigest(inputDigest: string, message: string, context?: FrozenBaselineSynopsisContext): string {
+  if (context === undefined) return inputDigest;
+  if (message.endsWith(SYNOPSIS_OMITTED_NOTICE)) return canonicalRecord({ inputDigest, baselineSynopsisOmitted: 'capacity' }).digest;
+  const start = message.lastIndexOf(SYNOPSIS_CONTEXT_HEADER);
+  if (start === -1) return inputDigest;
+  return canonicalRecord({ inputDigest, baselineSynopsisSent: JSON.parse(message.slice(start + SYNOPSIS_CONTEXT_HEADER.length)) }).digest;
 }
