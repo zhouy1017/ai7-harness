@@ -315,8 +315,9 @@ it.each(['bad-digest', 'missing-synopsis'] as const)('preserves review baseline 
   await withCapturedReviewBook(async (session, book) => {
     const baseline = session.store.launchBaselineAnalysis({ bookId: book.bookId, clientCommandId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }, launchPolicy);
     session.owner.admitAndDispatch(baseline.runRecordId, session.store.baselineAnalysisLedger); await session.owner.whenIdle();
+    const launched = session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy);
     appendBaselineUnitVariant(roots.dataRoot, book.bookId, variant);
-    await driveLaunchedReviewRun(session.driver, session.store.launchReviewRun({ bookId: book.bookId, clientCommandId: randomUUID(), categoryIds: [TYPOS], scope: WHOLE }, launchPolicy));
+    await driveLaunchedReviewRun(session.driver, launched);
     expect(workspace(session, book).run!.findings.length).toBeGreaterThan(0);
     if (variant === 'bad-digest') {
       expect(synthesisOutcome(session, book)).toContain('REVIEW_RECORD_INVALID');

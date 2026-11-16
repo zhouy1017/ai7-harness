@@ -191,9 +191,11 @@ describe('frozen baseline chapter context on ordinary downstream final steps (#1
         return { ...response, text: JSON.stringify(value) };
       }, {}, route); policy = capture!.policy;
       await runSynopsisBaseline(store, capture!.owner, target.bookId, policy);
-      const launch = launchRequest('initial-evaluation', target, { modelId: model.modelId, reasoningEffort: 'off' });
+      store.selectMainRoleModel(route, model.modelId, 'off');
+      const launch = launchRequest('initial-evaluation', target, { modelConnectionId: MODEL_SERVICE_CONNECTION_IDS[route], modelId: model.modelId, reasoningEffort: 'off' });
       const preview = store.previewTaskLaunch({ bookId: target.bookId, launch }, policy), launched = commitLaunch(target, launch);
       const facts = launched.ledger.loadExecutionPlan(launched.runRecordId), definition = launched.ledger.definitionForDigest(facts.promptContractDigest), frozen = facts.baselineSynopsisContext!;
+      expect(launched.ledger.frozenPlan(launched.taskIntentId, facts.planEnvelopeDigest).components['provider-resolution-plan']).toMatchObject({ executionRoute: { kind: route, model: model.modelId } });
       expect(frozen.maximumMessageBytes).toBe(remainingSynopsisMessageBytes(model.context.tokens, definition.systemPrompt));
       expect(frozen.maximumMessageBytes).not.toBeNull();
       expect(preview.send).toBe(`${store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: launched.taskIntentId }).scope.send}；${store.inspectTaskPlan({ bookId: target.bookId, kind: 'initial-evaluation', ref: launched.taskIntentId }).service.send}`);
