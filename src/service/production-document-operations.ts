@@ -41,7 +41,8 @@ import {
 export interface ProductionDocumentOperationsHost {
   assertAvailable(): void;
   readonly authority: DatabaseSync;
-  readonly boundedAuthority: BoundedManuscriptStore;
+  readonly boundedAuthority: Pick<BoundedManuscriptStore, 'initializeImportedBranch' | 'createManuscriptCheckpointWork' | 'advanceManuscriptCheckpointWork' |
+    'finalizeManuscriptCheckpointWork' | 'cancelManuscriptCheckpointWork'>;
   boundedCall<T>(operation: () => T): T;
   contentObjectPath(objectDigest: string, relativeKey: string): string;
   documentCall<T>(operation: () => T): T;

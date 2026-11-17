@@ -31,7 +31,7 @@ export interface EvaluationCalibrationOperationsHost {
   readonly evaluationCalibration: EvaluationCalibrationLedger;
   readonly evaluations: EvaluationRecords;
   publicationCall<T>(operation: () => T): T;
-  readonly publicationVersions: PublicationVersionStore;
+  readonly publicationVersions: Pick<PublicationVersionStore, 'current'>;
   safeTitle(input: string): string;
   transaction<T>(db: DatabaseSync, operation: () => T): T;
 }

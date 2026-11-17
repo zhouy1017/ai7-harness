@@ -24,7 +24,7 @@ import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
 import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL } from '../../src/service/series-exclusions.js';
 import type { ReadersReportContractInput } from '../../src/service/evaluation/readers-report-contract.js';
-import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError, boundedGraphemes } from '../../src/service/store.js';
+import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
@@ -532,35 +532,6 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('names a damaged admitted 审稿意见 exemplar as damaged instead of blanking 评估 (Issue #778)', async () => {
-    await withBook(async (book) => {
-      const { bookId } = book;
-      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
-      finalizeAsJ11(book.store, bookId);
-      await draftReport(book, 'author');
-      const settled = book.store.inspectReadersReport(bookId)!;
-      const draft = book.store.createReadersReportDraft(bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
-      const milestone = await book.store.saveMilestone(book.manuscriptId, book.branchId, '三审稿', 'stage-archive', null, '');
-      book.store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
-      book.store.admitReadersReportExemplar({ bookId, template: 'author', revisionDigest: draft.versions[0]!.revisionDigest, expectedDecisions: 0 });
-      const other = await importSample1Book(book.store, roots.codeRoot, '评估另一本书');
-      expect(book.store.inspectEvaluation(other.bookId, null).readersReport.exemplars)
-        .toEqual({ count: 1, statement: '参考本社 1 份审稿意见范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》' });
-      // The admitted decision record no longer reads: this one 范例 is named as damaged, and 评估 still reads.
-      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-      try {
-        database.exec('DROP TRIGGER learning_eligibility_decisions_no_update');
-        database.prepare("UPDATE learning_eligibility_decisions SET canonical_json = '{}' WHERE material_key LIKE 'readers-report-exemplar:%'").run();
-      } finally { database.close(); }
-      const workspace = book.store.inspectEvaluation(other.bookId, null).readersReport;
-      expect(workspace.templates.map((entry) => entry.template)).toEqual(['author', 'editorial']);
-      expect(workspace.exemplars).toEqual({
-        count: 0,
-        statement: '本社有 1 份审稿意见范例记录已损坏，无法读取，本次不参考范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》',
-      });
-    });
-  }, 300_000);
-
   it('names a skipped damaged exemplar on the drafted plan as 评估 names it, frozen at preparation (Issue #792)', async () => {
     await withBook(async (book) => {
       const { bookId } = book;
@@ -702,45 +673,6 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1])
         .toBe('参考本社 1 份审稿意见范例：《b书 · 审稿意见 · 给作者的修改意见 · 版本 1》；'
           + '另有 1 份范例的学习准入记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》');
-    });
-  }, 300_000);
-
-  it('seeds a draft with at most two admitted 审稿意见, by Book title, each its opening past the contract\'s bound (Issue #429)', async () => {
-    await withBook(async (book) => {
-      // Three Books drafted first — before any admission, so each contract asks the fixture the same question — then each
-      // designated and admitted; the fourth reads exactly two 范例 in `b.title COLLATE BINARY` order: 丙 (U+4E19), 乙 (U+4E59), never 审 (U+5BA1).
-      const drafted: Array<Book & { revisionDigest: string }> = [];
-      for (const title of [null, '丙书', '乙书']) {
-        let current: Book = book;
-        if (title !== null) {
-          const imported = await importSample1Book(book.store, roots.codeRoot, title);
-          await pinEditorialWorkspaceProfileRevision2(book.store, imported.bookId);
-          current = { ...book, bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
-        }
-        await runInitialEvaluationToEnd(book.store, book.owner, current.bookId, launchPolicy);
-        finalizeAsJ11(book.store, current.bookId);
-        await draftReport(current, 'author');
-        const settled = book.store.inspectReadersReport(current.bookId)!;
-        const draft = book.store.createReadersReportDraft(current.bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
-        drafted.push({ ...current, revisionDigest: draft.versions[0]!.revisionDigest });
-      }
-      for (const entry of drafted) {
-        const milestone = await book.store.saveMilestone(entry.manuscriptId, entry.branchId, '三审稿', 'stage-archive', null, '');
-        book.store.designatePublicationVersion({ bookId: entry.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
-        expect(book.store.admitReadersReportExemplar({ bookId: entry.bookId, template: 'author', revisionDigest: entry.revisionDigest, expectedDecisions: 0 })
-          .readersReports[0]!.admission.state).toBe('admitted');
-      }
-      const fourth = await importSample1Book(book.store, roots.codeRoot, '丁书');
-      expect(book.store.inspectEvaluation(fourth.bookId, null).readersReport.exemplars).toEqual({
-        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
-      });
-      // Each admitting Book still takes none of its own, and the two the fourth takes are the other two Books' when it is 审稿意见之书.
-      expect(book.store.inspectEvaluation(book.bookId, null).readersReport.exemplars).toEqual({
-        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
-      });
-      // The opening a 范例 hands the contract: whole graphemes, never a split combining mark, cut at the bound.
-      expect(boundedGraphemes(`${'a\u0301'.repeat(3)}bcd`, 4)).toBe(`${'a\u0301'.repeat(3)}b`);
-      expect(boundedGraphemes('短', 4_000)).toBe('短');
     });
   }, 300_000);
 

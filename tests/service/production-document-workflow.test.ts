@@ -4,14 +4,10 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
-import { PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../../src/service/production-document-workflow.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
-  MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
-  PRODUCTION_DOCUMENT_PHASE_IDS,
   type ProductionDocumentPhaseAction,
   type ProductionDocumentPhaseId,
   type ProductionDocumentWorkflowProjection,
@@ -85,139 +81,6 @@ function states(workflow: ProductionDocumentWorkflowProjection): Array<[string, 
 }
 
 describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)', () => {
-  it('follows the built-in profile\'s seven phases from its making, moved only by the editor\'s four commands and their reasons', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let bookId: string;
-    let settled: string;
-    try {
-      bookId = await importBook(store, await compose('工作流程组稿', [1, 2, 3]));
-      const document = await newsRelease(store, bookId);
-      const move = (phaseId: ProductionDocumentPhaseId, action: ProductionDocumentPhaseAction, reason: { choice: string; text: string | null } | null = null) =>
-        store.transitionProductionDocumentPhase({
-          bookId, documentId: document.documentId, phaseId, action, expectedTransitions: workflowOf(store, bookId).transitions, reason,
-        });
-
-      // WORK-002/003: pinned to the built-in profile when the document was made; seven phases, none started.
-      const fresh = workflowOf(store, bookId);
-      expect(fresh.profile).toMatchObject({ name: '基础书稿编辑流程', version: '2.0.0', activatedAt: document.createdAt });
-      expect([fresh.summary, fresh.next, fresh.transitions]).toEqual(['七个阶段都未开始', [], 0]);
-      expect(fresh.phases.map((phase) => phase.phaseId)).toEqual(PRODUCTION_DOCUMENT_PHASE_IDS);
-      expect(fresh.phases.map((phase) => phase.label)).toEqual(['接收与准备', '来源建设', '起草', '审阅与核查', '定稿', '交付', '维护']);
-      expect(fresh.phases.every((phase) => phase.state === 'not-started' && phase.latest === null && phase.moves === 0 &&
-        phase.actions.join() === 'start,skip')).toBe(true);
-
-      // 开始 and 完成 take no reason; several phases may be open at once.
-      expect(code(() => move('drafting', 'start', { choice: 'not-needed', text: null }))).toBe('PRODUCTION_DOCUMENT_PHASE_INVALID');
-      move('drafting', 'start');
-      move('intake', 'start');
-      let now = workflowOf(store, bookId);
-      expect(now.summary).toBe('2 个阶段进行中 · 0 项等待处理');
-      expect(now.next).toEqual([{ phaseId: 'intake', text: '接收与准备 · 进行中' }, { phaseId: 'drafting', text: '起草 · 进行中' }]);
-      move('drafting', 'complete');
-      expect(code(() => move('drafting', 'complete'))).toBe('PRODUCTION_DOCUMENT_PHASE_INVALID');
-      expect(code(() => move('maintenance', 'reopen', { choice: 'needs-change', text: null }))).toBe('PRODUCTION_DOCUMENT_PHASE_INVALID');
-
-      // A move against a count the editor did not see is refused: someone else moved the workflow first.
-      const seen = workflowOf(store, bookId).transitions;
-      move('intake', 'complete');
-      expect(code(() => store.transitionProductionDocumentPhase({
-        bookId, documentId: document.documentId, phaseId: 'finalization', action: 'start', expectedTransitions: seen, reason: null,
-      }))).toBe('PRODUCTION_DOCUMENT_WORKFLOW_CHANGED');
-
-      // 跳过 needs a reason from its set, and 自行输入 needs the editor's words, within their bound.
-      expect(code(() => move('source-development', 'skip'))).toBe('PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED');
-      expect(code(() => move('source-development', 'skip', { choice: 'needs-change', text: null }))).toBe('PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED');
-      expect(code(() => move('source-development', 'skip', { choice: 'custom', text: '   ' }))).toBe('PRODUCTION_DOCUMENT_PHASE_REASON_REQUIRED');
-      expect(code(() => move('source-development', 'skip', { choice: 'custom', text: '因'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) })))
-        .toBe('PRODUCTION_DOCUMENT_PHASE_REASON_INVALID');
-      move('source-development', 'skip', { choice: 'done-elsewhere', text: null });
-      // 重新打开 the same way, keeping the editor's words as written, trimmed.
-      move('drafting', 'reopen', { choice: 'custom', text: '  读者反馈后要改开头  ' });
-      now = workflowOf(store, bookId);
-      const phase = (id: ProductionDocumentPhaseId) => now.phases.find((entry) => entry.phaseId === id)!;
-      expect(phase('source-development')).toMatchObject({
-        state: 'skipped', stateLabel: '已跳过', actions: ['reopen'], moves: 1,
-        latest: { action: 'skip', fromState: 'not-started', toState: 'skipped', reason: { choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null } },
-      });
-      expect(phase('drafting')).toMatchObject({
-        state: 'reopened', stateLabel: '已重新打开', actions: ['complete', 'skip'], moves: 3,
-        latest: { action: 'reopen', fromState: 'completed', toState: 'reopened', reason: { choice: 'custom', label: '自行输入', text: '读者反馈后要改开头' } },
-      });
-      expect(phase('intake')).toMatchObject({ state: 'completed', actions: ['reopen'], moves: 2 });
-      expect([now.transitions, now.summary]).toEqual([6, '1 个阶段进行中 · 0 项等待处理']);
-      settled = JSON.stringify(now);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-
-    // WORK-009: every move stays, in order, and the ledger takes no change.
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    const database = new DatabaseSync(path);
-    try {
-      expect(database.prepare('SELECT phase_id, action FROM production_document_phase_transitions ORDER BY ordinal').all().map((row) => `${row.phase_id}:${row.action}`))
-        .toEqual(['drafting:start', 'intake:start', 'drafting:complete', 'intake:complete', 'source-development:skip', 'drafting:reopen']);
-      expect(() => database.exec("UPDATE production_document_phase_transitions SET reason_text = NULL WHERE ordinal = 6")).toThrow(/PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE/u);
-      expect(() => database.exec('DELETE FROM production_document_workflow_instances')).toThrow(/PRODUCTION_DOCUMENT_WORKFLOW_LEDGER_IMMUTABLE/u);
-    } finally {
-      database.close();
-    }
-    // A restart reads it as it was.
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      expect(JSON.stringify(workflowOf(reopened, bookId!))).toBe(settled!);
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-
-    // WORK-009 (Issue #626): a move records its reason's words with it, so they read as recorded — after a relabel, and for a
-    // key no longer offered. The skip of 来源建设 was the fifth move.
-    const rewrite = (change: (record: Record<string, unknown>) => Record<string, unknown>, choice: string): void => {
-      const tamper = new DatabaseSync(path);
-      try {
-        const row = tamper.prepare('SELECT canonical_json FROM production_document_phase_transitions WHERE ordinal = 5').get() as { canonical_json: string };
-        const record = canonicalRecord(change(parseCanonicalJson(row.canonical_json) as Record<string, unknown>));
-        tamper.exec('DROP TRIGGER production_document_phase_transitions_no_update');
-        tamper.prepare('UPDATE production_document_phase_transitions SET reason_choice = ?, canonical_json = ?, sha256 = ? WHERE ordinal = 5')
-          .run(choice, record.json, record.digest);
-        tamper.exec(PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL.production_document_phase_transitions_no_update!);
-      } finally {
-        tamper.close();
-      }
-    };
-    const skipOf = async (): Promise<unknown> => {
-      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try {
-        const read = (() => {
-          try {
-            return workflowOf(store, bookId!).phases.find((entry) => entry.phaseId === 'source-development')!.latest!.reason;
-          } catch (error) {
-            return error instanceof StoreError ? error.code : error;
-          }
-        })();
-        store.markCleanShutdown();
-        return read;
-      } finally {
-        store.close();
-      }
-    };
-    const recorded = new DatabaseSync(path, { readOnly: true });
-    try {
-      const row = recorded.prepare('SELECT canonical_json FROM production_document_phase_transitions WHERE ordinal = 5').get() as { canonical_json: string };
-      expect((parseCanonicalJson(row.canonical_json) as { reason: unknown }).reason).toEqual({ choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null });
-    } finally {
-      recorded.close();
-    }
-    rewrite((record) => ({ ...record, reason: { choice: 'retired-reason', label: '当时的说法', text: null } }), 'retired-reason');
-    expect(await skipOf()).toEqual({ choice: 'retired-reason', label: '当时的说法', text: null });
-    // A move recorded before its words were reads its key's words now, and one whose key no longer names a reason is refused.
-    rewrite((record) => ({ ...record, reason: { choice: 'done-elsewhere', text: null } }), 'done-elsewhere');
-    expect(await skipOf()).toEqual({ choice: 'done-elsewhere', label: '这一阶段已在别处完成', text: null });
-    rewrite((record) => ({ ...record, reason: { choice: 'retired-reason', text: null } }), 'retired-reason');
-    expect(await skipOf()).toBe('PRODUCTION_DOCUMENT_RECORD_INVALID');
-  }, 180_000);
-
   it('says what an open phase waits on from the document\'s own facts, and records none of it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

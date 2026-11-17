@@ -80,7 +80,7 @@ import type { BoundedManuscriptStore } from './bounded-manuscript.js';
 import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
 import type { ProductionDocuments } from './production-documents.js';
 import { RecentCache } from './recent-cache.js';
-import type { StoreControl, LedgerTaskKind } from './store.js';
+import type { StoreControl, LedgerTaskKind } from './store-operation-support.js';
 
 /**
  * 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5 ②C): the reader's report drafted by AI7 from a
@@ -549,7 +549,7 @@ export interface ReadersReportStoreHost {
   prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource>;
   readonly productionDocuments: ProductionDocuments;
   publicationCall<T>(operation: () => T): T;
-  readonly publicationVersions: PublicationVersionStore;
+  readonly publicationVersions: Pick<PublicationVersionStore, 'current'>;
   readersReportCall<T>(operation: () => T): T;
   readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] };
   readonly readersReportLedgers: RecentCache<BaselineAnalysisStore>;
@@ -932,12 +932,16 @@ export function boundedGraphemes(value: string, max: number): string {
 
 // ---- 审稿意见 in 图书交付包 and 范例 (Issue #429, S81c remainder; BUNDLE-001, KB-006; moved from store.ts by Issue #1534) -----------------
 
+/** What the 范例 side of 审稿意见 reads of the store: the connection, the ledgers it consults and the guarded calls, no more. */
+export type ReadersReportExemplarHost = Pick<ReadersReportStoreHost, 'authority' | 'bookPeople' | 'documentCall' | 'evaluationBookTitle' | 'exemplarSources' | 'importedCall' |
+  'importedExemplars' | 'learningCall' | 'learningEligibility' | 'productionDocuments' | 'publicationCall' | 'publicationVersions' | 'readersReportCall' | 'readersReports' | 'transaction'>;
+
 /**
  * Each template's 审稿意见 draft at the version 图书交付包 and 范例 pin: the latest version saved by the designation's instant
  * (`设为发稿版本时的最新一版`), or, for a draft that came after it — or while the Book has no 发稿版本 in force — the latest saved
  * now. A read of the drafts' records and the documents' version ledger; nothing is written.
  */
-export function readersReportPins(host: ReadersReportStoreHost, bookId: string, designatedAt: string | null): PackageReadersReportReading[] {
+export function readersReportPins(host: ReadersReportExemplarHost, bookId: string, designatedAt: string | null): PackageReadersReportReading[] {
   const drafts = host.readersReportCall(() => host.readersReports.drafts(bookId));
   return READERS_REPORT_TEMPLATES.flatMap((template): PackageReadersReportReading[] => {
     const stored = drafts.find((draft) => draft.template === template);
@@ -965,7 +969,7 @@ export function readersReportPins(host: ReadersReportStoreHost, bookId: string, 
 }
 
 /** The Learning Material one pinned 审稿意见 is on the ledger of S26b: its key names the template, its content the exact version. */
-function readersReportExemplarCandidate(host: ReadersReportStoreHost, pin: PackageReadersReportReading): LearningMaterialCandidate {
+function readersReportExemplarCandidate(host: ReadersReportExemplarHost, pin: PackageReadersReportReading): LearningMaterialCandidate {
   return {
     source: { kind: 'readers-report-exemplar', documentId: pin.documentId, revisionId: pin.revisionId },
     materialKey: `${READERS_REPORT_EXEMPLAR_KEY_PREFIX}${pin.template}`,
@@ -980,7 +984,7 @@ function readersReportExemplarCandidate(host: ReadersReportStoreHost, pin: Packa
 }
 
 /** The Book's 审稿意见 as 范例 offers them: each pinned against the designation given, with where the editor's admission stands. */
-export function readersReportExemplarsOf(host: ReadersReportStoreHost, bookId: string, designation: { readonly createdAt: string; readonly withdrawnAt: string | null }): ReadersReportExemplarProjection[] {
+export function readersReportExemplarsOf(host: ReadersReportExemplarHost, bookId: string, designation: { readonly createdAt: string; readonly withdrawnAt: string | null }): ReadersReportExemplarProjection[] {
   return readersReportPins(host, bookId, designation.withdrawnAt === null ? designation.createdAt : null).map((pin) => {
     const candidate = readersReportExemplarCandidate(host, pin);
     const latest = host.learningCall(() => host.learningEligibility.history(bookId, candidate.materialKey)).at(-1) ?? null;
@@ -1011,7 +1015,7 @@ export function readersReportExemplarsOf(host: ReadersReportStoreHost, bookId: s
  * decision is (S26b). Refused for a Book without a 发稿版本 in force, for a version no longer the one offered, or against
  * admissions the editor has not seen. It changes no draft and no package; the answer is the Book as 范例 reads it now.
  */
-export function admitReadersReportExemplar(host: ReadersReportStoreHost, input: AdmitReadersReportExemplarInput): ExemplarBookProjection {
+export function admitReadersReportExemplar(host: ReadersReportExemplarHost, input: AdmitReadersReportExemplarInput): ExemplarBookProjection {
   requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
   requireStore(READERS_REPORT_TEMPLATES.includes(input.template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
   const title = host.evaluationBookTitle(input.bookId);
@@ -1036,7 +1040,7 @@ export function admitReadersReportExemplar(host: ReadersReportStoreHost, input: 
   });
   return host.documentCall(() => host.publicationCall(() => readExemplarBook(host.exemplarSources(), { bookId: input.bookId, title })));
 }
-export function evaluationRecordOrdinal(host: ReadersReportStoreHost, recordId: string): number {
+export function evaluationRecordOrdinal(host: ReadersReportExemplarHost, recordId: string): number {
   const row = host.authority.prepare('SELECT ordinal FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow | undefined;
   requireStore(row !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
   return asNumber(row.ordinal);
@@ -1052,7 +1056,7 @@ export function evaluationRecordOrdinal(host: ReadersReportStoreHost, recordId: 
  * read, and every other exemplar — and the rest of 评估 — still reads. An imported version whose decision ledger alone will
  * not read is listed in `ledgerDamaged` instead, under its own plain reason (Issue #792).
  */
-export function readersReportExemplars(host: ReadersReportStoreHost, bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] } {
+export function readersReportExemplars(host: ReadersReportExemplarHost, bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] } {
   const rows = host.authority.prepare(
     `SELECT DISTINCT d.book_id, d.material_key, b.title FROM learning_eligibility_decisions d JOIN books b ON b.book_id = d.book_id
      WHERE d.material_key LIKE ? AND d.book_id <> ? ORDER BY b.title COLLATE BINARY, d.book_id, d.material_key`,
