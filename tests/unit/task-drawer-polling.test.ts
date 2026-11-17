@@ -23,7 +23,7 @@ function harness() {
   const state = { root, body, bar, footer, title, pill, plan: projection('running'), deferredPlan: null, painted: '', view: 'plan', mode: 'compact', cancelConfirmShown: true, focusTitle: false, focusBar: false, cancelOnOpen: false, redoOnOpen: false, interrupted: false, editOnOpen: null, redoPending: null, working: false, pendingNote: null, refusal: null, unconfirmedShown: false, redoConfirmShown: false, diffShown: false, unconfirmedRecordShown: false, ruleConfirmShown: false,
     taskPlanWording: (next: unknown) => next, retainPollInteraction, pollControlEngaged, onPollControlEnd, document, HTMLElement: MiniElement, HTMLButtonElement: MiniElement, queueMicrotask,
     TASK_PLAN_STATE_PILLS: { running: { tone: 'busy', shape: 'circle' }, settled: { tone: 'good', shape: 'circle' } }, TASK_DRAWER_FOOTER: '', CANCEL_IMPACT_ID: 'cancel-impact',
-    schedulePoll: vi.fn(), paintQuestions: vi.fn(), replaceBody: (...nodes: MiniElement[]) => body.replaceChildren(...nodes), goalBlock: make, compactBlock: make,
+    technicalLayerVisible: true, statusViewOf: () => false, tickActivity: vi.fn(), schedulePoll: vi.fn(), paintQuestions: vi.fn(), replaceBody: (...nodes: MiniElement[]) => body.replaceChildren(...nodes), goalBlock: make, compactBlock: make,
     paintBar: (next: ReturnType<typeof projection>) => { bar.textContent = next.state.key; },
   };
   const context = createContext(state); runInContext(implementation, context);
