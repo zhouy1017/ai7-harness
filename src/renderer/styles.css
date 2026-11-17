@@ -159,7 +159,7 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-more-books[open] > summary { color: var(--text); }
 .sidebar-books, .sidebar-book { display: grid; flex: 0 0 auto; gap: .2rem; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-books > div { max-height: clamp(80px, calc(100dvh - 720px), 260px); overflow: auto; scrollbar-width: thin; }
-.sidebar-book[hidden] { display: none; }
+.sidebar-books[hidden], .sidebar-book[hidden] { display: none; }
 .sidebar-book-row { position: relative; display: flex; align-items: center; }
 .sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; min-height: 26px; }
 .sidebar-book-row .nav-label { flex: 1 1 auto; font-family: var(--font-serif); }
@@ -174,7 +174,9 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
 .sidebar-group + .sidebar-group { margin-top: .1rem; }
-.sidebar-foot { display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--boundary); }
+/* 设置 is pinned by layout, not by a second scroller (#1521): the foot sticks to the bottom edge of the sidebar's own scroll, so it
+   is in view at any window height, in the full and in the icon form alike; the rows above it scroll under its background. */
+.sidebar-foot { position: sticky; bottom: 0; z-index: 1; display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding: .35rem 0 .5rem; border-top: 1px solid var(--boundary); background: var(--shell); }
 /* Icons only: the names leave the row's box but not the accessibility tree. */
 /* A thin scrollbar and a narrow inset keep the icon column inside the rail when the Book's groups make it scroll. */
 :root[data-sidebar="icons"] .app-sidebar { padding-inline: .15rem; }

@@ -128,21 +128,35 @@ describe('sidebar book entries', () => {
 
   it('opens a recent book directly and keeps the complete library reachable without a switcher', async () => {
     const { sidebar, preferences, surface, openBook, openDestination } = mounted();
+    await preferences.visit({ bookId: 'book-b', title: '乙书', section: 'review' });
     await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });
     surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
     expect(sidebar.querySelector('[data-shell-book-switcher]')).toBeNull();
     expect(sidebar.querySelector('.sidebar-book-title')).toBeNull();
+    // The open Book is the heading of its groups and has no row of its own (#1521); the others keep theirs.
     expect(sidebar.querySelector('.sidebar-current-book')?.textContent).toBe('甲书');
-    const row = sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')!;
-    expect(row.querySelector('.nav-book-initial')?.textContent).toBe('甲');
+    expect(sidebar.querySelector('[data-nav-book="book-a"]')).toBeNull();
+    expect(Array.from(sidebar.querySelectorAll<HTMLElement>('[data-nav-book-group]'), (group) => group.dataset['navBookGroup'])).toEqual(['work', 'records']);
+    const row = sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-b"]')!;
+    expect(row.querySelector('.nav-book-initial')?.textContent).toBe('乙');
     expect(row.querySelector('.icon')).toBeNull();
-    expect(row.querySelector('.nav-label')?.textContent).toBe('甲书');
-    expect(row.querySelector('.nav-state')?.textContent).toBe('当前');
-    expect(row.getAttribute('aria-current')).toBe('true');
+    expect(row.querySelector('.nav-label')?.textContent).toBe('乙书');
+    expect(row.querySelector('.nav-state')).toBeNull();
+    expect(row.getAttribute('aria-current')).toBeNull();
     row.click();
-    expect(openBook).toHaveBeenCalledWith('book-a');
+    expect(openBook).toHaveBeenCalledWith('book-b');
     sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')!.click();
     expect(openDestination).toHaveBeenCalledWith('library');
+  });
+
+  it('hides the Book list while the open Book is the only one known, and says so when no Book is open (#1521)', async () => {
+    const { sidebar, preferences, surface } = mounted();
+    await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });
+    surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
+    expect(sidebar.querySelector<HTMLElement>('.sidebar-books')!.hidden).toBe(true);
+    surface.leaveBook();
+    expect(sidebar.querySelector<HTMLElement>('.sidebar-books')!.hidden).toBe(false);
+    expect(sidebar.querySelector('[data-nav-book="book-a"]')).not.toBeNull();
   });
 
   it('remembers collapse through the existing preference store and keeps row tooltips', async () => {
