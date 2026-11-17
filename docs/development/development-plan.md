@@ -1,12 +1,12 @@
-# AI7 development plan — #1496 · R3 → 0.7.2 Alpha
+# AI7 development plan — #1516 · R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.8.0
 
-This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `1654f386342374e9b67b5fe51390dc8f0cb2c0e7` (0.7.1 Alpha, #1472, PR #1495). The post-0.6.5 order was settled on the plan board [#1458](https://github.com/zhouy1017/ai7-harness/issues/1458); its third round R3 is in closure under wave Issue [#1496](https://github.com/zhouy1017/ai7-harness/issues/1496) on `codex/integration-0.7.2` with candidate 0.7.2 Alpha. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
+This is the delivery-order owner under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). The current dev baseline is `790acbcbde8ca268217b152194f83241d1f13d10` (0.7.2 Alpha, #1496, PR #1515). The Owner's 2026-11-16 / 17 decisions in [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) replaced the earlier order: R4 → 0.7.3 Alpha, the interface and pages round → 0.7.4 Alpha, R5 → 0.8.0 Alpha, and one human test after all of it with no human test between rounds. R4 is in progress on two lanes: interface `codex/integration-0.7.3` (wave [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517)) and service `codex/integration-0.7.3-service`. The [historical Initial v1.0.0 Development Milestone](milestone-1.0.0-scope.md) remains a historical boundary reference. [PROGRESS](../../PROGRESS.md) owns actual capability/evidence status; this plan does not make candidate features dev-delivered.
 
 The Owner's 2026-10-23 direction is recorded in [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) (procedures as the central object, the execution governor and idle lane, DSH as the complex-task harness, review contract v2 with evidence on cards, one production policy with a runtime model table, the learning agent's reason asks) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (structural editing, structure recognition, import fidelity, less ceremony). They build on [ADR 0094](../adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md); F-05 and F-06 keep their design and their core priority. The plan was revised through [#1065](https://github.com/zhouy1017/ai7-harness/issues/1065). The Owner's 2026-10-24 platform decision is [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): Windows is the only delivery platform, and every macOS gate and target is deferred indefinitely (revised through [#1098](https://github.com/zhouy1017/ai7-harness/issues/1098)). The programme is versioned under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md): one `x.y.z` in `package.json` names the software in releases and in this plan — Wave 21 → 0.2.0, Wave 22 → 0.3.0, its follow-up integration Wave 22b → 0.4.0 (the Owner's 2026-10-31 maintenance sub-wave carrying the policy successor and the admitted channels), Wave 23 → 0.5.0 — and the former "v3.2" planning name is retired (revised through [#1100](https://github.com/zhouy1017/ai7-harness/issues/1100)).
 
-## R3 closure candidate -> 0.7.2 Alpha (#1496)
+## Delivered R3 → 0.7.2 Alpha (#1496)
 
-Every R3 slice is merged into `codex/integration-0.7.2` at `4eef1df7`, based on delivered `dev@1654f386` (0.7.1 Alpha). Candidate 0.7.2 Alpha uses protocol 204, schema 116 and Data Version 1. Closure requires the final exact-head ladder and two sequential unbound hosted controls, then the dev merge and fixed human-test refresh; no 0.7.2 dev delivery, tag or release is claimed. [PROGRESS](../../PROGRESS.md) owns the checkpoint and remaining risks.
+R3 is delivered at `dev@790acbcb` through [PR #1515](https://github.com/zhouy1017/ai7-harness/pull/1515), on top of `dev@1654f386` (0.7.1 Alpha): protocol 204, schema 116, Data Version 1. That pull request records the final exact-head ladder, the hosted controls and the dev merge; no tag or release is claimed. [PROGRESS](../../PROGRESS.md) owns the checkpoint and remaining risks.
 
 | Slice | What the editor can newly do / closure result | Merged PR / integration commit |
 | --- | --- | --- |
@@ -20,14 +20,14 @@ Every R3 slice is merged into `codex/integration-0.7.2` at `4eef1df7`, based on 
 | #1508 | Two heavy Word-manifest tests have 300-second headroom; their cost is retained for R4 #1033 | [#1509](https://github.com/zhouy1017/ai7-harness/pull/1509) / `89f757a2` |
 | #1147 / opening docs | Offline validation is closed: batched inference failed the numerical tolerance; no local embedding product is claimed and #1027 remains a separate Owner decision | [#1499](https://github.com/zhouy1017/ai7-harness/pull/1499) / `5a06c848` |
 
-The Owner's [2026-11-14 decisions](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6870691052) remain in force: keep SampleBook-based samples without new fixture fingerprints, use real ordinary-production captured transports, and preserve the independent safety boundaries. No live model call was made in R3; the invalidated recordings and the carried R2 lists await Owner re-record authorization in the closure PR.
+The Owner's [2026-11-14 decisions](https://github.com/zhouy1017/ai7-harness/issues/1458#issuecomment-6870691052) remain in force: keep SampleBook-based samples without new fixture fingerprints, use real ordinary-production captured transports, and preserve the independent safety boundaries. No live model call was made in R3; the invalidated recordings and the carried R2 lists are re-recorded in R4 by the Owner-authorized networking session ([#1538](https://github.com/zhouy1017/ai7-harness/issues/1538), then the [#1074](https://github.com/zhouy1017/ai7-harness/issues/1074) re-measurement).
 
-**The Owner asked to pause after R3 for a complete review (梳理) before any further development.** R4 and R5 remain planned and not started; R3 closure is not permission to begin them.
+**R4 is in progress on the two lanes above**, under plan [#1516](https://github.com/zhouy1017/ai7-harness/issues/1516) §7 and the wave [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) batches and merge order.
 
 | Carried special item | Disposition |
 | --- | --- |
-| #1147 / #1027 | Offline validation closed: batched inference failed the numerical tolerance. Product embedding is not shipped and #1027 awaits an Owner decision. |
-| #1152 | Standards-table scope awaits the Owner. |
+| #1147 / #1027 | Offline validation closed: batched inference failed the numerical tolerance. Product embedding is not shipped; the #1027 decision follows the #1074 result, with its decision point recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540). |
+| #1152 | A bounded R4 check of the standards tables (plan #1516 §9). |
 | #1074 | Quality re-measurement awaits the Owner's authorization for a developer-live pass. |
 
 ## Delivered R2 → 0.7.1 Alpha (#1472)
@@ -47,13 +47,18 @@ R1 is delivered as `dev@2026a9ee` through [PR #1468](https://github.com/zhouy101
 | repair | [#1459](https://github.com/zhouy1017/ai7-harness/issues/1459) | The 批注栏 works in the 1008×681 overlay form and a click on a mark is no longer dropped; found by the hosted Gate | `bedddbca` (#1469) |
 
 
-## After R3: paused for the Owner review (#1458)
+## After R3: R4 → 0.7.3, the interface and pages round → 0.7.4, R5 → 0.8.0 (#1516)
 
-| Round | Target | Scope | Starts after |
+The Owner's 2026-11-16 / 17 decisions moved the programme to this order and put one human test after all of it; no human test sits between rounds. Each round runs as usual — the test guest's full ladder, the hosted Full Gate, the merge into `dev`, the fixed human-test folder refresh and data-retention check, and the PROGRESS and plan updates.
+
+| Round | Version | Scope | Issues |
 | --- | --- | --- | --- |
-| R3 closure | 0.7.2 Alpha | Merged whole-book review synthesis and integer position indexes ([#1433](https://github.com/zhouy1017/ai7-harness/issues/1433), [#1434](https://github.com/zhouy1017/ai7-harness/issues/1434)), the memory facade and navigation guards, and the retained follow-ups [#1147](https://github.com/zhouy1017/ai7-harness/issues/1147), [#1152](https://github.com/zhouy1017/ai7-harness/issues/1152), [#1074](https://github.com/zhouy1017/ai7-harness/issues/1074) | Slices merged; final closure verification, dev merge and human-test refresh pending |
-| R4 | 0.7.3 Alpha | Service-layer domain split and the fast in-memory domain tests ([#1075](https://github.com/zhouy1017/ai7-harness/issues/1075), [#1033](https://github.com/zhouy1017/ai7-harness/issues/1033)) | Not started; after the Owner's complete review and subsequent dispatch |
-| R5 | 0.8.0 Alpha | Storage baseline fold and the in-app database upgrade tool | Not started; after Owner review, R4 and a measured read-path baseline on `SampleBooks/` and the Owner's decision on per-step undo across the upgrade |
+| R4 | 0.7.3 Alpha | The service-layer domain split and faster service tests; in parallel, the interface lane (39 review items plus the review's additions); the #1504 remainder, #1506 and a bounded #1152 check; the networking session (re-recording and the #1074 re-measurement) | [#1517](https://github.com/zhouy1017/ai7-harness/issues/1517) |
+| Interface and pages round | 0.7.4 Alpha | Interface lane two (9 items) and the rarely used pages (17 items); 学习回溯 cleaned up and opened; the review's additions; the styled icon set | [#1539](https://github.com/zhouy1017/ai7-harness/issues/1539) |
+| R5 | 0.8.0 Alpha | The storage rearrangement and the in-app upgrade tool; trustworthy undo (3 items); the real version list; the #1027 decision point | [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540) |
+| One human test | — | Arranged by the Owner after 0.8.0 is delivered; the real-editor evaluation (the second half of #1074) happens here too | — |
+
+The three rounds overlap in development and keep this delivery order. The [wave Issue #1517](https://github.com/zhouy1017/ai7-harness/issues/1517) owns the R4 batches, file ownership and merge order; [PROGRESS](../../PROGRESS.md) owns what is delivered.
 
 ## Delivered #1444 (0.6.5 Beta)
 

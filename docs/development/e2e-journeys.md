@@ -2,7 +2,7 @@
 
 ## #1496 synchronized deltas (0.7.2, `codex/integration-0.7.2`)
 
-The R3 closure candidate is **0.7.2 Alpha**, protocol **204**, schema **116**, Data Version **1**. All R3 slices are merged at `4eef1df7`; exact closure verification belongs in the closure PR, with dev delivery and the human-test refresh still pending. The delivered 0.7.1 identity and its evidence remain historical below.
+**0.7.2 Alpha** (protocol **204**, schema **116**, Data Version **1**) is delivered at `dev@790acbcb` through [PR #1515](https://github.com/zhouy1017/ai7-harness/pull/1515), which records its exact closure verification. The delivered 0.7.1 identity and its evidence remain historical below.
 
 | Slice / PR | Journey delta / stage owner |
 | --- | --- |
@@ -14,8 +14,7 @@ The R3 closure candidate is **0.7.2 Alpha**, protocol **204**, schema **116**, D
 | #1498 / [#1511](https://github.com/zhouy1017/ai7-harness/pull/1511) | All Journey stages are retained unchanged; real-store memory-specific base pins cover the facade. |
 | #1508 / [#1509](https://github.com/zhouy1017/ai7-harness/pull/1509) | No Journey change; two heavy Word-manifest service cases receive measured 300-second headroom, with cost reduction left to R4 #1033. |
 
-J-12 diagnostics now read package 0.7.2, protocol 204 and schema 116. Gate selection, the shared real-pointer path and the provider-free boundary are unchanged. The Owner asked to pause after R3 for a complete review (梳理) before any further development.
-
+J-12 diagnostics now read package 0.7.2, protocol 204 and schema 116. Gate selection, the shared real-pointer path and the provider-free boundary are unchanged.
 ## Completion windows stay on task surfaces (#1510)
 
 J-04's existing `review-online-dispatch` / `review-authorize` stages emulate the focused hosted window, keep the automatic-result preference on, observe completion notices and result-window creation, and require the review completion to remain a quiet 查看 notice without opening a window. The observation records notice arrival rather than relying on its short display duration. The original synthesis expansion, wheel scroll and real-pointer collapse remain at both viewports, as does the retained legacy result-window close guard. No stage is added or removed; Gate still consumes J-04 unchanged. J-16 retains its explicit preference-off and manual result-window paths. The completion probe pins the watched plan ref and the review workspace run id: that workspace already displays the completing run, so no duplicate result window opens. Renderer tests exercise the real completion callback and shell loaders for overview / matching task panel / matching task plan or run, another task, the already-visible review result, blocked surfaces and sheets, toggle-off, and a read released after navigating away and back. J-10 retains its original quiet-notice plus automatic-result expectation while watching the completing analysis in its own drawer.
