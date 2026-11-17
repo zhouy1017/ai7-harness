@@ -1,16 +1,88 @@
 import { createHash } from 'node:crypto';
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
-import { MAX_FRAME_BYTES } from '../shared/protocol.js';
-import { DOCX_NOTE_PARSER_IDENTITY, DOCX_PARSER_IDENTITY, DOCX_SPLIT_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
-  WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
-  wordIntakeForPinnedReadings, type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
+import {
+	closeSync,
+	constants,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readSync,
+	realpathSync
+} from 'node:fs';
+import { relative } from 'node:path';
+import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import {
+	MAX_FRAME_BYTES,
+	type FidelityCategoryProjection,
+	type ManuscriptBlockProjection,
+	type ManuscriptConversionProjection
+} from '../shared/protocol.js';
+import { hasExactKeys, isRecord, sha256Hex, canonicalJson as wordCanonicalJson } from './analysis/canonical.js';
+import {
+	BoundedManuscriptStore
+} from './bounded-manuscript.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { ParsedNoteSource } from './docx-notes.js';
-import { stageNoteSources, stagedNoteSourcesMatch, type StagedNoteSource } from './manuscript/note-blocks.js';
+import {
+	DOCX_NOTE_PARSER_IDENTITY,
+	DOCX_PARSER_IDENTITY,
+	DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
+	DOCX_SPLIT_PARSER_IDENTITY,
+	MAX_ARCHIVE_BYTES,
+	WORD_DOCX_PARSER_IDENTITY,
+	compileWordTrackedDocxBytes,
+	parseNativeDocxIntakeBytes,
+	wordImportFidelityReport,
+	wordIntakeForPinnedReadings,
+	type ImportFidelityPlan,
+	type NativeDocxIntakeParse,
+	type ParsedDocx,
+	type ParsedDocxBlock,
+	type ParsedTextBox,
+	type ParsedWordDocx,
+	type TextBoxDisposition,
+	type WordTrackedCompilation
+} from './docx.js';
+import {
+	EditorialMarkStore
+} from './editorial-marks.js';
+import { canonicalDegradationDecision, type DraftSnapshot, type IngestedDocx, type ResolvedImportTarget, type WordIntakePlan } from './import-review-records.js';
+import {
+	createWordImportedMarks,
+	stageImportedMarks,
+	stagedImportedMarksMatch,
+	validateWordImportedMarkSources
+} from './imported-marks.js';
+import {
+	LOCAL_LEARNING_POLICY_BASIS,
+	learningMaterialDigest,
+	wordTrackedEditCandidate
+} from './learning-eligibility.js';
+import {
+	EditorialLearningLedger
+} from './learning/ledger.js';
+import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { stageParagraphPieces, stagedParagraphPiecesMatch, type StagedParagraphPiece } from './manuscript/import-structure.js';
-import { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
-import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
+import {
+	legacyBlockSources,
+	stageNoteSources,
+	stagedNoteSourcesMatch,
+	type StagedNoteSource
+} from './manuscript/note-blocks.js';
+import { type BuiltInWorkflowProfile } from './native-workflow-profile.js';
+import {
+	one
+} from './store-operation-support.js';
+import {
+	DIGEST_PATTERN,
+	StoreError,
+	UUID_PATTERN,
+	asNumber,
+	asString,
+	canonicalJson,
+	requireStore,
+	sha256,
+	type SqlRow
+} from './store-records.js';
 
 /** Frozen local contracts for Issue #1132; the existing open, intake and IPC owners activate them. */
 export const WORD_INTAKE_PROFILE = 'ai7.word-tracked-intake-profile/1' as const;
@@ -1846,3 +1918,468 @@ export function recordTextBoxChoice(db: DatabaseSync, fidelityReviewId: string, 
     "INSERT INTO import_fidelity_choices(fidelity_review_id, category_key, choice, created_at) VALUES (?, 'text-boxes', ?, ?)",
   ).run(fidelityReviewId, choice, createdAt);
 }
+
+export interface ImportRetentionOperationsHost {
+  readonly authority: DatabaseSync;
+  retentionCall: <T>(operation: () => T) => T;
+  importedMarkCall: <T>(operation: () => T) => T;
+  contentObjectPath: (objectDigest: string, relativeKey: string) => string;
+  memoryFacade: () => EditorialMemoryFacade;
+  boundedCall: <T>(operation: () => T) => T;
+  readonly boundedAuthority: BoundedManuscriptStore;
+  learningLedger: () => EditorialLearningLedger;
+  readonly editorialMarks: EditorialMarkStore;
+  learningCall: <T>(operation: () => T) => T;
+  transaction: <T>(db: DatabaseSync, operation: () => T) => T;
+  loadDraftSnapshot: (draftId: string) => DraftSnapshot;
+  readonly workflowProfile: BuiltInWorkflowProfile;
+  persistedFidelityPlan: (fidelityReviewId: string, sourceDigest: string, sourceBytes: number, conversion: ManuscriptConversionProjection | null, parserIdentity: string, code: string, message: string) => { categories: FidelityCategoryProjection[]; plan: ImportFidelityPlan; };
+}
+
+export function promoteIngestSnapshot(host: ImportRetentionOperationsHost, draftId: string, ingested: IngestedDocx, createdAt: string, converted?: { sourceDigest: string; fidelity: FidelityCategoryProjection[] }): void {
+    const { parsed } = ingested;
+    host.authority
+      .prepare(
+        `INSERT INTO staged_import_snapshots(
+           draft_id, parser_identity, source_digest, content_digest, structure_digest, block_count,
+           fidelity_json, title_suggestion, title_source, snapshot_created_at, character_count
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        draftId,
+        parsed.parserIdentity,
+        converted?.sourceDigest ?? parsed.sourceDigest,
+        parsed.contentDigest,
+        parsed.structureDigest,
+        parsed.blockCount,
+        canonicalJson(converted?.fidelity ?? parsed.fidelity),
+        parsed.titleSuggestion.value,
+        parsed.titleSuggestion.sourceLabel,
+        createdAt,
+        parsed.characterCount,
+      );
+    const inserted = host.authority.prepare(
+      `INSERT INTO staged_import_blocks(
+         draft_id, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+       ) SELECT ?, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ? ORDER BY position`,
+    ).run(draftId, ingested.ingestId, draftId);
+    requireStore(inserted.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完整提升为权威快照。');
+    if (ingested.sources !== null) {
+      const sources = ingested.sources;
+      requireStore(sources.blockSourceIndexes.length + sources.notes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
+      host.retentionCall(() => stageImportSources(host.authority, draftId, sources));
+      host.importedMarkCall(() => stageImportedMarks(host.authority, draftId, parsed.importedMarks));
+    }
+    if (ingested.native !== null) {
+      const native = ingested.native;
+      host.retentionCall(() => stageWordRevisionIntake(host.authority, draftId, native));
+    }
+    const removed = host.authority
+      .prepare('DELETE FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?')
+      .run(ingested.ingestId, draftId);
+    requireStore(removed.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完成原子清理。');
+  }
+
+export function ingestMatchesSnapshot(host: ImportRetentionOperationsHost, ingested: IngestedDocx, draftId: string): boolean {
+    if (!ingestBlocksMatchSnapshot(host, ingested.ingestId, draftId)) return false;
+    if (ingested.native !== null) {
+      const native = ingested.native;
+      host.retentionCall(() => requireWordStagedIntake(host.authority, draftId, native));
+    }
+    if (ingested.sources === null) return true;
+    const sources = ingested.sources;
+    return host.retentionCall(() => stagedImportSourcesMatch(host.authority, draftId, sources)) &&
+      host.importedMarkCall(() => stagedImportedMarksMatch(host.authority, draftId, ingested.parsed.importedMarks));
+  }
+
+export function ingestBlocksMatchSnapshot(host: ImportRetentionOperationsHost, ingestId: string, draftId: string): boolean {
+    const difference = host.authority.prepare(
+      `SELECT
+         (SELECT count(*) FROM (
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?
+           EXCEPT
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM staged_import_blocks WHERE draft_id = ?
+         )) +
+         (SELECT count(*) FROM (
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM staged_import_blocks WHERE draft_id = ?
+           EXCEPT
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?
+         )) total`,
+    ).get(ingestId, draftId, draftId, draftId, ingestId, draftId) as SqlRow | undefined;
+    return difference !== undefined && asNumber(difference.total) === 0;
+  }
+
+export function readWordIntake(host: ImportRetentionOperationsHost, snapshot: DraftSnapshot): { native: NativeDocxIntakeParse; original: Uint8Array } | null {
+    if (host.authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(snapshot.draftId) === undefined) return null;
+    requireStore(snapshot.sourceFormat === 'DOCX' && snapshot.conversion === null && snapshot.workingObjectDigest === null &&
+      snapshot.objectDigest === snapshot.sourceDigest && snapshot.sourceBytes > 0 && snapshot.sourceBytes <= MAX_ARCHIVE_BYTES,
+    'WORD_SOURCE_INVALID', 'Word 暂存不是受支持的原始本机 DOCX。');
+    const object = host.authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(snapshot.objectDigest);
+    requireStore(object && object.byte_length === snapshot.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 暂存对象记录不完整。');
+    const path = host.contentObjectPath(snapshot.objectDigest, asString(object.relative_key));
+    let descriptor: number | null = null;
+    try {
+      requireStore(relative(path, realpathSync(path)) === '', 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件路径已经变化。');
+      const metadata = lstatSync(path);
+      requireStore(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === snapshot.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再完整。');
+      descriptor = openSync(path, constants.O_RDONLY);
+      const opened = fstatSync(descriptor);
+      requireStore(opened.isFile() && opened.size === snapshot.sourceBytes && opened.dev === metadata.dev && opened.ino === metadata.ino,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在打开时已经变化。');
+      const bytes = Buffer.allocUnsafe(snapshot.sourceBytes);
+      let offset = 0;
+      while (offset < bytes.byteLength) {
+        const read = readSync(descriptor, bytes, offset, Math.min(64 * 1024, bytes.byteLength - offset), offset);
+        requireStore(read > 0, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已不完整。');
+        offset += read;
+      }
+      requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, offset) === 0 && sha256(bytes) === snapshot.sourceDigest,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+      const native = host.retentionCall(() => wordIntakeForStagedReading(host.authority, snapshot.draftId,
+        parseNativeDocxIntakeBytes(bytes, snapshot.displayName, { formatIdentified: true })));
+      host.retentionCall(() => requireWordStagedIntake(host.authority, snapshot.draftId, native));
+      return { native, original: bytes };
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) throw new StoreError('WORD_SOURCE_INVALID', 'Word 原文件无法按暂存契约重新读取。');
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件当前无法读取，请恢复原始来源。');
+      }
+      throw error;
+    } finally { if (descriptor !== null) closeSync(descriptor); }
+  }
+
+export function wordIntakePlan(host: ImportRetentionOperationsHost, snapshot: DraftSnapshot, target: ResolvedImportTarget, disposition: TextBoxDisposition, input: unknown, draftVersion: number): WordIntakePlan | null {
+    const evidence = readWordIntake(host, snapshot);
+    if (evidence === null) {
+      requireStore(input === undefined, 'WORD_CHOICE_INVALID', '普通或转换导入不能选择 Word 修订模式。');
+      return null;
+    }
+    const { native } = evidence;
+    requireStore(native.kind === 'word', 'WORD_INTAKE_UNSUPPORTED', '此文件含当前不支持的 Word 修订；不能作为首份稿件导入。');
+    const choice = host.retentionCall(() => validateWordChoice(input));
+    const compiled = disposition === 'retain' ? native.word : compileWordTrackedDocxBytes(evidence.original, { textBoxDisposition: disposition });
+    requireStore(compiled.kind === 'ready' && compiled.graphDigest === native.word.graphDigest &&
+      compiled.templateManifestDigest === native.word.templateManifestDigest,
+    'WORD_READING_UNAVAILABLE', 'Word 阅读或来源图无法准确重建。');
+    const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+    requireStore(reading.usable && reading.blocks.length > 0, 'WORD_READING_UNAVAILABLE',
+      choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认「直接并入正文（作为定稿基线）」。' : '接受修订后的阅读没有可编辑的非空稿件。');
+    const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
+    requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
+    const ledger = host.memoryFacade();
+    let preparedTarget: WordPreparedIntake['target'];
+    if (target.kind === 'new-book') preparedTarget = { kind: 'new-book', controls: ledger.wordImportControlPins(null) };
+    else {
+      const samples = wordTrackedSamples(target.bookId, compiled.graph, compiled.templates);
+      const materials = samples.map((sample, index) => ({ templateKey: compiled.templates[index]!.templateKey,
+        materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
+          wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, snapshot.stagedAt)) }));
+      const parent = host.authority.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ? AND source_digest = ?')
+        .get(target.bookId, snapshot.sourceDigest);
+      const parentSourcePin = parent === undefined ? null : host.retentionCall(() => readWordParentSourcePin(host.authority, target.bookId, asString(parent.source_version_id)));
+      if (parentSourcePin?.parserIdentity === DOCX_PARSER_IDENTITY || parentSourcePin?.parserIdentity === DOCX_NOTE_PARSER_IDENTITY) {
+        // A retained /3 parent is checked by that same reader's result over these verified bytes; /1 and /2 keep
+        // their recorded historical meaning and are never reparsed.
+        const legacy = native.legacy;
+        requireStore(legacy.kind === 'ready' && legacy.parsed.parserIdentity === parentSourcePin.parserIdentity &&
+          legacy.parsed.sourceDigest === parentSourcePin.sourceDigest && legacy.parsed.archiveBytes === parentSourcePin.sourceBytes &&
+          legacy.parsed.contentDigest === parentSourcePin.contentDigest && legacy.parsed.structureDigest === parentSourcePin.structureDigest,
+        'WORD_SOURCE_INVALID', 'Word 复用的历史来源与其 /3 读法的实际结果不一致。');
+      }
+      preparedTarget = { kind: 'existing-book', bookId: target.bookId, controls: ledger.wordImportControls(target.bookId, materials), parentSourcePin };
+    }
+    const bound = bindWordReadingBlocks(reading, reading.blocks.map((block) => ({ sourceBlockId: block.blockId,
+      blockId: `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}` })));
+    const pin = (selected: WordCompiledReading) => ({ digest: selected.readingDigest, blockCount: selected.blocks.length, usable: selected.usable });
+    return { original: evidence.original, native, compiled, reading, parsed: { ...native.parsed, contentDigest: reading.contentDigest, structureDigest: reading.structureDigest,
+      blockCount: reading.blocks.length, characterCount: reading.characterCount, fidelity }, prepared: {
+      schema: 'ai7.word-import-preparation/1', draftId: snapshot.draftId, draftVersion, choice, originalDigest: snapshot.sourceDigest,
+      sourceBytes: snapshot.sourceBytes, inventoryDigest: native.word.inventoryDigest, graphDigest: compiled.graphDigest,
+      extractorIdentity: compiled.graph.extractorIdentity, readings: { rejected: pin(compiled.readings.rejected), accepted: pin(compiled.readings.accepted) },
+      mappingDigest: bound.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, textBoxDisposition: disposition, target: preparedTarget } };
+  }
+
+export function replaceStagedReading(host: ImportRetentionOperationsHost, snapshot: DraftSnapshot, parsed: ParsedDocx | ParsedWordDocx, blocks: ReadonlyArray<Pick<ParsedDocxBlock, 'position' | 'kind' | 'level' | 'text' | 'digest' | 'graphemeLength' | 'note'>>, sources: StagedImportSources | null): void {
+    requireStore(host.authority.isTransaction && blocks.length === parsed.blockCount && blocks.length > 0,
+      'WORD_STAGING_INVALID', '阅读切换必须形成原子的非空暂存快照。');
+    for (const table of ['staged_import_block_sources', 'staged_import_note_sources', 'staged_import_paragraph_pieces', 'staged_import_text_box_paragraphs', 'staged_import_marks', 'staged_import_blocks']) {
+      host.authority.prepare(`DELETE FROM ${table} WHERE draft_id = ?`).run(snapshot.draftId);
+    }
+    requireStore(host.authority.prepare(`UPDATE staged_import_snapshots SET parser_identity = ?, content_digest = ?, structure_digest = ?,
+      block_count = ?, character_count = ?, fidelity_json = ?, title_suggestion = ?, title_source = ? WHERE draft_id = ?`)
+      .run(parsed.parserIdentity, parsed.contentDigest, parsed.structureDigest, parsed.blockCount, parsed.characterCount,
+        canonicalJson(parsed.fidelity), parsed.titleSuggestion.value, parsed.titleSuggestion.sourceLabel, snapshot.draftId).changes === 1,
+    'WORD_STAGING_INVALID', '阅读切换缺少原始暂存快照。');
+    const insert = host.authority.prepare(`INSERT INTO staged_import_blocks(draft_id, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    let offset = 0;
+    for (const block of blocks) {
+      const id = `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+      insert.run(snapshot.draftId, id, block.position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+      offset += block.graphemeLength;
+    }
+    requireStore(offset === parsed.characterCount, 'WORD_STAGING_INVALID', '所选阅读的完整字符数不一致。');
+    if (sources !== null) {
+      host.retentionCall(() => stageImportSources(host.authority, snapshot.draftId, sources));
+      host.importedMarkCall(() => stageImportedMarks(host.authority, snapshot.draftId, parsed.importedMarks));
+    } else {
+      stageNoteSources(host.authority, snapshot.draftId, blocks.flatMap((block) => block.note === undefined ? [] : [{ position: block.position, ...block.note }]));
+    }
+    host.boundedCall(() => host.boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
+  }
+
+export function requireWordStagedReading(host: ImportRetentionOperationsHost, snapshot: DraftSnapshot, word: WordIntakePlan): void {
+    const { parsed, reading } = word;
+    requireStore(snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY && snapshot.contentDigest === parsed.contentDigest &&
+      snapshot.structureDigest === parsed.structureDigest && snapshot.blockCount === parsed.blockCount && snapshot.characterCount === parsed.characterCount &&
+      canonicalJson(snapshot.fidelity) === canonicalJson(parsed.fidelity) && snapshot.titleSuggestion === parsed.titleSuggestion.value &&
+      snapshot.titleSource === parsed.titleSuggestion.sourceLabel,
+    'WORD_PREPARATION_INVALID', 'Word 暂存元数据与明确选择的阅读不一致。');
+    const rows = host.authority.prepare('SELECT * FROM staged_import_blocks WHERE draft_id = ? ORDER BY position').all(snapshot.draftId);
+    let offset = 0;
+    requireStore(rows.length === reading.blocks.length && rows.every((row, index) => {
+      const block = reading.blocks[index]!;
+      const id = `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+      const valid = row.staged_block_id === id && row.position === block.position && row.kind === block.kind && row.level === block.level &&
+        row.text === block.text && row.digest === block.digest && row.grapheme_length === block.graphemeLength && row.start_offset === offset;
+      offset += block.graphemeLength;
+      return valid;
+    }), 'WORD_PREPARATION_INVALID', 'Word 暂存没有完整对应已确认的阅读。');
+    requireStore(stagedNoteSourcesMatch(host.authority, snapshot.draftId,
+      reading.blocks.flatMap((block) => block.note === undefined ? [] : [{ position: block.position, ...block.note }])),
+    'WORD_PREPARATION_INVALID', 'Word 注释来源与明确选择的阅读不一致。');
+    for (const table of ['staged_import_block_sources', 'staged_import_paragraph_pieces', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
+      host.authority.prepare(`SELECT 1 FROM ${table} WHERE draft_id = ? LIMIT 1`).get(snapshot.draftId) === undefined,
+      'WORD_PREPARATION_INVALID', 'Word 图与片段不能冒充历史段落或标记暂存。');
+  }
+
+export function commitWordEvidence(host: ImportRetentionOperationsHost, word: WordIntakePlan, input: { bookId: string; sourceVersionId: string; commitId: string;
+    fidelityReviewId: string; revisionId: string; branchId: string; reviewDigest: string; createdAt: string }): number {
+    requireStore(host.authority.isTransaction, 'WORD_SOURCE_INVALID', 'Word 来源必须与稿件导入一并提交。');
+    const { bookId, sourceVersionId, commitId, createdAt } = input;
+    const parent = host.retentionCall(() => readWordParentSourcePin(host.authority, bookId, sourceVersionId));
+    const reviewedTarget = word.prepared.target;
+    if (reviewedTarget.kind === 'existing-book' && reviewedTarget.parentSourcePin !== null) {
+      host.retentionCall(() => requireWordParentSourcePin(host.authority, reviewedTarget.parentSourcePin!));
+      requireStore(reviewedTarget.parentSourcePin.sourceVersionId === sourceVersionId, 'WORD_SOURCE_CHANGED', 'Word 复用来源与已审阅的原始来源不同。');
+    }
+    host.retentionCall(() => retainWordRevisionSource(host.authority, parent, word.compiled.graph));
+    const bound = host.retentionCall(() => bindWordReadingToRevision(host.authority, bookId, input.revisionId, sourceVersionId, word.reading));
+    requireStore(bound.mappingDigest === word.prepared.mappingDigest, 'WORD_MAPPING_INVALID', 'Word 稿件基线没有按已审阅的对应建立。');
+    const samples = wordTrackedSamples(bookId, word.compiled.graph, word.compiled.templates);
+    const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
+      materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
+        wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
+    // This import's three operations historically shared one ledger/read proof across its writes.
+    // A facade factory per method would re-read controls here; retain that operation-local lifetime.
+    const learning = host.learningLedger();
+    const ledger = new EditorialMemoryFacade(host.authority, () => learning);
+    const controls = ledger.wordImportControls(bookId, materials);
+    if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
+      'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
+    else requireStore(canonicalJson({ global: controls.global, book: controls.book }) === canonicalJson(reviewedTarget.controls) &&
+      controls.materials.every(({ standing }) => standing.choice === 'house' && standing.decisionId === null && standing.decisionDigest === null &&
+        standing.basisVersion === LOCAL_LEARNING_POLICY_BASIS.version), 'WORD_ADMISSION_STALE', 'Word 新图书的学习设置或默认准入已变化。');
+    const choice: WordImportChoiceRecord = { schema: 'ai7.word-import-choice/1', sourceVersionId,
+      parentSourcePinDigest: wordParentSourcePinRecord(parent).digest, originalDigest: word.compiled.sourceDigest, workingObjectDigest: null,
+      importReviewId: input.reviewDigest, fidelityReviewId: input.fidelityReviewId, commitId, revisionId: input.revisionId,
+      extractorIdentity: word.compiled.graph.extractorIdentity, graphDigest: word.compiled.graphDigest, ...word.prepared.choice,
+      readings: word.prepared.readings, mappingDigest: bound.mappingDigest, templateManifestDigest: word.compiled.templateManifestDigest,
+      effectiveControls: controls };
+    host.retentionCall(() => retainWordRevisionImport(host.authority, bookId, choice, createdAt));
+    host.retentionCall(() => retainWordManuscriptSourceSegments(host.authority, bookId, choice, word.reading));
+    const importedMarks = host.importedMarkCall(() => createWordImportedMarks(host.authority, host.editorialMarks, bookId, commitId,
+      word.compiled, input.branchId));
+    host.learningCall(() => ledger.retainWordImportSamples(bookId, commitId, word.compiled));
+    host.importedMarkCall(() => validateWordImportedMarkSources(host.authority, bookId, commitId, word.compiled));
+    host.learningCall(() => ledger.validateWordImportSamples(bookId, commitId, word.compiled));
+    return importedMarks;
+  }
+
+export function selectLegacyWordStaging(host: ImportRetentionOperationsHost, snapshot: DraftSnapshot): DraftSnapshot {
+    const evidence = readWordIntake(host, snapshot);
+    if (evidence === null || evidence.native.kind === 'legacy') return snapshot;
+    const legacy = evidence.native.legacy;
+    requireStore(legacy.kind === 'ready', 'DOCX_REJECTED', '该 DOCX 的历史读法没有可用于现有来源导入或重新导入的完整稿件。');
+    host.transaction(host.authority, () => {
+      replaceStagedReading(host, snapshot, legacy.parsed, legacy.blocks,
+        { ...legacyBlockSources(legacy.blocks), textBoxes: legacy.parsed.textBoxes });
+      host.authority.prepare('UPDATE staged_word_revision_intakes SET reviewed_json = NULL, reviewed_sha256 = NULL WHERE draft_id = ?').run(snapshot.draftId);
+    });
+    return host.loadDraftSnapshot(snapshot.draftId);
+  }
+
+export function assertImportPostconditions(host: ImportRetentionOperationsHost, input: {
+    bookId: string;
+    dimensionSetId: string;
+    manuscriptId: string;
+    branchId: string;
+    revisionId: string;
+    sourceVersionId: string;
+    fidelityReviewId: string;
+    degradationDecisionId: string | null;
+    workflowInstanceId: string;
+    importRecordId: string;
+    blockCount: number;
+    characterCount: number;
+    reviewDigest: string;
+    fidelityPlan: ImportFidelityPlan;
+    fidelityCategoryCount: number;
+    /** Blocks of r1 no source paragraph maps: the later pieces of split paragraphs (Issue #1205). */
+    unmappedBlocks: number;
+    sourceDigest: string;
+    sourceBytes: number;
+    conversion: ManuscriptConversionProjection | null;
+    parserIdentity: string;
+    word?: { commitId: string; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>; noteCount: number };
+  }): void {
+    const counts = one(
+      host.authority
+        .prepare(
+          `SELECT
+             (SELECT count(*) FROM books WHERE book_id = ?) books,
+             (SELECT count(*) FROM book_dimensions WHERE dimension_set_id = ?) dimensions,
+             (SELECT count(*) FROM manuscripts WHERE manuscript_id = ? AND role = 'primary') manuscripts,
+             (SELECT count(*) FROM manuscript_branches WHERE branch_id = ? AND base_revision_id = ?) branches,
+             (SELECT count(*) FROM manuscript_revisions WHERE revision_id = ? AND revision_label = 'r1' AND parent_revision_id IS NULL) revisions,
+             (SELECT count(*) FROM manuscript_block_versions WHERE revision_id = ?) blocks,
+             (SELECT count(*) FROM working_blocks WHERE branch_id = ?) working_blocks,
+             (SELECT count(*) FROM working_offset_nodes WHERE branch_id = ?) offset_nodes,
+             (SELECT count(*) FROM branch_working_state
+                WHERE branch_id = ? AND total_graphemes = ?) working_state,
+             (SELECT count(*) FROM source_versions
+                WHERE source_version_id = ? AND object_digest = ? AND source_digest = ?) sources,
+             (SELECT count(*) FROM import_fidelity_reviews
+                WHERE fidelity_review_id = ? AND book_id = ? AND source_version_id = ?
+                  AND outcome = ? AND review_digest = ?
+                  AND round_trip_guaranteed = 0) fidelity_reviews,
+             (SELECT count(*) FROM import_fidelity_categories WHERE fidelity_review_id = ?) fidelity_categories,
+             (SELECT count(*) FROM import_degradation_decisions WHERE fidelity_review_id = ?) degradation_decisions,
+             (SELECT count(*) FROM workflow_instances
+                WHERE workflow_instance_id = ?
+                  AND profile_id = ? AND profile_version = ? AND profile_digest = ?
+                  AND native_profile_id = ? AND native_profile_version = ? AND native_profile_digest = ?) workflows,
+             (SELECT count(*) FROM manuscript_import_records
+                WHERE import_record_id = ? AND book_id = ? AND manuscript_id = ?
+                  AND source_version_id = ? AND fidelity_review_id = ? AND resulting_revision_id = ?
+                  AND degradation_decision_id IS ?) imports,
+             (SELECT count(*) FROM manuscript_block_sources WHERE revision_id = ? AND source_version_id = ?) +
+               (SELECT count(*) FROM manuscript_note_sources WHERE revision_id = ? AND source_version_id = ?) block_sources,
+             (SELECT count(*) FROM editorial_marks
+                WHERE manuscript_id = ? AND source_kind = 'imported-author' AND pinned_revision_id = ?) imported_marks`,
+        )
+        .all(
+          input.bookId,
+          input.dimensionSetId,
+          input.manuscriptId,
+          input.branchId,
+          input.revisionId,
+          input.revisionId,
+          input.revisionId,
+          input.branchId,
+          input.branchId,
+          input.branchId,
+          input.characterCount,
+          input.sourceVersionId,
+          input.sourceDigest,
+          input.sourceDigest,
+          input.fidelityReviewId,
+          input.bookId,
+          input.sourceVersionId,
+          input.fidelityPlan.outcome,
+          input.reviewDigest,
+          input.fidelityReviewId,
+          input.fidelityReviewId,
+          input.workflowInstanceId,
+          host.workflowProfile.projection.id,
+          host.workflowProfile.projection.version,
+          host.workflowProfile.projection.digest,
+          host.workflowProfile.native.id,
+          host.workflowProfile.native.version,
+          host.workflowProfile.native.digest,
+          input.importRecordId,
+          input.bookId,
+          input.manuscriptId,
+          input.sourceVersionId,
+          input.fidelityReviewId,
+          input.revisionId,
+          input.degradationDecisionId,
+          input.revisionId,
+          input.sourceVersionId,
+          input.revisionId,
+          input.sourceVersionId,
+          input.manuscriptId,
+          input.revisionId,
+        ) as SqlRow[],
+      'IMPORT_POSTCONDITION_FAILED',
+      '导入提交后置条件缺失。',
+    );
+    requireStore(
+      asNumber(counts.books) === 1 &&
+        asNumber(counts.dimensions) === 8 &&
+        asNumber(counts.manuscripts) === 1 &&
+        asNumber(counts.branches) === 1 &&
+        asNumber(counts.revisions) === 1 &&
+        asNumber(counts.blocks) === input.blockCount &&
+        asNumber(counts.working_blocks) === input.blockCount &&
+        asNumber(counts.offset_nodes) === input.blockCount &&
+        asNumber(counts.working_state) === 1 &&
+        asNumber(counts.sources) === 1 &&
+        asNumber(counts.fidelity_reviews) === 1 &&
+        asNumber(counts.fidelity_categories) === input.fidelityCategoryCount &&
+        asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
+        asNumber(counts.workflows) === 1 &&
+        asNumber(counts.imports) === 1 &&
+        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount - input.unmappedBlocks : input.word.noteCount) &&
+        // Issue #411: exactly the marks the review counted, every one pinned on r1.
+        asNumber(counts.imported_marks) === input.fidelityPlan.importedMarks,
+      'IMPORT_POSTCONDITION_FAILED',
+      '导入提交未形成完整记录图。',
+    );
+    if (input.word !== undefined) {
+      const word = input.word;
+      const { choice } = host.retentionCall(() => readWordImportChoiceRecord(host.authority, input.bookId, word.commitId));
+      host.retentionCall(() => requireWordManuscriptSourceSegments(host.authority, input.bookId, choice,
+        word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
+      host.importedMarkCall(() => validateWordImportedMarkSources(host.authority, input.bookId, word.commitId, word.compiled));
+      host.learningCall(() => host.memoryFacade().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
+    }
+    const { plan: persistedPlan } = host.persistedFidelityPlan(
+      input.fidelityReviewId,
+      input.sourceDigest,
+      input.sourceBytes,
+      input.conversion,
+      input.parserIdentity,
+      'IMPORT_POSTCONDITION_FAILED',
+      '导入提交未形成精确保真分类。',
+    );
+    requireStore(
+      canonicalJson(persistedPlan) === canonicalJson(input.fidelityPlan),
+      'IMPORT_POSTCONDITION_FAILED',
+      '导入提交未形成精确保真分类。',
+    );
+    const decisions = host.authority
+      .prepare(
+        `SELECT degradation_decision_id, decision
+         FROM import_degradation_decisions WHERE fidelity_review_id = ?`,
+      )
+      .all(input.fidelityReviewId) as SqlRow[];
+    if (input.degradationDecisionId === null) {
+      requireStore(decisions.length === 0, 'IMPORT_POSTCONDITION_FAILED', '洁净导入意外创建了降级决定。');
+    } else {
+      const decision = one(decisions, 'IMPORT_POSTCONDITION_FAILED', '降级导入未形成唯一决定。');
+      requireStore(
+        asString(decision.degradation_decision_id) === input.degradationDecisionId &&
+          asString(decision.decision) === canonicalDegradationDecision(input.fidelityPlan),
+        'IMPORT_POSTCONDITION_FAILED',
+        '降级导入决定与保真审阅不匹配。',
+      );
+    }
+  }
