@@ -20,6 +20,7 @@ export const COMMENTS_TRIAGE_WORDS = {
   quickReject: '拒绝',
   readingPlaces: '正在读取全书待处理的位置，请稍后再试。',
   searchFailed: '没能读取其他位置的待处理批注；没有移动。',
+  pageEnd: '本页没有待处理的了；点「下一条待处理」到后面继续。',
 } as const;
 
 /** The header's count: the Book's pending marks, `2000+` once the list stops there. */

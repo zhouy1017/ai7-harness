@@ -1636,10 +1636,15 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
 /* The Book's pending count and 上一条 / 下一条待处理 (Issue #1523). */
 .manuscript-comments-book-pending { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-subdued); font-variant-numeric: tabular-nums; }
 .manuscript-comments-heading .manuscript-comments-step { min-width: 24px; width: 24px; padding: 0; }
-/* A compact 修改建议's 接受 and 拒绝 stand over its preview line on hover and focus; the card keeps its height. */
-.editorial-mark-quick-actions { position: absolute; right: .45rem; bottom: .3rem; display: none; gap: .25rem; padding-left: .3rem; background: var(--surface); }
+/* A compact 修改建议's 接受 and 拒绝 take their own room at the end of its preview line on hover and focus; the card keeps its height. */
+.editorial-mark-compact-line { display: flex; align-items: center; gap: .3rem; min-width: 0; margin: .2rem 0 0; }
+.editorial-mark-compact-line > .editorial-mark-compact-preview { flex: 1; min-width: 0; margin: 0; }
+.editorial-mark-card[data-expanded="true"] > .editorial-mark-compact-line { display: none; }
+.editorial-mark-quick-actions { display: none; flex: none; gap: .25rem; }
 .manuscript-comments-card[data-expanded="false"]:is(:hover, :focus-within) .editorial-mark-quick-actions { display: flex; }
-.editorial-mark-quick-actions button { min-height: 22px; padding: 0 .45rem; font-size: .72rem; line-height: 20px; }
+.editorial-mark-quick-actions .btn { min-height: 20px; height: 20px; padding: 0 .4rem; font-size: .7rem; line-height: 18px; }
+/* 下一条待处理 offered once a pointer decision reached the page's end (Issue #1523). */
+.manuscript-comments-heading .manuscript-comments-step[data-offered="true"] { color: var(--action-primary-text); background: var(--action-primary); }
 .manuscript-comments-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .manuscript-comments-canvas { position: relative; min-height: 100%; margin-inline: 8px; }
 .manuscript-comments-card { position: absolute; left: 0; right: 0; overflow-wrap: anywhere; border-radius: 10px; }
