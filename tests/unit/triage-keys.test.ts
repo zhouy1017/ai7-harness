@@ -35,6 +35,13 @@ it('leaves the key to an input, a textarea, a select or an editable region, insi
   expect([inTextEntry(reply as unknown as EventTarget), inTextEntry(card as unknown as EventTarget), inTextEntry(null)]).toEqual([true, false, false]);
 });
 
+it('decides once per press: a held key repeats nothing (#1523 review)', () => {
+  const target = element('article') as unknown as EventTarget;
+  expect(triageKeyAction({ key: 'a', target, repeat: true })).toBeNull();
+  expect(triageKeyAction({ key: 'r', target, repeat: true })).toBeNull();
+  expect(triageKeyAction({ key: 'A', target, repeat: false })).toBe('accept');
+});
+
 it('does nothing while an input method composes or a modifier is held', () => {
   const target = element('article') as unknown as EventTarget;
   expect(triageKeyAction({ key: 'a', target, isComposing: true })).toBeNull();
