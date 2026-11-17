@@ -27,6 +27,7 @@ interface TriageKeyEvent {
   readonly ctrlKey?: boolean;
   readonly altKey?: boolean;
   readonly metaKey?: boolean;
+  readonly repeat?: boolean;
 }
 
 /** Whether focus is in a field, a select or an editable region, where a key belongs to the text. */
@@ -37,9 +38,12 @@ export function inTextEntry(target: EventTarget | null): boolean {
 
 /**
  * The action a key press names on a focused card, or `null`: none while an input method composes, while a modifier is held
- * (Ctrl+A selects, Alt+R may be a menu) or while the press comes from text entry inside or outside the card.
+ * (Ctrl+A selects, Alt+R may be a menu), while the press comes from text entry inside or outside the card, or while the key is
+ * held down — one press decides one card, however long it is held, even once focus has moved to the next. Shift is not a
+ * modifier here: Shift+A accepts as A does, and Caps Lock changes nothing.
  */
 export function triageKeyAction(event: TriageKeyEvent): TriageAction | null {
+  if (event.repeat === true) return null;
   if (event.isComposing === true || event.keyCode === 229) return null;
   if (event.ctrlKey === true || event.altKey === true || event.metaKey === true) return null;
   if (inTextEntry(event.target)) return null;
