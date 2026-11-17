@@ -3,87 +3,87 @@ import { realpath } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
-	type BookHistoryCursor,
-	type BookRecordPresentation,
-	type BookWorkOverviewProjection,
-	type ContinueImportProjection,
-	type FidelityCategoryProjection,
-	type ImportCommitProjection,
-	type ImportDraftRecoveryProjection,
-	type ImportIdentityFindingProjection,
-	type ImportStartupProjection,
-	type ImportStructureChoice,
-	type ImportTargetSelection,
-	type ManuscriptConversionProjection,
-	type ManuscriptImportCommitProjection,
-	type ManuscriptWindowProjection,
-	type OriginalFileAccessProjection,
-	type ReviewBeforeImportProjection,
-	type ReviewBeforeManuscriptReimportProjection,
-	type ReviewBeforeSourceImportProjection,
-	type SourceFormat,
-	type SourceImportCommitProjection,
-	type SourceImportTargetSelection,
-	type StagedImportProjection
+  type BookHistoryCursor,
+  type BookRecordPresentation,
+  type BookWorkOverviewProjection,
+  type ContinueImportProjection,
+  type FidelityCategoryProjection,
+  type ImportCommitProjection,
+  type ImportDraftRecoveryProjection,
+  type ImportIdentityFindingProjection,
+  type ImportStartupProjection,
+  type ImportStructureChoice,
+  type ImportTargetSelection,
+  type ManuscriptConversionProjection,
+  type ManuscriptImportCommitProjection,
+  type ManuscriptWindowProjection,
+  type OriginalFileAccessProjection,
+  type ReviewBeforeImportProjection,
+  type ReviewBeforeManuscriptReimportProjection,
+  type ReviewBeforeSourceImportProjection,
+  type SourceFormat,
+  type SourceImportCommitProjection,
+  type SourceImportTargetSelection,
+  type StagedImportProjection
 } from '../shared/protocol.js';
 import {
-	BoundedManuscriptStore
+  BoundedManuscriptStore
 } from './bounded-manuscript.js';
 import {
-	WORD_DOCX_PARSER_IDENTITY,
-	type ImportFidelityPlan,
-	type ParsedDocx,
-	type ParsedDocxBlock,
-	type ParsedWordDocx,
-	type TextBoxDisposition,
-	type WordTrackedCompilation
+  WORD_DOCX_PARSER_IDENTITY,
+  type ImportFidelityPlan,
+  type ParsedDocx,
+  type ParsedDocxBlock,
+  type ParsedWordDocx,
+  type TextBoxDisposition,
+  type WordTrackedCompilation
 } from './docx.js';
 import {
-	EditorialMarkStore
+  EditorialMarkStore
 } from './editorial-marks.js';
 import {
-	recordTextBoxChoice,
-	recordWordPreparedIntake,
-	requireWordParentSourcePin,
-	stagedTextBoxParagraphs,
-	type StagedImportSources,
-	type WordReadingKind,
-	type WordTrackedChoiceInput
+  recordTextBoxChoice,
+  recordWordPreparedIntake,
+  requireWordParentSourcePin,
+  stagedTextBoxParagraphs,
+  type StagedImportSources,
+  type WordReadingKind,
+  type WordTrackedChoiceInput
 } from './import-retention.js';
 import * as importReviewOperations from './import-review-records.js';
 import { SOURCE_IMPORT_NON_EFFECTS, SOURCE_IMPORT_RECORD_SCHEMA, canonicalDegradationDecision, commitRequestFingerprint, continuationNotice, createImportReviewDigestV6, createLegacyNewBookReviewDigestV2, createSourceImportReviewDigest, draftSourceProjection, immutableCommitResult, isNotAWordprocessingPackage, readConversionColumns, requireSourceFormat, safeDisplayName, sourceImportRetainedBoundary, type AbandonmentCleanupIntent, type CommitAttempt, type DraftSnapshot, type ImmutableManuscriptImportResult, type IngestedDocx, type ResolvedImportTarget, type ResolvedReimportTarget, type ResolvedSourceImportTarget, type ReviewedFidelity, type StoredImportCommitProjection, type WordIntakePlan } from './import-review-records.js';
 import {
-	createImportedMarks
+  createImportedMarks
 } from './imported-marks.js';
 import {
-	editableImport
+  editableImport
 } from './manuscript-format.js';
 import {
-	recordStructureChoice,
-	reviewStructureChoice,
-	stagedHasPieces
+  recordStructureChoice,
+  reviewStructureChoice,
+  stagedHasPieces
 } from './manuscript/import-structure.js';
 import { insertMergedImportBlocks } from './manuscript/merged-import-blocks.js';
 import {
-	commitNoteSources
+  commitNoteSources
 } from './manuscript/note-blocks.js';
 import { type BuiltInWorkflowProfile } from './native-workflow-profile.js';
 import {
-	one,
-	parseStoredJson,
-	type StoreControl
+  one,
+  parseStoredJson,
+  type StoreControl
 } from './store-operation-support.js';
 import {
-	DIGEST_PATTERN,
-	StoreError,
-	StoreFatalError,
-	UUID_PATTERN,
-	asNumber,
-	asString,
-	canonicalJson,
-	requireStore,
-	sha256,
-	type SqlRow,
+  DIGEST_PATTERN,
+  StoreError,
+  StoreFatalError,
+  UUID_PATTERN,
+  asNumber,
+  asString,
+  canonicalJson,
+  requireStore,
+  sha256,
+  type SqlRow,
 } from './store-records.js';
 
 /** Writes r1 inside the caller's existing transaction; the continuation preserves intervening workflow/receipt writes. */

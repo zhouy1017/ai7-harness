@@ -1,87 +1,86 @@
 import { createHash } from 'node:crypto';
 import {
-	closeSync,
-	constants,
-	fstatSync,
-	lstatSync,
-	openSync,
-	readSync,
-	realpathSync
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync
 } from 'node:fs';
 import { relative } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
-	MAX_FRAME_BYTES,
-	type FidelityCategoryProjection,
-	type ManuscriptBlockProjection,
-	type ManuscriptConversionProjection
+  MAX_FRAME_BYTES,
+  type FidelityCategoryProjection,
+  type ManuscriptBlockProjection,
+  type ManuscriptConversionProjection
 } from '../shared/protocol.js';
 import { hasExactKeys, isRecord, sha256Hex, canonicalJson as wordCanonicalJson } from './analysis/canonical.js';
 import {
-	BoundedManuscriptStore
+  BoundedManuscriptStore
 } from './bounded-manuscript.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { ParsedNoteSource } from './docx-notes.js';
 import {
-	DOCX_NOTE_PARSER_IDENTITY,
-	DOCX_PARSER_IDENTITY,
-	DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
-	DOCX_SPLIT_PARSER_IDENTITY,
-	MAX_ARCHIVE_BYTES,
-	WORD_DOCX_PARSER_IDENTITY,
-	compileWordTrackedDocxBytes,
-	parseNativeDocxIntakeBytes,
-	wordImportFidelityReport,
-	wordIntakeForPinnedReadings,
-	type ImportFidelityPlan,
-	type NativeDocxIntakeParse,
-	type ParsedDocx,
-	type ParsedDocxBlock,
-	type ParsedTextBox,
-	type ParsedWordDocx,
-	type TextBoxDisposition,
-	type WordTrackedCompilation
+  DOCX_NOTE_PARSER_IDENTITY,
+  DOCX_PARSER_IDENTITY,
+  DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
+  DOCX_SPLIT_PARSER_IDENTITY,
+  MAX_ARCHIVE_BYTES,
+  WORD_DOCX_PARSER_IDENTITY,
+  compileWordTrackedDocxBytes,
+  parseNativeDocxIntakeBytes,
+  wordImportFidelityReport,
+  wordIntakeForPinnedReadings,
+  type ImportFidelityPlan,
+  type NativeDocxIntakeParse,
+  type ParsedDocx,
+  type ParsedDocxBlock,
+  type ParsedTextBox,
+  type ParsedWordDocx,
+  type TextBoxDisposition,
+  type WordTrackedCompilation
 } from './docx.js';
 import {
-	EditorialMarkStore
+  EditorialMarkStore
 } from './editorial-marks.js';
 import { canonicalDegradationDecision, type DraftSnapshot, type IngestedDocx, type ResolvedImportTarget, type WordIntakePlan } from './import-review-records.js';
 import {
-	createWordImportedMarks,
-	stageImportedMarks,
-	stagedImportedMarksMatch,
-	validateWordImportedMarkSources
+  createWordImportedMarks,
+  stageImportedMarks,
+  stagedImportedMarksMatch,
+  validateWordImportedMarkSources
 } from './imported-marks.js';
 import {
-	LOCAL_LEARNING_POLICY_BASIS,
-	learningMaterialDigest,
-	wordTrackedEditCandidate
+  LOCAL_LEARNING_POLICY_BASIS,
+  learningMaterialDigest,
+  wordTrackedEditCandidate
 } from './learning-eligibility.js';
 import {
-	EditorialLearningLedger
+  EditorialLearningLedger
 } from './learning/ledger.js';
 import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { stageParagraphPieces, stagedParagraphPiecesMatch, type StagedParagraphPiece } from './manuscript/import-structure.js';
 import {
-	legacyBlockSources,
-	stageNoteSources,
-	stagedNoteSourcesMatch,
-	type StagedNoteSource
+  legacyBlockSources,
+  stageNoteSources,
+  stagedNoteSourcesMatch,
+  type StagedNoteSource
 } from './manuscript/note-blocks.js';
 import { type BuiltInWorkflowProfile } from './native-workflow-profile.js';
 import {
-	one
+  one
 } from './store-operation-support.js';
 import {
-	DIGEST_PATTERN,
-	StoreError,
-	UUID_PATTERN,
-	asNumber,
-	asString,
-	canonicalJson,
-	requireStore,
-	sha256,
-	type SqlRow
+  DIGEST_PATTERN,
+  StoreError,
+  UUID_PATTERN,
+  asNumber,
+  asString,
+  canonicalJson,
+  requireStore,
+  sha256,
 } from './store-records.js';
 
 /** Frozen local contracts for Issue #1132; the existing open, intake and IPC owners activate them. */

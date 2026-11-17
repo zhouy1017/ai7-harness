@@ -1,3 +1,4 @@
+import { AnalysisError } from './analysis/baseline-analysis-store.js';
 import { StoreError } from './store-records.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';

@@ -1,87 +1,87 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-	closeSync,
-	constants,
-	fstatSync,
-	lstatSync,
-	openSync,
-	readSync
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync
 } from 'node:fs';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
-	MAX_FRAME_BYTES,
-	MAX_REIMPORT_EXCERPTS_PER_SIDE,
-	MAX_REIMPORT_EXCERPT_GRAPHEMES,
-	type BookHistoryCursor,
-	type BookRecordPresentation,
-	type BookWorkOverviewProjection,
-	type FidelityCategoryProjection,
-	type ImportCommitProjection,
-	type ImportIdentityFindingProjection,
-	type ManuscriptBlockProjection,
-	type ManuscriptReimportCommitProjection,
-	type ManuscriptReimportTargetSelection,
-	type ManuscriptWindowProjection,
-	type ManuscriptWindowTarget,
-	type ReimportGroupProjection,
-	type ReimportGroupVerb,
-	type ReimportLineageSourceVersionPageProjection,
-	type ReimportMappingPageProjection,
-	type ReviewBeforeManuscriptReimportProjection,
-	type StagedImportProjection
+  MAX_FRAME_BYTES,
+  MAX_REIMPORT_EXCERPTS_PER_SIDE,
+  MAX_REIMPORT_EXCERPT_GRAPHEMES,
+  type BookHistoryCursor,
+  type BookRecordPresentation,
+  type BookWorkOverviewProjection,
+  type FidelityCategoryProjection,
+  type ImportCommitProjection,
+  type ImportIdentityFindingProjection,
+  type ManuscriptBlockProjection,
+  type ManuscriptReimportCommitProjection,
+  type ManuscriptReimportTargetSelection,
+  type ManuscriptWindowProjection,
+  type ManuscriptWindowTarget,
+  type ReimportGroupProjection,
+  type ReimportGroupVerb,
+  type ReimportLineageSourceVersionPageProjection,
+  type ReimportMappingPageProjection,
+  type ReviewBeforeManuscriptReimportProjection,
+  type StagedImportProjection
 } from '../shared/protocol.js';
 import {
-	BoundedManuscriptStore,
-	type ReimportCheckpointBinding
+  BoundedManuscriptStore,
+  type ReimportCheckpointBinding
 } from './bounded-manuscript.js';
 import {
-	DOCX_NOTE_PARSER_IDENTITY,
-	DOCX_PARSER_IDENTITY,
-	DOCX_SPLIT_PARSER_IDENTITY,
-	type ImportFidelityPlan,
-	type TextBoxDisposition
+  DOCX_NOTE_PARSER_IDENTITY,
+  DOCX_PARSER_IDENTITY,
+  DOCX_SPLIT_PARSER_IDENTITY,
+  type ImportFidelityPlan,
+  type TextBoxDisposition
 } from './docx.js';
 import {
-	EditorialMarkStore,
-	followReimportedMarks,
-	resolveBranchMarksAfterRewrite,
-	workingBlockDigests,
-	type ReimportMarkOutcome,
-	type ReimportMarkRow
+  EditorialMarkStore,
+  followReimportedMarks,
+  resolveBranchMarksAfterRewrite,
+  workingBlockDigests,
+  type ReimportMarkOutcome,
+  type ReimportMarkRow
 } from './editorial-marks.js';
 import {
-	recordTextBoxChoice,
-	stagedImportSourcesMatch,
-	type WordReadingKind
+  recordTextBoxChoice,
+  stagedImportSourcesMatch,
+  type WordReadingKind
 } from './import-retention.js';
 import * as importReviewOperations from './import-review-records.js';
 import { MANUSCRIPT_REIMPORT_NON_EFFECTS, MANUSCRIPT_REIMPORT_RECORD_SCHEMA, REIMPORT_COMMIT_FILE_BATCH_BYTES, REIMPORT_GROUPING, REIMPORT_GROUP_PAGE_SIZE, REIMPORT_MAPPING_BATCH_SIZE, REIMPORT_WIRE_HEADROOM_BYTES, appendReimportOffsetSegment, canonicalDegradationDecision, commitRequestFingerprint, createReimportComparisonHasher, createReimportResolutionHasher, createReimportReviewDigest, degradationReview, emptyReimportResolutionDigest, manuscriptBlockDigest, type CommitAttempt, type DraftSnapshot, type IngestedDocx, type ReimportBlockFact, type ReimportCommitWork, type ReimportMappingBatch, type ReimportMappingFact, type ReimportPendingResolution, type ReimportPreparationWork, type ResolvedReimportTarget, type StoredImportCommitProjection } from './import-review-records.js';
 import {
-	createImportedMarks
+  createImportedMarks
 } from './imported-marks.js';
 import {
-	commitNoteSources
+  commitNoteSources
 } from './manuscript/note-blocks.js';
 import {
-	REIMPORT_GROUP_VERBS,
-	groupReimportMappings,
-	reimportGroupResolutions,
-	reimportGroupVerbs,
+  REIMPORT_GROUP_VERBS,
+  groupReimportMappings,
+  reimportGroupResolutions,
+  reimportGroupVerbs,
 } from './reimport-groups.js';
 import {
-	one
+  one
 } from './store-operation-support.js';
 import {
-	DIGEST_PATTERN,
-	StoreError,
-	StoreFatalError,
-	UUID_PATTERN,
-	asNumber,
-	asString,
-	canonicalJson,
-	requireStore,
-	sha256,
-	type SqlRow,
+  DIGEST_PATTERN,
+  StoreError,
+  StoreFatalError,
+  UUID_PATTERN,
+  asNumber,
+  asString,
+  canonicalJson,
+  requireStore,
+  sha256,
+  type SqlRow,
 } from './store-records.js';
 
 export interface ManuscriptReimportOperationsHost {

@@ -1,92 +1,92 @@
 import { createHash } from 'node:crypto';
-import { extname,isAbsolute,posix } from 'node:path';
-import { DatabaseSync,type SQLOutputValue } from 'node:sqlite';
+import { extname, isAbsolute, posix } from 'node:path';
+import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
-MAX_BLOCK_CODE_UNITS,
-MAX_REIMPORT_RECORD_ITEMS,
-REIMPORT_GROUP_VERB_LABELS,
-acceptedSourceImportRetainedBoundaryLabels,
-fidelityStatusLabel,
-sourceImportRetainedBoundaryLabel,
-type BookHistoryCursor,
-type BookRecordPresentation,
-type BookSummaryCursor,
-type BookSummaryFilter,
-type BookSummaryPageProjection,
-type BookWorkOverviewProjection,
-type EditorialMarkKind,
-type FidelityCategoryProjection,
-type ImportDegradationDecisionReviewProjection,
-type ImportIdentityFindingProjection,
-type ImportStructureChoice,
-type ImportTargetSelection,
-type ManuscriptBlockProjection,
-type ManuscriptConversionProjection,
-type ManuscriptImportCommitProjection,
-type ManuscriptReimportCommitProjection,
-type ManuscriptReimportTargetSelection,
-type ManuscriptWindowProjection,
-type NewBookImportTargetChoiceId,
-type OriginalFileAccessProjection,
-type ReimportGroupVerb,
-type ReviewBeforeImportProjection,
-type ReviewBeforeSourceImportProjection,
-type SourceFormat,
-type SourceImportCommitProjection,
-type SourceImportRetainedBoundaryLabel,
-type SourceImportTargetSelection,
-type StagedImportProjection
+  MAX_BLOCK_CODE_UNITS,
+  MAX_REIMPORT_RECORD_ITEMS,
+  REIMPORT_GROUP_VERB_LABELS,
+  acceptedSourceImportRetainedBoundaryLabels,
+  fidelityStatusLabel,
+  sourceImportRetainedBoundaryLabel,
+  type BookHistoryCursor,
+  type BookRecordPresentation,
+  type BookSummaryCursor,
+  type BookSummaryFilter,
+  type BookSummaryPageProjection,
+  type BookWorkOverviewProjection,
+  type EditorialMarkKind,
+  type FidelityCategoryProjection,
+  type ImportDegradationDecisionReviewProjection,
+  type ImportIdentityFindingProjection,
+  type ImportStructureChoice,
+  type ImportTargetSelection,
+  type ManuscriptBlockProjection,
+  type ManuscriptConversionProjection,
+  type ManuscriptImportCommitProjection,
+  type ManuscriptReimportCommitProjection,
+  type ManuscriptReimportTargetSelection,
+  type ManuscriptWindowProjection,
+  type NewBookImportTargetChoiceId,
+  type OriginalFileAccessProjection,
+  type ReimportGroupVerb,
+  type ReviewBeforeImportProjection,
+  type ReviewBeforeSourceImportProjection,
+  type SourceFormat,
+  type SourceImportCommitProjection,
+  type SourceImportRetainedBoundaryLabel,
+  type SourceImportTargetSelection,
+  type StagedImportProjection
 } from '../shared/protocol.js';
 import {
-type ReimportCheckpointBinding
+  type ReimportCheckpointBinding
 } from './bounded-manuscript.js';
 import {
-WORD_DOCX_PARSER_IDENTITY,
-buildFidelityReport,
-deriveImportFidelityPlan,
-withTextBoxDisposition,
-type FidelityConversionIdentity,
-type ImportFidelityPlan,
-type NativeDocxIntakeParse,
-type ParsedDocx,
-type ParsedWordDocx,
-type TextBoxDisposition,
-type WordTrackedCompilation
+  WORD_DOCX_PARSER_IDENTITY,
+  buildFidelityReport,
+  deriveImportFidelityPlan,
+  withTextBoxDisposition,
+  type FidelityConversionIdentity,
+  type ImportFidelityPlan,
+  type NativeDocxIntakeParse,
+  type ParsedDocx,
+  type ParsedWordDocx,
+  type TextBoxDisposition,
+  type WordTrackedCompilation
 } from './docx.js';
 import {
-readWordImportChoiceRecord,
-recordedTextBoxChoice,
-requireWordPreparedIntake,
-wordPreparedChoice,
-wordPreparedSelection,
-type StagedImportSources,
-type WordCompiledReading,
-type WordPreparedIntake
+  readWordImportChoiceRecord,
+  recordedTextBoxChoice,
+  requireWordPreparedIntake,
+  wordPreparedChoice,
+  wordPreparedSelection,
+  type StagedImportSources,
+  type WordCompiledReading,
+  type WordPreparedIntake
 } from './import-retention.js';
 import {
-editableImport,
-manuscriptObjectExtension
+  editableImport,
+  manuscriptObjectExtension
 } from './manuscript-format.js';
 import {
-recordedStructureChoice,
-reviewStructureField,
-stagedStructureField
+  recordedStructureChoice,
+  reviewStructureField,
+  stagedStructureField
 } from './manuscript/import-structure.js';
 import { type BuiltInWorkflowProfile } from './native-workflow-profile.js';
 import {
-one,
-parseStoredJson
+  one,
+  parseStoredJson
 } from './store-operation-support.js';
 import {
-DIGEST_PATTERN,
-StoreError,
-UUID_PATTERN,
-asNumber,
-asString,
-canonicalJson,
-requireStore,
-sha256,
-type SqlRow
+  DIGEST_PATTERN,
+  StoreError,
+  UUID_PATTERN,
+  asNumber,
+  asString,
+  canonicalJson,
+  requireStore,
+  sha256,
+  type SqlRow
 } from './store-records.js';
 import { type ConversionLoss } from './text-manuscript.js';
 
