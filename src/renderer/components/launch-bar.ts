@@ -105,7 +105,7 @@ export function launchBudgetControl(current: number | null): HTMLSelectElement {
 
 /** Shared presentation for ledger launches and surfaces with their own existing launch API. */
 export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLButtonElement,
-  options: { title: string; content: HTMLElement } | null, plan: HTMLElement | null): HTMLElement {
+  options: { title: string; content: HTMLElement } | null, plan: HTMLElement | null, openSettings?: () => void): HTMLElement {
   const bar = el('div', 'task-launch-bar');
   const disclosure = (title: string, content: HTMLElement, className: string): HTMLDetailsElement => {
     const details = el('details', className);
@@ -132,10 +132,19 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
     return details;
   };
   bar.append(chooser);
+  const settings = control('去设置', 'quiet', 'launch-settings'); settings.hidden = true;
+  settings.addEventListener('click', () => { if (openSettings !== undefined) openSettings(); else document.querySelector<HTMLElement>('#app-sidebar [data-nav-settings]')?.click(); });
+  bar.append(settings);
   if (options !== null) bar.append(disclosure(options.title, options.content, 'task-launch-options'));
   bar.append(start);
   if (plan !== null) bar.append(disclosure('先看计划', plan, 'task-launch-estimate'));
   return bar;
+}
+
+/** Read the chooser's existing readiness words after its async settings read. */
+export function syncLaunchModelSettings(bar: HTMLElement): void {
+  const settings = bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="launch-settings"]');
+  if (settings !== null) settings.hidden = !bar.querySelector('.dispatch-chooser summary')?.textContent?.includes('待设置');
 }
 
 export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
@@ -196,12 +205,12 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     const paintReferences = (): void => {
       materials.replaceChildren(evaluationMaterialsField(page, request.operation === 'launchInitialEvaluation' ? 'initial' : 'readersReport', selected, true, false, () => {
         request.input = { ...request.input, materialIds: [...selected] };
-        commandId = crypto.randomUUID(); invalidatePreview(); paintReferences();
+        commandId = crypto.randomUUID(); invalidatePreview(); paintReferences(); updateAdjusted();
       }));
     };
     paintReferences();
     references.append(similarMaterialsField(api, request.bookId, page.materials?.items ?? [], selected, id => {
-      selected.add(id); request.input = { ...request.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidatePreview(); paintReferences();
+      selected.add(id); request.input = { ...request.input, materialIds: [...selected] }; commandId = crypto.randomUUID(); invalidatePreview(); paintReferences(); updateAdjusted();
     }));
     if (request.operation === 'launchInitialEvaluation' && page.market.series.length > 0) {
       const label = el('label', undefined, '书系参考');
@@ -292,7 +301,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   const withReferences = request.operation === 'launchInitialEvaluation' || request.operation === 'launchReadersReport';
   const optionContent = el('div'); optionContent.append(references, runOptions);
-  const presentation = createLaunchBarPresentation(chooser.element, startButton, { title: withReferences ? '参考资料与选项' : '选项', content: optionContent }, planContent);
+  const presentation = createLaunchBarPresentation(chooser.element, startButton, { title: withReferences ? '参考资料与选项' : '选项', content: optionContent }, planContent, options.openSettings);
   const estimate = presentation.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
   const optionsDisclosure = presentation.querySelector<HTMLDetailsElement>('.task-launch-options')!;
   const optionsSummary = optionsDisclosure.querySelector('summary')!;
@@ -303,9 +312,6 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   };
   optionContent.addEventListener('change', updateAdjusted);
   estimate.addEventListener('toggle', () => { if (estimate.open && !refreshPreview.disabled) void openPlan(); });
-  const settingsLink = control('去设置', 'quiet', 'launch-settings');
-  settingsLink.hidden = true; settingsLink.addEventListener('click', () => options.openSettings?.());
-  presentation.append(settingsLink);
   const onDocumentInput = (event: Event): void => {
     const scope = request.inputEvents ?? request.mount?.closest('form') ?? presentation;
     if (!disposed && event.target instanceof HTMLElement && scope.contains(event.target)) { commandId = crypto.randomUUID(); invalidatePreview(); }
@@ -319,7 +325,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     rememberedChoice = Object.keys(executionConfig).length > 0;
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
-    settingsLink.hidden = !chooser.element.textContent?.includes('待设置');
+    syncLaunchModelSettings(presentation);
   }).catch(() => { if (!stopped) chooser.unavailable(); }).finally(() => { if (!stopped) startButton.disabled = interrupted; });
 
   return {

@@ -1,5 +1,5 @@
 import { navigation, rendererApi } from './navigation-generation.js';
-import { createLaunchBarPresentation } from './components/launch-bar.js';
+import { createLaunchBarPresentation, syncLaunchModelSettings } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
@@ -2884,7 +2884,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, state.executionConfig);
         else chooser.unavailable();
       }
-    })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate(); } }); }
+    })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate();
+      const bar = sheet.querySelector<HTMLElement>('.task-launch-bar'); if (bar !== null) syncLaunchModelSettings(bar); } }); }
     const timing = el('select'); timing.setAttribute('aria-label', '开始时间');
     for (const [value, title] of [['now', '立即'], ['when-online', '联网后开始']]) { const option = el('option', undefined, title); option.value = value!; timing.append(option); }
     timing.value = state.startWhen ?? 'now';
@@ -2893,6 +2894,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const planContent = el('div'); planContent.append(consequences, estimateNotice, prepare);
     prepare.textContent = '更新计划';
     const primaryActions = createLaunchBarPresentation(chooser.element, start, { title: '选项', content: timingRow }, planContent);
+    syncLaunchModelSettings(primaryActions);
     const estimatePanel = primaryActions.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
     estimatePanel.addEventListener('toggle', () => { if (estimatePanel.open) void startOrEstimateRun(state); });
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));

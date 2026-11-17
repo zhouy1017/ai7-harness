@@ -1,4 +1,4 @@
-import { createLaunchBarPresentation } from './components/launch-bar.js';
+import { createLaunchBarPresentation, syncLaunchModelSettings } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import type { PreferenceValues } from '../shared/preferences.js';
@@ -220,7 +220,7 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     rememberedChoice = Object.keys(executionConfig).length > 0;
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
-  }).catch(() => chooser.unavailable());
+  }).catch(() => chooser.unavailable()).finally(() => { const bar = actions.querySelector<HTMLElement>('.task-launch-bar'); if (!closed && bar !== null) syncLaunchModelSettings(bar); });
   actions.append(createLaunchBarPresentation(chooser.element, submit, null, planStatement), cancel);
   form.append(actions);
   let closed = false;
