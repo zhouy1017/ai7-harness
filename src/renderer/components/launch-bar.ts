@@ -65,7 +65,12 @@ export interface LaunchBar {
   start(): Promise<void>;
   /** Read the launch preview again (先看计划 / 更新计划). */
   openPlan(): Promise<void>;
-  /** This launch is no longer on screen: detach its listeners and stop its async work. */
+  /**
+   * The local service is gone: stop the asynchronous work (reads, the preview, what follows a start), but keep the view live.
+   * Its options stay editable, and the plan shown still goes stale when one changes.
+   */
+  interrupt(): void;
+  /** This launch is no longer on screen: stop its asynchronous work and detach its document listeners. */
   dispose(): void;
 }
 
@@ -136,6 +141,8 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
 export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const { api, request, errorMessage, setStatus, settle, onRecorded, openRun, interrupted } = options;
   const kinds = LEDGER_TASK_LAUNCH_KINDS;
+  /** Set by `interrupt` and `dispose`: no read, preview or start settles into the view any more. */
+  let stopped = false;
   let disposed = false;
   let executionConfig: RuntimeExecutionConfig = {}; let rememberedChoice = false;
   let commandId = crypto.randomUUID();
@@ -183,7 +190,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   const references = el('div', 'task-launch-references');
   const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
-    if (disposed || page.bookId !== request.bookId) return;
+    if (stopped || page.bookId !== request.bookId) return;
     const selected = new Set('materialIds' in request.input ? request.input.materialIds ?? [] : []);
     const materials = el('div'); references.append(materials);
     const paintReferences = (): void => {
@@ -206,7 +213,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
       select.addEventListener('change', () => { request.input = { ...request.input, seriesId: select.value || null }; commandId = crypto.randomUUID(); });
       label.append(select); references.append(label);
     }
-  }).catch(error => { if (!disposed) references.append(el('p', undefined, errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
+  }).catch(error => { if (!stopped) references.append(el('p', undefined, errorMessage(error, '参考资料暂时无法读取，请重新打开开始栏。'))); });
 
   const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); invalidatePreview(); } });
   const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
@@ -233,17 +240,17 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const openPlan = async (): Promise<void> => {
     estimate.open = true;
     const version = previewVersion;
-    if (refreshPreview.disabled || !applyOptions() || !(await settle()) || version !== previewVersion) return;
+    if (stopped || refreshPreview.disabled || !applyOptions() || !(await settle()) || version !== previewVersion) return;
     refreshPreview.disabled = true;
     try {
       const launch = { operation: request.operation, input: { ...request.input, clientCommandId: commandId, executionConfig, rememberedChoice } } as TaskLaunchPreviewInput['launch'];
       const preview = await api.previewTaskLaunch({ launch });
-      if (disposed || version !== previewVersion) return;
+      if (stopped || version !== previewVersion) return;
       const steps = el('ol'); for (const step of preview.steps) steps.append(el('li', undefined, step));
       usage.replaceChildren(el('p', undefined, `处理范围：${preview.scope}`), steps,
         ...preview.reference.map(line => el('p', undefined, `允许参考：${line}`)), el('p', undefined, `会发送：${preview.send}`), el('p', undefined, preview.usage),
         ...preview.adaptations.map(line => el('p', undefined, line)));
-    } catch (error) { if (!disposed && version === previewVersion) usage.textContent = errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
+    } catch (error) { if (!stopped && version === previewVersion) usage.textContent = errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
     finally { refreshPreview.disabled = false; }
   };
 
@@ -251,7 +258,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   const startButton = control(options.startLabel ?? request.startLabel ?? `开始${request.title}`, 'primary', 'launch'); startButton.disabled = true;
   const start = async (): Promise<void> => {
-    if (startButton.disabled) return;
+    if (stopped || startButton.disabled) return;
     startButton.disabled = true;
     problem.textContent = '';
     const controls = [
@@ -277,8 +284,8 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
       request.onStarted?.();
       onRecorded(kind, request.bookId, result.taskIntentId);
       setStatus(result.launchNotice ?? (result.waitingForNetwork ? '已记录任务，联网后开始。' : '已开始任务'), 'success');
-      if (!disposed) openRun(request.bookId, kind, result.taskIntentId, result.launchNotice);
-    } catch (error) { if (!disposed) { restore(); startButton.disabled = false; problem.textContent = errorMessage(error, '无法开始任务。'); } }
+      if (!stopped) openRun(request.bookId, kind, result.taskIntentId, result.launchNotice);
+    } catch (error) { if (!stopped) { restore(); startButton.disabled = false; problem.textContent = errorMessage(error, '无法开始任务。'); } }
   };
   startButton.addEventListener('click', () => { void start(); });
 
@@ -306,21 +313,22 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   document.addEventListener('change', onDocumentInput);
 
   void Promise.allSettled([api.getModelServiceSettings(), api.getPreferences(), readReferences]).then(([settings, preferences]) => {
-    if (disposed) return;
+    if (stopped) return;
     executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices'][kinds[request.operation]] ?? {} : {};
     rememberedChoice = Object.keys(executionConfig).length > 0;
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
     settingsLink.hidden = !chooser.element.textContent?.includes('待设置');
-  }).catch(() => { if (!disposed) chooser.unavailable(); }).finally(() => { if (!disposed) startButton.disabled = interrupted; });
+  }).catch(() => { if (!stopped) chooser.unavailable(); }).finally(() => { if (!stopped) startButton.disabled = interrupted; });
 
   return {
     body: [description],
     bar: [presentation, problem],
     start,
     openPlan,
+    interrupt(): void { stopped = true; startButton.disabled = true; refreshPreview.disabled = true; },
     dispose(): void {
-      disposed = true;
+      stopped = true; disposed = true;
       document.removeEventListener('input', onDocumentInput);
       document.removeEventListener('change', onDocumentInput);
     },

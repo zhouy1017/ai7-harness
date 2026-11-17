@@ -58,3 +58,24 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   expect(launch.mock.calls[0]![0]).toMatchObject({ rememberedChoice: true, executionConfig: remembered, planEdits: { disallowedAdaptations: ['safe-retry'] } });
   expect(JSON.stringify({ values, roles: settings.roles })).toBe(before);
 });
+
+it('keeps marking the shown plan stale after the service is interrupted, while the launch view is still on screen', async () => {
+  const previewTaskLaunch = vi.fn(async () => ({ steps: ['逐章读取'], scope: '全书 · 1 个阅读范围', units: 1, reference: ['勾选的资料'], send: '所选资料发往模型服务', usage: '暂无可靠估计', adaptations: [] }));
+  const api = { previewTaskLaunch, launchBaselineAnalysis: vi.fn(), getPreferences: async () => ({ version: 1, values: preferenceDefaults(), notice: null }),
+    getModelServiceSettings: async () => ({ channels: [], roles: [], routeChoice: { routes: [] } }), inspectEvaluation: async () => ({ bookId: 'book', materials: { items: [] }, market: { series: [] } }) };
+  const root = document.createElement('aside'); document.body.append(root);
+  const drawer = mountTaskDrawer({ root, shell: document.body, api, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
+    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
+  drawer.openLaunch({ operation: 'launchBaselineAnalysis', bookId: 'book', title: '分析', input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => null);
+  await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(false));
+  miniDocument.querySelector('[data-task-drawer-control="preview-launch"]')!.click();
+  await vi.waitFor(() => expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).toContain('勾选的资料'));
+  // Interrupting disables the buttons only: the options stay editable, and the plan shown no longer fits a changed option.
+  drawer.interrupt();
+  const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')?.disabled).toBe(true);
+  budget.value = '500';
+  budget.dispatchEvent({ type: 'input', bubbles: true });
+  expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
+  expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('勾选的资料');
+});

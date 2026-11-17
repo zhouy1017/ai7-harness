@@ -3114,7 +3114,7 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .task-launch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; position: relative; }
 .task-launch-bar > details { min-width: 0; }
 .task-launch-bar > details > summary { cursor: pointer; padding: .4rem .5rem; border-radius: .3rem; }
-.task-launch-popover { box-sizing: border-box; width: min(520px, calc(100vw - 1rem)); max-height: min(540px, calc(100vh - 2rem)); overflow: auto; padding: 1rem; margin: 0; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); color: var(--text); box-shadow: 0 8px 30px var(--shadow); }
+.task-launch-popover { position: fixed; inset: auto; box-sizing: border-box; width: min(520px, calc(100vw - 1rem)); max-height: min(540px, calc(100vh - 2rem)); overflow: auto; padding: 1rem; margin: 0; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); color: var(--text); box-shadow: 0 8px 30px var(--shadow); }
 .task-launch-popover:not([popover]) { position: absolute; bottom: 100%; z-index: 65; }
 .task-launch-option-rows, .task-launch-references { display: grid; gap: .8rem; }
 .task-launch-option-rows > label { display: grid; gap: .3rem; }

@@ -3053,9 +3053,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       read();
     },
     interrupt() {
-      for (const entry of inlineLaunches.values()) entry.bar.dispose(); inlineLaunches.clear();
+      for (const entry of inlineLaunches.values()) entry.bar.interrupt();
       interrupted = true;
-      disposeLaunchBar();
+      launchBar?.interrupt();
       ticket += 1;
       clearPoll();
       panel.stop();
