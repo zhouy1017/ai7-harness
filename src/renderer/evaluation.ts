@@ -398,6 +398,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (task !== null) section.append(el('p', 'readers-report-task', `${readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])}${task.modelLabel ? ` · ${task.modelLabel}` : ''}`));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
+    const reportBar = el('div', 'evaluation-readers-report-launch');
+    let templateChoice = report.templates[0]?.template;
+    if (templateChoice !== undefined) options.openLaunch({ bookId: page.bookId, operation: 'launchReadersReport', title: '审稿意见', mount: reportBar,
+      input: { template: templateChoice }, readInput: () => ({ template: templateChoice! }) });
+    section.append(reportBar);
+    const startTemplate = (template: ReadersReportTemplate): void => {
+      templateChoice = template;
+      reportBar.querySelector<HTMLButtonElement>('[data-task-drawer-control="launch"]')?.click();
+    };
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
@@ -432,14 +441,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         row.append(create);
       } else if (own && task.state === 'prepared' && !reportBlocked) {
         // A plan prepared but not started (Issue #1410 item 11): 起草 starts it; the plan stays one disclosure away.
-        const start = action(READERS_REPORT_ACTIONS.prepare, 'primary', 'prepare-readers-report', () => void prepareReport(entry.template));
+        const start = action(READERS_REPORT_ACTIONS.prepare, 'primary', 'prepare-readers-report', () => startTemplate(entry.template));
         start.dataset['readersReportAction'] = 'prepare';
         const open = action(READERS_REPORT_ACTIONS.openPlan, 'quiet', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-plan';
         start.disabled = open.disabled = busy;
         row.append(start, open);
       } else if (entry.prepare.allowed) {
-        const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => void prepareReport(entry.template));
+        const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => startTemplate(entry.template));
         prepare.dataset['readersReportAction'] = 'prepare';
         prepare.disabled = busy;
         row.append(prepare);
@@ -541,7 +550,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const preview = action('先看计划', 'quiet', 'prepare-initial', () => void prepareInitial(true));
     preview.classList.add('text-link');
     start.disabled = preview.disabled = busy || !canStart;
-    row.append(start, preview);
+    if (canStart) {
+      options.openLaunch({ bookId: page.bookId, operation: 'launchInitialEvaluation', title: '初评', mount: row, startLabel: latest === null ? EVALUATION_GENERATE : EVALUATION_REGENERATE, input: {} });
+      row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'start-initial');
+      row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'prepare-initial');
+    } else row.append(start, preview);
     if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', initial.prepare.reason));
     if (task !== null && task.state !== 'prepared') {
       const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
@@ -784,29 +797,13 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (rewrite.decided.modelLabel) section.append(el('p', 'evaluation-report-model', `模型 ${rewrite.decided.modelLabel}`));
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
-    // One click regenerates from the saved changes; the plan stays one disclosure away (Issue #1407).
-    if (task !== null && task.state === 'prepared') {
-      const start = action(EVALUATION_REWRITE_ACTIONS.prepare, 'primary', 'prepare-rewrite', () => void prepareRewrite(record));
-      const plan = action('先看计划', 'quiet', 'open-rewrite-plan', () => options.openRewritePlan(task.taskIntentId));
-      plan.classList.add('text-link');
-      start.disabled = plan.disabled = busy;
-      row.append(start, plan);
-    } else {
-      if (rewrite.prepare.allowed) {
-        const prepare = action(EVALUATION_REWRITE_ACTIONS.prepare, proposal === null ? 'primary' : 'secondary', 'prepare-rewrite', () => void prepareRewrite(record));
-        const plan = action('先看计划', 'quiet', 'preview-rewrite', () => void prepareRewrite(record));
-        plan.classList.add('text-link');
-        prepare.disabled = plan.disabled = busy;
-        row.append(prepare, plan);
-      } else {
-        heading.append(' · ', el('span', 'evaluation-rewrite-reason', rewrite.prepare.reason));
-      }
-      if (task !== null) {
-        const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
-        open.disabled = busy;
-        row.append(open);
-      }
-    }
+    if (rewrite.prepare.allowed || task?.state === 'prepared') {
+      options.openLaunch({ bookId: page.bookId, operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', mount: row,
+        input: { recordId: record.recordId }, beforeLaunch: async () => !unsaved() || await save(record, false) });
+      row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'prepare-rewrite');
+      row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'preview-rewrite');
+    } else heading.append(' · ', el('span', 'evaluation-rewrite-reason', rewrite.prepare.reason));
+    if (task !== null && task.state !== 'prepared') row.append(action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId)));
     section.append(row);
     return section;
   };

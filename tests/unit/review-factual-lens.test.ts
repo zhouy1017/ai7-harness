@@ -120,6 +120,18 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
+  it('starts 按上次设置再审一次 after its model choices finish loading (#1526)', async () => {
+    const view = await selectionSheet();
+    view.root.querySelector('dialog')!.close();
+    Object.assign(window, { ai7: { getPreferences: async () => ({ values: { 'model.dispatchChoices': {}, 'model.favourites': {} } }) } });
+    let finishSettings!: () => void;
+    view.api.getModelServiceSettings = vi.fn(() => new Promise<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>((_resolve, reject) => { finishSettings = () => reject(new Error('unavailable')); }));
+    view.root.querySelector('[data-review-repeat]')!.click(); await flush();
+    expect(view.prepare).not.toHaveBeenCalled();
+    finishSettings(); await flush();
+    expect(view.prepare).toHaveBeenCalledOnce();
+    expect(view.prepare).toHaveBeenCalledWith(expect.objectContaining({ categoryIds: expect.arrayContaining(['typos-and-usage']), scope: expect.objectContaining({ kind: 'whole' }) }));
+  });
   it('keeps the reopened sheet choices when the previous native close event arrives asynchronously', async () => {
     const view = mount(); const next = workspace(); const available = { available: true, unavailableReason: null };
     next.newReview = available; next.scopeOptions.whole = available;
@@ -353,6 +365,15 @@ async function selectionSheet(composite = false) {
 
 describe('configuration selection memory (#1374)', () => {
   afterEach(() => setTechnicalLayerVisible(true));
+  it('expands a category basis without dismissing the sheet or losing its choices (#1526)', async () => {
+    const view = await selectionSheet();
+    const basis = view.root.querySelector('[data-review-category-option="style-and-format"] .review-category-basis')!;
+    basis.click();
+    expect(view.root.querySelector('dialog')!.open).toBe(true);
+    expect(view.box('style-and-format').checked).toBe(true);
+    expect(view.box('typos-and-usage').checked).toBe(true);
+    expect(basis.getAttribute('aria-expanded')).toBe('true');
+  });
   it('blocks an unavailable fixed member and restores the full definition order when its scope becomes available', async () => {
     const view = await selectionSheet(true);
     expect(view.root.querySelector('[data-procedure-definition="ai7-procedure/selection-memory@1"]')).not.toBeNull();

@@ -1,4 +1,5 @@
 import { navigation, rendererApi } from './navigation-generation.js';
+import { createLaunchBarPresentation } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_ASSURANCE_LEVEL_LABELS,
@@ -344,6 +345,8 @@ interface SheetState {
   executionConfig?: RuntimeExecutionConfig;
   chooser?: ReturnType<typeof createDispatchChooser>;
   choicePending?: boolean;
+  choiceReady?: Promise<void>;
+  startWhen?: 'now' | 'when-online';
   choiceTicket?: number;
   launchPending?: boolean;
   clientCommandId?: string;
@@ -2447,7 +2450,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     renderSheet(projection, sheetState);
     sheet.show();
-    if (immediate) { await startOrEstimateRun(sheetState, 'start'); return; }
+    if (immediate) {
+      const state = sheetState;
+      await state.choiceReady;
+      if (!state.dismissed && sheetState === state) await startOrEstimateRun(state, 'start');
+      return;
+    }
     if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
       await chooseDefinition(sheetState, procedureId);
       return;
@@ -2602,14 +2610,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const text = el('span', 'review-category-text');
       const basis = el('a', 'review-category-basis', [...entry.guidelineDocuments.map((document) => document.title), entry.procedure.title].join(' · '));
       basis.href = '#'; basis.title = basis.textContent ?? '';
-      basis.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); sheet.close(); options.openRules?.(); });
+      const basisDetail = el('p', 'review-category-basis-detail', reviewBasisWords(entry.basis));
+      basisDetail.hidden = true;
+      basis.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); basisDetail.hidden = !basisDetail.hidden; basis.setAttribute('aria-expanded', String(!basisDetail.hidden)); });
       basis.id = uid('category-basis');
       const reason = el('span', 'review-category-reason');
       reason.id = uid('category-reason');
       input.setAttribute('aria-describedby', `${basis.id} ${reason.id}`);
       text.append(el('strong', undefined, entry.label), el('span', 'review-category-description', entry.description.split(/[；。]/u)[0] + '。'), reason);
       const calls = el('span', 'review-category-calls');
-      label.append(input, text, basis, calls);
+      label.append(input, text, basis, calls, basisDetail);
       input.addEventListener('change', () => {
         if (input.checked) state.categories.add(entry.categoryId);
         else state.categories.delete(entry.categoryId);
@@ -2867,7 +2877,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const actions = el('div', 'button-row review-sheet-actions');
     const newChooser = state.chooser === undefined;
     const chooser = state.chooser ??= createDispatchChooser({ role: 'main-editorial', changed: config => { void updateExecutionChoice(state, config); } });
-    if (newChooser) { state.choicePending = true; void (async () => {
+    if (newChooser) { state.choicePending = true; state.choiceReady = (async () => {
       const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), rendererApi.getPreferences()]);
       if (!state.dismissed) {
         if (state.executionConfig === undefined) { state.executionConfig = preferences.status === 'fulfilled' ? preferences.value.values['model.dispatchChoices']['review-run'] ?? {} : {}; state.rememberedChoice = Object.keys(state.executionConfig).length > 0; }
@@ -2875,10 +2885,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         else chooser.unavailable();
       }
     })().catch(() => { chooser.unavailable(); }).finally(() => { if (!state.dismissed) { state.choicePending = false; sheetUpdate(); } }); }
-    const primaryActions = el('div', 'button-row'); primaryActions.append(chooser.element, start, prepare);
+    const timing = el('select'); timing.setAttribute('aria-label', '开始时间');
+    for (const [value, title] of [['now', '立即'], ['when-online', '联网后开始']]) { const option = el('option', undefined, title); option.value = value!; timing.append(option); }
+    timing.value = state.startWhen ?? 'now';
+    timing.addEventListener('change', () => { state.startWhen = timing.value === 'when-online' ? 'when-online' : 'now'; delete state.clientCommandId; });
+    const timingRow = el('label', undefined, '开始时间'); timingRow.append(timing, el('small', undefined, '只安排这一次审阅的开始时间。'));
+    const planContent = el('div'); planContent.append(consequences, estimateNotice, prepare);
+    prepare.textContent = '更新计划';
+    const primaryActions = createLaunchBarPresentation(chooser.element, start, { title: '选项', content: timingRow }, planContent);
+    const estimatePanel = primaryActions.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+    estimatePanel.addEventListener('toggle', () => { if (estimatePanel.open) void startOrEstimateRun(state); });
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
-    form.append(categories, localOptions, assurance, scopes, consequences, networkNotice, networkSettings, problem, estimateNotice, progress, actions);
+    form.append(categories, localOptions, assurance, scopes, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
     for (const event of ['input', 'change']) form.addEventListener(event, () => { delete state.clientCommandId; delete state.estimate; estimateNotice.textContent = ''; estimateNotice.hidden = true; });
 
@@ -3067,7 +3086,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.launchPending = true;
       const taskInput = { ...preparationInput,
         ...(categoryIds.includes('factual-review') ? { evidenceAssuranceLevel: state.evidenceAssuranceLevel ?? EVIDENCE_ASSURANCE_DEFAULT_LEVEL } : {}),
-        ...(projection.connectivity === 'offline' && !localOnly(state) ? { startWhen: 'when-online' as const } : {}) };
+        ...(projection.connectivity === 'offline' && !localOnly(state) || state.startWhen === 'when-online' ? { startWhen: 'when-online' as const } : {}) };
       const launchInput = JSON.stringify({ taskInput, executionConfig: state.executionConfig ?? {} });
       if (state.launchInput !== launchInput) delete state.clientCommandId;
       state.launchInput = launchInput;

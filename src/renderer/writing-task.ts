@@ -381,7 +381,17 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       paint('[data-writing-action="new"]');
     });
     cancel.disabled = busy;
-    row.append(start, plan, cancel);
+    options.openLaunch({ bookId: page.bookId, operation: 'launchWritingTask', title: '写作', mount: row, inputEvents: form, lifetime: state,
+      input: { typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] },
+      readInput: () => ({ typeId: state.typeId ?? '', audience: state.audience, channel: state.channel,
+        requirements: state.requirements.trim().length === 0 ? null : state.requirements, materialIds: [...state.materialIds] }),
+      beforeLaunch: async () => await prepare(null, true, true) === true,
+      onStarted: () => { const typeId = state.typeId; if (sheet === state) { sheet = null; paint(null); } if (typeId !== null) awaitDraft(typeId); }
+    });
+    row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-writing-action', 'start');
+    row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-writing-action', 'plan');
+    row.append(cancel);
     form.append(row);
     const surface = createSheet('writing-task-sheet');
     const title = el('h3', undefined, '写作任务');
@@ -464,7 +474,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null, openDraftOnStart = false, validationOnly = false): Promise<boolean | void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -482,6 +492,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const title = state.title.trim();
     if (title !== '') rememberedTitles.set(titleKey(projection.bookId, state.typeId), title);
     else rememberedTitles.delete(titleKey(projection.bookId, state.typeId));
+    if (validationOnly) return true;
     if (rule === null) {
       const typeId = state.typeId;
       options.openLaunch({ bookId: projection.bookId, operation: 'launchWritingTask', title: '写作', input: {

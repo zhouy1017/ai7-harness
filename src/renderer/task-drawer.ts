@@ -1,5 +1,5 @@
 import { LEDGER_TASK_LAUNCH_KINDS } from '../shared/runtime-execution-config.js';
-import { mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
+import { createLaunchBarPresentation, launchBudgetControl, mountLaunchBar, type LaunchBar, type TaskLaunchOperation, type TaskLaunchRequest } from './components/launch-bar.js';
 import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
@@ -452,6 +452,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * for 调整预算并重做 (Issue #51, S16a), on 设置上限….
    */
   let editOnOpen: 'first' | 'budget' | null = null;
+  let preparedRedoRef: string | null = null;
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
@@ -512,6 +513,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const body = el('div', 'task-drawer-body');
   /** The launch bar the drawer currently shows, so a new view or a re-open disposes the one it replaces (Issue #1545). */
   let launchBar: LaunchBar | null = null;
+  const launchLifetimes = new WeakMap<object, string>();
+  const inlineLaunches = new Map<string, { request: TaskLaunchRequest; bar: LaunchBar }>();
   function disposeLaunchBar(): void {
     if (launchBar !== null) { launchBar.dispose(); launchBar = null; }
   }
@@ -864,10 +867,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     focusBar = false;
     // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
     if (editOnOpen !== null && next.edit.editable) {
-      const target = editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
+      const target = preparedRedoRef === next.ref ? '[data-task-launch-option="budget"]:not(:disabled)' : editOnOpen === 'budget' ? '[data-task-plan-edit="budget"]:not(:disabled)' : '[data-task-plan-edit]:not(:disabled)';
+      if (preparedRedoRef === next.ref) { const optionsPanel = bar.querySelector<HTMLDetailsElement>('.task-launch-options'); if (optionsPanel !== null) optionsPanel.open = true; }
       editOnOpen = null;
       if (mode !== 'full') setMode('full', false);
-      (body.querySelector<HTMLElement>(target) ?? body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)'))?.focus();
+      (root.querySelector<HTMLElement>(target) ?? body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)'))?.focus();
     }
     // The Run the editor redoes has stopped and reads 已取消: the new Task is prepared now.
     if (redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelled-after-start' && next.redo !== null &&
@@ -1380,7 +1384,26 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       timing.addEventListener('change', () => { startWhen = timing.value === 'idle' ? 'idle' : 'now'; });
       actions.prepend(timing);
     }
-    parts.push(actions);
+    if (next.ref === preparedRedoRef && next.edit.editable && next.edit.budget !== null) {
+      const ceiling = shownCeiling(next);
+      const budget = launchBudgetControl(ceiling === 'unset' ? null : ceiling.maxTotalTokens);
+      budget.disabled = !next.edit.budget.settable || working || interrupted;
+      budget.addEventListener('change', () => {
+        const value: RunBudgetCeilingState = budget.value === '' ? 'unset' : { kind: 'tokens', maxTotalTokens: Number(budget.value) };
+        if (sameCeiling(value, next.edit.budget!.ceiling)) budgetBuffers.delete(editKey(next));
+        else budgetBuffers.set(editKey(next), value);
+      });
+      const row = el('label', undefined, '本次用量'); row.append(budget, el('small', undefined, '达到上限后暂停，可调整后重新开始。'));
+      const begin = control('开始任务', 'primary', 'start');
+      begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
+      begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true); else void start(); });
+      const model = el('span', 'task-launch-retained-model', next.service.send);
+      model.setAttribute('aria-label', '沿用本次计划的模型与思考强度');
+      const preview = el('div'); preview.append(el('p', undefined, next.scope.process), el('p', undefined, next.scope.send), listOf(next.steps.map(step => step.label), 'task-plan-list'));
+      parts.push(createLaunchBarPresentation(model, begin, { title: '选项', content: row }, preview));
+      for (const action of view.actions.filter(action => !['start', 'start-when-online', 'update-and-start', 'update-plan'].includes(action.name))) parts.push(barAction(action, noteId));
+    } else parts.push(actions);
+
     const run = next.runControl;
     if (run !== null && run.outcomeUnknown !== null && unconfirmedShown) parts.push(unconfirmedBlock(run.outcomeUnknown.units));
     if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
@@ -1914,7 +1937,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (andStart) {
         const fresh = await api.inspectTaskPlan({ kind: current.kind, ref: current.ref });
         if (request !== null && request.ref === fresh.ref && request.kind === fresh.kind) {
-          paint(retainTaskPlanPages(fresh, plan), false);
+          // This explicit revision must replace the old authorization digest even while its options are open.
+          paint(retainTaskPlanPages(fresh, plan), true);
           startNext = fresh.start.readiness === 'ready';
         }
       }
@@ -2166,6 +2190,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       endWork(asked);
     }
     if (prepared !== null && !root.hidden) {
+      preparedRedoRef = prepared;
       editOnOpen = current.state.key === 'budget-reached' ? 'budget' : 'first';
       surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
     }
@@ -2810,6 +2835,31 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       title.focus();
     },
     openLaunch(next, finder) {
+      if (next.mount !== undefined) {
+        const discriminator = 'dimensionId' in next.input ? next.input.dimensionId : 'recordId' in next.input ? next.input.recordId : '';
+        let lifetime = '';
+        if (next.lifetime !== undefined) { lifetime = launchLifetimes.get(next.lifetime) ?? crypto.randomUUID(); launchLifetimes.set(next.lifetime, lifetime); }
+        const key = `${next.bookId}:${next.operation}:${discriminator}:${lifetime}`;
+        let entry = inlineLaunches.get(key);
+        if (entry === undefined) {
+          const mounted = mountLaunchBar({ api, request: next,
+            errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle,
+            onRecorded: (kind, bookId, ref) => { inlineLaunches.delete(key); options.onRecorded(kind, bookId, ref); },
+            openRun: (bookId, kind, ref, notice) => { surface.open({ bookId, kind, ref }, finder, notice, { view: 'run' }); mounted.dispose(); },
+            interrupted, ...(next.startLabel === undefined ? {} : { startLabel: next.startLabel }), openSettings: options.openConnectionSettings });
+          entry = { request: next, bar: mounted }; inlineLaunches.set(key, entry);
+        } else {
+          const previous = entry.request.input;
+          const input = { ...next.input, ...('materialIds' in previous ? { materialIds: previous.materialIds } : {}), ...('seriesId' in previous ? { seriesId: previous.seriesId } : {}) };
+          for (const name of ['onStarted', 'beforeLaunch', 'readInput', 'inputEvents'] as const) if (!(name in next)) delete entry.request[name];
+          Object.assign(entry.request, next, { input });
+        }
+        next.mount.id ||= `launch-bar-${crypto.randomUUID()}`;
+        next.mount.dataset['taskLaunchKind'] = LEDGER_TASK_LAUNCH_KINDS[next.operation];
+        next.mount.replaceChildren(...entry.bar.bar);
+        queueMicrotask(() => { for (const [otherKey, other] of inlineLaunches) if (!other.request.mount?.isConnected) { other.bar.dispose(); inlineLaunches.delete(otherKey); } });
+        return;
+      }
       disposeLaunchBar();
       ticket += 1;
       clearPoll(); panel.stop(); dialogueSurface.stop();
@@ -2823,7 +2873,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         api, request: next,
         errorMessage: options.errorMessage, setStatus: options.setStatus, settle: options.settle, onRecorded: options.onRecorded,
         openRun: (bookId, kind, ref, launchNotice) => surface.open({ bookId, kind, ref }, finder, launchNotice, { view: 'run' }),
-        interrupted,
+        interrupted, openSettings: options.openConnectionSettings,
       });
       body.replaceChildren(...launchBar.body);
       bar.hidden = false; bar.replaceChildren(...launchBar.bar);
@@ -2976,6 +3026,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       return !root.hidden;
     },
     followScreen(state, bookId) {
+      for (const [key, entry] of inlineLaunches) {
+        if (entry.request.bookId !== bookId || !entry.request.mount?.isConnected) { entry.bar.dispose(); inlineLaunches.delete(key); }
+      }
       if (root.hidden) return;
       const book = view === 'plan' ? request?.bookId ?? null : panelBookId;
       const kept = state === 'task-overview' || bookId !== null && bookId === book && COPILOT_SCREENS.includes(state);
@@ -3000,6 +3053,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       read();
     },
     interrupt() {
+      for (const entry of inlineLaunches.values()) entry.bar.dispose(); inlineLaunches.clear();
       interrupted = true;
       disposeLaunchBar();
       ticket += 1;

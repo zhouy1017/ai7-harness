@@ -1,3 +1,4 @@
+import { createLaunchBarPresentation } from './components/launch-bar.js';
 import { createDispatchChooser } from './components/dispatch-chooser.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import type { PreferenceValues } from '../shared/preferences.js';
@@ -199,7 +200,8 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
   instruction.placeholder = SCOPED_AI_EDIT_WORDS.placeholder;
   instruction.dataset['scopedAiEdit'] = 'instruction';
   field.append(instruction);
-  form.append(field, el('small', 'muted', SCOPED_AI_EDIT_WORDS.note));
+  form.append(field);
+  const planStatement = el('p', 'field-note', SCOPED_AI_EDIT_WORDS.note);
   const actions = el('div', 'button-row');
   const submit = el('button', 'btn primary', SCOPED_AI_EDIT_WORDS.submit);
   submit.type = 'submit';
@@ -219,7 +221,7 @@ export function openScopedAiEditComposer(host: ScopedAiEditHost, options: Scoped
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
   }).catch(() => chooser.unavailable());
-  actions.append(chooser.element, submit, cancel);
+  actions.append(createLaunchBarPresentation(chooser.element, submit, null, planStatement), cancel);
   form.append(actions);
   let closed = false;
   const close = (): void => {

@@ -72,7 +72,7 @@ it('scans the settled baseline, historical revision, plan versions and update co
     inspectAnalysisFeedback: vi.fn(async () => { throw new Error('unused feedback'); }),
   } });
   const card = createBaselineAnalysisCard({ screen: root, technicalDetails, rendererErrorMessage: errorMessage,
-    setStatus: vi.fn(), taskDrawer: { refresh: vi.fn() } as unknown as ReturnType<typeof mountTaskDrawer>,
+    setStatus: vi.fn(), taskDrawer: { refresh: vi.fn(), openLaunch: vi.fn() } as unknown as ReturnType<typeof mountTaskDrawer>,
     taskPlanOpenButton: () => document.createElement('button'), awaitServiceJob: vi.fn(), jumpToManuscript: vi.fn(),
     leaveReturnChip: vi.fn(), openEditorWindow: vi.fn(), openTaskPlan: vi.fn(), quickStartStartedLine: () => '', renderBookReview: vi.fn() });
   card.renderBaselineAnalysis(root, projection, '公开样书'); await settle();

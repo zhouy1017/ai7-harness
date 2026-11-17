@@ -1,5 +1,5 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -108,7 +108,7 @@ const EXPORT_MEMBERS = [
 // apply or export member, so the two pins below hold them without an exception.
 const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',
   'recordReviewFindingDisposition', 'generateReviewReport', 'inspectReviewFindingOfMark'];
-const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
+const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>button.closest('.task-launch-bar')!==null||${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
 /** ②A's tabs in the specification's order (editor-surfaces §3); 自定义 since Issue #922 (slice 7f; ADR 0090 item 4). */
 const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '自定义', '历史与更新'];
@@ -419,21 +419,12 @@ async function openAnalysisDestination(renderer, name) {
  * after launch the frozen plan remains readable. Quick starts retain the Default Execution Rule owner.
  */
 async function startUpdate(renderer, mode, label, name, launch = true) {
-  // The three modes live under 历史与更新, so the editor goes there first, as they would.
-  await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
-  // The mode's start and 先看计划 stand on its block at once (Issue #1410 item 15): no button only unfolds them.
   void label;
-  if (mode === 'reanalyze-range') await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] [data-analysis-action="reanalyze-range"]')?.disabled===false`, `${name}-selected-plan-ready`);
-  await assertRenderer(renderer, `(() => {
-    const block=document.querySelector('.baseline-analysis-card [data-update-action=${JSON.stringify(mode)}]');
-    const quick=block?.querySelector('.analysis-actions [data-analysis-action=${JSON.stringify(`quick-${mode}`)}]');
-    const plan=block?.querySelector('.analysis-actions [data-analysis-action=${JSON.stringify(mode)}]');
-    if(!(quick instanceof HTMLButtonElement)||!(plan instanceof HTMLButtonElement)||block.querySelector('[data-analysis-action^="choose-"], .analysis-update-choice')!==null) return false;
-    const note=document.getElementById(quick.getAttribute('aria-describedby')??'');
-    if(quick.disabled||plan.disabled||plan.textContent!=='查看计划'||note!==null) return false;
-    plan.click();
-    return true;
-  })()`, name);
+  await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
+  const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
+  await pointerClick(renderer, waitFor, choice, `${name}-mode`);
+  await pointerClick(renderer, waitFor, '.analysis-update-controls .task-launch-estimate > summary', `${name}-plan`);
   if (!launch) return;
   await launchTaskFromBar(renderer, waitFor, name);
   await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', `${name}-read-full-plan`);
@@ -2426,17 +2417,17 @@ async function main() {
       for (const [width,height] of [[1280,800],[1008,681]]) {
         at(width===1280?'launch-options-wide':'launch-options-gate');
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-        if (!(await renderer.evaluate(`document.querySelector('#task-drawer .task-launch-options').open`))) await pointerClick(renderer,waitFor,'#task-drawer .task-launch-options > summary','launch-options-open');
-        await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-without-sampling');
-        const retry='#task-drawer [data-task-launch-option="retry"]';
+        if (!(await renderer.evaluate(`document.querySelector('[data-task-launch-kind] .task-launch-options').open`))) await pointerClick(renderer,waitFor,'[data-task-launch-kind] .task-launch-options > summary','launch-options-open');
+        await pointerClick(renderer,waitFor,'[data-task-launch-kind] [data-task-launch-option="sampling"]','launch-without-sampling');
+        const retry='[data-task-launch-kind] [data-task-launch-option="retry"]';
         const chooseRetry=async value=>{
           const index=await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(retry)}).options).findIndex(option=>option.value===${JSON.stringify(value)})`);
           await pointerClick(renderer,waitFor,`${retry} + .ui-select-trigger`,'launch-retry-open');
           await pointerClick(renderer,waitFor,`${retry} ~ .ui-select-popover [data-index="${index}"]`,'launch-retry-option');
         };
         await chooseRetry('never');
-        requireJourney(await renderer.evaluate(`!document.querySelector('#task-drawer [data-task-launch-option="sampling"]').checked && document.querySelector('#task-drawer [data-task-launch-option="retry"]').value==='never'`),'launch-options-selected');
-        if(width===1280){await pointerClick(renderer,waitFor,'#task-drawer [data-task-launch-option="sampling"]','launch-restore-sampling');await chooseRetry('auto');}
+        requireJourney(await renderer.evaluate(`!document.querySelector('[data-task-launch-kind] [data-task-launch-option="sampling"]').checked && document.querySelector('[data-task-launch-kind] [data-task-launch-option="retry"]').value==='never'`),'launch-options-selected');
+        if(width===1280){await pointerClick(renderer,waitFor,'[data-task-launch-kind] [data-task-launch-option="sampling"]','launch-restore-sampling');await chooseRetry('auto');}
       }
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
     at('plan-revision-dispatch'); // This start freezes options in version 1; no ordinary prepared-plan revision exists.
@@ -2458,10 +2449,13 @@ async function main() {
     try {
       for(const [width,height] of [[1280,800],[1008,681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-        await waitFor(renderer, `(() => {if(innerWidth!==${width}||innerHeight!==${height})return false;const drawer=document.querySelector('#task-drawer'),options=drawer.querySelector('.task-launch-options'),timing=drawer.querySelector('[data-task-start-when]');options.open=true;const focus=timing.nextElementSibling?.matches('.ui-select-trigger')?timing.nextElementSibling:timing;focus.scrollIntoView({block:'center',behavior:'instant'});focus.focus({preventScroll:true});const rect=focus.getBoundingClientRect();return document.activeElement===focus && rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight && Array.from(timing.options).some(option=>option.value==='when-online'&&option.textContent==='联网后开始任务');})()`, `offline-launch-timing-${width}`).catch(async () => { requireJourney(false, `offline-launch-timing-${width}`, await renderer.evaluate(`(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]'),focus=timing?.nextElementSibling?.matches('.ui-select-trigger')?timing.nextElementSibling:timing;return {viewport:[innerWidth,innerHeight],rect:focus?.getBoundingClientRect().toJSON(),focused:document.activeElement===focus,options:Array.from(timing?.options??[],option=>[option.value,option.textContent])};})()`)); });
+        await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', `offline-options-${width}`);
+        await pointerClick(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when] + .ui-select-trigger', `offline-timing-${width}`);
+        await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        requireJourney(await renderer.evaluate(`(() => {const focus=document.activeElement,rect=focus.getBoundingClientRect();return rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight;})()`)===true, `offline-launch-timing-${width}`);
       }
     } finally {await renderer.send('Emulation.clearDeviceMetricsOverride');}
-    await assertRenderer(renderer, `(() => {const timing=document.querySelector('#task-drawer [data-task-start-when]');timing.value='when-online';timing.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'offline-launch-choice');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when]', 'when-online', 'offline-launch-choice');
     at('connectivity-start-when-online');
     const offlineIntent = await launchTaskFromBar(renderer, waitFor, 'offline-sync');
     const waitingDrawer = await drawerShowing(renderer,offlineIntent,'waiting','offline-sync-waiting');
@@ -2617,7 +2611,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${legacyBook.bookId}"]')`, 'legacy-plan-book-ready');
     await openAnalysisDestination(renderer, 'legacy-plan-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card [data-analysis-action="start"]')?.disabled===false`, 'legacy-plan-first-ready');
-    await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="start"]','legacy-plan-first');
+    await reviewAction(renderer,'.baseline-analysis-card [data-analysis-action="prepare"]','legacy-plan-first');
     await launchTaskFromBar(renderer,waitFor,'legacy-plan-first'); await settleLaunchedRun(renderer,'legacy-plan-first');
     await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]','legacy-plan-first-close');
     await startUpdate(renderer,'reanalyze-book','重新分析全书','legacy-plan-book-run'); await settleLaunchedRun(renderer,'legacy-plan-book-run');
@@ -3497,9 +3491,10 @@ async function main() {
     const dimensionCard = `.baseline-analysis-card [data-analysis-panel="custom"] .custom-dimension-card[data-dimension-id=${JSON.stringify(customDimension.dimensionId)}]`;
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${dimensionCard} [data-custom-empty="not-run"]`)})?.textContent==='尚未运行' && document.querySelector(${JSON.stringify(`${dimensionCard} [data-analysis-action="custom-run"]`)})?.disabled===false`, 'custom-tab-not-run');
     // 运行 runs in one step (Issue #1410 item 13): the plan is prepared and started at once; 查看计划 stays beside the result.
-    await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-run"]`, 'custom-run');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
-    await assertRenderer(renderer, `(() => {const retry=document.querySelector('#task-drawer [data-task-launch-option="retry"]');if(!retry)return false;retry.value='never';retry.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'custom-withdraw-safe-retry');
+    await reviewAction(renderer, `${dimensionCard} [data-analysis-action="custom-preview"]`, 'custom-run');
+    await waitFor(renderer, `document.querySelector('[data-task-launch-kind]')?.dataset.taskLaunchKind==='custom-analysis'`, 'custom-launch-options');
+    await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', 'custom-launch-options-open');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-launch-option="retry"]', 'never', 'custom-withdraw-safe-retry');
     await launchTaskFromBar(renderer, waitFor, 'custom-analysis');
     await waitFor(renderer, `window.ai7.inspectCustomAnalysisDimensions({ forBook: true }).then((value) => value.dimensions[0]?.book?.latest !== null && value.dimensions[0]?.book?.taskState?.state === 'settled')`, 'custom-settled', 180_000);
     const customTask = (await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: true })`)).dimensions[0].book.taskState;

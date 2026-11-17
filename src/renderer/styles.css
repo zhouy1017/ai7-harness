@@ -692,9 +692,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 :root { --task-drawer-width: 500px; }
 .task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(var(--task-drawer-width), calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
 .task-drawer[hidden] { display: none; }
-/* An ordinary launch keeps its initiating form until success; its start controls sit in front of that sheet. */
-.task-drawer[data-task-drawer-view="launch"] { z-index: 61; }
-body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawer-separator { z-index: 62; }
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
   .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
@@ -3112,3 +3109,16 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+/* One compact launch bar in page sections and sheet feet (#1526). */
+.task-launch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-width: 0; position: relative; }
+.task-launch-bar > details { min-width: 0; }
+.task-launch-bar > details > summary { cursor: pointer; padding: .4rem .5rem; border-radius: .3rem; }
+.task-launch-popover { box-sizing: border-box; width: min(520px, calc(100vw - 1rem)); max-height: min(540px, calc(100vh - 2rem)); overflow: auto; padding: 1rem; margin: 0; border: 1px solid var(--boundary); border-radius: .5rem; background: var(--surface); color: var(--text); box-shadow: 0 8px 30px var(--shadow); }
+.task-launch-popover:not([popover]) { position: absolute; bottom: 100%; z-index: 65; }
+.task-launch-option-rows, .task-launch-references { display: grid; gap: .8rem; }
+.task-launch-option-rows > label { display: grid; gap: .3rem; }
+.task-launch-option-rows small { display: block; color: var(--muted); }
+.task-launch-references:empty { display: none; }
+.task-launch-bar + .task-bar-refusal:empty { display: none; }
+.task-launch-bar ~ p { margin: .3rem 0; font-size: .85em; }

@@ -48,8 +48,8 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   const retry=miniDocument.querySelector('[data-task-launch-option="retry"]')!;
   expect(Array.from(retry.querySelectorAll('option'),option=>option.value)).toEqual(operation==='launchBaselineAnalysis'?['auto','ask-first','never']:['auto','never']);
   retry.value='never';
-  miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='12345';
-  miniDocument.body.dispatchEvent({type:'input'});
+  miniDocument.querySelector('[data-task-launch-option="budget"]')!.value='50000';
+  miniDocument.querySelector('[data-task-launch-option="budget"]')!.dispatchEvent({type:'change',bubbles:true});
   expect(miniDocument.querySelector('.task-launch-preview-stale')?.textContent).toBe('选项已变化，请更新计划。');
   expect(miniDocument.querySelector('.task-launch-estimate')?.textContent).not.toContain('勾选的资料');
   miniDocument.querySelector('[data-task-drawer-control="launch"]')!.click();

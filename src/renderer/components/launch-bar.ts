@@ -5,8 +5,8 @@ import type { PreferencesRendererApi } from '../../shared/preferences.js';
 import { createDispatchChooser } from './dispatch-chooser.js';
 import { evaluationMaterialsField } from '../evaluation.js';
 import { similarMaterialsField } from '../task-material-selection.js';
-import { identityWords } from '../technical-layer.js';
-import { parseBudgetCeiling, TASK_PLAN_BUDGET_HINT, TASK_PLAN_BUDGET_INVALID } from '../task-drawer-labels.js';
+import { technicalLayerVisible, identityWords } from '../technical-layer.js';
+import { parseBudgetCeiling, TASK_PLAN_BUDGET_INVALID } from '../task-drawer-labels.js';
 
 /** A launch operation as the launch bar dispatches it (Issue #1545). */
 export type TaskLaunchOperation = LedgerTaskLaunchOperation;
@@ -17,6 +17,12 @@ export type TaskLaunchOperation = LedgerTaskLaunchOperation;
 export type TaskLaunchRequest = { [K in TaskLaunchOperation]: { bookId: string; operation: K; title: string;
   /** Surface behavior after the launch commits; never sent to the service. */
   onStarted?: () => void;
+  /** Renderer-only placement and validation; never part of the launch input. */
+  mount?: HTMLElement;
+  inputEvents?: HTMLElement;
+  lifetime?: object;
+  startLabel?: string;
+  beforeLaunch?: () => Promise<boolean>;
   readInput?: () => Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'>;
   input: Omit<ServiceOperationMap[K]['input'], 'bookId' | 'clientCommandId' | 'executionConfig' | 'rememberedChoice'> } }[TaskLaunchOperation];
 
@@ -45,6 +51,8 @@ export interface MountLaunchBarOptions {
   readonly openRun: (bookId: string, kind: TaskPlanKind, ref: string, launchNotice?: string) => void;
   /** The local service is gone; the start button stays disabled once the settings read resolves. */
   readonly interrupted: boolean;
+  readonly startLabel?: string;
+  readonly openSettings?: () => void;
 }
 
 /** The launch bar the drawer mounts in place of the inline UI it used to build (Issue #1545). */
@@ -76,6 +84,55 @@ function control(label: string, className: string, name: string): HTMLButtonElem
   return node;
 }
 
+/** Shared numeric mapping for fresh launches and prepared-task redos. Unset preserves the old default. */
+export const LAUNCH_BUDGET_TIERS: ReadonlyArray<readonly [string, string]> = [
+  ['50000', '较少'], ['100000', '标准（推荐）'], ['200000', '较多'], ['', '不设上限'],
+];
+export function launchBudgetControl(current: number | null): HTMLSelectElement {
+  const budget = el('select'); budget.dataset['taskLaunchOption'] = 'budget'; budget.setAttribute('aria-label', '本次用量');
+  const value = current === null ? '' : String(current);
+  const tiers = [...LAUNCH_BUDGET_TIERS];
+  if (!tiers.some(([entry]) => entry === value)) tiers.push([value, '上次上限']);
+  for (const [entry, title] of tiers) { const option = el('option', undefined, title); option.value = entry; budget.append(option); }
+  budget.value = value;
+  return budget;
+}
+
+/** Shared presentation for ledger launches and surfaces with their own existing launch API. */
+export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLButtonElement,
+  options: { title: string; content: HTMLElement } | null, plan: HTMLElement | null): HTMLElement {
+  const bar = el('div', 'task-launch-bar');
+  const disclosure = (title: string, content: HTMLElement, className: string): HTMLDetailsElement => {
+    const details = el('details', className);
+    const summary = el('summary', undefined, title);
+    if (className === 'task-launch-estimate') {
+      const button = el('button', 'quiet', title); button.type = 'button';
+      button.addEventListener('click', event => { event.preventDefault(); details.open = !details.open; });
+      summary.replaceChildren(button);
+    }
+    const panel = el('div', 'task-launch-popover'); panel.append(content);
+    details.append(summary, panel);
+    if (typeof panel.showPopover === 'function') {
+      panel.setAttribute('popover', 'auto');
+      details.addEventListener('toggle', event => {
+        if (event.target !== details) return;
+        if (!details.open) { if (panel.matches(':popover-open')) panel.hidePopover(); return; }
+        panel.showPopover();
+        const anchor = summary.getBoundingClientRect(), bounds = panel.getBoundingClientRect();
+        panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - bounds.width - 8))}px`;
+        panel.style.top = `${Math.max(8, anchor.top >= bounds.height + 8 ? anchor.top - bounds.height : Math.min(anchor.bottom, innerHeight - bounds.height - 8))}px`;
+      });
+      panel.addEventListener('toggle', () => { if (!panel.matches(':popover-open')) details.open = false; });
+    }
+    return details;
+  };
+  bar.append(chooser);
+  if (options !== null) bar.append(disclosure(options.title, options.content, 'task-launch-options'));
+  bar.append(start);
+  if (plan !== null) bar.append(disclosure('先看计划', plan, 'task-launch-estimate'));
+  return bar;
+}
+
 export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   const { api, request, errorMessage, setStatus, settle, onRecorded, openRun, interrupted } = options;
   const kinds = LEDGER_TASK_LAUNCH_KINDS;
@@ -85,26 +142,23 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   let previewVersion = 0;
 
   const description = el('p', undefined, '开始时使用当前稿件，并固定本次任务的模型与思考强度。');
-  const estimate = el('details', 'task-launch-estimate'), usage = el('div');
+  const usage = el('div');
   const refreshPreview = control('更新计划', '', 'preview-launch');
-  estimate.append(el('summary', undefined, '先看计划'), usage, refreshPreview);
+  const planContent = el('div'); planContent.append(usage, refreshPreview);
 
   const invalidatePreview = (): void => {
     previewVersion += 1;
     usage.replaceChildren(el('p', 'task-launch-preview-stale', '选项已变化，请更新计划。'));
   };
 
-  const runOptions = el('details', 'task-launch-options');
-  runOptions.append(el('summary', undefined, '本次运行选项'));
-  const budget = el('input'); budget.inputMode = 'numeric'; budget.type = 'text';
-  budget.value = String(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? '');
-  budget.dataset['taskLaunchOption'] = 'budget';
-  budget.setAttribute('aria-label', '本次预算上限 · 词元（不填为不设上限）');
-  const budgetLabel = el('label', undefined, '本次预算上限 · 词元（不填为不设上限）'); budgetLabel.append(budget); runOptions.append(budgetLabel);
+  const runOptions = el('div', 'task-launch-option-rows');
+  const budget = technicalLayerVisible ? el('input') : launchBudgetControl(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? null);
+  if (budget instanceof HTMLInputElement) { budget.inputMode = 'numeric'; budget.value = String(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? ''); budget.dataset['taskLaunchOption'] = 'budget'; budget.setAttribute('aria-label', '本次预算上限'); }
+  const previousBudget = budget.value;
+  const budgetLabel = el('label', undefined, '本次用量'); budgetLabel.append(budget, el('small', undefined, '达到上限后暂停，可调整后重新开始。')); runOptions.append(budgetLabel);
   usage.textContent = '计划预览按当前稿件和本次选项计算，不记录任务；开始时固定当前稿件。';
-  runOptions.append(el('p', 'field-note', TASK_PLAN_BUDGET_HINT));
   const baselineOptions = request.operation === 'launchBaselineAnalysis';
-  const retry = el('select'); retry.dataset['taskLaunchOption'] = 'retry'; retry.setAttribute('aria-label', '遇到可重试的失败');
+  const retry = el('select'); retry.dataset['taskLaunchOption'] = 'retry'; retry.setAttribute('aria-label', '遇到失败时');
   for (const [value, label] of [['auto', '自动重试'], ['ask-first', '先问我'], ['never', '不重试']]) {
     if (value === 'ask-first' && !baselineOptions) continue;
     const option = el('option', undefined, label); option.value = value!; retry.append(option);
@@ -112,11 +166,11 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   retry.value = request.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : request.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
   const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
   sampling.checked = !request.input.planEdits?.removedSteps.includes('assurance-sampling');
-  const retryLabel = el('label', undefined, '遇到可重试的失败'); retryLabel.append(retry);
-  runOptions.append(retryLabel);
+  const retryLabel = el('label', undefined, '遇到失败时'); retryLabel.append(retry);
+  retryLabel.append(el('small', undefined, '仅处理可重试的失败，其他失败仍会停下。')); runOptions.append(retryLabel);
   if (baselineOptions) {
     const samplingLabel = el('label', undefined, '完成后核对与抽检'); samplingLabel.prepend(sampling);
-    runOptions.append(samplingLabel);
+    samplingLabel.append(el('small', undefined, '完成后检查结果，并抽取部分内容核对。')); runOptions.append(samplingLabel);
   }
   for (const event of ['input', 'change']) runOptions.addEventListener(event, () => { commandId = crypto.randomUUID(); });
   const timing = el('select'); timing.dataset['taskStartWhen'] = ''; timing.setAttribute('aria-label', '开始时间');
@@ -125,12 +179,12 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   }
   timing.value = request.input.startWhen ?? 'now';
   timing.addEventListener('change', () => { commandId = crypto.randomUUID(); });
-  const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing); runOptions.append(timingLabel);
+  const timingLabel = el('label', undefined, '开始时间'); timingLabel.append(timing, el('small', undefined, '只安排这一次任务的开始时间。')); runOptions.append(timingLabel);
 
   const references = el('div', 'task-launch-references');
   const readReferences = request.operation !== 'launchInitialEvaluation' && request.operation !== 'launchReadersReport' ? Promise.resolve() : api.inspectEvaluation({ recordId: null }).then(page => {
     if (disposed || page.bookId !== request.bookId) return;
-    const selected = new Set(request.input.materialIds ?? []);
+    const selected = new Set('materialIds' in request.input ? request.input.materialIds ?? [] : []);
     const materials = el('div'); references.append(materials);
     const paintReferences = (): void => {
       materials.replaceChildren(evaluationMaterialsField(page, request.operation === 'launchInitialEvaluation' ? 'initial' : 'readersReport', selected, true, false, () => {
@@ -156,15 +210,17 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   const chooser = createDispatchChooser({ role: 'main-editorial', changed(config) { executionConfig = config; rememberedChoice = false; commandId = crypto.randomUUID(); invalidatePreview(); } });
   const problem = el('p', 'task-bar-refusal'); problem.setAttribute('role', 'status');
+  let lastLiveInput = request.readInput === undefined ? undefined : JSON.stringify(request.readInput());
   const applyOptions = (): boolean => {
     const latestInput = request.readInput?.();
     if (latestInput !== undefined) {
-      const { planEdits: _edits, startWhen: _when, ...previous } = request.input;
-      if (JSON.stringify(latestInput) !== JSON.stringify(previous)) commandId = crypto.randomUUID();
+      const encoded = JSON.stringify(latestInput);
+      if (encoded !== lastLiveInput) commandId = crypto.randomUUID();
+      lastLiveInput = encoded;
       request.input = { ...request.input, ...latestInput };
     }
     const tokens = budget.value.trim() === '' ? null : parseBudgetCeiling(budget.value);
-    if (tokens === null && budget.value.trim() !== '') { problem.textContent = TASK_PLAN_BUDGET_INVALID; runOptions.open = true; budget.focus(); return false; }
+    if (tokens === null && budget.value.trim() !== '') { problem.textContent = TASK_PLAN_BUDGET_INVALID; optionsDisclosure.open = true; budget.focus(); return false; }
     const planEdits: PlanEditsProjection = {
       removedSteps: baselineOptions ? sampling.checked ? [] : ['assurance-sampling'] : request.input.planEdits?.removedSteps ?? [],
       disallowedAdaptations: retry.value === 'never' ? ['safe-retry'] : [],
@@ -175,6 +231,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     return true;
   };
   const openPlan = async (): Promise<void> => {
+    estimate.open = true;
     const version = previewVersion;
     if (refreshPreview.disabled || !applyOptions() || !(await settle()) || version !== previewVersion) return;
     refreshPreview.disabled = true;
@@ -189,21 +246,22 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     } catch (error) { if (!disposed && version === previewVersion) usage.textContent = errorMessage(error, '计划暂时无法读取；仍可直接开始任务。'); }
     finally { refreshPreview.disabled = false; }
   };
-  estimate.addEventListener('toggle', () => { if (estimate.open) void openPlan(); });
+
   refreshPreview.addEventListener('click', () => { void openPlan(); });
 
-  const startButton = control('开始任务', 'primary', 'launch'); startButton.disabled = true;
+  const startButton = control(options.startLabel ?? request.startLabel ?? `开始${request.title}`, 'primary', 'launch'); startButton.disabled = true;
   const start = async (): Promise<void> => {
     if (startButton.disabled) return;
     startButton.disabled = true;
     problem.textContent = '';
     const controls = [
-      ...[description, estimate, runOptions, references].flatMap(node => [...node.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')]),
+      ...[description, planContent, runOptions, references].flatMap(node => [...node.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')]),
       ...chooser.element.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button'),
     ].map(control => ({ control, disabled: control.disabled }));
     for (const { control } of controls) control.disabled = true;
     const restore = (): void => { for (const { control, disabled } of controls) control.disabled = disabled; };
     try {
+      if (request.beforeLaunch !== undefined && !await request.beforeLaunch()) { restore(); startButton.disabled = false; return; }
       if (!applyOptions()) { restore(); startButton.disabled = false; return; }
       if (!(await settle())) { restore(); startButton.disabled = false; return; }
       let result: TaskExecutionLaunchResult;
@@ -224,7 +282,26 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   };
   startButton.addEventListener('click', () => { void start(); });
 
-  const onDocumentInput = (): void => { if (!disposed) invalidatePreview(); };
+  const withReferences = request.operation === 'launchInitialEvaluation' || request.operation === 'launchReadersReport';
+  const optionContent = el('div'); optionContent.append(references, runOptions);
+  const presentation = createLaunchBarPresentation(chooser.element, startButton, { title: withReferences ? '参考资料与选项' : '选项', content: optionContent }, planContent);
+  const estimate = presentation.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
+  const optionsDisclosure = presentation.querySelector<HTMLDetailsElement>('.task-launch-options')!;
+  const optionsSummary = optionsDisclosure.querySelector('summary')!;
+  const defaults = JSON.stringify([previousBudget, retry.value, sampling.checked, timing.value, 'materialIds' in request.input ? request.input.materialIds ?? [] : [], 'seriesId' in request.input ? request.input.seriesId ?? null : null]);
+  const updateAdjusted = (): void => {
+    const current = JSON.stringify([budget.value, retry.value, sampling.checked, timing.value, 'materialIds' in request.input ? request.input.materialIds ?? [] : [], 'seriesId' in request.input ? request.input.seriesId ?? null : null]);
+    optionsSummary.textContent = `${withReferences ? '参考资料与选项' : '选项'}${current === defaults ? '' : ' · 已调整'}`;
+  };
+  optionContent.addEventListener('change', updateAdjusted);
+  estimate.addEventListener('toggle', () => { if (estimate.open && !refreshPreview.disabled) void openPlan(); });
+  const settingsLink = control('去设置', 'quiet', 'launch-settings');
+  settingsLink.hidden = true; settingsLink.addEventListener('click', () => options.openSettings?.());
+  presentation.append(settingsLink);
+  const onDocumentInput = (event: Event): void => {
+    const scope = request.inputEvents ?? request.mount?.closest('form') ?? presentation;
+    if (!disposed && event.target instanceof HTMLElement && scope.contains(event.target)) invalidatePreview();
+  };
   document.addEventListener('input', onDocumentInput);
   document.addEventListener('change', onDocumentInput);
 
@@ -234,11 +311,12 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     rememberedChoice = Object.keys(executionConfig).length > 0;
     if (settings.status === 'fulfilled') chooser.render(settings.value, preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {}, executionConfig);
     else chooser.unavailable();
+    settingsLink.hidden = !chooser.element.textContent?.includes('待设置');
   }).catch(() => { if (!disposed) chooser.unavailable(); }).finally(() => { if (!disposed) startButton.disabled = interrupted; });
 
   return {
-    body: [description, estimate, runOptions, references],
-    bar: [chooser.element, startButton, problem],
+    body: [description],
+    bar: [presentation, problem],
     start,
     openPlan,
     dispose(): void {

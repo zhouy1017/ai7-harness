@@ -64,7 +64,7 @@ it.each(OPERATIONS)('builds the %s input from the run options and the remembered
   await bar.openPlan();
   const previewed = previewTaskLaunch.mock.calls[0]![0].launch;
   expect(previewed.operation).toBe(operation);
-  choose('[data-task-launch-option="budget"]', '12345', 'input');
+  choose('[data-task-launch-option="budget"]', '50000', 'change');
   choose('[data-task-launch-option="retry"]', 'never', 'change');
   choose('[data-task-start-when]', 'idle', 'change');
   await bar.openPlan();
@@ -75,7 +75,7 @@ it.each(OPERATIONS)('builds the %s input from the run options and the remembered
   expect(launch).toHaveBeenCalledOnce();
   expect(launch.mock.calls[0]![0]).toEqual({
     ...inputFor(operation), executionConfig: remembered, rememberedChoice: true, startWhen: 'idle', clientCommandId: latest,
-    planEdits: { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 12_345 } },
+    planEdits: { removedSteps: [], disallowedAdaptations: ['safe-retry'], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50_000 } },
   });
   // A custom analysis is read as a baseline-analysis Task; every other launch is read as its own kind.
   const planKind = operation === 'launchCustomAnalysis' ? 'baseline-analysis' : kind;

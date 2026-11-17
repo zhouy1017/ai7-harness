@@ -2946,7 +2946,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if(!(radio instanceof HTMLInputElement))return false;radio.click();return radio.checked;})()`, 'writing-direct-type');
     await fill(renderer, '.writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-direct-audience');
     await fill(renderer, '.writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-direct-channel');
-    await clickSelector(renderer, '.writing-task [data-writing-action="start"]', 'writing-direct-start');
+    await clickSelector(renderer, '.writing-task [data-writing-action="plan"]', 'writing-direct-start');
     await launchTaskFromBar(renderer, waitFor, 'writing-direct-start');
 
     at('writing-draft');

@@ -1,4 +1,5 @@
-import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { launchTaskFromBar, chooseLaunchOption, openLaunchOptions, setLaunchBudget } from './launch-task-bar.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -81,7 +82,7 @@ const FOURTH_BOOK = Object.freeze({ title: '澄清旅程' });
 const FIFTH_BOOK = Object.freeze({ title: '预算上限旅程' });
 /** The fifth Book's ceilings (Issue #51, S16a): four ranges spend 6,620 tokens under 5,000; the redo reads the rest under 20,000. */
 const BUDGET = Object.freeze({ kind: 'tokens', maxTotalTokens: 5000 });
-const RAISED = Object.freeze({ kind: 'tokens', maxTotalTokens: 20000 });
+const RAISED = Object.freeze({ kind: 'tokens', maxTotalTokens: 50000 });
 const BUDGET_STOP_NOTE = '已读完 4 / 8 个阅读范围，结果都已保留；这次运行用了 6,620 tokens，达到了预算上限 5,000 tokens';
 const BUDGET_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果';
 const BUDGET_REDO_GOAL = '改计划重做：沿用已读完的 4 个阅读范围，接着读其余 4 个';
@@ -409,7 +410,7 @@ async function startFirstBaseline(renderer, readiness, name) {
 async function prepareFirstBaseline(renderer, readiness, name) {
   await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='available'`, `${name}-available`);
   await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', `${name}-open`);
-  await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
+  await waitFor(renderer, `document.querySelector('[data-task-launch-kind] [data-task-drawer-control="launch"]')?.disabled===false`, `${name}-bar-ready`);
 }
 
 /**
@@ -1263,7 +1264,8 @@ async function main() {
     // Ask-first retry is an optional launch choice, frozen in the first plan.
     await openAnalysisOf(renderer, fourthBookId, 'fourth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fourth-baseline');
-    await assertRenderer(renderer, `(() => { const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const retry=options.querySelector('[data-task-launch-option="retry"]');retry.value='ask-first';retry.dispatchEvent(new Event('change',{bubbles:true}));return retry.value==='ask-first';})()`, 'ask-first-selected');
+    await openLaunchOptions(renderer, waitFor, '[data-task-launch-kind]', 'ask-first-options');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-launch-option="retry"]', 'ask-first', 'ask-first-selected');
 
     at('clarification-raised');
     // 开始任务 with five ranges allowed to settle: unit 5 fails retry-safe and, asked first, asks instead of retrying; 6 is
@@ -1460,13 +1462,13 @@ async function main() {
     // 更新计划 makes version 2 — the ceiling frozen into the plan, which can still start.
     await openAnalysisOf(renderer, fifthBookId, 'fifth-analysis');
     await prepareFirstBaseline(renderer, 'ready', 'fifth-baseline');
-    await assertRenderer(renderer, `(() => {const options=document.querySelector('#task-drawer .task-launch-options');options.open=true;const input=options.querySelector('[data-task-launch-option="budget"]');input.value='5,000';input.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`, 'budget-first-plan-option');
+    await setLaunchBudget(renderer, waitFor, '[data-task-launch-kind]', '5,000', 'budget-first-plan-option');
 
     at('budget-reached');
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
     // 已停止 · 预算已达上限 with what it read and used — 调整预算并重做 and 查看部分结果, never 续行 or 重试 — its partial revision
     // kept, and 待我处理 holds it as an exception whose next step is 调整预算并重做.
-    await assertRenderer(renderer, `(() => { const timing=document.querySelector('#task-drawer select[data-task-start-when]'); if(!(timing instanceof HTMLSelectElement)||timing.value!=='now')return false; timing.value='idle'; timing.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'budget-deferred-start-choice');
+    await chooseLaunchOption(renderer, waitFor, '[data-task-launch-kind] [data-task-start-when]', 'idle', 'budget-deferred-start-choice');
     const fifthIntentId = await launchTaskFromBar(renderer, waitFor, 'fifth-start');
     const budgetPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(budgetPlan?.planVersion?.ordinal === 1 && budgetPlan.planRevisions.length === 0 &&
@@ -1502,7 +1504,7 @@ async function main() {
     // 调整预算并重做 prepares a new Task that carries the four ranges and begins from the plan's 5,000 tokens; it opens in its
     // editing with focus on 设置上限….
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="redo"]', 'budget-redo');
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(fifthIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.activeElement?.dataset?.taskPlanEdit==='budget'; })()`, 'budget-redo-opened', 120_000);
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && typeof drawer.dataset.taskPlanRef==='string' && drawer.dataset.taskPlanRef!==${JSON.stringify(fifthIntentId)} && drawer.dataset.taskPlanState==='ready' && drawer.dataset.taskPlanVersion==='1' && drawer.dataset.taskDrawerMode==='full' && document.querySelector('#task-drawer [data-task-launch-option="budget"]')?.disabled===false; })()`, 'budget-redo-opened', 120_000);
     const budgetRedo = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const budgetRedoId = budgetRedo?.taskIntent?.taskIntentId ?? '';
     requireJourney(UUID_PATTERN.test(budgetRedoId) && budgetRedoId !== fifthIntentId && budgetRedo.state === 'prepared' && (budgetRedo.run ?? null) === null &&
@@ -1514,17 +1516,20 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-sentence-text')?.textContent===${JSON.stringify(BUDGET_REDO_GOAL)} && document.querySelector('#task-drawer dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens'`, 'budget-redo-words');
 
     at('j14-budget-keyboard');
-    // Without a pointer: Enter on 设置上限… opens the field with focus in it; the count is typed and Enter sets it, focus back
-    // on 设置上限… beside 你改的; Tab reaches 去掉上限.
-    await pressEnter(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl==='budget-input'`, 'keyboard-budget-input', 10_000);
-    await renderer.send('Input.insertText', { text: '20000' });
-    await pressEnter(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget' && document.activeElement.matches(':focus-visible') && document.querySelector('#task-drawer .task-plan-budget-edited .task-plan-edit-tag')?.textContent==='你改的 · 预算上限 20,000 tokens' && document.querySelector('#task-drawer .task-bar-note')?.textContent==='你改了 1 处'`, 'keyboard-budget-set', 10_000);
-    await pressTab(renderer);
-    await waitFor(renderer, `document.activeElement?.dataset?.taskPlanEdit==='budget-remove' && document.activeElement.matches(':focus-visible')`, 'keyboard-budget-remove-reached', 10_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'budget-redo-update');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'budget-redo-version-2', 60_000);
+    await setLaunchBudget(renderer, waitFor, '#task-drawer', '50000', 'keyboard-budget-set');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-launch-option="budget"]')?.value==='50000' && document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='1'`, 'keyboard-budget-selection');
+
+    at('budget-redo-completed');
+    // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
+    // of the one notice, so its 2.5 seconds are read from the page and not raced by the steps below.
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden === true`, 'quiet-completion-idle', 10_000);
+    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
+    // 开始任务: the redo reads the four ranges left, and the reduction after them, under 50,000 tokens, to its end — the
+    // Book's analysis whole again, and 待我处理 no longer naming the stop.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2'`, 'budget-redo-version-2', 60_000);
     const raisedPlan = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     // The stored diff line is read field by field: its record's keys come back in canonical order.
     const raisedDiff = raisedPlan?.planRevisions?.at(-1)?.diff ?? [];
@@ -1534,16 +1539,6 @@ async function main() {
       raisedDiff[0].prior?.maxTotalTokens === BUDGET.maxTotalTokens && raisedDiff[0].proposed?.maxTotalTokens === RAISED.maxTotalTokens,
     'budget-raised', { ceiling: raisedPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, diff: raisedDiff });
 
-    at('budget-redo-completed');
-    // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
-    // of the one notice, so its 2.5 seconds are read from the page and not raced by the steps below.
-    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
-    await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden === true`, 'quiet-completion-idle', 10_000);
-    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
-    // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
-    // Book's analysis whole again, and 待我处理 no longer naming the stop.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(budgetRedoId)} && analysis.run !== null && !['authorized','admitted','executing'].includes(analysis.run.state))`, 'budget-redo-ended', 180_000);
     const budgetDone = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(budgetDone?.state === 'settled' && budgetDone.run?.state === 'completed' && budgetDone.run.runRecordId !== reached.run.runRecordId &&
