@@ -6,6 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { pointerClick } from './dispatch-chooser.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -2883,6 +2884,30 @@ async function main() {
       populatedBefore.length === 6 && /^[0-9a-f-]{36}$/i.test(populatedSourceVersionId ?? ''),
       'populated-book-before-source-records',
     );
+    // #1521: with the 历史与恢复 row gone, a populated Book's records are reached through 工作概览 by real input: the fold is closed on
+    // arrival, its summary opens it, a record opens in place, and leaving the overview and coming back finds the same way again.
+    const recordsStageReturn = diagnosticLocation;
+    at('book-records-reachable');
+    const recordsFold = '[data-screen="book-overview"] .book-overview-history';
+    const recordProvenance = `(() => { const labels = Array.from(document.querySelectorAll('${recordsFold} .record-detail dt')); return labels.find((item) => item.textContent === '来源记录 ID')?.nextElementSibling?.textContent ?? false; })()`;
+    let shownProvenance;
+    for (const visit of ['first', 'again']) {
+      if (visit === 'again') {
+        await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="review"]', 'book-records-leave');
+        await waitFor(renderer, `document.querySelector('[data-screen="book-review"]')`, 'book-records-left');
+        await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="overview"]', 'book-records-return');
+        await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(populatedBookId)}]')`, 'book-records-returned');
+      }
+      await waitFor(renderer, `document.querySelector('${recordsFold}')?.open === false`, `book-records-folded-${visit}`);
+      await pointerClick(renderer, waitFor, `${recordsFold} > summary`, `book-records-summary-${visit}`);
+      await waitFor(renderer, `document.querySelector('${recordsFold}')?.open === true`, `book-records-opened-${visit}`);
+      await pointerClick(renderer, waitFor, `${recordsFold} [data-record-kind="source"]`, `book-records-record-${visit}`);
+      await waitFor(renderer, recordProvenance, `book-records-detail-${visit}`);
+      const provenance = await renderer.evaluate(recordProvenance);
+      requireJourney(visit === 'first' ? typeof provenance === 'string' && provenance.length > 0 : provenance === shownProvenance, `book-records-same-${visit}`);
+      shownProvenance = provenance;
+    }
+    at(recordsStageReturn);
     await assertRenderer(
       renderer,
       `(() => { const source = document.querySelector('[data-record-kind="source"]'); if (!source) return false; source.click(); return true; })()`,
