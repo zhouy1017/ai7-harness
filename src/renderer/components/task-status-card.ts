@@ -38,7 +38,10 @@ export function createTaskStatusCard(options: { readonly viewPlan: () => void })
   fill.className = 'task-plan-progress-fill';
   progress.append(fill);
   progress.hidden = true;
+  const stale = line('stale');
+  stale.classList.add('attention-note');
   const stage = line('line');
+  const ceiling = line('ceiling');
   const model = line('model');
   const actions = document.createElement('div');
   actions.className = 'task-status-actions';
@@ -55,7 +58,7 @@ export function createTaskStatusCard(options: { readonly viewPlan: () => void })
   viewPlan.textContent = TASK_PLAN_OPEN;
   viewPlan.addEventListener('click', options.viewPlan);
   actions.append(viewResult, viewPlan);
-  element.append(sentence, progress, stage, model, actions);
+  element.append(sentence, progress, stale, stage, ceiling, model, actions);
   let open: (() => void) | null = null;
   viewResult.addEventListener('click', () => open?.());
   return {
@@ -69,7 +72,9 @@ export function createTaskStatusCard(options: { readonly viewPlan: () => void })
         progress.setAttribute('aria-valuetext', lines.progress.text);
         fill.setAttribute('style', `width: ${lines.progress.total === 0 ? 0 : lines.progress.settled / lines.progress.total * 100}%`);
       }
+      setLine(stale, lines.stale);
       setLine(stage, lines.line);
+      setLine(ceiling, lines.ceiling);
       setLine(model, lines.model);
       open = result;
       viewResult.hidden = result === null;

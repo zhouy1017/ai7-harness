@@ -1,5 +1,6 @@
 import { launchTaskFromBar } from './launch-task-bar.mjs';
-import { statusCardExpression } from './task-status-card.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
+import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1740,6 +1741,11 @@ async function main() {
     for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
       await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-${statusWidth}`, 30_000);
+      // The card's own controls, by pointer: 查看计划 opens the plan with the Run's activity, 运行 comes back, and 暂停 and 停止任务 are there to press.
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-running-plan-${statusWidth}`);
+      await waitFor(renderer, planViewExpression({ running: true }), `task-status-running-plan-view-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-running-back-to-run-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-card-again-${statusWidth}`, 30_000);
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await press(renderer, 'Escape');

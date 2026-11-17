@@ -1,6 +1,6 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
-import { statusCardExpression } from './task-status-card.mjs';
+import { planViewExpression, statusCardExpression } from './task-status-card.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -3933,11 +3933,16 @@ async function main() {
             // 状态卡 (Issue #1527): the finished Task in ordinary mode is its result in one sentence, how long it took, the model it ran on and
             // 查看结果 — at the wide window and at the Gate's. 查看结果 opens the result, and closing it brings the drawer back on the same Task.
             at('task-status-finished');
-            await clickSelector(renderer,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-run-view-${planWidth}`);
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-run-view-${planWidth}`);
             await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-${planWidth}`,30_000);
-            await clickSelector(renderer,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
+            // The card's own controls, by pointer: 查看计划 and 运行 go to the plan and back, and 查看结果 opens the result.
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="full-link"]',`task-status-finished-plan-${planWidth}`);
+            await waitFor(renderer,planViewExpression({ running: false }),`task-status-finished-plan-view-${planWidth}`,30_000);
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-back-to-run-${planWidth}`);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-again-${planWidth}`,30_000);
+            await pointerClick(renderer,waitFor,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
             await waitFor(renderer,`document.querySelector('.task-result-window [data-task-result-action="close"]') && document.querySelector('#task-drawer')?.hidden===true`,`task-status-finished-result-open-${planWidth}`);
-            await clickSelector(renderer,'.task-result-window [data-task-result-action="close"]',`task-status-finished-result-close-${planWidth}`);
+            await pointerClick(renderer,waitFor,'.task-result-window [data-task-result-action="close"]',`task-status-finished-result-close-${planWidth}`);
             await waitFor(renderer,`document.querySelector('#task-drawer')?.hidden===false && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(reviewRunId)} && document.querySelector('.task-result-window')===null`,`task-status-finished-back-${planWidth}`);
             await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]',`dispatch-plan-close-${planWidth}`);
           }

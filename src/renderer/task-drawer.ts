@@ -20,7 +20,6 @@ import type {
   RendererApi,
   RunBudgetCeilingState,
   ServiceWireJobProjection as ServiceJobProjection,
-  TaskOverviewItemProjection,
   TaskPlanClarificationProjection,
   TaskPlanKind,
   TaskPlanProjection,
@@ -157,8 +156,13 @@ import {
   taskPlanSavedLine,
   TASK_DRAWER_VIEW_NAMES,
   TASK_PLAN_FULL_LINK_ORDINARY,
+  taskStatusEnded,
   taskStatusLines,
   taskStatusName,
+  taskStatusOutcome,
+  taskStatusRowEnded,
+  type TaskStatusFacts,
+  type TaskStatusRow,
   type TaskBarAction,
   type TaskDrawerMode,
   TASK_PLAN_ASSURANCE_HEADING,
@@ -193,6 +197,7 @@ export interface TaskPlanRequest {
 }
 
 export type { TaskLaunchOperation, TaskLaunchRequest } from './components/launch-bar.js';
+export type { TaskStatusRow } from './task-drawer-labels.js';
 
 export interface TaskDrawerSurface {
   openLaunch(request: TaskLaunchRequest, returnFocus: () => HTMLElement | null): void;
@@ -200,7 +205,11 @@ export interface TaskDrawerSurface {
    * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
    */
-  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: { readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean }): void;
+  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: {
+    readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean;
+    /** The Task's row in the 任务总览 when the opener holds it: the status card reads its model, duration and result from it and asks for no other (Issue #1527). */
+    readonly row?: TaskStatusRow;
+  }): void;
   /**
    * The Book's 任务 panel in the same slot (Issue #423, S77a; TASK-044): its Tasks in three groups. A plan opened from it
    * keeps `← 任务`, which comes back here.
@@ -437,8 +446,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * state the Task is in. The row names the model and thinking effort, how long a finished Run took, and the result 查看结果 opens.
    */
   let statusCard: TaskStatusCard | null = null;
-  let statusFacts: { readonly key: string; readonly item: TaskOverviewItemProjection | null } | null = null;
-  let statusAsked = '';
+  let statusFacts: { readonly key: string; readonly row: TaskStatusRow | null } | null = null;
+  /** The row the opener handed in; the one read for the state a Task is in, which a reopening or a new state may ask for again. */
+  let handedRow: { readonly kind: TaskPlanKind; readonly ref: string; readonly row: TaskStatusRow } | null = null;
+  let statusRead: { readonly generation: number; readonly key: string } | null = null;
+  let statusGeneration = 0;
   /** A start or a reconfirmation is under way: every bar action waits for it. */
   let working = false;
   /** Why the last start or reconfirmation was refused, beside the actions until the next one or a new plan. */
@@ -546,8 +558,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     settle: options.settle,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
-    openPlan: (kind, ref, cancel, redo) => {
-      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, ...(redo === undefined ? {} : { redo }) });
+    openPlan: (kind, ref, cancel, redo, row) => {
+      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, ...(redo === undefined ? {} : { redo }), ...(row === undefined ? {} : { row }) });
     },
     // A dialogue Task's 打开对话 brings its dialogue to the foreground in the same slot (TASK-044, DIALOG-011).
     openTarget: (target) => {
@@ -839,7 +851,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     replaceBody(
       ...(next.runOutcome?.reason ? [el('p', 'attention-note', next.runOutcome.reason)] : []),
-      ...(card ? [statusCard!.element] : next.runControl === null || !technicalLayerVisible ? [] : [activityBlock(next.runControl)]),
+      ...(card ? [statusCard!.element] : next.runControl === null ? [] : [activityBlock(next.runControl)]),
       ...(next.clarifications.some((card) => card.state !== 'open') ? [clarificationRecord(next)] : []),
       ...(card ? [] : [goalBlock(next)]),
       // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known says so
@@ -913,51 +925,75 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return `${next.kind}:${next.ref}:${next.state.key}`;
   }
 
-  /** The row read for this Task in its latest state; the row of an earlier state of the same Task still names its model. */
-  function statusItem(next: TaskPlanProjection, anyState: boolean): TaskOverviewItemProjection | null {
-    return statusFacts !== null && (anyState ? statusFacts.key.startsWith(`${next.kind}:${next.ref}:`) : statusFacts.key === statusKey(next)) ? statusFacts.item : null;
+  /** The row read for this Task: in the state it is in now, or — for what its state does not change, the model — in any state of it. */
+  function statusRow(next: TaskPlanProjection, anyState: boolean): TaskStatusRow | null {
+    return statusFacts !== null && (anyState ? statusFacts.key.startsWith(`${next.kind}:${next.ref}:`) : statusFacts.key === statusKey(next)) ? statusFacts.row : null;
   }
 
-  /** The Task's overview row, read once for each state it is in; the model and effort are frozen with the Task, the rest follows its state. */
+  function statusFactsOf(next: TaskPlanProjection): TaskStatusFacts {
+    const row = statusRow(next, false);
+    return {
+      modelLabel: statusRow(next, true)?.attention.modelLabel ?? null,
+      workedMs: row?.usage?.elapsed ?? null,
+      outcome: row === null || !taskStatusRowEnded(row) ? null : taskStatusOutcome(row, next.kind),
+    };
+  }
+
+  /**
+   * The Task's row, for its model, how long it worked and what it formed. The opener's own row first — only while it says what the plan
+   * says, that the Task ended or did not; otherwise one read of the 任务总览 for each state a Task is in, never one per poll. A read that
+   * failed is not asked again until the drawer is opened again or the Task is in another state; one that settles after either is dropped.
+   */
   function readStatusFacts(next: TaskPlanProjection): void {
     const key = statusKey(next);
-    if (statusFacts?.key === key || statusAsked === key) return;
-    statusAsked = key;
-    const settle = (item: TaskOverviewItemProjection | null): void => {
-      if (plan === null || statusKey(plan) !== key || root.hidden) return;
-      statusFacts = { key, item };
+    if (statusFacts?.key === key) return;
+    if (handedRow !== null && handedRow.kind === next.kind && handedRow.ref === next.ref && taskStatusRowEnded(handedRow.row) === taskStatusEnded(next)) {
+      statusFacts = { key, row: handedRow.row };
+      return;
+    }
+    if (statusRead?.generation === statusGeneration && statusRead.key === key) return;
+    const mine = { generation: statusGeneration, key };
+    statusRead = mine;
+    const settle = (row: TaskStatusRow | null, failed: boolean): void => {
+      if (mine.generation !== statusGeneration || plan === null || statusKey(plan) !== key || root.hidden) {
+        if (statusRead === mine) statusRead = null;
+        return;
+      }
+      if (failed) return;
+      statusRead = null;
+      statusFacts = { key, row };
       if (statusViewOf(plan)) paintStatus();
     };
     void api.inspectTaskOverview().then(
       (overview) => settle(overview.groups.flatMap((group) => group.items).find((item) =>
-        item.bookId === next.bookId && item.plan?.kind === next.kind && item.plan.ref === next.ref) ?? null),
-      () => settle(null),
+        item.bookId === next.bookId && item.plan?.kind === next.kind && item.plan.ref === next.ref) ?? null, false),
+      () => settle(null, true),
     );
   }
 
   /** 查看结果 for a Task that ended and formed a result, or `null`. */
   function statusResult(next: TaskPlanProjection): (() => void) | null {
-    const item = statusItem(next, false);
-    if (item === null || !['completed', 'cancelled', 'stopped'].includes(item.state) || (item.result === null && item.attention.object.kind !== 'task')) return null;
+    const row = statusRow(next, false);
+    if (row === null || !taskStatusRowEnded(row) || taskStatusOutcome(row, next.kind)?.kind !== 'result') return null;
     const asked = request;
     const finder = returnFocus;
     return () => {
       if (asked === null || working || interrupted) return;
       surface.close(false);
       // Closing the result brings the drawer back on the same Task, as 任务 does for a card.
-      options.openTaskResult({ item: item.attention, result: item.result }, () => { if (!interrupted) surface.open(asked, finder, undefined, { view: 'run' }); });
+      options.openTaskResult({ item: row.attention, result: row.result }, () => { if (!interrupted) surface.open(asked, finder, undefined, { view: 'run', row }); });
     };
   }
 
   function paintStatus(): void {
     if (plan === null || statusCard === null) return;
-    statusCard.update(taskStatusLines(plan, { modelLabel: statusItem(plan, true)?.attention.modelLabel ?? null, elapsedMs: statusItem(plan, false)?.usage?.elapsed ?? null }, Date.now()), statusResult(plan));
+    statusCard.update(taskStatusLines(plan, statusFactsOf(plan), Date.now()), statusResult(plan));
   }
 
   /** The clock and the repeated read move the activity card, or the status card, in place. */
   function tickActivity(next: TaskPlanProjection): void {
     if (statusViewOf(next)) paintStatus();
-    else if (next.runControl !== null && technicalLayerVisible) activityBlock(next.runControl);
+    else if (next.runControl !== null) activityBlock(next.runControl);
   }
 
   /** The disabled action with its reason in words beside it, not only in a tooltip. */
@@ -2385,8 +2421,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const now = Date.now();
     let progress = section.querySelector<HTMLElement>('.task-plan-progress');
     if (progress === null) {
+      // The five-stage chain repeats the stage the rows name: it is developer mode's alone (Issue #1527).
       const chain = el('ol', 'task-plan-stage-chain');
-      for (const [stage, label] of Object.entries(RUN_LIVENESS_STAGE_LABELS)) {
+      for (const [stage, label] of technicalLayerVisible ? Object.entries(RUN_LIVENESS_STAGE_LABELS) : []) {
         const node = el('li', undefined, label.replace(/^正在/u, '').replace('分析已保存，正在', ''));
         node.dataset['stage'] = stage;
         chain.append(node);
@@ -2396,7 +2433,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       progress.setAttribute('aria-label', technicalWords('阅读范围进度', '任务进度'));
       progress.setAttribute('aria-valuemin', '0');
       progress.append(el('span', 'task-plan-progress-fill'));
-      section.append(chain, progress);
+      section.append(...(technicalLayerVisible ? [chain] : []), progress);
     }
     progress.setAttribute('aria-valuemax', String(activity.unitsTotal));
     progress.setAttribute('aria-valuenow', String(activity.unitsSettled));
@@ -2936,6 +2973,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (request?.ref !== next.ref || request?.bookId !== next.bookId || request?.kind !== next.kind) startWhen = 'now';
       request = next;
       returnFocus = finder;
+      statusGeneration += 1;
+      statusRead = null;
+      handedRow = how?.row === undefined || next.ref === null ? null : { kind: next.kind, ref: next.ref, row: how.row };
       plan = null;
       deferredPlan = null;
       painted = '';
@@ -3042,6 +3082,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (root.hidden) return;
       disposeLaunchBar();
       ticket += 1;
+      statusGeneration += 1;
+      statusRead = null;
       clearPoll();
       panel.stop();
       dialogueSurface.stop();
