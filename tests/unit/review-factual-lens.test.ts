@@ -109,14 +109,14 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
   const calls = { inspectReviewWorkspace, inspectFactualVerification, inspectEvidenceWorkspace };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
-  const status = vi.fn(); const searchSettings = vi.fn();
+  const status = vi.fn(); const searchSettings = vi.fn(); const goToText = vi.fn(async () => undefined);
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: resume ? null : { reviewRunId: RUN, findingId: null }, api, procedureId,
     awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
     setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
-    goToText: async () => undefined, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined });
+    goToText, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
-  return { root, surface, status, unexpected, api, searchSettings, ...calls };
+  return { root, surface, status, unexpected, api, searchSettings, goToText, ...calls };
 }
 
 describe('review triage (#1525)', () => {
@@ -151,6 +151,12 @@ describe('review triage (#1525)', () => {
     expect(view.inspectReviewWorkspace).not.toHaveBeenCalled();
     expect(view.root.querySelector('article[data-finding-id="f-2"]')).toBe(untouched);
     expect(miniDocument.activeElement).toBe(untouched);
+    // A held decision key must not decide the next card after focus advances (#1523 review).
+    untouched!.dispatchEvent(Object.assign({ type: 'keydown', key: 'r' }, { repeat: true }));
+    untouched!.dispatchEvent(Object.assign({ type: 'keydown', key: 'Enter' }, { repeat: true }));
+    await flush();
+    expect(reject).toHaveBeenCalledTimes(1);
+    expect(view.goToText).not.toHaveBeenCalled();
     view.root.querySelector('[data-review-action="batch-prepare"]')!.click(); await flush();
     expect(batch).toHaveBeenCalledWith(expect.objectContaining({ markIds: ['m-2', 'm-3'] }));
   });
