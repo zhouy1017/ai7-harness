@@ -7,8 +7,19 @@ import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notifi
 export const QUIET_NOTICE_MS = 2_500;
 export function showTransientNotice(message: string): void { showToast(message); }
 
-/** Persistent status and transient notices share the same renderer entry point. */
-export function createStatusSurface(surface: HTMLElement): (message: string, tone?: 'busy' | 'success' | 'error') => void {
+export type StatusTone = 'busy' | 'success' | 'error';
+export interface StatusSurface {
+  (message: string, tone?: StatusTone): void;
+  /** A different destination was rendered: an error from the one before it no longer applies. */
+  clearError(): void;
+}
+
+/**
+ * The one status line. An error and a busy line stand in the bar until replaced, dismissed or (for an error) cleared by the
+ * next `success` or a new destination; a `success` is also said once in a toast. A status without a tone is the live
+ * region's text only — no toast, no bar — and an empty message shows nothing.
+ */
+export function createStatusSurface(surface: HTMLElement): StatusSurface {
   let error: string | null = null;
   let busy: string | null = null;
   const paint = (): void => {
@@ -21,25 +32,28 @@ export function createStatusSurface(surface: HTMLElement): (message: string, ton
       dismiss.className = 'btn small quiet status-dismiss';
       dismiss.setAttribute('aria-label', '关闭错误提示');
       dismiss.title = '关闭错误提示';
-      dismiss.addEventListener('click', () => { error = null; paint(); });
+      // The bar sits on the manuscript page's save menu trigger: closing the error must not toggle that menu.
+      dismiss.addEventListener('click', (event) => { event.stopPropagation(); error = null; paint(); });
       surface.append(dismiss);
     }
   };
-  return (message, tone) => {
-    if (tone === 'error') { error = message; busy = null; }
+  const update = (message: string, tone?: StatusTone): void => {
+    if (message === '') busy = null;
+    else if (tone === 'error') { error = message; busy = null; }
     else if (tone === 'busy') busy = message;
     else {
       busy = null;
-      showToast(message, tone === undefined ? {} : { tone });
+      if (tone === 'success') { error = null; showToast(message, { tone }); }
     }
     paint();
-    // Keep the latest ordinary status available to existing status readers.
+    // Keep the latest ordinary status in the live region, for assistive technology and existing status readers.
     if (surface.hidden) {
       surface.textContent = message;
       if (tone) surface.dataset['tone'] = tone;
       else delete surface.dataset['tone'];
     }
   };
+  return Object.assign(update, { clearError: (): void => { if (error !== null) { error = null; paint(); } } });
 }
 
 /** Observe the existing attention projection; history and its count remain owned by that projection. */

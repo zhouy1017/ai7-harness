@@ -1944,10 +1944,14 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
-.status-bar { position: relative; flex: none; z-index: 20; width: fit-content; max-width: calc(100% - 1.5rem); margin: .65rem auto; padding: .4rem .85rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
+.status-bar { position: fixed; z-index: 40; bottom: .65rem; left: calc(var(--sidebar-width) + .75rem); right: .75rem; width: fit-content; margin: 0 auto; padding: .4rem .85rem; box-shadow: 0 4px 20px var(--shadow); border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
 .status-bar[data-tone="busy"] { color: var(--status-attention); }
 .status-bar[data-tone="success"] { color: var(--status-good); }
 .status-bar[data-tone="error"] { color: var(--status-blocked); }
+/* #1519: the bar is fixed to the bottom of the content area, never in the page flow: a long page shows it and its appearance
+   never changes a page's height. It stays between the sidebar and the Task Drawer, docked or overlaying. */
+body[data-task-drawer="open"] .status-bar { right: calc(min(var(--task-drawer-width), 100vw - 1rem) + .75rem); }
+:root[data-focus-mode="on"] .status-bar { left: .75rem; right: .75rem; }
 .error-panel { border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 
 @media (max-width: 960px) {

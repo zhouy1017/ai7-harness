@@ -233,7 +233,7 @@ describe('quiet notice lifetime', () => {
     } finally { vi.useRealTimers(); restore(); }
   });
 
-  it('keeps an unacknowledged error when a later success notice expires', () => {
+  it('keeps an error through untoned and busy lines; the next success clears it and is said once', () => {
     const restore = installMiniDom();
     vi.useFakeTimers();
     try {
@@ -244,21 +244,65 @@ describe('quiet notice lifetime', () => {
       update('正在测试连接…', 'busy');
       expect(surface.textContent).toContain('凭据被拒');
       expect(surface.textContent).toContain('正在测试连接…');
-      update('其他设置已保存', 'success');
+      update('设置已打开');
       expect(surface.textContent).toBe('凭据被拒');
       expect(surface.dataset['tone']).toBe('error');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('其他设置已保存', 'success');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('其他设置已保存');
       const toast = miniDocument.body.querySelector('[data-toast]')!;
       expect(toast.textContent).toBe('其他设置已保存');
       vi.advanceTimersByTime(2_500);
       expect(toast.hidden).toBe(true);
-      expect(surface.textContent).toBe('凭据被拒');
-      expect(surface.hidden).toBe(false);
-      surface.querySelector('button')!.click();
-      expect(surface.hidden).toBe(true);
       update('正在测试连接…', 'busy');
       expect(surface.textContent).toBe('正在测试连接…');
       expect(surface.dataset['tone']).toBe('busy');
     } finally { vi.useRealTimers(); restore(); }
+  });
+
+  it('a status without a tone is the live region only, and an empty one shows nothing', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update('设置已打开');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('设置已打开');
+      expect(surface.dataset['tone']).toBeUndefined();
+      update('');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(surface.textContent).toBe('');
+      update('', 'success');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('正在打开图书…', 'busy');
+      update('');
+      expect(surface.hidden).toBe(true);
+    } finally { restore(); }
+  });
+
+  it('closing an error only dismisses it, and a new destination clears it', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      const reached = vi.fn();
+      surface.addEventListener('click', reached);
+      update('无法打开图书', 'error');
+      const close = surface.querySelector('button')!;
+      close.click();
+      expect(surface.hidden).toBe(true);
+      expect(reached).not.toHaveBeenCalled();
+      update('无法打开图书', 'error');
+      update.clearError();
+      expect(surface.hidden).toBe(true);
+      update('正在打开图书…', 'busy');
+      update.clearError();
+      expect(surface.textContent).toBe('正在打开图书…');
+    } finally { restore(); }
   });
 
   it('replaces the one notice, pauses its remaining reading time on hover and focus, and dismisses without touching the record', async () => {

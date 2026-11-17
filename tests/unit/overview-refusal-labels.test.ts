@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { miniDocument } from '../support/mini-dom.js';
 import { TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
 import { analysisRefusalView } from '../../src/renderer/overview-refusal-labels.js';
+import { rendererErrorCode, rendererErrorData, rendererErrorMessage } from '../../src/renderer/error-words.js';
 import { NavigationGeneration } from '../../src/renderer/navigation-generation.js';
 
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
@@ -19,7 +20,7 @@ const refusals: string[] = [];
 const taskInspections: string[] = [];
 function extract(node: Node): void {
   if (isFunctionDeclaration(node) && node.name !== undefined && [
-    'element', 'button', 'rendererErrorData', 'rendererErrorCode', 'rendererErrorMessage',
+    'element', 'button',
   ].includes(node.name.text)) helpers.set(node.name.text, node.getText(parsed));
   if (isArrowFunction(node) && node.parameters[0]?.name.getText(parsed) === 'error' &&
       /analysisRefusalView/u.test(node.body.getText(parsed))) refusals.push(node.getText(parsed));
@@ -75,13 +76,13 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
     bookId: 'book-1', bookTitle: '测试图书', overview: { book: { bookId: 'book-1' }, manuscriptState: { state: 'populated' } },
     error: { code, message: '原有拒绝说明。' },
     analysisRefusalView, TASK_DRAWER_TITLE,
-    researchUnavailableLine: (_code: string, message: string) => message,
+    rendererErrorData, rendererErrorCode, rendererErrorMessage,
     openBookSection: navigate,
   });
   const marker = surface === 'overview' ? 'analysisHost' : 'host.replaceChildren';
   const handler = surface === 'task' ? taskInspections : refusals.filter((source) => source.includes(marker));
   expect(handler).toHaveLength(1);
-  expect(helpers.size).toBe(5);
+  expect(helpers.size).toBe(2);
   await runInContext(compile([...helpers.values(), `const refuse = ${handler[0]}; refuse(error);`].join('\n')), context);
   return { host, heading, scroll, navigate, serviceRead, inspectTaskAuthorization, getModelServiceSettings };
 }

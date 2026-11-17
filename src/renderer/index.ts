@@ -35,7 +35,7 @@ import { mountLearningAskFrequency } from './learning-settings.js';
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
-import { researchUnavailableLine } from '../shared/research-status.js';
+import { hasErrorCode, rendererErrorCode, rendererErrorData, rendererErrorMessage } from './error-words.js';
 import { preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
   AgentWorkspacePromotionProjection,
@@ -232,7 +232,7 @@ window.addEventListener('pagehide', unmountSelectControls, { once: true });
 const unmountMenuControls = mountMenuControls(document.body);
 window.addEventListener('pagehide', unmountMenuControls, { once: true });
 const persistenceStatus = requiredElement('#persistence-status');
-const updateStatusSurface = createStatusSurface(persistenceStatus);
+const statusSurface = createStatusSurface(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 
@@ -1011,32 +1011,6 @@ function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess'
   return access === 'available-exact' ? 'success-note' : 'attention-note';
 }
 
-interface RendererErrorData {
-  readonly code: string;
-  readonly message: string;
-}
-
-function rendererErrorData(error: unknown): RendererErrorData | null {
-  if (typeof error !== 'object' || error === null) return null;
-  const candidate = error as { code?: unknown; message?: unknown };
-  return typeof candidate.code === 'string' && typeof candidate.message === 'string'
-    ? { code: candidate.code, message: candidate.message }
-    : null;
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return rendererErrorData(error)?.code === code;
-}
-
-function rendererErrorCode(error: unknown): string | null {
-  return rendererErrorData(error)?.code ?? null;
-}
-
-function rendererErrorMessage(error: unknown, fallback: string): string {
-  const data = rendererErrorData(error);
-  return researchUnavailableLine(data?.code, data?.message ?? (error instanceof Error ? error.message : fallback));
-}
-
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -1105,7 +1079,7 @@ function instantValue(iso: string): HTMLElement {
 
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   statusRevision += 1;
-  updateStatusSurface(message, tone);
+  statusSurface(message, tone);
 }
 
 /**
@@ -1166,6 +1140,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   const object = content.dataset['documentId'] ?? content.dataset['manuscriptId'] ?? content.dataset['revisionId'] ?? content.dataset['seriesId'] ?? null;
   const conflict = content.dataset['conflictMarkId'] ?? null;
   navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId);
+  statusSurface.clearError();
   if (state !== 'task-overview') overviewDrawerBookId = null;
   screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;

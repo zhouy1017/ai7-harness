@@ -132,7 +132,8 @@ interface MountOptions {
   flushJournalEdit(input: JournalEditInput, action: object): ReturnType<RendererApi['flushJournalEdit']>;
   readManuscriptImageChunk?: RendererApi['readManuscriptImageChunk'];
   onStateChange(state: EditorUiState): void;
-  onAnnouncement(message: string, tone: 'busy' | 'success' | 'error'): void;
+  /** An autosave line has no tone: it is the live region's text only, neither a toast nor a bar. */
+  onAnnouncement(message: string, tone?: 'busy' | 'success' | 'error'): void;
   onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
   /** A different window was loaded: anything anchored to the blocks that were on screen is gone. */
   onWindowLoaded?(): void;
@@ -976,7 +977,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         retryPrepared = prepared;
         saving = true;
         announceState();
-        options.onAnnouncement(technicalWords('正在自动写入修订日志；可继续编辑当前窗口。', '正在保存…'), 'busy');
+        options.onAnnouncement(technicalWords('正在自动写入修订日志；可继续编辑当前窗口。', '正在保存…'));
         try {
           const ack = await options.flushJournalEdit(prepared.input, editAction);
           requireAcknowledgement(
@@ -1037,7 +1038,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       settleProtection();
       announceState();
       if (lastCompletion && !retryRequired && changedBlocks(view.state.doc).length === 0) {
-        options.onAnnouncement(technicalWords(lastCompletion, '已保存'), 'success');
+        options.onAnnouncement(technicalWords(lastCompletion, '已保存'));
       }
     })().catch((error: unknown) => {
       saving = false;

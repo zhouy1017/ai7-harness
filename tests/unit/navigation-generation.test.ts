@@ -1,3 +1,4 @@
+import { rendererErrorMessage } from '../../src/renderer/error-words.js';
 import { createNotificationObserver, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
@@ -76,7 +77,7 @@ function harness(api: object = {}) {
     manuscriptOnScreen: null, taskResultWindow: null, authorityInterrupted: false, keyboardSettingsOff: undefined,
     reviewWorkspace: undefined, deliverablesSurface: undefined, derivativesSurface: undefined, proposalWorkspaceSurface: undefined,
     agentWorkspaceSurface: undefined, proposalConflictSurface: undefined, globalAttentionSurface: undefined, taskOverviewSurface: undefined,
-    leaveGuard: null, taskDrawer: {followScreen: vi.fn(), close: vi.fn(), view: () => null}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(),
+    leaveGuard: null, taskDrawer: {followScreen: vi.fn(), close: vi.fn(), view: () => null}, globalAttentionReader: {refresh: vi.fn()}, refreshCommandEntries: vi.fn(), statusSurface: {clearError: vi.fn()},
     SHELL_LABELS: {openingBook:'正在打开图书',bookUnavailable:'无法打开图书'},
     renderBookReview: vi.fn((bookId:string) => {const node=element('section');node.dataset['bookId']=bookId;replaceScreen('book-review',node);}),
     element, panel: () => element('section'), agentWorkspaceReturns: new WeakMap(), taskSurfaceRefresh: {},
@@ -554,9 +555,7 @@ it('a failed-state Book read-click reports the same editorial notice at the clic
  const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
  await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
  const notice=page.screen.querySelector('[data-book-reacquire]')!.querySelector('p')!.textContent;
- const formatter=source.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='rendererErrorMessage')!;
- page.context['rendererErrorData']=()=>null;page.context['researchUnavailableLine']=(_code:unknown,message:string)=>message;
- runInContext(ts.transpileModule(formatter.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ page.context['rendererErrorMessage']=rendererErrorMessage;
  page.setStatus.mockClear();
  await page.run("jumpToManuscript('book-a',{manuscriptId:'manuscript',blockId:'block',markId:null})");
  expect(open).toHaveBeenCalledOnce();expect(page.setStatus).toHaveBeenLastCalledWith(notice,'error');

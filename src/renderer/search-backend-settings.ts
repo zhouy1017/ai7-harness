@@ -120,14 +120,14 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const label = element('label', 'field-note'); label.append(override, element('span', undefined, '总是使用联网检索里选定的后端'));
   override.addEventListener('change', async () => {
     override.disabled = true;
-    try { render(await api.selectSearchBackend({ backendId: selectedBackendId, alwaysUseSelectedBackend: override.checked })); setStatus('联网检索来源偏好已保存。'); }
+    try { render(await api.selectSearchBackend({ backendId: selectedBackendId, alwaysUseSelectedBackend: override.checked })); setStatus('联网检索来源偏好已保存。', 'success'); }
     catch (error) { override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false; setStatus(errorMessage(error, '无法保存联网检索来源偏好。'), 'error'); }
     finally { override.disabled = false; }
   });
   section.append(label);
 
   const saveFallback = (backendId: string | null, done: string): void => void (async () => {
-    try { render(await api.selectSearchBackend({ backendId, role: 'fallback' })); setStatus(done); }
+    try { render(await api.selectSearchBackend({ backendId, role: 'fallback' })); setStatus(done, 'success'); }
     catch (error) { setStatus(errorMessage(error, '无法保存备用来源。'), 'error'); }
   })();
   for (const backend of projection.searchBackends.backends) {
@@ -144,7 +144,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     const actions = element('div', 'button-row');
     // Ordinary mode says 检索服务 for a backend (Issue #1431 item 101).
     const choose = button(technicalWords('选择后端', '选择检索服务'), 'quiet', () => void (async () => {
-      try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus(technicalWords('联网检索后端已保存', '检索服务已保存')); }
+      try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus(technicalWords('联网检索后端已保存', '检索服务已保存'), 'success'); }
       catch (error) { setStatus(errorMessage(error, technicalWords('无法保存联网检索后端。', '无法保存检索服务。')), 'error'); }
     })());
     choose.disabled = selected || !keyed;

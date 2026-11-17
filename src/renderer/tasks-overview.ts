@@ -1,4 +1,5 @@
 import { technicalWords } from './technical-layer.js';
+import { rendererErrorMessage } from './error-words.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import type { RendererApi, TaskOverviewGroupProjection, TaskOverviewItemProjection, TaskOverviewProjection, TaskOverviewCall } from '../shared/protocol.js';
 import { createSheet, sheetContent } from './components/sheet.js';
@@ -92,7 +93,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     add.addEventListener('click', () => { const tasks = [...list.querySelectorAll<HTMLInputElement>('input:checked')].map((input) => ({ bookId: input.value, procedureId: type.value })); if (!tasks.length) { options.setStatus('请先选择图书。', 'error'); return; }
       add.disabled = true; void rememberActionDefaults({ taskBooks: tasks.map((task) => task.bookId), taskProcedure: type.value }).catch(() => options.setStatus('未能记住任务设置。', 'error'));
       const enqueue = async () => { if (options.beforeStart && !await options.beforeStart()) return null; return options.api.startQuickTasks({ tasks }); };
-      void enqueue().then((result) => { if (result === null) return; count += result.results.length; added.textContent = `已加入 ${count} 项`; options.onChanged?.(); refresh(); }, (error: unknown) => { added.textContent = '未能全部加入，请查看任务列表后继续。'; options.setStatus(error instanceof Error ? error.message : '任务未能加入。', 'error'); refresh(); }).finally(() => { add.disabled = false; }); });
+      void enqueue().then((result) => { if (result === null) return; count += result.results.length; added.textContent = `已加入 ${count} 项`; options.onChanged?.(); refresh(); }, (error: unknown) => { added.textContent = '未能全部加入，请查看任务列表后继续。'; options.setStatus(rendererErrorMessage(error, '任务未能加入。'), 'error'); refresh(); }).finally(() => { add.disabled = false; }); });
     const close = el('button', 'quiet', '关闭'); close.addEventListener('click', () => sheet.close());
     const foot = el('div'); foot.append(added, add, close);
     const config = el('div', 'button-row'); for (const [label, kind] of [['自定义审阅…', 'review'], ['写作任务说明…', 'writing']] as const) { const link = el('button', 'quiet', label); link.addEventListener('click', () => { const book = list.querySelector<HTMLInputElement>('input:checked')?.value; if (book) { sheet.close(); options.configure?.(book, kind); } }); config.append(link); }
@@ -107,7 +108,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const types = el('div', 'task-overview-filter-row'); types.append(el('span', undefined, '类型')); for (const type of ['all', '分析', '审阅', '评估', '写作', '对话', '工序']) types.append(filter(type === 'all' ? '全部' : type, selectedType === type, () => { selectedType = type; remember(); }));
     const time = el('div', 'task-overview-filter-row'); time.append(el('span', undefined, '最近完成')); for (const [value, label] of [['today', '今天'], ['week', '7 天'], ['all', '全部']]) time.append(filter(label!, selectedTime === value, () => { selectedTime = value!; remember(); })); rows.push(types, time); filters.replaceChildren(...rows);
   }
-  async function perform(action: () => Promise<void>): Promise<void> { if (busy) return; busy = true; try { await action(); } catch (error) { options.setStatus(error instanceof Error ? error.message : '任务操作未能完成。', 'error'); } finally { busy = false; options.onChanged?.(); refresh(); } }
+  async function perform(action: () => Promise<void>): Promise<void> { if (busy) return; busy = true; try { await action(); } catch (error) { options.setStatus(rendererErrorMessage(error, '任务操作未能完成。'), 'error'); } finally { busy = false; options.onChanged?.(); refresh(); } }
   async function call(item: TaskOverviewItemProjection, operation: TaskOverviewCall['operation'], input: object): Promise<unknown> { if (!item.bookId) return; return options.api.taskOverviewCall({ operation, bookId: item.bookId, input } as TaskOverviewCall); }
   function act(item: TaskOverviewItemProjection, action: TaskCardAction): void {
     selectedId = item.itemId;
@@ -155,7 +156,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
       }); });
       submit.type = 'submit'; const close = el('button', 'quiet', '收起'); close.addEventListener('click', () => form.remove());
       form.append(choices, text, submit, close); node.append(form); text.focus();
-    } catch (error) { options.setStatus(error instanceof Error ? error.message : '无法读取问题。', 'error'); }
+    } catch (error) { options.setStatus(rendererErrorMessage(error, '无法读取问题。'), 'error'); }
   }
   async function dialogueAction(item: TaskOverviewItemProjection, operation: 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer', cancel = false): Promise<void> {
     if (item.target.kind !== 'dialogue') return;
@@ -184,7 +185,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     restoreInteraction();
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
   }
-  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => { if (!destroyed) options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error'); }).finally(() => { inFlight = false; }); }
+  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => { if (!destroyed) options.setStatus(rendererErrorMessage(error, '任务总览暂时无法读取。'), 'error'); }).finally(() => { inFlight = false; }); }
   function keydown(event: KeyboardEvent): void {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
     const cards = [...host.querySelectorAll<HTMLElement>('[data-task-item]')]; const index = cards.findIndex((node) => node === document.activeElement || node.contains(document.activeElement));
