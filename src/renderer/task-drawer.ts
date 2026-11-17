@@ -2954,10 +2954,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     setColumnVisible(visible) {
       if (visible && !columnSuspended || !visible && root.hidden) return;
+      const restoring = visible && root.hidden;
       columnSuspended = !visible;
       root.hidden = !visible;
       root.dataset['taskDrawer'] = visible ? 'open' : 'closed';
       shell.dataset['taskDrawer'] = visible ? 'open' : 'closed';
+      if (restoring) { if (view === 'panel') panel.refresh(); else if (view === 'plan') read(); }
     },
     close(restoreFocus) {
       if (root.hidden && !columnSuspended) return;

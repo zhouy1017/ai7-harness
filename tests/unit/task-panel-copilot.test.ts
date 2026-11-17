@@ -128,3 +128,18 @@ it.each(['plan','run'] as const)('exposes the watched task identity in the real 
  await settle();
  expect(drawer.view()).toEqual({kind:'plan',bookId:BOOK,task:{kind:'baseline-analysis',ref:'watched-task'}});
 });
+
+it.each(['tasks', 'plans'] as const)('reads the restored %s column again after temporary suspension', async (kind) => {
+  const { drawer, root, reads, settle } = harness();
+  if (kind === 'tasks') drawer.openPanel(BOOK, () => null);
+  else drawer.open({ bookId: BOOK, kind: 'baseline-analysis', ref: 'plan' }, () => null);
+  await settle();
+  const before = reads[kind];
+  drawer.setColumnVisible(false);
+  expect(root.hidden).toBe(true);
+  drawer.setColumnVisible(true);
+  await settle();
+  expect(root.hidden).toBe(false);
+  expect(reads[kind]).toBeGreaterThan(before);
+  drawer.close(false);
+});
