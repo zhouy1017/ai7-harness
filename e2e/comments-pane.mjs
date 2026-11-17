@@ -1,6 +1,25 @@
 import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 
+// Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail.
+const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript-comments-pane'),editor=document.querySelector('.editor-window'),style=getComputedStyle(editor),root=getComputedStyle(document.documentElement);return innerWidth-parseFloat(root.getPropertyValue('--sidebar-icons-width'))-document.querySelector('.editor-edge').getBoundingClientRect().width-pane.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(editor.querySelector('.ProseMirror')).fontSize); })()`;
+
+async function commentsReadingSize(renderer, check, waitFor, size) {
+  await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
+  await waitFor(renderer, `document.querySelector('[data-settings-route="appearance"]')`, 'comments-reading-settings-ready');
+  await pointerClick(renderer,waitFor,'[data-settings-route="appearance"]','comments-reading-appearance');
+  await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]')`, 'comments-reading-size-ready');
+  const bounds=await renderer.evaluate(`(() => {const input=document.querySelector('[data-view-typography="fontSize"]');return {min:Number(input.min),max:Number(input.max),step:Number(input.step)};})()`);
+  await pointerClick(renderer,waitFor,'[data-view-typography="fontSize"]','comments-reading-size-focus');
+  const press=async(key,code)=>{await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key,code:key,windowsVirtualKeyCode:code});await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key,code:key,windowsVirtualKeyCode:code});};
+  if(size===bounds.max)await press('End',35);
+  else {await press('Home',36);for(let index=0;index<(size-bounds.min)/bounds.step;index++)await press('ArrowRight',39);}
+  await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]').value===${JSON.stringify(String(size))} && getComputedStyle(document.documentElement).getPropertyValue('--manuscript-font-size').trim()===${JSON.stringify(String(size)+'px')}`, 'comments-reading-size-saved');
+  await pointerClick(renderer,waitFor,SIDEBAR.section('manuscript'),'comments-reading-return');
+  await waitFor(renderer, `document.querySelector('.manuscript-comments-pane') && document.querySelector('.ProseMirror')`, 'comments-reading-editor-ready');
+  if(await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`))await pointerClick(renderer,waitFor,'[data-edge-entry="comments"]','comments-reading-pane-open');
+}
+
 // All async service operations are evaluated directly and awaited; waitFor receives synchronous DOM predicates only.
 // pointer-events:none removes SVG from hit tests; compare its sibling stacking context
 // with opaque hit-test surfaces without temporarily making the connector interactive.
@@ -101,7 +120,7 @@ export async function commentsLayouts(renderer, check, waitFor) {
   for (const size of [native, { width: 1280, height: 800 }, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
     check(await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(!entry||entry.disabled)return false; if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`), 'comments-layout-open');
-    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'), editor=document.querySelector('.editor-window'), prose=editor.querySelector('.ProseMirror'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(), style=getComputedStyle(editor); const measure=28*parseFloat(getComputedStyle(prose).fontSize), content=editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1008 ? content>=measure-1 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute'); })()`, 'comments-responsive-geometry');
+    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'), editor=document.querySelector('.editor-window'), prose=editor.querySelector('.ProseMirror'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(), style=getComputedStyle(editor); const measure=28*parseFloat(getComputedStyle(prose).fontSize), content=editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (${commentsCanDock} ? content>=measure-1 && t.right<=p.left+1 && getComputedStyle(panel).position==='static' : getComputedStyle(panel).position==='absolute' && (innerWidth<1008 || content>=measure-1)); })()`, 'comments-responsive-geometry');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='on' && getComputedStyle(document.querySelector('.manuscript-comments-pane')).display==='none'; })()`), 'comments-focus-hidden');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='off' && !document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-focus-restored');
     check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
@@ -121,14 +140,18 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
     for(const [form,size] of [['column',{width:1280,height:800}],['overlay',{width:1008,height:681}]]) {
       at('comments-inline-'+action+'-'+form);
       await seedCommentsPane(renderer,check,waitFor,size);
-      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify('static')}`, 'comments-'+form+'-viewport');
+      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===(${commentsCanDock}?'static':'absolute')`, 'comments-'+form+'-viewport');
       await commentsGeometryAndScroll(renderer,check,waitFor);
       if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
       else await commentsReplyAndResolve(renderer,check,waitFor);
       if(form==='overlay') {
-        await renderer.send('Emulation.setDeviceMetricsOverride', {width:640,height:681,deviceScaleFactor:1,mobile:false});
-        await waitFor(renderer, `getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute'`, 'comments-small-overlay');
-        await commentsSeedConnectorCases(renderer,check,waitFor);
+        at('comments-connector-'+action+'-overlay');
+        const originalSize=await renderer.evaluate(`parseFloat(getComputedStyle(document.querySelector('.ProseMirror')).fontSize)`);
+        try {
+          await commentsReadingSize(renderer,check,waitFor,24);
+          await waitFor(renderer, `!${commentsCanDock} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute'`, 'comments-reading-overlay-measure');
+          await commentsSeedConnectorCases(renderer,check,waitFor);
+        } finally { await commentsReadingSize(renderer,check,waitFor,originalSize); }
       }
       check(true,'comments-'+form+'-complete');
     }
