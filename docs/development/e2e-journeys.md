@@ -1,5 +1,9 @@
 # E2E journeys: what each admitted runner proves
 
+## #1521 synchronized deltas (0.7.3 slice, `codex/integration-0.7.3`)
+
+The sidebar names and rows change: 全域智能体 is AI 助手, 书内 AI 协作 is AI 改稿 (developer layer keeps Agent 工作区), 发现 is 待办汇总 in the 工作 group, and the 处理 group and the 历史与恢复 row are gone; the open Book has no row in the Book list. `e2e/controller.mjs` carries the new row names (`sidebarNavigate`, `SIDEBAR_LIBRARY_READY`, `sidebarBookCurrent`). J-01 replaces `empty-book-sidebar-history` and `…-history-records` with `empty-book-sidebar-no-history-row` (no row; the empty Book's 导入记录 section is open). J-03 `book-row-current` now reads the Book heading instead of a current row, and `sidebar-settings-pinned` (new location) proves 设置 is inside innerWidth × innerHeight and hit-testable at 1280×800 and 1008×681 with a Book open. J-12 and J-13 read the new names, `ordinary-quality-no-global-history-button` and `ordinary-house-same-name` prove the removed button and the one 审阅偏好 name from 知识库 and 质量与学习; J-15 and J-16 read the names through the controller only. The `GLOBAL_AGENT_TITLE` protocol constant and `usage.ts`'s 「全域智能体（无图书）」 row keep the old name until #1531.
+
 ## #1496 synchronized deltas (0.7.2, `codex/integration-0.7.2`)
 
 The R3 closure candidate is **0.7.2 Alpha**, protocol **204**, schema **116**, Data Version **1**. All R3 slices are merged at `4eef1df7`; exact closure verification belongs in the closure PR, with dev delivery and the human-test refresh still pending. The delivered 0.7.1 identity and its evidence remain historical below.
