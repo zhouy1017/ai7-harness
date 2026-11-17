@@ -235,8 +235,9 @@ describe('the developer-live transmittable set before dispatch (Issue #990)', { 
     try {
       // Admission itself does not throw EXECUTION_SOURCE_NOT_TRANSMITTABLE: the Run reaches the (refusing) transport.
       expect(refusal(() => execution.admitAndDispatch(authorized.dispatchRunRecordId!))).toBe('no-throw');
-      await execution.whenIdle();
-      expect(calls.length).toBeGreaterThan(0);
+      // The claim is the first call reaching the stub, not the Run's end: every later request is refused alike, and a Book of
+      // wujingzi-rulin-waishi's size spent 138 s of 150 s on them (#1537). The `finally` aborts what is still in flight.
+      await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0), { timeout: 60_000, interval: 20 });
       expect(new Set(calls)).toEqual(new Set([DEVELOPER_LIVE_POLICY_BINDING.endpoint]));
     } finally {
       await execution.dispose();

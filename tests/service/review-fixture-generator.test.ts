@@ -20,10 +20,11 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|authors the stock|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
+import { cpSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -335,8 +336,30 @@ beforeEach(async () => {
 });
 afterEach(async () => { await roots.dispose(); });
 
+// Every scenario reads the same freshly imported sample1 Book with Revision 2 pinned and one missing-credential connection. That
+// state is built once (#1537) and cloned into each scenario's own data root, so a scenario still opens its own store and no
+// state is shared between scenarios; the import path itself stays proven by the many tests that run it.
+let seededBook: Promise<{ seedRoots: ServiceTestRoots; imported: { bookId: string; manuscriptId: string; branchId: string; revisionId: string } }> | null = null;
+function seedBook() {
+  seededBook ??= (async () => {
+    const seedRoots = await createServiceTestRoots('ai7-s69-generate-seed-');
+    const store = await EditorialStore.open(seedRoots.dataRoot, seedRoots.codeRoot);
+    try {
+      const imported = await importSample1Book(store, seedRoots.codeRoot, 'S69 夹具生成');
+      await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+      recordMissingCredentialConnection(store, 'S69 主编辑连接');
+      store.markCleanShutdown();
+      return { seedRoots, imported };
+    } finally { store.close(); }
+  })();
+  return seededBook;
+}
+afterAll(async () => { if (seededBook !== null) await (await seededBook.catch(() => null))?.seedRoots.dispose(); });
+
 async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
+  const seed = await seedBook();
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
+  cpSync(seed.seedRoots.dataRoot, scenarioRoots.dataRoot, { recursive: true });
   const stockAnswers = [...entries.values()].filter(({ order }) => order === 'synthesis-leaf').map(({ entry }) => ({ ...entry, attempt: 1 }));
   const routedFixture = baselineFixture === undefined ? fixture : ownProfile
     ? { ...baselineFixture, entries: new Map([...baselineFixture.entries, ...stockAnswers.map(entry => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, 1), entry] as const)]) }
@@ -352,10 +375,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
   if (inheritGeneratedEntries) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
   try {
-    const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
-    await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
-    recordMissingCredentialConnection(store, 'S69 主编辑连接');
-    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...imported });
+    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...seed.imported });
     store.markCleanShutdown();
     return result;
   } finally {
