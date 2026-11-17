@@ -1,3 +1,4 @@
+import { inspectManuscriptExportReceipt as inspectExportReceipt } from './manuscript-export.js';
 import * as importRetentionOperations from './import-retention.js';
 import type { ReimportPreparationProgress, ReimportResolutionProgress, ReimportCommitProgress } from './manuscript-reimport-operations.js';
 export type { ReimportPreparationProgress, ReimportResolutionProgress, ReimportCommitProgress } from './manuscript-reimport-operations.js';
@@ -10720,15 +10721,7 @@ export class EditorialStore {
   }
 
   /** What one approved export came to, read by the main process before it reveals the file. */
-  inspectManuscriptExportReceipt(input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection {
-    this.#assertAvailable();
-    try {
-      return this.#manuscriptExport.receipt(input);
-    } catch (error) {
-      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
-  }
+  inspectManuscriptExportReceipt(input: InspectManuscriptExportReceiptInput): ManuscriptExportReceiptProjection { return inspectExportReceipt({ assertAvailable: this.#assertAvailable.bind(this), manuscriptExport: this.#manuscriptExport }, input); }
 
   // ---- 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22) ----------------------------------------
 
