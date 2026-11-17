@@ -55,7 +55,9 @@ export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement):
     const edge = workspace.querySelector('.editor-edge')!.getBoundingClientRect().width;
     const full = pixels(style.getPropertyValue('--sidebar-full-width'), rem);
     const icons = pixels(style.getPropertyValue('--sidebar-icons-width'), rem);
-    const available = innerWidth - edge - column - minimum;
+    const page = getComputedStyle(document.body);
+    const area = workspace.getBoundingClientRect().width + parseFloat(page.paddingLeft) + parseFloat(page.paddingRight);
+    const available = area - edge - column - minimum;
     const next = available >= full ? 'wide' : available >= icons ? 'icons' : 'overlay';
     if (root.dataset['rightColumn'] !== next) root.dataset['rightColumn'] = next;
   };

@@ -2,7 +2,7 @@ import { pointerClick, pointerElementDescription, pointerFailureDetail } from '.
 import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 // Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail.
-const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript-comments-pane'),editor=document.querySelector('.editor-window'),style=getComputedStyle(editor),root=getComputedStyle(document.documentElement);return innerWidth-parseFloat(root.getPropertyValue('--sidebar-icons-width'))-document.querySelector('.editor-edge').getBoundingClientRect().width-pane.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(editor.querySelector('.ProseMirror')).fontSize); })()`;
+const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript-comments-pane'),editor=document.querySelector('.editor-window'),style=getComputedStyle(editor),root=getComputedStyle(document.documentElement),page=getComputedStyle(document.body),outside=innerWidth-document.querySelector('.editor-workspace').getBoundingClientRect().width-parseFloat(page.paddingLeft)-parseFloat(page.paddingRight);return innerWidth-outside-parseFloat(root.getPropertyValue('--sidebar-icons-width'))-document.querySelector('.editor-edge').getBoundingClientRect().width-pane.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(editor.querySelector('.ProseMirror')).fontSize); })()`;
 
 async function commentsReadingSize(renderer, check, waitFor, size) {
   await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
