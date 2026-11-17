@@ -142,6 +142,8 @@ export function groupedCount(value: number): string {
 
 export const TASK_PLAN_COMPACT_TERMS = ['处理', '发送', '会得到', '不会', '中途'] as const;
 export const TASK_PLAN_FULL_LINK = '完整计划（6 段）';
+/** Ordinary mode names the way from a plan's summary to its whole, without counting its sections (Issue #1527). */
+export const TASK_PLAN_FULL_LINK_ORDINARY = '完整计划';
 /** The usage figure is a ceiling the Run cannot pass, never a forecast of what it will use. */
 export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
@@ -1148,6 +1150,89 @@ export function taskPlanActivityIsStale(activity: NonNullable<TaskPlanRunControl
   if (activity.stage === 'units' && activity.inFlightUnits !== undefined) return activity.inFlightUnits.some((unit) => unit.requestState === 'admitted' &&
     unit.admittedRequestStartedAt !== null && runStepIsStale(nowMs - Date.parse(unit.admittedRequestStartedAt), activity.longestSettledUnitMs));
   return activity.currentUnitStartedAt !== null && runStepIsStale(nowMs - Date.parse(activity.currentUnitStartedAt), activity.longestSettledUnitMs);
+}
+
+// ---- the status card of ordinary mode (Issue #1527; plan #1516 review item 5.3) -------------------------------
+
+/**
+ * Ordinary mode names the switch one way, whichever way the drawer was opened: 运行 is the Task's state, 计划 is what it was set up
+ * to do. Developer mode keeps 精简 · 完整 ({@link TASK_DRAWER_MODES}).
+ */
+export const TASK_DRAWER_VIEW_NAMES: Readonly<Record<TaskDrawerMode, string>> = { compact: '运行', full: '计划' };
+export const TASK_STATUS_VIEW_RESULT = '查看结果';
+
+/** The title of ordinary mode names the Task, in the procedure's own name; the drawer's own title until the plan is read. */
+export function taskStatusName(plan: TaskPlanProjection): string {
+  return plan.goal.chips.procedure.length === 0 ? TASK_DRAWER_TITLE : plan.goal.chips.procedure;
+}
+
+/** How long a Run has taken, in the largest two units: `45 秒`, `3 分 12 秒`, `1 小时 5 分`. */
+export function taskStatusDuration(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.round(elapsedMs / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes} 分 ${seconds % 60} 秒` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
+}
+
+/** What the card reads beside the plan: the Task's frozen model and thinking effort, and how long its Run took once it ended. */
+export interface TaskStatusFacts {
+  readonly modelLabel: string | null;
+  readonly elapsedMs: number | null;
+}
+
+export interface TaskStatusLines {
+  /** The Run's measured progress, `null` when nothing measures it (waiting, queued, finished). */
+  readonly progress: { readonly settled: number; readonly total: number; readonly text: string } | null;
+  /** The one sentence a Task that ended — or that has nothing under way — says for itself. */
+  readonly sentence: string | null;
+  /** `阶段 · 用时` while the Run is under way, `用时` once it ended. */
+  readonly line: string | null;
+  /** `模型 名称@思考强度`. */
+  readonly model: string | null;
+}
+
+/** The one sentence of a Task that ended, when its state says nothing more in the bar; `null` while it is under way. */
+function taskStatusSentence(plan: TaskPlanProjection): string | null {
+  if (plan.runOutcome?.reason) return null;
+  switch (plan.state.key) {
+    case 'settled': return `已完成，得到${TASK_BAR_OUTCOMES[plan.kind]}。`;
+    case 'recorded': return `${TASK_BAR_RECORDED}。`;
+    case 'cancelled': return `${TASK_BAR_CANCELLED}。`;
+    case 'cancelled-after-start': return `${TASK_BAR_CANCELLED_NOTE}。`;
+    case 'stopped': case 'blocked': return `${plan.state.label}。`;
+    default: return null;
+  }
+}
+
+/**
+ * The status card of a started Task in ordinary mode (Issue #1527): the Run's progress, the stage and the time it has taken, and the
+ * model it runs on; once it ended, one sentence of its result, its duration and the model. A state that says more in the bar — a wait,
+ * a pause, a question — leaves its one sentence to the bar. Elapsed time is computed from the instants shown at `nowMs`.
+ */
+export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts, nowMs: number): TaskStatusLines {
+  const control = plan.runControl;
+  const activity = control?.activity ?? null;
+  const model = facts.modelLabel === null ? null : `模型 ${facts.modelLabel}`;
+  const share = (settled: number, total: number): string => `已完成约 ${total === 0 ? 0 : Math.floor((settled / total) * 100)}%`;
+  if (activity !== null) {
+    const since = control!.executingSince === null ? null : `用时 ${taskStatusDuration(nowMs - Date.parse(control!.executingSince))}`;
+    return {
+      progress: { settled: activity.unitsSettled, total: activity.unitsTotal, text: activity.stage === 'units' ? share(activity.unitsSettled, activity.unitsTotal) : '正在整理结果' },
+      sentence: null, line: [RUN_LIVENESS_STAGE_LABELS[activity.stage], since].filter((part) => part !== null).join(' · '), model,
+    };
+  }
+  const kept = control?.continuation ?? plan.budgetStop;
+  const settled = kept?.unitsSettled ?? null;
+  const progress = settled === null || kept === null ? null : { settled, total: kept.unitsTotal, text: share(settled, kept.unitsTotal) };
+  if (control !== null) {
+    // A Run no execution holds says so; every other stopped Run leaves its sentence to the bar's note.
+    return { progress, sentence: control.continuation === null && taskBarView(plan).note === null ? TASK_PLAN_ACTIVITY_UNREPORTED : null, line: null, model };
+  }
+  const ended = ['settled', 'recorded', 'cancelled', 'cancelled-after-start', 'stopped', 'blocked'].includes(plan.state.key);
+  return {
+    progress, sentence: taskStatusSentence(plan),
+    line: ended && facts.elapsedMs !== null ? `用时 ${taskStatusDuration(facts.elapsedMs)}` : null, model,
+  };
 }
 
 // ---- the surfaces that raise a Task (S72 D4) ---------------------------------------------------------------

@@ -4,6 +4,7 @@ import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './p
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
 import { createButton } from './components/controls.js';
+import { createTaskStatusCard, type TaskStatusCard } from './components/task-status-card.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { taskPlanWording } from './task-drawer-labels.js';
 import type {
@@ -19,6 +20,7 @@ import type {
   RendererApi,
   RunBudgetCeilingState,
   ServiceWireJobProjection as ServiceJobProjection,
+  TaskOverviewItemProjection,
   TaskPlanClarificationProjection,
   TaskPlanKind,
   TaskPlanProjection,
@@ -153,6 +155,10 @@ import {
   taskPlanChips,
   taskPlanCompactRows,
   taskPlanSavedLine,
+  TASK_DRAWER_VIEW_NAMES,
+  TASK_PLAN_FULL_LINK_ORDINARY,
+  taskStatusLines,
+  taskStatusName,
   type TaskBarAction,
   type TaskDrawerMode,
   TASK_PLAN_ASSURANCE_HEADING,
@@ -426,6 +432,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let focusTitle = false;
   /** 立即 or 空闲时处理 (Issue #1089): the editor's explicit choice for this Task's start, back to 立即 on another Task. */
   let startWhen: 'now' | 'idle' = 'now';
+  /**
+   * The status card of a started Task in ordinary mode (Issue #1527), and what it reads beside the plan: the Task's overview row, once per
+   * state the Task is in. The row names the model and thinking effort, how long a finished Run took, and the result 查看结果 opens.
+   */
+  let statusCard: TaskStatusCard | null = null;
+  let statusFacts: { readonly key: string; readonly item: TaskOverviewItemProjection | null } | null = null;
+  let statusAsked = '';
   /** A start or a reconfirmation is under way: every bar action waits for it. */
   let working = false;
   /** Why the last start or reconfirmation was refused, beside the actions until the next one or a new plan. */
@@ -645,7 +658,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : view === 'composer' ? TASK_COMPOSER_TITLES.draft : TASK_DRAWER_TITLE;
     modes.hidden = view !== 'plan';
     foot.hidden = view !== 'plan' && view !== 'launch';
-    footer.hidden = view === 'launch';
+    // The footer's sentence is developer mode's: ordinary mode keeps it for the queue's position alone (Issue #1527).
+    footer.hidden = view === 'launch' || !technicalLayerVisible;
     // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
     if (view !== 'dialogue') dialogueSurface.stop();
     if (view !== 'plan') {
@@ -765,7 +779,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const sameItem = plan !== null && plan.ref === next.ref && plan.kind === next.kind;
     const sameVersion = sameItem && plan!.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
-      if (next.runControl !== null) activityBlock(next.runControl);
+      tickActivity(next);
       schedulePoll(next);
       return;
     }
@@ -815,11 +829,19 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     paintQuestions(next);
+    // Ordinary mode shows a started Task's 运行 view as one status card and its plan behind 查看计划; the title names the Task (Issue #1527).
+    const card = statusViewOf(next);
+    if (!technicalLayerVisible) title.textContent = taskStatusName(next);
+    if (card) {
+      statusCard ??= createTaskStatusCard({ viewPlan: () => setMode('full', true) });
+      readStatusFacts(next);
+      paintStatus();
+    }
     replaceBody(
       ...(next.runOutcome?.reason ? [el('p', 'attention-note', next.runOutcome.reason)] : []),
-      ...(next.runControl === null ? [] : [activityBlock(next.runControl)]),
+      ...(card ? [statusCard!.element] : next.runControl === null || !technicalLayerVisible ? [] : [activityBlock(next.runControl)]),
       ...(next.clarifications.some((card) => card.state !== 'open') ? [clarificationRecord(next)] : []),
-      goalBlock(next),
+      ...(card ? [] : [goalBlock(next)]),
       // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known says so
       // in its Plan Preview, in both modes, before it is started.
       ...(next.resend === null ? [] : [resendNote(next.resend)]),
@@ -827,8 +849,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.unconfirmed === null ? [] : [unconfirmedRecord(next.unconfirmed)]),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
-      mode === 'compact' ? compactBlock(next) : fullBlock(next),
-      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact').flatMap((path) => {
+      ...(card ? [] : [mode === 'compact' ? compactBlock(next) : fullBlock(next)]),
+      ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact' &&
+        (!card || /^(runControl|unconfirmed|resend|clarifications)/u.test(path))).flatMap((path) => {
         const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
         return button === null ? [] : [button];
       }),
@@ -841,9 +864,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     restoreInteraction();
     if (redoOnOpen) { redoOnOpen = false; bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
     footer.textContent = TASK_DRAWER_FOOTER;
+    footer.hidden = !technicalLayerVisible;
     if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {
       if (plan?.ref !== next.ref || root.hidden) return;
       const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.ref === next.ref);
+      footer.hidden = false;
       footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '等待运行名额' : `排在第 ${item.queuePosition} 位`} · `));
       const link = control('查看任务总览', 'quiet', 'overview'); link.addEventListener('click', () => options.openTaskOverview?.()); footer.append(link);
     });
@@ -859,7 +884,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     } else if (focusBar) {
       // The action that had focus is gone — the start the Run's state replaced — so focus goes to the bar's
       // first action, and to its state when it offers none; the state itself is announced as it changes.
-      (bar.querySelector<HTMLElement>('button:not(:disabled)') ?? bar.querySelector<HTMLElement>('.task-bar-status'))?.focus();
+      (bar.querySelector<HTMLElement>('button:not(:disabled)') ?? bar.querySelector<HTMLElement>('.task-bar-status') ?? title).focus();
     }
     focusBar = false;
     // The Task a redo prepared opens in its editing (Issue #422, S76c), as 返回修改 would open it.
@@ -875,6 +900,64 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       queueMicrotask(() => void redoNow());
     }
     schedulePoll(next);
+  }
+
+  // ---- the status card of ordinary mode (Issue #1527) ---------------------------------------------------------
+
+  /** Ordinary mode's 运行 view of a started Task; developer mode keeps the whole plan and the activity card. */
+  function statusViewOf(next: TaskPlanProjection): boolean {
+    return !technicalLayerVisible && mode === 'compact' && next.start.readiness === 'started';
+  }
+
+  function statusKey(next: TaskPlanProjection): string {
+    return `${next.kind}:${next.ref}:${next.state.key}`;
+  }
+
+  /** The row read for this Task in its latest state; the row of an earlier state of the same Task still names its model. */
+  function statusItem(next: TaskPlanProjection, anyState: boolean): TaskOverviewItemProjection | null {
+    return statusFacts !== null && (anyState ? statusFacts.key.startsWith(`${next.kind}:${next.ref}:`) : statusFacts.key === statusKey(next)) ? statusFacts.item : null;
+  }
+
+  /** The Task's overview row, read once for each state it is in; the model and effort are frozen with the Task, the rest follows its state. */
+  function readStatusFacts(next: TaskPlanProjection): void {
+    const key = statusKey(next);
+    if (statusFacts?.key === key || statusAsked === key) return;
+    statusAsked = key;
+    const settle = (item: TaskOverviewItemProjection | null): void => {
+      if (plan === null || statusKey(plan) !== key || root.hidden) return;
+      statusFacts = { key, item };
+      if (statusViewOf(plan)) paintStatus();
+    };
+    void api.inspectTaskOverview().then(
+      (overview) => settle(overview.groups.flatMap((group) => group.items).find((item) =>
+        item.bookId === next.bookId && item.plan?.kind === next.kind && item.plan.ref === next.ref) ?? null),
+      () => settle(null),
+    );
+  }
+
+  /** 查看结果 for a Task that ended and formed a result, or `null`. */
+  function statusResult(next: TaskPlanProjection): (() => void) | null {
+    const item = statusItem(next, false);
+    if (item === null || !['completed', 'cancelled', 'stopped'].includes(item.state) || (item.result === null && item.attention.object.kind !== 'task')) return null;
+    const asked = request;
+    const finder = returnFocus;
+    return () => {
+      if (asked === null || working || interrupted) return;
+      surface.close(false);
+      // Closing the result brings the drawer back on the same Task, as 任务 does for a card.
+      options.openTaskResult({ item: item.attention, result: item.result }, () => { if (!interrupted) surface.open(asked, finder, undefined, { view: 'run' }); });
+    };
+  }
+
+  function paintStatus(): void {
+    if (plan === null || statusCard === null) return;
+    statusCard.update(taskStatusLines(plan, { modelLabel: statusItem(plan, true)?.attention.modelLabel ?? null, elapsedMs: statusItem(plan, false)?.usage?.elapsed ?? null }, Date.now()), statusResult(plan));
+  }
+
+  /** The clock and the repeated read move the activity card, or the status card, in place. */
+  function tickActivity(next: TaskPlanProjection): void {
+    if (statusViewOf(next)) paintStatus();
+    else if (next.runControl !== null && technicalLayerVisible) activityBlock(next.runControl);
   }
 
   /** The disabled action with its reason in words beside it, not only in a tooltip. */
@@ -976,7 +1059,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const sentence = el('div', 'task-plan-sentence');
     const draft = next.goal.draft;
     if (draft === undefined) {
-      sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON));
+      // The 修改 that is never available is developer mode's; ordinary mode names no action it cannot take (Issue #1527).
+      sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), ...(technicalLayerVisible ? [unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON)] : []));
     } else {
       // A Task prepared from a Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, and 修改 back to the composer.
       const asked = el('span', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
@@ -997,7 +1081,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       item.dataset['taskPlanChip'] = chip.key;
       chips.append(item);
     }
-    if (next.goal.savedForEdits) chips.append(el('li', 'task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
+    // Ordinary mode words the saved revision as 基于当前稿件, which the revision chip already says.
+    if (next.goal.savedForEdits && technicalLayerVisible) chips.append(el('li', 'task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
     if (next.edit.lastEdit !== null) chips.append(el('li', 'task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit)));
     section.append(sentence, chips);
     return section;
@@ -1054,7 +1139,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       dd.dataset['taskPlanRow'] = term;
       rows.append(dt, dd);
     }
-    const full = control(TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
+    const full = control(technicalLayerVisible ? TASK_PLAN_FULL_LINK : TASK_PLAN_FULL_LINK_ORDINARY, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
     section.append(...(technicalLayerVisible ? [el('p', 'research-status', next.service.decision)] : []), rows, full);
     return section;
@@ -1337,19 +1422,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     bar.hidden = false;
     bar.dataset['taskBar'] = view.readiness;
     const parts: HTMLElement[] = [];
-    if (view.status !== null) {
+    // The pill in the header says the state and the status card the Task's summary; ordinary mode says neither a second time beside
+    // the actions (Issue #1527).
+    if (technicalLayerVisible && view.status !== null) {
       const status = el('p', 'state-term task-bar-status', view.status);
       status.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       status.dataset['busy'] = pill.dataset['busy'] ?? 'false';
       status.setAttribute('role', 'status');
       status.tabIndex = -1;
       parts.push(status);
-    } else {
+    } else if (technicalLayerVisible) {
       const state = el('span', 'state-term task-bar-state', next.state.label);
       state.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
       parts.push(state);
     }
-    parts.push(el('p', 'task-bar-summary', view.summary));
+    if (technicalLayerVisible) parts.push(el('p', 'task-bar-summary', view.summary));
     if (view.statement !== null) parts.push(el('p', 'task-bar-statement', technicalLayerVisible ? view.statement : TASK_BAR_PRODUCTION_STATEMENT));
     let noteId: string | null = null;
     if (view.note !== null) {
@@ -2357,7 +2444,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         activityClock = undefined;
         return;
       }
-      activityBlock(plan.runControl);
+      tickActivity(plan);
     }, 1_000);
   }
 
@@ -2841,7 +2928,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       redoOnOpen = how?.redo === true;
       root.dataset['taskDetailView'] = how?.view ?? 'plan';
       if (how?.view) { mode = how.view === 'run' ? 'compact' : 'full'; syncModeButtons(); }
-      for (const button of modeButtons) button.textContent = how?.view ? button.dataset['taskDrawerMode'] === 'compact' ? '运行' : '计划' : TASK_DRAWER_MODES[button.dataset['taskDrawerMode'] as TaskDrawerMode];
+      for (const button of modeButtons) {
+        const value = button.dataset['taskDrawerMode'] as TaskDrawerMode;
+        button.textContent = how?.view || !technicalLayerVisible ? TASK_DRAWER_VIEW_NAMES[value] : TASK_DRAWER_MODES[value];
+      }
       showView();
       if (request?.ref !== next.ref || request?.bookId !== next.bookId || request?.kind !== next.kind) startWhen = 'now';
       request = next;
