@@ -1519,6 +1519,10 @@ export class EditorialStore {
   #importRetentionOperationsHostOf(): importRetentionOperations.ImportRetentionOperationsHost {
     const store = this;
     return {
+      stageImportedMarks,
+      stagedImportedMarksMatch,
+      createWordImportedMarks,
+      validateWordImportedMarkSources,
       get authority() { return store.#authority; },
       retentionCall: this.#retentionCall.bind(this),
       importedMarkCall: this.#importedMarkCall.bind(this),
@@ -6035,13 +6039,6 @@ export class EditorialStore {
     };
   }
 
-  /**
-   * The rows a Manuscript Reimport Record resolved and what its marks came to (Issue #412, plan slice S63): the first
-   * `MAX_REIMPORT_RECORD_ITEMS` of each, the counts saying how many there were. A record made before the chapter-level
-   * comparison has neither.
-   */
-  #reimportRecordResolutions(reimportRecordId: string): Pick<Extract<BookRecordPresentation, { kind: 'manuscript-reimport-record' }>, 'groups' | 'markOutcomes'> { return importReviewOperations.reimportRecordResolutions(this.#importReviewRecordsHost, reimportRecordId); }
-
   #reimportRecordPresentations(
     bookId: string,
     recordIds: ReadonlyArray<string>,
@@ -8938,11 +8935,6 @@ export class EditorialStore {
 
   async abandonImportDraft(draftId: string, expectedDraftVersion: number): Promise<ImportStartupProjection> { return importIntakeOperations.abandonImportDraft(this.#importIntakeOperationsHost, draftId, expectedDraftVersion); }
 
-  async #abandonImportDraftWithinContentObjectLifecycle(
-    draftId: string,
-    expectedDraftVersion: number,
-  ): Promise<ImportStartupProjection> { return importIntakeOperations.abandonImportDraftWithinContentObjectLifecycle(this.#importIntakeOperationsHost, draftId, expectedDraftVersion); }
-
   async acknowledgeImportCompletion(commitId: string): Promise<{ state: 'acknowledged' }> { return importIntakeOperations.acknowledgeImportCompletion(this.#importIntakeOperationsHost, commitId); }
 
   /**
@@ -8971,14 +8963,6 @@ export class EditorialStore {
     expectedDraftVersion: number,
     targetSelection: ManuscriptReimportTargetSelection,
   ): { workId: string; total: number } { return manuscriptReimportOperations.createManuscriptReimportPreparationWork(this.#manuscriptReimportOperationsHost, draftId, expectedDraftVersion, targetSelection); }
-
-  #initializeReimportPreparationMapping(
-    work: ReimportPreparationWork,
-    target: ResolvedReimportTarget,
-    checkpointBlockCount: number,
-  ): void { return manuscriptReimportOperations.initializeReimportPreparationMapping(this.#manuscriptReimportOperationsHost, work, target, checkpointBlockCount); }
-
-  #advanceReimportOccurrenceFacts(work: ReimportPreparationWork): number { return manuscriptReimportOperations.advanceReimportOccurrenceFacts(this.#manuscriptReimportOperationsHost, work); }
 
   advanceManuscriptReimportPreparationWork(workId: string): ReimportPreparationProgress { return manuscriptReimportOperations.advanceManuscriptReimportPreparationWork(this.#manuscriptReimportOperationsHost, workId); }
 
@@ -9012,26 +8996,7 @@ export class EditorialStore {
     verb: ReimportGroupVerb,
   ): { workId: string; total: number } { return manuscriptReimportOperations.createReimportResolutionWork(this.#manuscriptReimportOperationsHost, draftId, expectedDraftVersion, groupId, verb); }
 
-  /** The mappings on one side of a row, in the row's order, with what the commit needs of each. */
-  #reimportGroupMembers(groupId: string, side: 'current' | 'staged'): Array<{ mappingId: string; changeKind: 'unchanged' | 'move' | 'edit' | 'insert' | 'delete'; currentBlockId: string | null }> { return manuscriptReimportOperations.reimportGroupMembers(this.#manuscriptReimportOperationsHost, groupId, side); }
-
-  /** Every identity a verb writes is still unwritten, and every current identity it carries still unclaimed. */
-  #requireReimportPendingOpen(comparisonId: string, pending: ReadonlyMap<string, ReimportPendingResolution>): void { return manuscriptReimportOperations.requireReimportPendingOpen(this.#manuscriptReimportOperationsHost, comparisonId, pending); }
-
   advanceReimportResolutionWork(workId: string): ReimportResolutionProgress { return manuscriptReimportOperations.advanceReimportResolutionWork(this.#manuscriptReimportOperationsHost, workId); }
-
-  /**
-   * The resolved rows of a comparison as the marks see them (Issue #412, S63): each row's blocks in the revision the
-   * reimport replaced, and the blocks the commit put in its place, read from the commit's own rows.
-   */
-  #reimportMarkRows(comparisonId: string, commitWorkId: string): ReimportMarkRow[] { return manuscriptReimportOperations.reimportMarkRows(this.#manuscriptReimportOperationsHost, comparisonId, commitWorkId); }
-
-  /**
-   * The chapter-level rows of one comparison (Issue #412, plan slice S63), from the mappings just recorded: runs of
-   * changed blocks between exact ones, each with its members on either side, the heading it stands under, and the
-   * set that marks the comparison as grouped. In the caller's transaction, before the preparation rows are dropped.
-   */
-  #persistReimportGroups(comparisonId: string, draftId: string, workId: string): void { return manuscriptReimportOperations.persistReimportGroups(this.#manuscriptReimportOperationsHost, comparisonId, draftId, workId); }
 
   cancelReimportResolutionWork(workId: string): boolean { return manuscriptReimportOperations.cancelReimportResolutionWork(this.#manuscriptReimportOperationsHost, workId); }
 
@@ -9068,11 +9033,6 @@ export class EditorialStore {
     } = {},
   ): Promise<{ workId: string | null; total: number; result: ManuscriptReimportCommitProjection | null }> { return manuscriptReimportOperations.createManuscriptReimportCommitWork(this.#manuscriptReimportOperationsHost, input, options); }
 
-  #createManuscriptReimportReplayWork(
-    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
-    attempt: CommitAttempt,
-  ): { workId: string; total: number; result: null } { return manuscriptReimportOperations.createManuscriptReimportReplayWork(this.#manuscriptReimportOperationsHost, input, attempt); }
-
   async advanceManuscriptReimportCommitWork(workId: string): Promise<ReimportCommitProgress> { return manuscriptReimportOperations.advanceManuscriptReimportCommitWork(this.#manuscriptReimportOperationsHost, workId); }
 
   cancelManuscriptReimportCommitWork(workId: string): boolean { return manuscriptReimportOperations.cancelManuscriptReimportCommitWork(this.#manuscriptReimportOperationsHost, workId); }
@@ -9092,21 +9052,11 @@ export class EditorialStore {
     'COMMIT_PROOF_INCONCLUSIVE', '无法建立旧版无展示字段提交结果。');
   }
 
-  #finalizeManuscriptReimportCommit(work: ReimportCommitWork): ManuscriptReimportCommitProjection { return manuscriptReimportOperations.finalizeManuscriptReimportCommit(this.#manuscriptReimportOperationsHost, work); }
-
   /**
    * Where a reimport lands (V2-UX-IMP-056; Issue #412): the editor's remembered place as the reimport mapped it —
    * its paragraph where the identity carried, else the nearest one — or the start when none is remembered.
    */
   #reimportLandingWindow(overview: BookWorkOverviewProjection, manuscriptId: string, branchId: string): ManuscriptWindowProjection { return manuscriptReimportOperations.reimportLandingWindow(this.#manuscriptReimportOperationsHost, overview, manuscriptId, branchId); }
-
-  #reimportAuthorityCounts(bookId: string): {
-    manuscripts: number;
-    revisions: number;
-    sourceVersions: number;
-    provenance: number;
-    reimports: number;
-  } { return manuscriptReimportOperations.reimportAuthorityCounts(this.#manuscriptReimportOperationsHost, bookId); }
 
   #sourceImportAuthorityCounts(bookId: string): {
     manuscripts: number;
@@ -12747,8 +12697,6 @@ export class EditorialStore {
    */
   #ingestMatchesSnapshot(ingested: IngestedDocx, draftId: string): boolean { return importRetentionOperations.ingestMatchesSnapshot(this.#importRetentionOperationsHost, ingested, draftId); }
 
-  #ingestBlocksMatchSnapshot(ingestId: string, draftId: string): boolean { return importRetentionOperations.ingestBlocksMatchSnapshot(this.#importRetentionOperationsHost, ingestId, draftId); }
-
   #contentObjectPath(objectDigest: string, relativeKey: string): string {
     return contentObjectPath(this.#objectsRoot, objectDigest, relativeKey);
   }
@@ -13136,17 +13084,6 @@ export class EditorialStore {
     'choiceId' | 'sourceVersionDisposition' | 'reuseSourceVersionId'
   > & { exactSourceVersionId: string | null } { return importReviewOperations.bookSourceImportTarget(this.#importReviewRecordsHost, bookId, sourceDigest); }
 
-  #reimportManuscriptBinding(bookId: string): { manuscriptId: string; branchId: string } { return manuscriptReimportOperations.reimportManuscriptBinding(this.#manuscriptReimportOperationsHost, bookId); }
-
-  #populatedBookReimportTarget(
-    bookId: string,
-    sourceDigest: string,
-    checkpoint: ReimportCheckpointBinding,
-    preparedCheckpoint = false,
-  ): Omit<ResolvedReimportTarget, 'sourceVersionDisposition' | 'reuseSourceVersionId' | 'lineage'> & {
-    exactSourceVersionId: string | null;
-  } { return manuscriptReimportOperations.populatedBookReimportTarget(this.#manuscriptReimportOperationsHost, bookId, sourceDigest, checkpoint, preparedCheckpoint); }
-
   /**
    * The same file again onto the Source Version a Book already holds for it is a reuse, and a Source Version keeps the
    * reading its parser made (Issue #532). One an earlier parser read — a Book imported before this build's parser — cannot
@@ -13154,25 +13091,6 @@ export class EditorialStore {
    * blames the file. Development stores before the first packaged release are disposable (ADR 0079 §1b).
    */
   #requireSameParser(sourceVersionId: string, snapshot: DraftSnapshot): void { return manuscriptReimportOperations.requireSameParser(this.#manuscriptReimportOperationsHost, sourceVersionId, snapshot); }
-
-  #resolveReimportTarget(
-    selection: ManuscriptReimportTargetSelection,
-    snapshot: DraftSnapshot,
-    checkpoint: ReimportCheckpointBinding,
-    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
-    preparedCheckpoint = false,
-  ): ResolvedReimportTarget { return manuscriptReimportOperations.resolveReimportTarget(this.#manuscriptReimportOperationsHost, selection, snapshot, checkpoint, identityFindings, preparedCheckpoint); }
-
-  #verifiedReimportLineageRevision(bookId: string, manuscriptId: string, sourceVersionId: string): string | null { return manuscriptReimportOperations.verifiedReimportLineageRevision(this.#manuscriptReimportOperationsHost, bookId, manuscriptId, sourceVersionId); }
-
-  #reimportBlockFact(row: SqlRow, prefix: 'current' | 'lineage' | 'staged'): ReimportBlockFact | null { return manuscriptReimportOperations.reimportBlockFact(this.#manuscriptReimportOperationsHost, row, prefix); }
-
-  *#reimportMappingBatches(
-    workId: string,
-    draftId: string,
-    target: ResolvedReimportTarget,
-    checkpointWorkId: string | null = null,
-  ): Generator<ReimportMappingBatch> { return yield* manuscriptReimportOperations.reimportMappingBatches(this.#manuscriptReimportOperationsHost, workId, draftId, target, checkpointWorkId); }
 
   #resolveSourceImportTarget(
     selection: SourceImportTargetSelection,
@@ -13191,20 +13109,6 @@ export class EditorialStore {
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
     commitAttemptId: string | null,
   ): ReviewBeforeSourceImportProjection { return importReviewOperations.sourceImportReviewProjection(this.#importReviewRecordsHost, snapshot, target, identityFindings, commitAttemptId); }
-
-  #reimportEvidence(draftId: string): {
-    comparisonDigest: string;
-    resolutionDigest: string;
-    totalMappings: number;
-    unresolvedMappings: number;
-    changed: boolean;
-    groups: number;
-    unresolvedGroups: number;
-    exactBlocks: number;
-  } { return manuscriptReimportOperations.reimportEvidence(this.#manuscriptReimportOperationsHost, draftId); }
-
-  /** The chapter-level rows of a comparison: how many, how many are unresolved, and how many blocks matched exactly. */
-  #reimportGroupCounts(draftId: string): { groups: number; unresolvedGroups: number; exactBlocks: number } { return manuscriptReimportOperations.reimportGroupCounts(this.#manuscriptReimportOperationsHost, draftId); }
 
   #reconstructReviewedReimportTarget(snapshot: DraftSnapshot): ResolvedReimportTarget | null { return manuscriptReimportOperations.reconstructReviewedReimportTarget(this.#manuscriptReimportOperationsHost, snapshot); }
 
@@ -13258,14 +13162,6 @@ export class EditorialStore {
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
   ): { target: ResolvedImportTarget; reviewed: ReviewedFidelity } | null { return importReviewOperations.reconstructReviewedImport(this.#importReviewRecordsHost, snapshot, identityFindings); }
 
-  #reconstructReviewedImportTarget(
-    snapshot: DraftSnapshot,
-    reviewed: ReviewedFidelity,
-    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
-  ): ResolvedImportTarget | null { return importReviewOperations.reconstructReviewedImportTarget(this.#importReviewRecordsHost, snapshot, reviewed, identityFindings); }
-
-  #recordedImportTarget(snapshot: DraftSnapshot, identityFindings: ReadonlyArray<ImportIdentityFindingProjection>): ResolvedImportTarget | null { return importReviewOperations.recordedImportTarget(this.#importReviewRecordsHost, snapshot, identityFindings); }
-
   #reviewProjection(
     snapshot: DraftSnapshot,
     reviewDigest: string | null,
@@ -13296,8 +13192,6 @@ export class EditorialStore {
    * (`reimportFidelityReport`), and they still rebuild as they were.
    */
   #reimportFidelity(snapshot: DraftSnapshot): { fidelity: FidelityCategoryProjection[]; plan: ImportFidelityPlan } { return importReviewOperations.reimportFidelity(this.#importReviewRecordsHost, snapshot); }
-
-  #loadPersistedFidelity(fidelityReviewId: string): FidelityCategoryProjection[] { return importReviewOperations.loadPersistedFidelity(this.#importReviewRecordsHost, fidelityReviewId); }
 
   /**
    * A committed review read back and planned under the parser identity it was recorded with (ADR 0086),
@@ -13335,12 +13229,6 @@ export class EditorialStore {
   }
 
   #loadStoredCommitResult(commitId: string): StoredImportCommitProjection { return importReviewOperations.loadStoredCommitResult(this.#importReviewRecordsHost, commitId); }
-
-  #loadStoredReimportResult(commitId: string): ManuscriptReimportCommitProjection { return importReviewOperations.loadStoredReimportResult(this.#importReviewRecordsHost, commitId); }
-
-  #loadStoredManuscriptImportResult(commitId: string): Omit<ManuscriptImportCommitProjection, 'firstWindow'> { return importReviewOperations.loadStoredManuscriptImportResult(this.#importReviewRecordsHost, commitId); }
-
-  #loadStoredSourceImportResult(commitId: string): SourceImportCommitProjection { return importReviewOperations.loadStoredSourceImportResult(this.#importReviewRecordsHost, commitId); }
 
   #assertImportPostconditions(input: {
     bookId: string;

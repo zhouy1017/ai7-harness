@@ -46,12 +46,7 @@ import {
   EditorialMarkStore
 } from './editorial-marks.js';
 import { canonicalDegradationDecision, type DraftSnapshot, type IngestedDocx, type ResolvedImportTarget, type WordIntakePlan } from './import-review-records.js';
-import {
-  createWordImportedMarks,
-  stageImportedMarks,
-  stagedImportedMarksMatch,
-  validateWordImportedMarkSources
-} from './imported-marks.js';
+import type { createWordImportedMarks, validateWordImportedMarkSources, stageImportedMarks, stagedImportedMarksMatch } from './imported-marks.js';
 import {
   LOCAL_LEARNING_POLICY_BASIS,
   learningMaterialDigest,
@@ -1919,6 +1914,10 @@ export function recordTextBoxChoice(db: DatabaseSync, fidelityReviewId: string, 
 }
 
 export interface ImportRetentionOperationsHost {
+  readonly stageImportedMarks: typeof stageImportedMarks;
+  readonly stagedImportedMarksMatch: typeof stagedImportedMarksMatch;
+  readonly createWordImportedMarks: typeof createWordImportedMarks;
+  readonly validateWordImportedMarkSources: typeof validateWordImportedMarkSources;
   readonly authority: DatabaseSync;
   retentionCall: <T>(operation: () => T) => T;
   importedMarkCall: <T>(operation: () => T) => T;
@@ -1968,7 +1967,7 @@ export function promoteIngestSnapshot(host: ImportRetentionOperationsHost, draft
       const sources = ingested.sources;
       requireStore(sources.blockSourceIndexes.length + sources.notes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
       host.retentionCall(() => stageImportSources(host.authority, draftId, sources));
-      host.importedMarkCall(() => stageImportedMarks(host.authority, draftId, parsed.importedMarks));
+      host.importedMarkCall(() => host.stageImportedMarks(host.authority, draftId, parsed.importedMarks));
     }
     if (ingested.native !== null) {
       const native = ingested.native;
@@ -1989,7 +1988,7 @@ export function ingestMatchesSnapshot(host: ImportRetentionOperationsHost, inges
     if (ingested.sources === null) return true;
     const sources = ingested.sources;
     return host.retentionCall(() => stagedImportSourcesMatch(host.authority, draftId, sources)) &&
-      host.importedMarkCall(() => stagedImportedMarksMatch(host.authority, draftId, ingested.parsed.importedMarks));
+      host.importedMarkCall(() => host.stagedImportedMarksMatch(host.authority, draftId, ingested.parsed.importedMarks));
   }
 
 export function ingestBlocksMatchSnapshot(host: ImportRetentionOperationsHost, ingestId: string, draftId: string): boolean {
@@ -2127,7 +2126,7 @@ export function replaceStagedReading(host: ImportRetentionOperationsHost, snapsh
     requireStore(offset === parsed.characterCount, 'WORD_STAGING_INVALID', '所选阅读的完整字符数不一致。');
     if (sources !== null) {
       host.retentionCall(() => stageImportSources(host.authority, snapshot.draftId, sources));
-      host.importedMarkCall(() => stageImportedMarks(host.authority, snapshot.draftId, parsed.importedMarks));
+      host.importedMarkCall(() => host.stageImportedMarks(host.authority, snapshot.draftId, parsed.importedMarks));
     } else {
       stageNoteSources(host.authority, snapshot.draftId, blocks.flatMap((block) => block.note === undefined ? [] : [{ position: block.position, ...block.note }]));
     }
@@ -2194,10 +2193,10 @@ export function commitWordEvidence(host: ImportRetentionOperationsHost, word: Wo
       effectiveControls: controls };
     host.retentionCall(() => retainWordRevisionImport(host.authority, bookId, choice, createdAt));
     host.retentionCall(() => retainWordManuscriptSourceSegments(host.authority, bookId, choice, word.reading));
-    const importedMarks = host.importedMarkCall(() => createWordImportedMarks(host.authority, host.editorialMarks, bookId, commitId,
+    const importedMarks = host.importedMarkCall(() => host.createWordImportedMarks(host.authority, host.editorialMarks, bookId, commitId,
       word.compiled, input.branchId));
     host.learningCall(() => ledger.retainWordImportSamples(bookId, commitId, word.compiled));
-    host.importedMarkCall(() => validateWordImportedMarkSources(host.authority, bookId, commitId, word.compiled));
+    host.importedMarkCall(() => host.validateWordImportedMarkSources(host.authority, bookId, commitId, word.compiled));
     host.learningCall(() => ledger.validateWordImportSamples(bookId, commitId, word.compiled));
     return importedMarks;
   }
@@ -2347,7 +2346,7 @@ export function assertImportPostconditions(host: ImportRetentionOperationsHost, 
       const { choice } = host.retentionCall(() => readWordImportChoiceRecord(host.authority, input.bookId, word.commitId));
       host.retentionCall(() => requireWordManuscriptSourceSegments(host.authority, input.bookId, choice,
         word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
-      host.importedMarkCall(() => validateWordImportedMarkSources(host.authority, input.bookId, word.commitId, word.compiled));
+      host.importedMarkCall(() => host.validateWordImportedMarkSources(host.authority, input.bookId, word.commitId, word.compiled));
       host.learningCall(() => host.memoryFacade().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
     }
     const { plan: persistedPlan } = host.persistedFidelityPlan(
