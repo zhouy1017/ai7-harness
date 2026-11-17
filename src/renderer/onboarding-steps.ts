@@ -18,7 +18,7 @@ export function appendFirstRunSteps(
 ): void {
   for (const [title, note, label, action] of [
     [actions.model ? labels.modelStep : `${labels.modelStep} · 已连接`, labels.modelNote, labels.modelOpen, actions.model],
-    [actions.import ? labels.importStep : `${labels.importStep} · 已导入`, '选择本机 DOCX 稿件。', '导入稿件', actions.import],
+    [actions.import ? labels.importStep : `${labels.importStep} · 已导入`, actions.import ? '选择本机 DOCX 稿件。' : '稿件已导入，可以开始审阅。', '导入稿件', actions.import],
     [labels.startStep, actions.bookTitle ? `审阅《${actions.bookTitle}》。` : labels.startNote, '新建审阅', actions.review],
   ] as const) {
     const step = element('li');
