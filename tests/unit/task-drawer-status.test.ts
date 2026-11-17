@@ -3,6 +3,8 @@ import { mountTaskDrawer, type MountTaskDrawerOptions, type TaskPlanRequest } fr
 import { taskStatusDuration, taskStatusName, TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanRunControlProjection } from '../../src/shared/protocol.js';
+import { composeGlobalAttention } from '../../src/service/global-attention.js';
+import { taskOverviewItem } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 import { taskPlanFixture } from '../support/task-plan-fixture.js';
 
@@ -77,14 +79,14 @@ const controls = (root: MiniElement): string[] => root.querySelectorAll('[data-t
 const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high'));
 
 describe('the status card of a started Task in ordinary mode', () => {
-  it('shows a running Task in at most eight lines: its name, state, progress, stage and running time, model, and its actions', async () => {
+  it('shows a running Task in at most eight lines: its name, state, progress, stage, model, and its actions', async () => {
     const { root } = await openDrawer(runningPlan());
     await model(root);
     expect(text(root, '.task-drawer-title')).toBe('基线分析');
     expect(text(root, '.task-drawer-pill')).toBe('运行中');
     expect(Array.from(root.querySelectorAll('.task-drawer-mode'), (node) => node.textContent)).toEqual(['运行', '计划']);
     expect(root.querySelector('.task-status-progress')?.getAttribute('aria-valuetext')).toBe('已完成约 25%');
-    expect(text(root, '.task-status-line')).toBe('正在分析 · 本次已运行 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('正在分析');
     expect(lines(root).length).toBeLessThanOrEqual(8);
     expect(controls(root)).toEqual(expect.arrayContaining(['full-link', 'pause', 'cancel-run', 'run-link']));
   });
@@ -180,57 +182,59 @@ describe('the status card of a started Task in ordinary mode', () => {
   });
 });
 
-describe('the two times of the status card', () => {
-  const at = (minutes: number) => new Date(Date.parse(NOW) + minutes * 60_000).toISOString();
-  const runningSince = (lastTransitionAt: string) => runningPlan({}, running({}, { lastTransitionAt }));
+/**
+ * The row the real service composition gives a Run recorded early, queued, executed, paused and resumed: `composeGlobalAttention` sets `at` to
+ * when the Run was recorded, not to the start of the stretch it is executing now.
+ */
+function composedRunningRow() {
+  const attention = composeGlobalAttention({
+    imports: [], recoveries: [], conflicts: [], analysisOutcomes: [], reviewRuns: [], reviewCompletions: [], maintenance: [], libraryMaterials: [], learningMaterials: [],
+    busy: false, waitingFor: 'admitting',
+    analysisTasks: [{ bookId: 'book', bookTitle: '合成书', taskIntentId: 'task', mode: 'first-baseline', createdAt: '2026-11-17T06:50:00.000Z', planRevision: null,
+      run: { runRecordId: 'run', state: 'executing', stateAt: '2026-11-17T08:03:00.000Z', recordedAt: '2026-11-17T07:00:00.000Z',
+        progress: { unitsTotal: 8, unitsSettled: 2, currentUnitOrdinal: 3, currentUnitStartedAt: '2026-11-17T08:03:00.000Z', attemptState: 'dispatched', completedAttempts: 2,
+          longestSettledUnitMs: 60_000, stage: 'units' } } }] as never,
+  }, new Date(NOW));
+  return taskOverviewItem(attention.groups.flatMap((entry) => entry.items).find((entry) => entry.target.kind === 'analysis')!, () => null);
+}
+
+describe('the running card and the times of a Task', () => {
   const line = (root: MiniElement) => text(root, '.task-status-line');
-  const refresh = async (opened: Awaited<ReturnType<typeof openDrawer>>, plan: TaskPlanProjection, key: string) => {
-    opened.inspectTaskPlan.mockImplementation(async () => plan);
-    opened.drawer.refresh('baseline-analysis');
-    await vi.waitFor(() => expect(opened.root.dataset['taskPlanState']).toBe(key));
-  };
 
-  it('shows the stage alone until the Task\'s row was read, then 本次已运行 from the instant its running state began', async () => {
-    let answer: (value: unknown) => void = () => undefined;
-    const { root } = await openDrawer(runningPlan(), { overview: () => new Promise((resolve) => { answer = resolve; }) });
+  it('shows the stage alone while a Run executes, for the row the real composition gives — whose `at` is when the Run was recorded, an hour before the resume', async () => {
+    const real = composedRunningRow();
+    expect(real.at).toBe('2026-11-17T07:00:00.000Z');
+    const { root, inspectTaskOverview } = await openDrawer(runningPlan(), { how: { view: 'run', row: real as never } });
     expect(line(root)).toBe('正在分析');
-    answer(overviewOf(row('running')));
-    await vi.waitFor(() => expect(line(root)).toBe('正在分析 · 本次已运行 3 分 12 秒'));
+    expect(root.textContent).not.toMatch(/已运行|小时/u);
+    expect(inspectTaskOverview).not.toHaveBeenCalled();
   });
 
-  it('counts no queue wait: a queued Task, a waiting one and a Run admitted but not yet executing show no running time', async () => {
-    for (const plan of [taskPlanFixture({ start: STARTED, state: { key: 'queued', label: '等待运行名额' } }), taskPlanFixture({ start: STARTED, state: { key: 'waiting', label: '等待网络' } }),
-      runningPlan({}, running({ executingSince: null }))]) {
-      const { root } = await openDrawer(plan, { overview: async () => overviewOf(row('running')) });
-      await vi.waitFor(() => expect(text(root, '.task-status-model')).toBeDefined());
-      expect(root.textContent).not.toContain('本次已运行');
+  it('does not read the overview again when the Run records another request: its latest transition moves, the state does not', async () => {
+    const opened = await openDrawer(runningPlan());
+    await vi.waitFor(() => expect(opened.inspectTaskOverview).toHaveBeenCalledTimes(1));
+    for (const lastTransitionAt of ['2026-11-17T08:03:05.000Z', '2026-11-17T08:03:09.000Z']) {
+      opened.inspectTaskPlan.mockImplementation(async () => runningPlan({}, running({}, { lastTransitionAt })));
+      opened.drawer.refresh('baseline-analysis');
+      await vi.waitFor(() => expect(opened.root.querySelector('.task-status-card')).not.toBeNull());
     }
+    expect(opened.inspectTaskOverview).toHaveBeenCalledTimes(1);
+    expect(line(opened.root)).toBe('正在分析');
   });
 
-  const STOPS: ReadonlyArray<readonly [string, TaskPlanProjection, string]> = [
-    ['paused', taskPlanFixture({ start: STARTED, state: { key: 'paused', label: '已暂停' }, runControl: paused() }), 'paused'],
-    ['stopped by a restart', taskPlanFixture({ start: STARTED, state: { key: 'resumable', label: '任务已中断 · 可续行' }, runControl: paused() }), 'resumable'],
-  ];
-  it.each(STOPS)('restarts the running time when a Task that was %s runs again, and ticks nothing while it is stopped', async (_name, stopped, key) => {
-    const opened = await openDrawer(runningSince(at(0)), { how: { view: 'run', row: row('running', { at: at(-3) }) as never } });
-    expect(line(opened.root)).toBe('正在分析 · 本次已运行 3 分 0 秒');
-    await refresh(opened, stopped, key);
-    expect(opened.root.textContent).not.toContain('本次已运行');
-    vi.setSystemTime(new Date(at(10)));
-    opened.drawer.refresh('baseline-analysis');
-    expect(opened.root.textContent).not.toContain('本次已运行');
-    opened.inspectTaskOverview.mockImplementation(async () => overviewOf(row('running', { at: at(10) })));
-    await refresh(opened, runningSince(at(10)), 'running');
-    await vi.waitFor(() => expect(line(opened.root)).toBe('正在分析 · 本次已运行 0 秒'));
+  it('shows no running figure for a review run, which carries no activity at all', async () => {
+    const { root } = await openDrawer(taskPlanFixture({ kind: 'review-run', start: STARTED, state: { key: 'running', label: '运行中' }, runControl: null }));
+    expect(line(root)).toBeUndefined();
+    expect(root.textContent).not.toMatch(/已运行|用时/u);
   });
 
-  it('on completion drops the running time and shows 处理用时 from the Run Report — and no figure for a Task without one', async () => {
-    const opened = await openDrawer(runningSince(at(0)), { how: { view: 'run', row: row('running', { at: at(-3) }) as never } });
-    expect(line(opened.root)).toContain('本次已运行');
+  it('on completion shows 处理用时 from the Run Report — and no figure for a Task without one', async () => {
+    const opened = await openDrawer(runningPlan());
+    await model(opened.root);
     opened.inspectTaskOverview.mockImplementation(async () => overviewOf(row('completed')));
-    await refresh(opened, finishedPlan(), 'settled');
+    opened.inspectTaskPlan.mockImplementation(async () => finishedPlan());
+    opened.drawer.refresh('baseline-analysis');
     await vi.waitFor(() => expect(line(opened.root)).toBe('处理用时 3 分 12 秒'));
-    expect(opened.root.textContent).not.toContain('本次已运行');
     const bare = await openDrawer(finishedPlan(), { overview: async () => overviewOf(row('completed', { usage: null })) });
     await vi.waitFor(() => expect(text(bare.root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。'));
     expect(line(bare.root)).toBeUndefined();
@@ -279,6 +283,20 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not remember a read that found no row for the Task: closed and opened again with the row present, the model, 处理用时 and 查看结果 appear', async () => {
+    const overview = vi.fn().mockResolvedValueOnce(overviewOf()).mockResolvedValue(overviewOf(row('completed')));
+    const { root, drawer, open } = await openDrawer(finishedPlan(), { overview });
+    await vi.waitFor(() => expect(overview).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(text(root, '.task-status-sentence')).toBe('已完成。'));
+    expect(controls(root)).not.toContain('view-result');
+    drawer.close(false);
+    await open();
+    await model(root);
+    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
+    expect(controls(root)).toContain('view-result');
+    expect(overview).toHaveBeenCalledTimes(2);
   });
 
   it('drops an answer that arrives after the drawer was closed, and reads again when it is opened', async () => {

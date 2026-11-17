@@ -922,9 +922,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return !technicalLayerVisible && mode === 'compact' && next.start.readiness === 'started';
   }
 
-  /** One Task in one state — and, while a Run executes, in one stretch of it: a resume or a restart is another, which restarts 本次已运行. */
   function statusKey(next: TaskPlanProjection): string {
-    return `${next.kind}:${next.ref}:${next.state.key}:${next.runControl?.activity?.lastTransitionAt ?? ''}`;
+    return `${next.kind}:${next.ref}:${next.state.key}`;
   }
 
   /** The row read for this Task: in the state it is in now, or — for what its state does not change, the model — in any state of it. */
@@ -936,7 +935,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const row = statusRow(next, false);
     return {
       modelLabel: statusRow(next, true)?.attention.modelLabel ?? null,
-      runningSince: row !== null && row.state === 'running' ? row.at : null,
       processedMs: row !== null && taskStatusRowEnded(row) ? row.usage?.elapsed ?? null : null,
       outcome: row === null || !taskStatusRowEnded(row) ? null : taskStatusOutcome(row, next.kind),
     };
@@ -991,8 +989,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function adoptHandedRow(next: TaskPlanProjection): void {
     const handed = handedRow;
     handedRow = null;
-    if (handed === null || handed.kind !== next.kind || handed.ref !== next.ref || taskStatusRowEnded(handed.row) !== taskStatusEnded(next) ||
-        (next.state.key === 'running') !== (handed.row.state === 'running')) return;
+    if (handed === null || handed.kind !== next.kind || handed.ref !== next.ref || taskStatusRowEnded(handed.row) !== taskStatusEnded(next)) return;
     statusFacts = { key: statusKey(next), row: handed.row };
   }
 
@@ -2986,6 +2983,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       returnFocus = finder;
       statusGeneration += 1;
       statusRead = null;
+      // A read that found no row for the Task is not remembered into the next opening; a row that was found is.
+      if (statusFacts?.row === null) statusFacts = null;
       handedRow = how?.row === undefined || next.ref === null ? null : { kind: next.kind, ref: next.ref, row: how.row };
       plan = null;
       deferredPlan = null;
