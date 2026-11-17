@@ -1,3 +1,5 @@
+const shownSheets: HTMLDialogElement[] = [];
+
 /** Non-modal: no backdrop, focus trap, inert page or scroll lock. */
 export function createSheet(className: string): HTMLDialogElement {
   const sheet = document.createElement('dialog');
@@ -12,17 +14,35 @@ export function createSheet(className: string): HTMLDialogElement {
   const escape = (event: KeyboardEvent): void => {
     if (!sheet.open || event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
     event.preventDefault();
+    event.stopPropagation();
     const cancel = new Event('cancel', { cancelable: true });
     if (sheet.dispatchEvent(cancel)) sheet.close();
   };
+  const outsideEscape = (event: KeyboardEvent): void => {
+    if (!sheet.isConnected) {
+      document.removeEventListener('keydown', outsideEscape);
+      contentObserver?.disconnect();
+      return;
+    }
+    if (!sheet.open) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest('dialog[data-sheet][open]')) return;
+    if (shownSheets.filter(item => item.open && item.isConnected).at(-1) === sheet) escape(event);
+  };
+  sheet.addEventListener('keydown', escape);
   sheet.show = () => {
     if (sheet.open) return;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     show();
-    document.addEventListener('keydown', escape);
+    for (let index = shownSheets.length - 1; index >= 0; index--) if (!shownSheets[index]!.isConnected) shownSheets.splice(index, 1);
+    shownSheets.push(sheet);
+    document.addEventListener('keydown', outsideEscape);
     // Some callers load the controls asynchronously after show().
     const focusFirst = (): void => {
       if (!sheet.open) return;
+      const active = document.activeElement;
+      if (active !== sheet && sheet.contains(active)) { contentObserver?.disconnect(); return; }
+      if (active !== document.body && active !== opener && active !== sheet) { contentObserver?.disconnect(); return; }
       const first = Array.from(sheet.querySelectorAll<HTMLElement>('button, input, select, textarea, summary, [tabindex]'))
         .find(node => !node.matches(':disabled, [tabindex="-1"]') && !node.closest('[hidden], [inert]') && (typeof node.getClientRects !== 'function' || node.getClientRects().length > 0));
       if (first) { first.focus({ preventScroll: true }); contentObserver?.disconnect(); }
@@ -37,7 +57,9 @@ export function createSheet(className: string): HTMLDialogElement {
   sheet.close = (value?: string) => {
     contentObserver?.disconnect();
     close(value);
-    document.removeEventListener('keydown', escape);
+    document.removeEventListener('keydown', outsideEscape);
+    const index = shownSheets.indexOf(sheet);
+    if (index >= 0) shownSheets.splice(index, 1);
     if (opener?.isConnected) opener.focus({ preventScroll: true });
     opener = null;
   };

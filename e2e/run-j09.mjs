@@ -1706,6 +1706,18 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
     // #1375: release two real reading units; both changed cards must keep More and summary focus in ordinary mode.
     const pollOverviewSelector=`.task-overview-card[data-task-item="${overviewIds[0]}"]`;
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      const summarySelector = `${pollOverviewSelector} .task-overview-more > summary`;
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-open');
+      await assertRenderer(renderer, `(() => {
+        const panel = document.querySelector(${JSON.stringify(pollOverviewSelector)}).querySelector('.ui-menu-panel');
+        const box = panel.getBoundingClientRect(), minimum = parseFloat(getComputedStyle(panel).minWidth);
+        return innerWidth === ${width} && innerHeight === ${height} && minimum > 0 && box.width >= minimum && box.right <= innerWidth && box.left >= 0;
+      })()`, 'overview-ordinary-menu-geometry');
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-close');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await assertRenderer(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card.querySelector('.task-overview-more');more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'overview-more-poll-open');
     for(const done of [2,3]) {
       await renderer.evaluate(`globalThis.__j09PollCard=document.querySelector(${JSON.stringify(pollOverviewSelector)})`);

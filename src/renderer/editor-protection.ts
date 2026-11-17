@@ -143,7 +143,7 @@ export interface ProtectionSurfaceOptions {
 
 export interface ProtectionSurface {
   update(view: ProtectionView | null): void;
-  /** Open 查看保护选项, with a line saying why when a guarded action or a close request opened it (DUR-005, DUR-010). */
+  /** Open 处理…, with a line saying why when a guarded action or a close request opened it (DUR-005, DUR-010). */
   openOptions(reason?: string): void;
   /** Say beside an attempted action why it was refused (DUR-005). */
   blockAction(action: HTMLElement | null): void;

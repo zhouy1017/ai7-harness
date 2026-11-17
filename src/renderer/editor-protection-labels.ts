@@ -26,8 +26,6 @@ export const PROTECTION_SALVAGE_UNAVAILABLE = '本机服务暂不能导出，请
 export const PROTECTION_BUFFER_REFUSED = '未确认内容已接近安全上限，这次输入未被接收；请先重试写入，或复制受影响内容。';
 export const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 export const PROTECTION_ACK_MISMATCH = '修订日志确认与当前编辑不匹配。';
-/** The marker shape beside the words (ED-058): text and shape, never colour alone. */
-export const PROTECTION_MARKER = '⚠';
 
 export type ProtectionCause = 'journal-unavailable' | 'service-stopped' | 'drift';
 export type ProtectionReadOnlyReason = 'capacity' | 'service-stopped' | 'drift';
@@ -80,3 +78,9 @@ export function blockedActionLine(action: string | null): string {
 
 /** DUR-010: a close request with at-risk input opens the protection surface and says why the window stays. */
 export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+
+/** Only a distinct cause belongs in the status bar; the banner owns the general state. */
+export function protectionFailureReason(error: unknown): string {
+  const reason = error instanceof Error ? error.message.trim() : '';
+  return reason === PROTECTION_HEADLINE || reason === PROTECTION_READ_ONLY_HEADLINE ? '' : reason;
+}

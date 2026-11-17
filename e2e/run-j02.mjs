@@ -1020,12 +1020,14 @@ async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
   return 'save-result-renderer-not-r2';
 }
 
-async function panelGeometry(renderer, selector, facts = false) {
+async function panelGeometry(renderer, selector, width, height, facts = false) {
   const fits = await renderer.evaluate(`(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const panel = document.querySelector(${JSON.stringify(selector)}), box = panel.getBoundingClientRect();
+    const panel = document.querySelector(${JSON.stringify(selector)});
+    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+    const box = panel.getBoundingClientRect();
     const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
-    return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+    return box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
       && panel.scrollWidth <= panel.clientWidth + 1
       && nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0);
   })()`);
@@ -1037,7 +1039,7 @@ async function milestoneGeometry(renderer) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
-    await panelGeometry(renderer, '.editor-save-menu-body');
+    await panelGeometry(renderer, '.editor-save-menu-body', width, height);
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form-close');
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-close');
   }
@@ -1916,20 +1918,22 @@ async function runProtectionJourney(renderer) {
   const headerHeights = [];
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-    headerHeights.push(await renderer.evaluate(`document.querySelector('.context-header').getBoundingClientRect().height`));
+    headerHeights.push(await renderer.evaluate(`(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); return document.querySelector('.context-header').getBoundingClientRect().height; })()`));
   }
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
+  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status.dataset.tone !== 'busy' && !status.textContent.includes('正在保存') && !status.textContent.includes(${JSON.stringify(PROTECTION_HEADLINE)}); })()`, 'protection-specific-status');
   at('protection-panel-geometry');
   for (const [index, [width, height]] of [[1280, 800], [1008, 681]].entries()) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '#editing-protection [data-protection-action="options"]', 'protection-geometry-open');
-    await panelGeometry(renderer, '#editing-protection-options', true);
+    await panelGeometry(renderer, '#editing-protection-options', width, height, true);
     await assertRenderer(renderer, `(() => {
       const header = document.querySelector('.context-header');
-      return header.getBoundingClientRect().height === ${headerHeights[index]}
+      const h = header.getBoundingClientRect(), b = document.querySelector('#editing-protection').getBoundingClientRect();
+      return b.width > 0 && b.height > 0 && b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom && header.getBoundingClientRect().height === ${headerHeights[index]}
         && [...header.querySelectorAll('button, summary')].filter(node => node.getClientRects().length > 0)
           .every(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
     })()`, 'protection-header-height');

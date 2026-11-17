@@ -3126,7 +3126,8 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .settings-switch input:checked::after { left: calc(100% - .8rem - 2px); background: var(--surface); }
 button.danger { color: var(--status-blocked); border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 button.danger:hover { box-shadow: inset 0 0 0 1px var(--status-blocked); }
-:is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body, .editing-protection-options) { box-sizing: border-box; min-width: 0; max-width: calc(100vw - 16px); overflow-wrap: anywhere; white-space: normal; }
+:is(.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body, .editing-protection-options) { box-sizing: border-box; max-width: calc(100vw - 16px); }
+:is(.editor-save-menu-body, .editing-protection-options) { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 :is(.editor-save-menu-body, .editing-protection-options) :is(input, textarea, select, fieldset, label, details, .button-row) { box-sizing: border-box; min-width: 0; max-width: 100%; }
 .editing-protection-host { min-width: 0; }
 .editing-protection { flex-wrap: nowrap; gap: .3rem; padding: 0; border: 0; background: transparent; white-space: nowrap; }

@@ -30,12 +30,13 @@ it('takes focus after its caller paints and returns focus on close', async () =>
   expect(miniDocument.activeElement).toBe(opener);
 });
 
-it('dismisses a chooser when focus leaves its element', async () => {
+it('dismisses a chooser on Tab to a real outside focus target', () => {
   vi.stubGlobal('window', { removeEventListener: () => {} });
   const chooser = createDispatchChooser({ role: 'main-editorial', changed: () => {} });
+  const outside = document.createElement('button'); document.body.append(chooser.element, outside);
   chooser.element.open = true;
-  (chooser.element as unknown as MiniElement).dispatchEvent({ type: 'focusout', bubbles: true });
-  await Promise.resolve();
+  const event = Object.assign({ type: 'focusout', bubbles: true }, { relatedTarget: outside });
+  (chooser.element as unknown as MiniElement).dispatchEvent(event);
   expect(chooser.element.open).toBe(false);
 });
 
@@ -73,4 +74,29 @@ it('keeps a chooser open while its sheet restores focus after reattaching it', a
   summary.focus();
   await Promise.resolve();
   expect(chooser.element.open).toBe(true);
+});
+
+it('keeps padding focus inside the chooser and tolerates focus restored on the next frame', async () => {
+  vi.stubGlobal('window', { removeEventListener: () => {} });
+  let frame = () => {};
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => { frame = callback; });
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed: () => {} });
+  document.body.append(chooser.element); chooser.element.open = true;
+  const panel = chooser.element.querySelector<HTMLElement>('.dispatch-chooser-panel')!;
+  expect(panel.tabIndex).toBe(-1);
+  panel.focus();
+  (chooser.element as unknown as MiniElement).dispatchEvent({ type: 'focusout', bubbles: true });
+  await Promise.resolve(); frame(); panel.focus(); frame(); await Promise.resolve();
+  expect(chooser.element.open).toBe(true);
+});
+
+it('Escape in a focused upper sheet leaves the lower sheet open', async () => {
+  vi.stubGlobal('Event', class { defaultPrevented = false; constructor(readonly type: string) {} });
+  const lower = createSheet('lower'), upper = createSheet('upper');
+  const lowerButton = document.createElement('button'), upperButton = document.createElement('button');
+  lower.append(lowerButton); upper.append(upperButton); document.body.append(lower, upper);
+  lower.show(); await Promise.resolve(); upper.show(); await Promise.resolve();
+  (upperButton as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
+  expect(upper.open).toBe(false); expect(lower.open).toBe(true);
+  lower.close();
 });

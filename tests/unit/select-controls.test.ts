@@ -43,7 +43,7 @@ it('Space chooses the active option in an open select and preserves spaces in it
   const handler = source.slice(source.indexOf('const keydown = (event: KeyboardEvent)'), source.indexOf('  function destroy()'));
   const filter = {};
   let chosen = -1;
-  const keydown = runInNewContext(transpileModule(`${handler}; keydown;`, {}).outputText, {
+  const keydown = runInNewContext(transpileModule(`let typeahead = ''; let typedAt = 0; ${handler}; keydown;`, {}).outputText, {
     composing: false, open: true, filter, active: 2, choose: (index: number) => { chosen = index; },
   });
   let prevented = false;
@@ -52,4 +52,17 @@ it('Space chooses the active option in an open select and preserves spaces in it
   chosen = -1; prevented = false;
   keydown({ key: ' ', target: filter, preventDefault: () => { prevented = true; }, stopPropagation: () => {} });
   expect(chosen).toBe(-1); expect(prevented).toBe(false);
+});
+
+it('keeps Space in an active typeahead phrase without committing its first match', () => {
+  const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
+  const handler = source.slice(source.indexOf('const keydown = (event: KeyboardEvent)'), source.indexOf('  function destroy()'));
+  const chosen: number[] = [], active: number[] = [];
+  const keydown = runInNewContext(transpileModule(`let typeahead = 'beta'; let typedAt = Date.now(); ${handler}; keydown;`, {}).outputText, {
+    composing: false, open: true, filter: { hidden: true }, active: 0, visible: [0, 1],
+    select: { options: [{ text: 'beta one' }, { text: 'beta two' }] },
+    setActive: (index: number) => active.push(index), choose: (index: number) => chosen.push(index),
+  });
+  for (const key of [' ', 't']) keydown({ key, target: {}, preventDefault: () => {}, stopPropagation: () => {} });
+  expect(chosen).toEqual([]); expect(active.at(-1)).toBe(1);
 });

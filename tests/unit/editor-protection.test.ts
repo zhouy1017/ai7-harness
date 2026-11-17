@@ -1,3 +1,4 @@
+import { protectionFailureReason } from '../../src/renderer/editor-protection-labels.js';
 import { parseArguments } from '../../src/main/launch-arguments.js';
 import { packagedLaunchForm } from '../../src/main/channel.js';
 import { resolve } from 'node:path';
@@ -203,4 +204,10 @@ describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
     for (const mode of ['off', 'fail-next', 'fail-all']) expect(decodeRequest(frame({ mode }))).toMatchObject({ op: 'setEditJournalFault', input: { mode } });
     for (const input of [{}, { mode: 'fail-some' }, { mode: 'off', extra: true }, null]) expect(() => decodeRequest(frame(input))).toThrowError();
   });
+});
+
+it('keeps a specific write failure while leaving the general protection statement to the banner', () => {
+  expect(protectionFailureReason(new Error('确认结果与当前编辑不符'))).toBe('确认结果与当前编辑不符');
+  expect(protectionFailureReason(new Error(PROTECTION_HEADLINE))).toBe('');
+  expect(protectionFailureReason(null)).toBe('');
 });
