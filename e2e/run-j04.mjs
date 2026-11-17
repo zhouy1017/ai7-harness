@@ -2912,6 +2912,12 @@ async function main() {
         synthesisLayouts.push(synthesisLayout);
         requireJourney(synthesisLayout.top <= synthesisLayout.height * .45 && synthesisLayout.bottom <= synthesisLayout.height,
           `review-first-card-${viewport}-geometry`, synthesisLayout);
+        await pointerClick(renderer, waitFor, '.review-run > [data-review-action="view-plan"]', `review-first-card-${viewport}-open-drawer`);
+        await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`, `review-first-card-${viewport}-drawer`);
+        await renderer.evaluate(`document.querySelector('.review-workspace-card').scrollIntoView({block:'start',behavior:'instant'})`);
+        const dockedLayout = await renderer.evaluate(`(() => {const card=document.querySelector('article.review-finding'),r=card.getBoundingClientRect(),main=card.querySelector('.review-finding-main').getBoundingClientRect(),actions=card.querySelector('.review-finding-actions').getBoundingClientRect();return {width:innerWidth,height:innerHeight,top:r.top,bottom:r.bottom,cardWidth:r.width,textWidth:main.width,actionsBelow:actions.top>=main.bottom};})()`);
+        requireJourney(dockedLayout.top <= dockedLayout.height * .45 && dockedLayout.bottom <= dockedLayout.height && dockedLayout.textWidth > Math.min(300, dockedLayout.cardWidth * .7) && (dockedLayout.cardWidth > 720 || dockedLayout.actionsBelow), `review-first-card-${viewport}-docked-geometry`, dockedLayout);
+        await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `review-first-card-${viewport}-close-drawer`);
         requireJourney(synthesisLayout.ok, `review-synthesis-${viewport}-compact-ordinary`, synthesisLayout);
         requireJourney(synthesisLayout.oneLine && synthesisLayout.headerCost > 0 && synthesisLayout.headerCost <= 48, `review-synthesis-${viewport}-header-bound`, synthesisLayout);
         await assertRenderer(renderer, `(() => {const meta=document.querySelector('.review-run > .review-run-heading > .review-run-meta'),basis=document.querySelector('article.review-finding .review-finding-basis');return !!(meta&&meta.getClientRects().length&&meta.firstChild.textContent.includes(${JSON.stringify(reviewed.run.scope.label.replaceAll('内容块', '段落'))})&&meta.firstChild.textContent.includes('创建于')&&!meta.closest('details')&&basis&&basis.getClientRects().length&&!basis.closest('details:not([open])'));})()`, `review-synthesis-${viewport}-base-metadata-basis`);
@@ -3032,7 +3038,8 @@ async function main() {
     const ignorable = afterBatch.run.findings.find((finding) => finding.categoryId === 'style-and-format' && finding.status === 'pending');
     requireJourney(ignorable !== undefined, 'review-ignorable');
     const ignoreReason = '体例由编辑部统一处理，这一处保留作者原样。';
-    await reviewAction(renderer, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore"]`, 'review-ignore');
+    await pointerClick(renderer, waitFor, `article.review-finding[data-finding-id="${ignorable.findingId}"] .review-card-more > summary`, 'review-ignore-more');
+    await pointerClick(renderer, waitFor, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore"]`, 'review-ignore');
     await assertRenderer(renderer, `(() => { const field=document.querySelector('article.review-finding[data-finding-id="${ignorable.findingId}"] textarea[data-review-field="ignore-reason"]'); if(!(field instanceof HTMLTextAreaElement))return false; field.value=${JSON.stringify(ignoreReason)}; field.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'review-ignore-reason');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore-confirm"]`, 'review-ignore-confirm');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${ignorable.findingId}"]')?.dataset.status==='ignored'`, 'review-ignored');
@@ -3078,7 +3085,7 @@ async function main() {
     // Issue #1174 (ADR 0095 §5): a /2 record adds 章节与类别统计 and 发现详单 between 必须处理的事项 and 各类别摘要.
     await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
-    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && report.querySelector('[data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=document.querySelector('.review-header-export [data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && document.querySelector('.review-header-export [data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
 
     await assertRenderer(renderer, `(() => {const summary=document.querySelector('section.review-report .review-synthesis');return summary?.dataset.synthesisState==='completed' && summary.textContent.includes('总体评价：') && summary.textContent.includes('[e1]') && summary.textContent.includes('「');})()`, 'review-report-synthesis-evidence');
 
@@ -3092,9 +3099,10 @@ async function main() {
     const runHeading = await renderer.evaluate(`document.querySelector('section.review-run .review-run-heading h4')?.textContent ?? ''`);
     requireJourney(/^第 \d+ 次审阅$/u.test(runHeading ?? ''), 'report-export-run-heading', runHeading);
     const reportLabel = `审阅报告 · ${runHeading} · 第 1 版`;
-    await assertRenderer(renderer, `document.querySelector('section.review-report [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
-    await assertRenderer(renderer, `(() => { const menu=document.querySelector('section.review-report [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'report-format-menu');
-    await reviewAction(renderer, 'section.review-report [data-export-format-action="markdown"]', 'report-export-open');
+    await assertRenderer(renderer, `document.querySelector('.review-header-export [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
+    await pointerClick(renderer, waitFor, '.review-header-export > summary', 'report-header-export-menu');
+    await pointerClick(renderer, waitFor, '.review-header-export [data-export-menu] > summary', 'report-format-menu');
+    await reviewAction(renderer, '.review-header-export [data-export-format-action="markdown"]', 'report-export-open');
     await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, 'report-export-written', 60_000);
     const reportMarkdown = await readFile(reportExportPath, 'utf8');
     const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');
@@ -3113,7 +3121,7 @@ async function main() {
     'report-export-file-reads-as-the-report', { blocks: reportBlocks.length, headings: reportBlocks.filter((block) => block.startsWith('#')).length, rows: overviewRows, statisticsRows, listedFindings });
     requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([REPORT_EXPORT_FILE]), 'report-export-folder-holds-one-file');
     await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="close"]', 'report-export-close');
-    await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('section.review-report [data-review-action="export"]')`, 'report-export-closed-focus-returns', 10_000);
+    await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export [data-review-action="export"]')`, 'report-export-closed-focus-returns', 10_000);
 
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
@@ -3235,7 +3243,8 @@ async function main() {
     // answer is the destination, the file is written and the toast names where. The runner opens the DOCX: the title block,
     // the four parts, the statistics table and the one finding's banner above its four-row table.
     await openReviewDestination(renderer, 'docx-report-review');
-    await reviewAction(renderer, '.review-workspace-heading [data-review-action="export-docx-report"]', 'docx-report-export');
+    await pointerClick(renderer, waitFor, '.review-header-export > summary', 'docx-report-menu');
+    await pointerClick(renderer, waitFor, '.review-header-export [data-review-action="export-docx-report"]', 'docx-report-export');
     await waitFor(renderer, `Array.from(document.querySelectorAll('[data-toast]')).some((toast)=>toast.textContent.includes(${JSON.stringify(`审阅报告已导出至 ${bookReportExportPath}`)}))`, 'docx-report-exported-toast', 60_000);
     const bookReportXml = strFromU8(unzipSync(await readFile(bookReportExportPath))['word/document.xml']);
     const bookReportTables = bookReportXml.match(/<w:tbl>.*?<\/w:tbl>/gsu) ?? [];

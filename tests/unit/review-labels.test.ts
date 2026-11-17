@@ -60,7 +60,8 @@ import {
   reviewReplacementLine,
   reviewReportMustItemLine,
   reviewReportVersionLine,
-  reviewResultsCountsLine,
+  reviewTotalLine,
+  reviewGroupCountLine,
   reviewRunLine,
   reviewSendConsequence,
 } from '../../src/renderer/review-labels.js';
@@ -176,7 +177,7 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewRunLine({ label: '第 3 次', categoryLabels: ['错别字与规范用语', '体例与格式'], scopeLabel: '全书', stateLabel: '已完成' }))
       .toBe('第 3 次 · 错别字与规范用语、体例与格式 · 全书 · 已完成');
     expect(reviewCountsLine(counts)).toBe('必须处理 2 · 建议处理 5 · 提示 1 · 待处理 6 · 已处理 1 · 已忽略 1');
-    expect(reviewResultsCountsLine(counts)).toBe('共 8 条 · 必须处理 2 · 建议处理 5 · 提示 1 · 待处理 6 · 已处理 1 · 已忽略 1');
+    expect(reviewTotalLine(counts)).toBe('共 8 条');
   });
 
   it('states the four consequences of 新建审阅 before any plan exists', () => {
@@ -334,4 +335,12 @@ describe('the note beside 只审改动过的章 (Issue #716)', () => {
     expect(reviewChangedScopeNotes(rows, new Set(['style-and-format', 'plot-consistency']))).toEqual(['体例与格式：只往回查了最近 512 次审阅。']);
     expect(reviewChangedScopeNotes(rows, new Set())).toEqual([]);
   });
+});
+
+it('reports loaded group counts and the latest ordinal truthfully', () => {
+  expect(reviewGroupCountLine(3, 57)).toBe('显示 3 / 57 条');
+  expect(reviewGroupCountLine(57, 57)).toBe('本类 57 条');
+  setTechnicalLayerVisible(false);
+  expect(reviewCoverageLastReview({ lastRunOrdinal: 5, lastReviewedRevisionLabel: 'r2' })).toBe('最近：第 5 次审阅');
+  setTechnicalLayerVisible(true);
 });

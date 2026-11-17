@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1388,7 +1389,8 @@ async function main() {
     at('exclusion-marker');
     // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
     // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
-    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-open-first');
+    if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'exclusion-open-first-history');
+    await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
     await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent?.startsWith(${JSON.stringify(`${MARKER} · `)}) === true && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
     await leaveMemberReview();
@@ -2001,7 +2003,8 @@ async function main() {
     // Book must have for it to run there: a Series, whose material is chosen apart at each run.
     await openBookReview(renderer, MEMBER, member, 'series-procedure-review');
     // The Run history folds into the summary bar once a Run has findings (Issue #1413 cluster 6): open it first.
-    await assertRenderer(renderer, `(() => { const fold=document.querySelector('details.review-history-fold'); if (fold instanceof HTMLDetailsElement) fold.open = true; const open=document.querySelector('ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'series-procedure-first-run');
+    if (await renderer.evaluate(`document.querySelector('details.review-history-fold')?.open === false`)) await pointerClick(renderer, waitFor, 'details.review-history-fold > summary', 'series-procedure-first-run-history');
+    await pointerClick(renderer, waitFor, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'series-procedure-first-run');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelector('ol.review-runs li[data-review-run="1"]')?.getAttribute('aria-current')==='true'`, 'series-procedure-first-open', 60_000);
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'series-procedure-capture');
     const seriesCapture = await readCapture(renderer, (read) => read.steps.length === 1 && read.focused, 'series-procedure-sheet');
