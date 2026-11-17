@@ -30,11 +30,12 @@ it('takes focus after its caller paints and returns focus on close', async () =>
   expect(miniDocument.activeElement).toBe(opener);
 });
 
-it('dismisses a chooser when focus leaves its element', () => {
+it('dismisses a chooser when focus leaves its element', async () => {
   vi.stubGlobal('window', { removeEventListener: () => {} });
   const chooser = createDispatchChooser({ role: 'main-editorial', changed: () => {} });
   chooser.element.open = true;
   (chooser.element as unknown as MiniElement).dispatchEvent({ type: 'focusout', bubbles: true });
+  await Promise.resolve();
   expect(chooser.element.open).toBe(false);
 });
 
@@ -59,4 +60,17 @@ it('closes on Escape even after focus moves outside the sheet', async () => {
   const outside = document.createElement('button'); document.body.append(outside); outside.focus();
   miniDocument.body.dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
   expect(sheet.open).toBe(false);
+});
+
+it('keeps a chooser open while its sheet restores focus after reattaching it', async () => {
+  vi.stubGlobal('window', { removeEventListener: () => {} });
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed: () => {} });
+  document.body.append(chooser.element);
+  chooser.element.open = true;
+  const summary = chooser.element.querySelector('summary')!;
+  summary.focus();
+  (chooser.element as unknown as MiniElement).dispatchEvent({ type: 'focusout', bubbles: true });
+  summary.focus();
+  await Promise.resolve();
+  expect(chooser.element.open).toBe(true);
 });

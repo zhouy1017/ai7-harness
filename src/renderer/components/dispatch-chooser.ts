@@ -76,7 +76,14 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     const index = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
     models.selectedIndex = index; paint(defaultChoice.reasoningEffort); options.changed({});
   });
-  element.addEventListener('focusout', event => { if (!element.contains(event.relatedTarget as Node | null)) dismiss(); });
+  element.addEventListener('focusout', event => {
+    if (event.relatedTarget !== null && event.relatedTarget !== undefined) {
+      if (!element.contains(event.relatedTarget as Node)) dismiss();
+      return;
+    }
+    // A sheet reattaches this same chooser and restores its focus synchronously.
+    queueMicrotask(() => { if (!element.contains(document.activeElement)) dismiss(); });
+  });
   element.addEventListener('keydown', event => { if (event.key === 'Escape') { dismiss(); summary.focus(); } });
   return {
     element,
