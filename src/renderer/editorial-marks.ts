@@ -920,7 +920,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const comments = marks.filter((mark) => mark.kind !== 'personal-highlight');
     const matching = new Set(comments.filter((mark) => matchesEditorialMarkFilter(mark, cardCache.cards.get(mark.markId) ?? commentNodes.get(mark.markId)?.card, markFilter)).map((mark) => mark.markId));
     if (inlinePreviewId !== undefined && !matching.has(inlinePreviewId)) clearInlinePreview();
-    if (activeComment !== undefined && !matching.has(activeComment)) activateComment(undefined);
+    // A card still being read is not yet known to miss a model or keyword filter: a card just brought forward on a new page stays
+    // selected until its words are read (Issue #1523).
+    const unread = (markId: string): boolean => (markFilter.selectedModels.size > 0 || markFilter.keyword.trim() !== '')
+      && !cardCache.cards.has(markId) && !commentNodes.has(markId) && comments.some((mark) => mark.markId === markId);
+    if (activeComment !== undefined && !matching.has(activeComment) && !unread(activeComment)) activateComment(undefined);
     const filtering = markFilter.selectedCategories.size > 0 || markFilter.selectedModels.size > 0 || markFilter.status !== 'all' || markFilter.keyword.trim() !== '';
     editor.setVisibleMarkIds(filtering ? new Set([...matching, ...marks.filter((mark) => mark.kind === 'personal-highlight').map((mark) => mark.markId)]) : null);
     for (const [key, button] of categoryButtons) {

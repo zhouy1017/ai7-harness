@@ -709,6 +709,23 @@ describe('comments command parity and refresh continuity', () => {
     expect(go).toHaveBeenCalledTimes(1); expect(selectedCard(ui.pane)).toBe('far');
     expect(ui.status).toHaveBeenLastCalledWith('按当前筛选，后面没有待处理的了。', 'success');
   });
+  it('keeps a card brought forward under a keyword filter selected while its words are still being read (#1523)', async () => {
+    const far = { ...card, markId: 'far', blockId: 'far-block', body: '公开合成跨页批注' };
+    const page = { ...atPage('far-block', 80, 800), marks: [anchor(far)] };
+    let ui!: ReturnType<typeof mount>;
+    const go = vi.fn(async () => { ui.setPage({ ...page }); return true; });
+    ui = mount(card, [], { bookPending: { read: () => ({ places: [{ blockId: 'far-block', proportion: 0.8 }], truncated: false }), windowAt: async () => page, go } });
+    const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
+    ui.setPage({ ...atPage('block', 1, 0), marks: [anchor()] }); await paint();
+    const held = deferred<EditorialMarkCardProjection>(); let farReads = 0;
+    ui.get.mockImplementation(async (input: { markId: string }) => input.markId !== 'far' ? card : ++farReads === 1 ? far : held.promise);
+    const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
+    search.value = '跨页'; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
+    ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click(); await paint();
+    expect(go).toHaveBeenCalledTimes(1);
+    held.resolve(far); await paint();
+    expect(selectedCard(ui.pane)).toBe('far'); expect(document.activeElement).toBe(row(ui.pane, 'far'));
+  });
   it('stops reading beyond the page at its bound and says so without moving (#1523)', async () => {
     const places = Array.from({ length: 30 }, (_, index) => ({ blockId: `later-${index}`, proportion: 0.1 + index / 100 }));
     const windowAt = vi.fn(async (blockId: string) => ({ ...atPage(blockId, 10 + places.findIndex((place) => place.blockId === blockId), 100), marks: [{ ...anchor(literaryCard(`m-${blockId}`, 0)), blockId }] }));
