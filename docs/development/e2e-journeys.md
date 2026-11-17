@@ -11,7 +11,7 @@ The sidebar names and rows change: 全域智能体 is AI 助手, 书内 AI 协�
 
 ## #1496 synchronized deltas (0.7.2, `codex/integration-0.7.2`)
 
-The R3 closure candidate is **0.7.2 Alpha**, protocol **204**, schema **116**, Data Version **1**. All R3 slices are merged at `4eef1df7`; exact closure verification belongs in the closure PR, with dev delivery and the human-test refresh still pending. The delivered 0.7.1 identity and its evidence remain historical below.
+**0.7.2 Alpha** (protocol **204**, schema **116**, Data Version **1**) is delivered at `dev@790acbcb` through [PR #1515](https://github.com/zhouy1017/ai7-harness/pull/1515), which records its exact closure verification. The delivered 0.7.1 identity and its evidence remain historical below.
 
 | Slice / PR | Journey delta / stage owner |
 | --- | --- |
@@ -23,8 +23,7 @@ The R3 closure candidate is **0.7.2 Alpha**, protocol **204**, schema **116**, D
 | #1498 / [#1511](https://github.com/zhouy1017/ai7-harness/pull/1511) | All Journey stages are retained unchanged; real-store memory-specific base pins cover the facade. |
 | #1508 / [#1509](https://github.com/zhouy1017/ai7-harness/pull/1509) | No Journey change; two heavy Word-manifest service cases receive measured 300-second headroom, with cost reduction left to R4 #1033. |
 
-J-12 diagnostics now read package 0.7.2, protocol 204 and schema 116. Gate selection, the shared real-pointer path and the provider-free boundary are unchanged. The Owner asked to pause after R3 for a complete review (梳理) before any further development.
-
+J-12 diagnostics now read package 0.7.2, protocol 204 and schema 116. Gate selection, the shared real-pointer path and the provider-free boundary are unchanged.
 ## Completion windows stay on task surfaces (#1510)
 
 J-04's existing `review-online-dispatch` / `review-authorize` stages emulate the focused hosted window, keep the automatic-result preference on, observe completion notices and result-window creation, and require the review completion to remain a quiet 查看 notice without opening a window. The observation records notice arrival rather than relying on its short display duration. The original synthesis expansion, wheel scroll and real-pointer collapse remain at both viewports, as does the retained legacy result-window close guard. No stage is added or removed; Gate still consumes J-04 unchanged. J-16 retains its explicit preference-off and manual result-window paths. The completion probe pins the watched plan ref and the review workspace run id: that workspace already displays the completing run, so no duplicate result window opens. Renderer tests exercise the real completion callback and shell loaders for overview / matching task panel / matching task plan or run, another task, the already-visible review result, blocked surfaces and sheets, toggle-off, and a read released after navigating away and back. J-10 retains its original quiet-notice plus automatic-result expectation while watching the completing analysis in its own drawer.
@@ -95,7 +94,7 @@ Issues #1401–#1413 changed what the runners drive, under [ADR 0096 §4](../adr
 | J-09 | Background enrollment opens with the first starting point and a 100000 ceiling, one `登记` records, `撤销登记` is one click with what is kept in the status line; baseline update `查看计划` directly (#1410). |
 | J-10 | Whole-Book re-analysis opens its plan without the mode chooser; otherwise shared label and layout deltas only (#1410, #1413). |
 | J-11 | 评估 leads with AI7's report; `修改报告`, one-click `按我的修改重新生成` (saves edits first) and `采用新版报告`; 🔒 item and part locks (`evaluation-ai-lock`); 审稿意见 `起草` starts at once and its DOCX writes on the Save choice; learning eligibility opens on its recommendation; `停止今后使用` is one step; house memories widened explicitly (#1406–#1408, #1410, #1412). |
-| J-12 | Ordinary-mode model author with recorded effort (#1402); first factual range verdict and range retention (#1401); ordinary `新增并启用偏好`, edit and stop (#1408); database export writes on the Save choice; same-Book reuse preselected; current diagnostics read protocol 204 / schema 116 at the 0.7.2 closure candidate (#1496); delivered 0.7.1 evidence remains in the #1472 section. |
+| J-12 | Ordinary-mode model author with recorded effort (#1402); first factual range verdict and range retention (#1401); ordinary `新增并启用偏好`, edit and stop (#1408); database export writes on the Save choice; same-Book reuse preselected; current diagnostics read protocol 204 / schema 116 at the delivered 0.7.2 (#1496, `dev@790acbcb`); delivered 0.7.1 evidence remains in the #1472 section. |
 | J-13 | Series membership, removal, exclusion and stop are one click with their impact recorded; chooser and knowledge forms open on their first choice; the review history folds into the summary bar; the imported-Skill chain (#1410, #1413). |
 | J-15 | Guideline import on file choice; imported-Skill keep/validate/install/select chain with its restricted/rejected refusals; library additions under their own names (#1410). |
 | J-16 | Agent workspace `生成修改建议` becomes 修改建议 marks and opens them in one step (#1431); shared editorial memory in Book dialogue and Global Agent; Global Agent conversation-first with pills (#1408, #1410, #1413). |

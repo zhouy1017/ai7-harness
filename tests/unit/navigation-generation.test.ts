@@ -16,8 +16,8 @@ const declarations: string[] = [];
 let libraryLanding = '';
 for (const module of [source, ...['global-pages', 'settings-screens', 'library-screen'].map((name) => ts.createSourceFile(name + '.ts', readFileSync(new URL('../../src/renderer/' + name + '.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true))]) {
  function collect(node: ts.Node): void {
-  if (ts.isFunctionDeclaration(node) && node.name?.text === 'renderLanding') libraryLanding = node.getText(module).replaceAll('state.', '');
-  if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u, '') ?? '')) declarations.push(node.getText(module).replaceAll('state.', ''));
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'renderLanding') libraryLanding = node.getText(module).replace(/(?<![\w$.])state\./gu, '');
+  if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u, '') ?? '')) declarations.push(node.getText(module).replace(/(?<![\w$.])state\./gu, ''));
   ts.forEachChild(node, collect);
  }
  collect(module);
