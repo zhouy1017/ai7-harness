@@ -12,7 +12,14 @@ import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.j
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 const names = ['canAutoOpenTaskResult', 'renderTaskOverview', 'renderBookReview', 'renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
-const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
+const declarations: string[] = [];
+for (const module of [source, ts.createSourceFile('global-pages.ts', readFileSync(new URL('../../src/renderer/global-pages.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)]) {
+ function collect(node: ts.Node): void {
+  if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u, '') ?? '')) declarations.push(node.getText(module).replaceAll('state.', ''));
+  ts.forEachChild(node, collect);
+ }
+ collect(module);
+}
 const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let settingsLoader='';
 function findSettings(node:ts.Node):void {if(ts.isFunctionDeclaration(node)&&node.name?.text==='renderModelServiceSettings')settingsLoader=node.getText(settingsSource);ts.forEachChild(node,findSettings);}
@@ -30,7 +37,7 @@ function findCompletionObserver(node: ts.Node): void {
  ts.forEachChild(node, findCompletionObserver);
 }
 findCompletionObserver(source);
-const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const program = ts.transpileModule(declarations.join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const manuscriptSource = ts.createSourceFile('manuscript-screen.ts', readFileSync(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let journalSender='';
 function findJournalSender(node:ts.Node):void { if(ts.isPropertyAssignment(node)&&node.name.getText(manuscriptSource)==='flushJournalEdit')journalSender=node.initializer.getText(manuscriptSource);ts.forEachChild(node,findJournalSender); }

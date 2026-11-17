@@ -1,6 +1,7 @@
+import { createGlobalPages } from './global-pages.js';
 import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, type NavigationCheckpoint } from './navigation-generation.js';
 import { importSteps } from './components/import-steps.js';
-import { icon } from './components/icon-sprite.js';
+
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
 import { createStatusSurface } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
@@ -14,78 +15,23 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
-import { applyOnce, applyFindingBatches } from './manuscript-apply.js';
-import { showToast } from './components/toast.js';
+import { applyFindingBatches } from './manuscript-apply.js';
+
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
 import type { BookFindingProjection, ProductionDocumentProjection } from '../shared/protocol.js';
-import {
-  APPEARANCE_BACK,
-  APPEARANCE_CHOICES,
-  APPEARANCE_LEDE,
-  APPEARANCE_LEGEND,
-  APPEARANCE_SAVED,
-  APPEARANCE_SAVE_FAILED,
-  APPEARANCE_SECTION,
-  APPEARANCE_STATUS,
-  APPEARANCE_TITLE,
-} from './appearance-labels.js';
+import { APPEARANCE_BACK, APPEARANCE_CHOICES, APPEARANCE_LEDE, APPEARANCE_LEGEND, APPEARANCE_SAVED, APPEARANCE_SAVE_FAILED, APPEARANCE_SECTION, APPEARANCE_STATUS, APPEARANCE_TITLE } from './appearance-labels.js';
 import { mountLearningAskFrequency } from './learning-settings.js';
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
 import { researchUnavailableLine } from '../shared/research-status.js';
 import { preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
-import type {
-  AgentWorkspacePromotionProjection,
-  BaselineAnalysisGoal,
-  BaselineAnalysisWireProjection as BaselineAnalysisProjection,
-  BookTaskItemProjection,
-  DefaultExecutionRuleReference,
-  QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult,
-  BaselineAnalysisUpdateRequest,
-  BookManuscriptAnchorProjection,
-  BookRecordPresentation,
-  BookSummaryFilter,
-  BookSummaryPageProjection,
-  BookWorkbenchRoute,
-  BookWorkOverviewProjection,
-  ContinueImportProjection,
-  ForegroundExecutionBoundaryProjection,
-  GlobalAttentionItemProjection,
-  GlobalAttentionProjection,
-  GlobalAttentionTarget,
-  ImportCommitProjection,
-  ManuscriptReimportCommitProjection,
-  ReimportUnfollowedMarkProjection,
-  ImportDraftRecoveryProjection,
-  ImportStartupProjection,
-  HistoricalRevisionProjection,
-  ManuscriptWindowProjection,
-  PriorWorkItemProjection,
-  RecoveryComparisonProjection,
-  RecoveryRestorationProjection,
-  RecoverySelection,
-  RecoveryWindowProjection,
-  ResolvedBookWorkbenchRoute,
-  ReviewBeforeImportProjection,
-  ReviewBeforeSourceImportProjection,
-  ServiceWireJobProjection as ServiceJobProjection,
-  SourceImportCommitProjection,
-  StagedImportProjection,
-  StartupProjection,
-  TaskAuthorizationProjection,
-  TaskPlanKind,
-  TaskPlanProjection,
-} from '../shared/protocol.js';
+import type { AgentWorkspacePromotionProjection, BaselineAnalysisGoal, BaselineAnalysisWireProjection as BaselineAnalysisProjection, BookTaskItemProjection, DefaultExecutionRuleReference, QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult, BaselineAnalysisUpdateRequest, BookManuscriptAnchorProjection, BookRecordPresentation, BookSummaryFilter, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ContinueImportProjection, ForegroundExecutionBoundaryProjection, GlobalAttentionItemProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ReimportUnfollowedMarkProjection, ImportDraftRecoveryProjection, ImportStartupProjection, HistoricalRevisionProjection, ManuscriptWindowProjection, PriorWorkItemProjection, RecoveryComparisonProjection, RecoveryRestorationProjection, RecoverySelection, RecoveryWindowProjection, ResolvedBookWorkbenchRoute, ReviewBeforeImportProjection, ReviewBeforeSourceImportProjection, ServiceWireJobProjection as ServiceJobProjection, SourceImportCommitProjection, StagedImportProjection, StartupProjection, TaskAuthorizationProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import { createNotificationObserver, mountQuietNotice, openCurrentBookCompletion } from './notifications.js';
-import { NOTIFICATION_BOOK_LIST_LINE, NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
-import {
-  GLOBAL_ATTENTION_COUNTED_GROUPS,
-  J03_TASK_GOAL,
-  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
-} from '../shared/protocol.js';
+import { NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
+import { J03_TASK_GOAL, MAX_BOOK_SUMMARY_FILTER_CHARACTERS } from '../shared/protocol.js';
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
@@ -99,14 +45,7 @@ import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
-import {
-  activeCommandBindings,
-  BOOK_SECTION_COMMANDS,
-  configureCommandLabels,
-  createCommandDispatcher,
-  refreshShortcutLabels,
-  type CommandPlatform,
-} from './commands.js';
+import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
 import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 import { mountKeyboardSettings } from './keyboard-settings.js';
 import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
@@ -114,91 +53,32 @@ import { mountUsage } from './usage.js';
 import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
-import {
-  EVALUATION_STATUS,
-  EVALUATION_TITLE,
-  evaluationOverviewLine,
-} from './evaluation-labels.js';
+import { EVALUATION_STATUS, EVALUATION_TITLE, evaluationOverviewLine } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
-import {
-  TASK_PANEL_COMPOSE_STATUS,
-  TASK_PANEL_JUMP_GONE,
-  TASK_PANEL_LEAVE_STATUS,
-  returnChipPlace,
-} from './task-panel-labels.js';
-import {
-  BOOK_FILTER_ACTIONS,
-  BOOK_FILTER_FIELD_LABEL,
-  BOOK_FILTER_FIELDS,
-  BOOK_FILTER_LEGEND,
-  BOOK_FILTER_NONE,
-  BOOK_FILTER_STATUS_LINES,
-  BOOK_FILTER_TEXT_LABEL,
-  bookCardPeopleLine,
-  bookCardRelatedLine,
-  bookFilterLine,
-} from './book-people-labels.js';
-import {
-  DOCUMENT_STATUS_LINES,
-  showRestoreStands,
-} from './production-document-labels.js';
+import { TASK_PANEL_COMPOSE_STATUS, TASK_PANEL_JUMP_GONE, TASK_PANEL_LEAVE_STATUS, returnChipPlace } from './task-panel-labels.js';
+import { BOOK_FILTER_ACTIONS, BOOK_FILTER_FIELD_LABEL, BOOK_FILTER_FIELDS, BOOK_FILTER_LEGEND, BOOK_FILTER_NONE, BOOK_FILTER_STATUS_LINES, BOOK_FILTER_TEXT_LABEL, bookCardPeopleLine, bookCardRelatedLine, bookFilterLine } from './book-people-labels.js';
+import { DOCUMENT_STATUS_LINES, showRestoreStands } from './production-document-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
 import { mountDerivativesWorkspace } from './derivatives-workspace.js';
 import { conflictCompletionOn } from './proposal-conflict-labels.js';
-import {
-  fidelityDetailText,
-  fidelityDisclosureSummary,
-  fidelityOutcomeLabel,
-  WORD_IMPORT_MODE_NAMES,
-} from './import-fidelity-labels.js';
+import { fidelityDetailText, fidelityDisclosureSummary, fidelityOutcomeLabel, WORD_IMPORT_MODE_NAMES } from './import-fidelity-labels.js';
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
-import {
-  DELIVERABLES_ENTRY_LABEL,
-  DELIVERABLES_STATUS_LINES,
-  DELIVERABLES_UNAVAILABLE,
-  PUBLICATION_ACTION_LABELS,
-  deliverablesOverviewLine,
-  publicationStateOf,
-} from './deliverables-labels.js';
+import { DELIVERABLES_ENTRY_LABEL, DELIVERABLES_STATUS_LINES, DELIVERABLES_UNAVAILABLE, PUBLICATION_ACTION_LABELS, deliverablesOverviewLine, publicationStateOf } from './deliverables-labels.js';
 import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
-import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
+import { createGlobalAttentionReader, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
 import { bookIdentityRows, recoveryIdentityRows } from './technical-layer-labels.js';
-import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
+
 import { analysisRefusalView } from './overview-refusal-labels.js';
-import {
-  SELECTION_TASK_STATUS,
-  selectionProcedureEntries,
-  selectionProcedureStepReason,
-  selectionTaskChoices,
-  type SelectionProcedureEntry,
-  type SelectionTaskChoice,
-  type SelectionTaskChoices,
-  SELECTION_TASK_PICK_RANGE,
-} from './selection-task-labels.js';
+import { SELECTION_TASK_STATUS, selectionProcedureEntries, selectionProcedureStepReason, selectionTaskChoices, type SelectionProcedureEntry, type SelectionTaskChoice, type SelectionTaskChoices, SELECTION_TASK_PICK_RANGE } from './selection-task-labels.js';
 import type { SelectionSpanReading } from './editorial-marks.js';
 import type { ComposerRange } from './task-panel.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import { mountProcedureRecommendationSlots } from './procedure-choice.js';
 import { mountTaskDrawer } from './task-drawer.js';
-import {
-  TASK_DRAWER_TITLE,
-  TASK_PLAN_OPEN,
-  TASK_PLAN_OPEN_START,
-  taskPlanQuickStartFellBack,
-  taskPlanSummaryLine,
-} from './task-drawer-labels.js';
-import {
-  REVIEW_ACTION_LABELS,
-  REVIEW_CARD_HEADING,
-  REVIEW_STATUS_LINES,
-  REVIEW_WORKSPACE_UNAVAILABLE,
-  reviewOverviewLine,
-} from './review-labels.js';
-import {
-  localInstantLabel,
-  taskAuthorizationDispatchNote,
-} from './plan-preview-labels.js';
+import { TASK_DRAWER_TITLE, TASK_PLAN_OPEN, TASK_PLAN_OPEN_START, taskPlanQuickStartFellBack, taskPlanSummaryLine } from './task-drawer-labels.js';
+import { REVIEW_ACTION_LABELS, REVIEW_CARD_HEADING, REVIEW_STATUS_LINES, REVIEW_WORKSPACE_UNAVAILABLE, reviewOverviewLine } from './review-labels.js';
+import { localInstantLabel, taskAuthorizationDispatchNote } from './plan-preview-labels.js';
 import { MAX_PINNED_BOOKS, showOnboardingCard, readSampleGuidance, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 import { developerModeRow, mountHelp } from './help.js';
@@ -207,9 +87,9 @@ import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labe
 import { SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
-import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
+import { type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
-import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
+import type { RendererApi } from '../shared/protocol.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -1218,279 +1098,6 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
   shell.follow(state, place);
   refreshCommandEntries();
-}
-
-/**
- * 待我处理 from the header (Issue #424): the screen opens in the library state — the window leaves the Book it
- * showed, as 返回图书列表 does — after the surface on screen has settled what it must first.
- */
-async function openGlobalAttention(bookId?: string | null): Promise<void> {
-  const navigationRoute = navigation.begin();
-  if (authorityInterrupted) return;
-  const guard = leaveGuard;
-  if (guard !== null) {
-    setStatus(GLOBAL_ATTENTION_STATUS_LINES.leaving, 'busy');
-    try {
-      const left = await guard();
-      if (!navigationRoute.isCurrent()) return;
-      if (!left) {
-        // The surface's own refusal stands; only a silent one is named here.
-        if (persistenceStatus.textContent === GLOBAL_ATTENTION_STATUS_LINES.leaving) setStatus(GLOBAL_ATTENTION_STATUS_LINES.stayed, 'error');
-        return;
-      }
-    } catch (error) {
-      if (!navigation.errorIsCurrent(error, navigationRoute)) return;
-      setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
-      return;
-    }
-  }
-  try {
-    await api.leaveBookWorkbench();
-    if (!navigationRoute.isCurrent()) return;
-    renderGlobalAttention(bookId);
-  } catch (error) {
-    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
-    setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
-  }
-}
-
-/** 待我处理's screen (editor-surfaces §8.1): the surface is `global-attention.ts`; this gives it its way out. */
-function renderGlobalAttention(bookId?: string | null): void {
-  const content = panel();
-  content.classList.add('global-attention');
-  // A notice for several events of one Book opens the list of that Book alone (NOTIF-008), its own count beside it.
-  const bookOnly = (projection: GlobalAttentionProjection): GlobalAttentionProjection => {
-    const groups = projection.groups.map((group) => {
-      const items = group.items.filter((item) => item.book.bookId === bookId);
-      return { ...group, items, total: items.length };
-    });
-    const actionableCount = groups.reduce((count, group) => count + (GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key) ? group.total : 0), 0);
-    return { ...projection, groups, actionableCount };
-  };
-  const surface = mountGlobalAttention({
-    openTasks: () => renderTaskOverview(),
-    root: content,
-    reader: bookId === undefined ? globalAttentionReader : {
-      ...globalAttentionReader,
-      subscribe: (listener) => globalAttentionReader.subscribe((reading) =>
-        listener(reading.kind === 'projection' ? { kind: 'projection', projection: bookOnly(reading.projection) } : reading)),
-    },
-    technicalDetails,
-    setStatus,
-    errorMessage: rendererErrorMessage,
-    openNetworkProxySettings: () => renderModelServiceSettings(),
-    open: openGlobalAttentionItem,
-  });
-  replaceScreen('global-attention', content);
-  globalAttentionSurface = surface;
-  surface.start();
-  setStatus(bookId === undefined ? GLOBAL_ATTENTION_STATUS_LINES.opened : NOTIFICATION_BOOK_LIST_LINE);
-}
-
-/** Global cross-Book task queue (Issue #1328): the page is a projection; records remain Book-owned. */
-function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' = 'run'): void {
-  overviewDrawerBookId = item.bookId;
-  const finder = () => [...screen.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId) ?? null;
-  if (item.target.kind === 'task-intent-draft') taskDrawer.openDraft(item.target.bookId, item.target.draftId, finder);
-  else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
-  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo' });
-}
-/** Task notices use the overview; other attention notices retain their existing destination. */
-async function openTaskNotification(itemId: string, target: GlobalAttentionTarget): Promise<void> {
-  const navigationRoute = navigation.begin();
-  if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(target.kind)) {
-    await openGlobalAttentionTarget(target); return;
-  }
-  const overview = await api.inspectTaskOverview();
-  if (!navigationRoute.isCurrent()) return;
-  const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === itemId);
-  if (!task) { await openGlobalAttentionTarget(target); return; }
-  renderTaskOverview(itemId);
-  if (['completed', 'cancelled', 'stopped'].includes(task.state)) await openOverviewResult(task);
-  else openOverviewTask(task);
-}
-async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
-  if (!item.bookId) return;
-  const resultApi = taskOverviewApi(api, () => item.bookId);
-  if (item.result || item.attention.object.kind === 'task') openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), resultApi);
-  else openOverviewTask(item, 'run');
-}
-function renderTaskOverview(focusItemId?: string): void {
-  taskDrawer.close(false);
-  const content = panel(); content.classList.add('task-overview');
-  const surface = mountTaskOverview({ root: content, api: api, setStatus, beforeStart: settleScreen,
-    onChanged: () => globalAttentionReader.refresh(),
-    onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
-    openTarget: openOverviewTask,
-    openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
-    jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
-    openResult: (item) => void openOverviewResult(item), closeDrawer: () => taskDrawer.close(true),
-    configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
-      const current = navigation.route();
-      if (kind === 'review') renderBookReview(bookId, route.bookTitle);
-      // 写作 lives on 稿件 (Issue #1403).
-      else { const shown = await renderBookManuscript(bookId, route.bookTitle, current); if (!shown?.isCurrent()) return; }
-      const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
-    }),
-  });
-  replaceScreen('task-overview', content); taskOverviewSurface = surface;
-  if (focusItemId) { const page = navigation.read(content); surface.focus(focusItemId); window.setTimeout(() => { if (page.isCurrent()) surface.focus(focusItemId); }, 300); }
-}
-
-/**
- * An item opens its own record in this window (V2-UX-ATTN-007, D-006): the import or manuscript recovery the
- * startup would show, 稿件冲突 of the conflicted suggestion, ②A with its Run, ②A with the plan in the Task Drawer where 重新确认计划 is, or ②B with
- * the Review Run open. A Book another window already shows is shown there, as 书库 does. Opening decides
- * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
- */
-async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
-  const navigationRoute = navigation.begin();
-  if (item.nextStep === 'open-network-proxy') {
-    await renderModelServiceSettings();
-    return;
-  }
-  if (['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(item.target.kind)) {
-    const tasks = await api.inspectTaskOverview();
-    if (!navigationRoute.isCurrent()) return;
-    const task = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
-    if (task) { if (task.state === 'completed') await openOverviewResult(task); else openOverviewTask(task); return; }
-  }
-  await openGlobalAttentionTarget(item.target);
-}
-
-/** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
-async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
-  navigation.begin();
-  switch (target.kind) {
-    case 'apply-receipt':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        const receipt = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
-        if (!navigationRoute.isCurrent()) return;
-        const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
-        const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
-        heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
-        // The raw receipt is diagnostics only (Issue #1431 item 103), gated like the proposal workspace's.
-        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full);
-        if (technicalLayerVisible) content.append(technicalDisclosure(details));
-        // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
-        if (receipt.state === 'unresolved') {
-          const recheck = button('重新核对应用结果', 'primary', async () => {
-            const next = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
-            heading.textContent = labels[next.state]; heading.dataset['applyReceiptState'] = next.state; reason.textContent = next.reason; full.textContent = JSON.stringify(next, null, 2);
-            if (next.state !== 'unresolved') recheck.remove();
-          });
-          content.append(recheck);
-        }
-        content.append(button('在稿件中查看', 'secondary', async () => { const current = navigation.begin(); const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); if (current.isCurrent()) await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
-        replaceScreen('apply-receipt', content, { bookId: target.bookId, title: route.bookTitle, section: 'review' });
-      });
-      return;
-    case 'manuscript-recovery':
-      await returnToRecoveryComparison(target.attentionId);
-      return;
-    // 解决冲突… (Issue #57): 稿件冲突 of that suggestion, whose 返回稿件 opens the manuscript at its paragraph. The
-    // workspace reads and writes through this window's hold on the manuscript, which reading it grants — as opening
-    // the manuscript first does on the way there from its card.
-    case 'manuscript-conflict':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId, onDocument: opened.deliverable === 'production-document' }, route.bookTitle);
-      });
-      return;
-    case 'import-recovery': {
-      const navigationRoute = navigation.begin();
-      const startup = await api.getImportStartup();
-      if (!navigationRoute.isCurrent()) return;
-      await renderStartupProjection(startup);
-      return;
-    }
-    case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, analysisRevisionId));
-      return;
-    case 'analysis-plan':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        renderBookAnalysis(route.bookId, route.bookTitle);
-        openTaskPlan(route.bookId, 'baseline-analysis', target.taskIntentId);
-      });
-      return;
-    case 'review':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null }));
-      return;
-    // A prepared Review Run's plan (Issue #423, S77a): ②B with the plan in the Task Drawer, whose bar starts it.
-    case 'review-plan':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null });
-        openTaskPlan(route.bookId, 'review-run', target.reviewRunId);
-      });
-      return;
-    // 结果待确认 a completed Run left (Issue #757): the kind's own surface, with its plan in the Task Drawer, where the list is and
-    // 保留为缺口 is recorded.
-    case 'task-plan':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const current = navigation.route();
-        switch (target.taskKind) {
-          case 'review-run':
-            renderBookReview(route.bookId, route.bookTitle, target.ref === null ? null : { reviewRunId: target.ref, findingId: null });
-            break;
-          case 'initial-evaluation':
-          case 'readers-report':
-          case 'evaluation-rewrite':
-            renderBookEvaluation(route.bookId, route.bookTitle);
-            break;
-          case 'writing': {
-            const shown = await renderBookManuscript(route.bookId, route.bookTitle, current);
-            if (!shown?.isCurrent()) return;
-            break;
-          }
-          default:
-            renderBookAnalysis(route.bookId, route.bookTitle);
-        }
-        openTaskPlan(route.bookId, target.taskKind, target.ref);
-      });
-      return;
-    // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
-    case 'maintenance':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderBookDeliverables(route.bookId, route.bookTitle, { caseId: target.caseId, publicationVersionId: target.publicationVersionId }));
-      return;
-    // A 资料库 item waiting for a decision (Issue #427, S79c): 知识库 › 资料库, with the decision it waits for in focus. 知识库 is
-    // no Book's, so no Book route is asked for.
-    case 'library-material':
-      await renderKnowledgeBase('library', false, target.materialId);
-      return;
-    case 'learning-materials':
-      await renderQualityLearning('learning', target.bookId);
-      return;
-    // A dialogue (Issue #52, S17a): the Book's 工作概览 with the dialogue in the foreground beside it.
-    case 'global-agent-dialogue':
-      await renderGlobalAgent(target.dialogueId);
-      return;
-    case 'dialogue':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        navigation.present(() => renderBookOverview(overview));
-        taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
-      });
-      return;
-    // A Task Intent Draft (Issue #423, slice 7a; TASK-006): its own Book's 工作概览, with the draft in the composer beside it.
-    case 'task-intent-draft':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        navigation.present(() => renderBookOverview(overview));
-        taskDrawer.openDraft(route.bookId, target.draftId, () => null);
-      });
-      return;
-  }
 }
 
 /**
@@ -5101,6 +4708,52 @@ const { renderKnowledgeBase, renderQualityLearning } = createKnowledgeBase({
 
 const { renderModelServiceSettings } = createModelServiceSettings({
   element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
+});
+
+const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openOverviewResult, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+  technicalDetails,
+  get authorityInterrupted() { return authorityInterrupted; },
+  set authorityInterrupted(value) { authorityInterrupted = value; },
+  get leaveGuard() { return leaveGuard; },
+  set leaveGuard(value) { leaveGuard = value; },
+  setStatus: (...args) => setStatus(...args),
+  persistenceStatus,
+  rendererErrorMessage: (...args) => rendererErrorMessage(...args),
+  api,
+  panel: (...args) => panel(...args),
+  globalAttentionReader,
+  renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
+  replaceScreen: (...args) => replaceScreen(...args),
+  get globalAttentionSurface() { return globalAttentionSurface; },
+  set globalAttentionSurface(value) { globalAttentionSurface = value; },
+  get overviewDrawerBookId() { return overviewDrawerBookId; },
+  set overviewDrawerBookId(value) { overviewDrawerBookId = value; },
+  screen,
+  taskDrawer,
+  openTaskResult: (...args) => openTaskResult(...args),
+  get taskOverviewSurface() { return taskOverviewSurface; },
+  set taskOverviewSurface(value) { taskOverviewSurface = value; },
+  settleScreen: (...args) => settleScreen(...args),
+  taskNavigationBadge,
+  requestBookWorkbenchRoute: (...args) => requestBookWorkbenchRoute(...args),
+  jumpToSelectionText: (...args) => jumpToSelectionText(...args),
+  renderBookReview: (...args) => renderBookReview(...args),
+  renderBookManuscript: (...args) => renderBookManuscript(...args),
+  button: (...args) => button(...args),
+  element: (...args) => element(...args),
+  openEditorWindow: (...args) => openEditorWindow(...args),
+  renderProposalWorkspace: (...args) => renderProposalWorkspace(...args),
+  returnToRecoveryComparison: (...args) => returnToRecoveryComparison(...args),
+  renderProposalConflict: (...args) => renderProposalConflict(...args),
+  renderStartupProjection: (...args) => renderStartupProjection(...args),
+  renderBookAnalysis: (...args) => renderBookAnalysis(...args),
+  openTaskPlan: (...args) => openTaskPlan(...args),
+  renderBookEvaluation: (...args) => renderBookEvaluation(...args),
+  renderBookDeliverables: (...args) => renderBookDeliverables(...args),
+  renderKnowledgeBase: (...args) => renderKnowledgeBase(...args),
+  renderQualityLearning: (...args) => renderQualityLearning(...args),
+  renderGlobalAgent: (...args) => renderGlobalAgent(...args),
+  renderBookOverview: (...args) => renderBookOverview(...args),
 });
 
 async function initializeRenderer(): Promise<void> {
