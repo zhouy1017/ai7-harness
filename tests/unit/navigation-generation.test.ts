@@ -12,7 +12,16 @@ import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.j
 // without starting the application or replacing the production navigation code.
 const source = ts.createSourceFile('index.ts', readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 const names = ['canAutoOpenTaskResult', 'renderTaskOverview', 'renderBookReview', 'renderGlobalAgent', 'renderResolvedBookWorkbenchRoute', 'renderBookAnalysis', 'leaveThen', 'openTaskNotification', 'replaceScreen', 'openBookSection', 'requestBookWorkbenchRoute', 'guardNavigationRead', 'openEditorWindow', 'renderBookManuscript', 'openGlobalAttentionTarget', 'renderBookEvaluation', 'agentWorkspaceReturn', 'openProductionDocument', 'renderKeyboardSettings', 'renderProposalConflict', 'abandonAndContinue', 'renderBookCreationForm', 'initializeStartup', 'renderApplicationStartup', 'renderError', 'reportBookReacquisitionFailure', 'clearBookReacquisitionNotice', 'withConflictCompletion', 'renderBookFilter', 'jumpToManuscript'];
-const declarations = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u,'') ?? ''));
+const declarations: string[] = [];
+let libraryLanding = '';
+for (const module of [source, ...['global-pages', 'settings-screens', 'library-screen'].map((name) => ts.createSourceFile(name + '.ts', readFileSync(new URL('../../src/renderer/' + name + '.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true))]) {
+ function collect(node: ts.Node): void {
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'renderLanding') libraryLanding = node.getText(module).replaceAll('state.', '');
+  if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text.replace(/Now$/u, '') ?? '')) declarations.push(node.getText(module).replaceAll('state.', ''));
+  ts.forEachChild(node, collect);
+ }
+ collect(module);
+}
 const settingsSource = ts.createSourceFile('model-service-settings.ts', readFileSync(new URL('../../src/renderer/model-service-settings.ts', import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 let settingsLoader='';
 function findSettings(node:ts.Node):void {if(ts.isFunctionDeclaration(node)&&node.name?.text==='renderModelServiceSettings')settingsLoader=node.getText(settingsSource);ts.forEachChild(node,findSettings);}
@@ -30,7 +39,7 @@ function findCompletionObserver(node: ts.Node): void {
  ts.forEachChild(node, findCompletionObserver);
 }
 findCompletionObserver(source);
-const program = ts.transpileModule(declarations.map((node) => node.getText(source)).join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const program = ts.transpileModule(declarations.join('\n')+'\n'+settingsLoader+'\n'+importLoaders.join('\n')+'\nvar reportReacquisitionFailure='+failureCallback+'; var completionObserverOptions='+completionObserverOptions+';', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const manuscriptSource = ts.createSourceFile('manuscript-screen.ts', readFileSync(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
 let journalSender='';
 function findJournalSender(node:ts.Node):void { if(ts.isPropertyAssignment(node)&&node.name.getText(manuscriptSource)==='flushJournalEdit')journalSender=node.initializer.getText(manuscriptSource);ts.forEachChild(node,findJournalSender); }
@@ -606,8 +615,7 @@ it('retries a failed manuscript capability read without opening an already re-ac
 it('does not let an older library page overwrite a newer filter result', async () => {
  const more=Promise.withResolvers<object>(),filtered=Promise.withResolvers<object>();
  const page=harness({listBooks:({after}:{after:string|null})=>after===null?filtered.promise:more.promise});
- const declaration=source.statements.find((node)=>ts.isFunctionDeclaration(node)&&node.name?.text==='renderLanding')!;
- runInContext(ts.transpileModule(declaration.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ runInContext(ts.transpileModule(libraryLanding,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
  page.context['book']={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
  await page.run("renderLanding([],undefined,{items:[book],nextCursor:'next'})");
  const pending=page.actions.get('加载更多图书')!();
@@ -622,8 +630,7 @@ it('does not let an older library page overwrite a newer filter result', async (
 
 it('reports a library-card error after its requested Book committed', async () => {
  const page=harness({openBookWorkbench:async()=>({target:'requesting-window',route:{kind:'book',bookId:'book-a',bookTitle:'图书'}}),getBookOverview:async()=>({book:{bookId:'book-a'},manuscriptAnchor:null})});
- const declaration=source.statements.find((node)=>ts.isFunctionDeclaration(node)&&node.name?.text==='renderLanding')!;
- runInContext(ts.transpileModule(declaration.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
+ runInContext(ts.transpileModule(libraryLanding,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,page.context);
  page.context['book']={bookId:'book-a',title:'原有图书',people:[],internalNumber:null,manuscriptStateLabel:'有稿件'};
  await page.run("renderLanding([],undefined,{items:[book],nextCursor:null})");
  page.context['renderBookOverview']=()=>{page.replaceScreen('book-overview');throw new Error('paint failed');};
