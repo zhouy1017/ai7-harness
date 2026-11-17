@@ -641,20 +641,18 @@ async function commentsHandledFilter(renderer, check, waitFor, indexes) {
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false)`, 'comments-handled-all-restored');
 }
 
-// Issue #1523: 下一条待处理 beyond the loaded page, keyboard-only triage of three marks and the Book's pending count, docked
-// and as the overlay. Three 修改建议 are seeded beyond the page with a public synthetic reason only they carry, so the step's
-// target is certain whatever else the Book holds; the filter on that reason and on their category is set with real input.
-const TRIAGE_REASON = '公开合成跨页待处理';
-const TRIAGE_KEYWORD = '跨页待处理';
-
+// Issue #1523: 上一条 / 下一条待处理 within and beyond the loaded page, keyboard triage (the next card focused, across pages after a
+// key), 接受 on a compact card by pointer, the Book's pending count, docked and as the overlay. Each form seeds five 修改建议 with a
+// public synthetic reason of its own — one on the first page, outside the last page, and four beyond the first page — so with the
+// filter on that reason and on their category every step's target is certain whatever else the Book holds.
 export async function commentsTriageForms(renderer, check, waitFor, at) {
   const native = await renderer.evaluate('({width:innerWidth,height:innerHeight})');
   try {
-    for (const [form, size] of [['column', { width: 1280, height: 800 }], ['overlay', { width: 1008, height: 681 }]]) {
+    for (const [form, size, suffix] of [['column', { width: 1280, height: 800 }, '甲'], ['overlay', { width: 1008, height: 681 }, '乙']]) {
       at('comments-triage-' + form);
       await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
       await waitFor(renderer, `innerWidth===${size.width} && innerHeight===${size.height}`, 'comments-triage-' + form + '-viewport');
-      await commentsTriage(renderer, check, waitFor, form);
+      await commentsTriage(renderer, check, waitFor, form, '跨页待处理' + suffix);
       check(true, 'comments-triage-' + form + '-complete');
     }
   } finally {
@@ -671,7 +669,9 @@ async function triageKey(renderer, key, code, windowsVirtualKeyCode, modifiers =
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode, modifiers });
 }
 
-// The card is selected, holds focus and is read: its single keys act now.
+const TRIAGE_FIRST = `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId`;
+
+// The seeded card is selected, holds focus and is read: its single keys act now.
 const triageReady = (index) => `(() => { const node=document.querySelector('[data-comment-card="'+__triage.ids[${index}]+'"]'); return node?.dataset.selected==='true' && document.activeElement===node && node.dataset.revalidating==='false' && node.querySelector('[data-mark-card] [data-mark-action="reject"]')?.disabled===false; })()`;
 
 const triageRecord = (renderer, index, expected) => renderer.evaluate(`(async () => {
@@ -683,43 +683,54 @@ const triageRecord = (renderer, index, expected) => renderer.evaluate(`(async ()
   return false;
 })()`);
 
-async function commentsTriage(renderer, check, waitFor, form) {
+async function commentsTriage(renderer, check, waitFor, form, keyword) {
   await renderer.send('Page.bringToFront');
   await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  // Start from the Book's first page, with the caret at its start.
   check(await renderer.evaluate(`(async () => {
-    const editor=document.querySelector('[data-testid="manuscript-editor"]'), bookId=document.querySelector('.editor-shell').dataset.bookId;
-    const work=(await window.ai7.listPriorWork()).find(item=>item.bookId===bookId), binding={manuscriptId:work.manuscriptId,branchId:work.branchId};
-    const start=editor.querySelector('[data-block-id]').dataset.blockId;
-    const here=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'window-start',blockId:start}});
-    const last=Math.max(...here.blocks.map(block=>block.position));
+    const bookId=document.querySelector('.editor-shell').dataset.bookId, work=(await window.ai7.listPriorWork()).find(item=>item.bookId===bookId);
+    const binding={manuscriptId:work.manuscriptId,branchId:work.branchId}, first=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'start'}});
+    globalThis.__triage={...binding,start:first.blocks[0].blockId}; return true;
+  })()`), 'comments-triage-binding');
+  check(await renderer.evaluate(manuscriptRailJump('0')), 'comments-triage-first-page');
+  await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start`, 'comments-triage-first-page-ready', 60_000);
+  check(await renderer.evaluate(`(async () => {
+    const binding={manuscriptId:__triage.manuscriptId,branchId:__triage.branchId};
+    const here=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'window-start',blockId:__triage.start}});
     const far=await window.ai7.getManuscriptWindowAt({...binding,target:{kind:'proportion',proportion:1}});
+    const last=Math.max(...here.blocks.map(block=>block.position)), farFirst=Math.min(...far.blocks.map(block=>block.position));
     const split=text=>Array.from(new Intl.Segmenter('zh-CN',{granularity:'grapheme'}).segment(text??''),item=>item.segment);
-    const paragraphs=far.blocks.filter(block=>block.kind==='paragraph'&&block.position>last&&split(block.text).length>=8);
-    const ranges=[];
-    const free=(block,from)=>!far.marks.some(mark=>mark.blockId===block.blockId&&mark.fromGrapheme<from+2&&mark.toGrapheme>from)&&!ranges.some(range=>range.block===block&&range.from<from+2&&range.from+2>from);
-    while(ranges.length<3){
-      const before=ranges.length;
-      for(const block of paragraphs){
-        if(ranges.length===3)break;
-        const words=split(block.text);
-        for(let from=1;from+2<=words.length;from++)if(free(block,from)){ranges.push({block,from,text:words.slice(from,from+2).join('')});break;}
+    const marks=[...here.marks,...far.marks], ranges=[];
+    const free=(block,from)=>!marks.some(mark=>mark.blockId===block.blockId&&mark.fromGrapheme<from+2&&mark.toGrapheme>from)&&!ranges.some(range=>range.block.blockId===block.blockId&&range.from<from+2&&range.from+2>from);
+    const take=(paragraphs,count)=>{
+      const taken=[];
+      while(taken.length<count){
+        const before=taken.length;
+        for(const block of paragraphs){
+          if(taken.length===count)break;
+          const words=split(block.text);
+          for(let from=1;from+2<=words.length;from++)if(free(block,from)){const range={block,from,text:words.slice(from,from+2).join('')};ranges.push(range);taken.push(range);break;}
+        }
+        if(taken.length===before)return null;
       }
-      if(ranges.length===before)return false;
-    }
-    ranges.sort((a,b)=>a.block.position-b.block.position||a.from-b.from);
+      return taken.sort((a,b)=>a.block.position-b.block.position||a.from-b.from);
+    };
+    const paragraph=block=>block.kind==='paragraph'&&split(block.text).length>=8;
+    const onFirst=take(here.blocks.filter(block=>paragraph(block)&&block.position<farFirst),1), beyond=take(far.blocks.filter(block=>paragraph(block)&&block.position>last),4);
+    if(!onFirst||!beyond)return false;
     const ids=[];
-    for(const range of ranges){
-      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:far.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:far.revisionId,expectedJournalSequence:far.journalSequence,blockId:range.block.blockId,baseBlockDigest:range.block.digest,fromGrapheme:range.from,toGrapheme:range.from+2,selectedText:range.text,kind:'change-suggestion',highlightColor:null,body:'',proposedText:'合成',rationale:${JSON.stringify(TRIAGE_REASON)}});
+    for(const range of [...onFirst,...beyond]){
+      const page=range.block.position<farFirst?here:far;
+      const result=await window.ai7.createEditorialMark({...binding,windowStartBlockId:page.blocks[0].blockId,clientMarkId:crypto.randomUUID(),baseRevisionId:page.revisionId,expectedJournalSequence:page.journalSequence,blockId:range.block.blockId,baseBlockDigest:range.block.digest,fromGrapheme:range.from,toGrapheme:range.from+2,selectedText:range.text,kind:'change-suggestion',highlightColor:null,body:'',proposedText:'合成',rationale:'公开合成'+${JSON.stringify(keyword)}});
       ids.push(result.markId);
     }
-    globalThis.__triage={...binding,start,proportion:here.position.proportion,ids};
-    return true;
-  })()`), 'comments-triage-seed-beyond-page');
-  // The renderer reads the Book's pending list again once the manuscript opens.
+    __triage.ids=ids; return true;
+  })()`), 'comments-triage-seed');
+  // The manuscript opens again on the first page and reads the Book's pending list anew.
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('overview'))), 'comments-triage-reload-overview');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'comments-triage-overview-ready');
   check(await renderer.evaluate(sidebarNavigate(SIDEBAR.section('manuscript'))), 'comments-triage-reload-manuscript');
-  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="'+__triage.start+'"]')`, 'comments-triage-editor-ready');
+  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]') && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-editor-ready');
   if (!(await renderer.evaluate(`document.querySelector('[data-edge-entry="comments"]').getAttribute('aria-expanded')==='true'`))) {
     check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-edge-entry="comments"]'))).real, 'comments-triage-open-pane');
   }
@@ -734,7 +745,8 @@ async function commentsTriage(renderer, check, waitFor, form) {
     }
     return false;
   })()`);
-  check(await bookCount(3), 'comments-triage-book-count');
+  check(await bookCount(5), 'comments-triage-book-count');
+  // The filter: the seeds' category and their reason, with real clicks and typing.
   const isOpen = `document.querySelector('.editorial-mark-filter-popover').matches(':popover-open')`;
   check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-filter-toggle]'))).real, 'comments-triage-filter-open');
   await waitFor(renderer, isOpen, 'comments-triage-filter-opened');
@@ -742,33 +754,56 @@ async function commentsTriage(renderer, check, waitFor, form) {
   await waitFor(renderer, `document.querySelector('[data-mark-category-filter="editor"]').getAttribute('aria-pressed')==='true'`, 'comments-triage-category-on');
   check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-search-input]'))).real, 'comments-triage-search-click');
   await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-search-input]')`, 'comments-triage-search-focused');
-  await renderer.send('Input.insertText', { text: TRIAGE_KEYWORD });
-  await waitFor(renderer, `document.querySelector('[data-mark-search-input]').value===${JSON.stringify(TRIAGE_KEYWORD)}`, 'comments-triage-keyword');
+  await renderer.send('Input.insertText', { text: keyword });
+  await waitFor(renderer, `document.querySelector('[data-mark-search-input]').value===${JSON.stringify(keyword)}`, 'comments-triage-keyword');
   await triageKey(renderer, 'Escape', 'Escape', 27);
   await waitFor(renderer, `!(${isOpen})`, 'comments-triage-filter-closed');
-  // 下一条待处理 finds nothing on this page, reads the pages beyond it and lands on the first match there.
-  await renderer.evaluate(`(() => { globalThis.__triageFirst=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId; return true; })()`);
-  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-pending-step="next"]'))).real, 'comments-triage-next-click');
-  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId!==__triageFirst && ${triageReady(0)}`, 'comments-triage-crossed-selected', 60_000);
-  check(await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await new Promise(done=>setTimeout(done,400)); return ${triageReady(0)}; })()`), 'comments-triage-crossed-stays-selected');
-  // Keyboard only: A accepts and applies, the next card is focused, R rejects, A accepts the third.
-  await triageKey(renderer, 'a', 'KeyA', 65);
-  await waitFor(renderer, triageReady(1), 'comments-triage-key-accept-next', 60_000);
-  check(await triageRecord(renderer, 0, 'applied'), 'comments-triage-key-accept-applied');
+  const nextClick = async (name) => check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-pending-step="next"]'))).real, name);
+  // 下一条待处理 on the page, then across it; the card there stays selected once read.
+  await nextClick('comments-triage-next-click');
+  await waitFor(renderer, `${triageReady(0)} && ${TRIAGE_FIRST}===__triage.start`, 'comments-triage-next-on-page', 60_000);
+  await nextClick('comments-triage-cross-click');
+  await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-crossed-selected', 60_000);
+  check(await renderer.evaluate(`(async () => { await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))); await new Promise(done=>setTimeout(done,400)); return ${triageReady(1)}; })()`), 'comments-triage-crossed-stays-selected');
+  // 上一条待处理 (Alt+↑) goes back across the page to the first seed.
+  await triageKey(renderer, 'ArrowUp', 'ArrowUp', 38, 1);
+  await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start && ${triageReady(0)}`, 'comments-triage-previous-crossed', 60_000);
+  // Keyboard only: R on the page's last match walks on across the page; A and R then decide the next two, each next card focused.
   await triageKey(renderer, 'r', 'KeyR', 82);
-  await waitFor(renderer, triageReady(2), 'comments-triage-key-reject-next', 60_000);
-  check(await triageRecord(renderer, 1, 'rejected'), 'comments-triage-key-reject-recorded');
+  await waitFor(renderer, `${TRIAGE_FIRST}!==__triage.start && ${triageReady(1)}`, 'comments-triage-key-reject-crossed', 60_000);
+  check(await triageRecord(renderer, 0, 'rejected'), 'comments-triage-key-reject-recorded');
   await triageKey(renderer, 'a', 'KeyA', 65);
-  check(await triageRecord(renderer, 2, 'applied'), 'comments-triage-key-third-applied');
-  await waitFor(renderer, `document.querySelector('[data-comment-card="'+__triage.ids[2]+'"] [data-mark-state]')?.textContent.includes('已应用')`, 'comments-triage-third-pane-updated', 60_000);
+  await waitFor(renderer, triageReady(2), 'comments-triage-key-accept-next', 60_000);
+  check(await triageRecord(renderer, 1, 'applied'), 'comments-triage-key-accept-applied');
+  await triageKey(renderer, 'r', 'KeyR', 82);
+  await waitFor(renderer, triageReady(3), 'comments-triage-key-reject-next', 60_000);
+  check(await triageRecord(renderer, 2, 'rejected'), 'comments-triage-key-second-reject-recorded');
+  // 接受 on the last seed's compact card, by pointer: hovered, its controls stand beside the preview, never over it.
+  check(await renderer.evaluate(`(() => { document.querySelector('.editor-window [data-mark-id="'+__triage.ids[4]+'"]').scrollIntoView({block:'center',behavior:'instant'}); return true; })()`), 'comments-triage-quick-reveal');
+  await waitFor(renderer, `(() => { const node=document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]'); if(!node||node.hidden||node.dataset.expanded!=='false'||node.dataset.revalidating!=='false')return false; const r=node.getBoundingClientRect(),p=document.querySelector('.manuscript-comments-scroll').getBoundingClientRect(); if(r.top<p.top||r.bottom>p.bottom){node.scrollIntoView({block:'center',behavior:'instant'});return false;} return node.contains(document.elementFromPoint(r.left+12,r.bottom-8)); })()`, 'comments-triage-quick-card-ready', 60_000);
+  const hover = await renderer.evaluate(`(() => { const r=document.querySelector('[data-comment-card="'+__triage.ids[4]+'"] .editorial-mark-compact-preview').getBoundingClientRect(); return {x:r.left+12,y:r.top+r.height/2}; })()`);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hover.x, y: hover.y, buttons: 0 });
+  await waitFor(renderer, `(() => {
+    const node=document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]'), preview=node.querySelector('.editorial-mark-compact-preview').getBoundingClientRect();
+    const buttons=Array.from(node.querySelectorAll('[data-mark-quick]')).map(button=>({button,r:button.getBoundingClientRect()}));
+    const apart=(a,b)=>a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top;
+    return buttons.length===2 && buttons.every(({button,r})=>r.width>0&&r.height>0&&apart(r,preview)&&button.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))) && preview.width>0 && node.dataset.expanded==='false';
+  })()`, 'comments-triage-quick-beside-text');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-comment-card="' + await renderer.evaluate('__triage.ids[4]') + '"] [data-mark-quick="accept"]'))).real, 'comments-triage-quick-accept-click');
+  check(await triageRecord(renderer, 4, 'applied'), 'comments-triage-quick-accept-applied');
+  // A pointer decision at the Book's end: the card stays, nothing moves, and that there is nothing further is said.
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('按当前筛选，后面没有待处理的了') && document.querySelector('[data-comment-card="'+__triage.ids[4]+'"]')?.dataset.selected==='true' && ${TRIAGE_FIRST}!==__triage.start`, 'comments-triage-book-end', 60_000);
   check(await bookCount(0), 'comments-triage-book-count-after');
-  // With the filter still on there is nothing further: Alt+↓ says so, and nothing moves.
-  await renderer.evaluate(`(() => { globalThis.__triageFirst=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId; return true; })()`);
-  await triageKey(renderer, 'ArrowDown', 'ArrowDown', 40, 1);
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('按当前筛选，后面没有待处理的了')`, 'comments-triage-none-further', 60_000);
-  check(await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"] [data-block-id]').dataset.blockId===__triageFirst && document.querySelector('[data-comment-card="'+__triage.ids[2]+'"]')?.dataset.selected==='true'`), 'comments-triage-none-did-not-move');
-  // Leave the pane as it was found and the text where it was.
-  check(await renderer.evaluate(`(() => { const search=document.querySelector('[data-mark-search-input]'); search.value=''; search.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-mark-category-filter="all"]').click(); return true; })()`), 'comments-triage-filter-reset');
-  check(await renderer.evaluate(manuscriptRailJump('__triage.proportion')), 'comments-triage-return');
-  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="'+__triage.start+'"]')`, 'comments-triage-returned', 60_000);
+  // Back to all marks, with real input: 全部, then the search field emptied.
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-filter-toggle]'))).real, 'comments-triage-reset-open');
+  await waitFor(renderer, isOpen, 'comments-triage-reset-opened');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-category-filter="all"]'))).real, 'comments-triage-reset-category');
+  check((await commentsNativeClick(renderer, await triageCentre(renderer, '[data-mark-search-input]'))).real, 'comments-triage-reset-search-click');
+  await waitFor(renderer, `document.activeElement===document.querySelector('[data-mark-search-input]')`, 'comments-triage-reset-search-focused');
+  await triageKey(renderer, 'a', 'KeyA', 65, 2);
+  await triageKey(renderer, 'Backspace', 'Backspace', 8);
+  await triageKey(renderer, 'Escape', 'Escape', 27);
+  await waitFor(renderer, `!(${isOpen}) && document.querySelector('[data-mark-search-input]').value==='' && document.querySelector('[data-mark-category-filter="all"]').getAttribute('aria-pressed')==='true' && document.querySelector('[data-mark-filter-toggle]').textContent==='筛选'`, 'comments-triage-filter-reset');
+  check(await renderer.evaluate(manuscriptRailJump('0')), 'comments-triage-return');
+  await waitFor(renderer, `${TRIAGE_FIRST}===__triage.start`, 'comments-triage-returned', 60_000);
 }
