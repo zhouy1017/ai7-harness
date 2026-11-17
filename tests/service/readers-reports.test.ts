@@ -676,6 +676,54 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
+  it('freezes the reader\'s report contract of a draft seeded with the two admitted 审稿意见 by Book title, byte for byte as before the move (Issue #1534)', async () => {
+    await withBook(async (book) => {
+      // Three Books drafted first — before any admission, so each contract asks the fixture the same question — then each
+      // designated and admitted; the fourth reads exactly two 范例 in `b.title COLLATE BINARY` order: 丙 (U+4E19), 乙 (U+4E59), never 审 (U+5BA1).
+      const drafted: Array<Book & { revisionDigest: string }> = [];
+      for (const title of [null, '丙书', '乙书']) {
+        let current: Book = book;
+        if (title !== null) {
+          const imported = await importSample1Book(book.store, roots.codeRoot, title);
+          await pinEditorialWorkspaceProfileRevision2(book.store, imported.bookId);
+          current = { ...book, bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
+        }
+        await runInitialEvaluationToEnd(book.store, book.owner, current.bookId, launchPolicy);
+        finalizeAsJ11(book.store, current.bookId);
+        await draftReport(current, 'author');
+        const settled = book.store.inspectReadersReport(current.bookId)!;
+        const draft = book.store.createReadersReportDraft(current.bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
+        drafted.push({ ...current, revisionDigest: draft.versions[0]!.revisionDigest });
+      }
+      for (const entry of drafted) {
+        const milestone = await book.store.saveMilestone(entry.manuscriptId, entry.branchId, '三审稿', 'stage-archive', null, '');
+        book.store.designatePublicationVersion({ bookId: entry.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+        expect(book.store.admitReadersReportExemplar({ bookId: entry.bookId, template: 'author', revisionDigest: entry.revisionDigest, expectedDecisions: 0 })
+          .readersReports[0]!.admission.state).toBe('admitted');
+      }
+      const fourth = await importSample1Book(book.store, roots.codeRoot, '丁书');
+      await pinEditorialWorkspaceProfileRevision2(book.store, fourth.bookId);
+      await runInitialEvaluationToEnd(book.store, book.owner, fourth.bookId, launchPolicy);
+      finalizeAsJ11(book.store, fourth.bookId);
+      let progress = book.store.createReadersReportPreparationWork(fourth.bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      // The contract frozen over the two 范例 — their titles and their opening words — as the code before the move froze it: a
+      // digest produced at the base commit, so a changed exemplar (or one framed differently) changes the request and fails here.
+      const database = exemplarDb();
+      try {
+        const frozen = database.prepare('SELECT prompt_contract_sha256 FROM readers_report_tasks WHERE book_id = ?').all(fourth.bookId) as Array<{ prompt_contract_sha256: string }>;
+        expect(frozen.map((row) => row.prompt_contract_sha256)).toEqual(['e0cefa24df0578575bf81a7f847ca0286f6a4db72f78cbfd62f8ae71f07dd3ae']);
+      } finally { database.close(); }
+      expect(book.store.inspectEvaluation(fourth.bookId, null).readersReport.exemplars).toEqual({
+        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
+      });
+      // Each admitting Book still takes none of its own, and the two the fourth takes are the other two Books' when it is 审稿意见之书.
+      expect(book.store.inspectEvaluation(book.bookId, null).readersReport.exemplars).toEqual({
+        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
+      });
+    });
+  }, 300_000);
+
   it('fails when reading closes but the report synthesis has no usable result', async () => {
     fixture = { ...fixture, entries: new Map([...fixture.entries].map(([key, entry]) => [key,
       entry.response.kind === 'unit-result' && entry.response.text.includes('ai7.readers-report.synthesis-result/')
