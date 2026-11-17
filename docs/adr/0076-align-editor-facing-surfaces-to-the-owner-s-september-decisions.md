@@ -1,5 +1,6 @@
 ---
 status: accepted
+amended-by: ADR 0077's amendment of 2026-11-17 (Owner, plan #1516 §1; #1518) — §2's grouping of the current Book's navigation (IA-012); IA-013's aggregate entry stands
 ---
 
 # Align the editor-facing surfaces to the Owner's September 2026 decisions
@@ -29,7 +30,7 @@ Opening a Book that has a primary Manuscript enters the Manuscript at the editor
 「左侧应当是遵循之前的状态，保持不变，同时需要有一个toggle侧栏的按钮」「使用图标」「规范文件应当属于例如"知识库"的另一个功能下管理，我们应当存在一个中心化管理这些资料的模块」「一定要存在一个所有发现问题（混合ABC和潜在的其他检查等）的集中查看与管理的总入口」「A的排序应该往后一些……对于编辑而言不那么重要」
 
 - The stable global layer becomes `待我处理`, `书库`, `书系`, `知识库`, `质量与学习` (IA-007). `知识库` is the centralized home of house-managed professional material: review guideline documents, evaluation profiles, expert skills (工序), House Editorial Memory and exemplars; it also houses the native-artifact/Rule management projection whose placement Issue #86 had deferred.
-- The current Book's navigation is grouped `工作`（稿件 / 审阅 / 评估 / 交付物）, `处理`（发现）and `资料与记录`（分析 / 来源与证据 / 工作概览 / 历史与恢复）(IA-012). `发现` is the Book-level aggregate entry for every unresolved finding from analysis gaps, review categories, evaluation risk items and other checks (IA-013); `待我处理` keeps only cross-Book decisions.
+- The current Book's navigation is grouped `工作`（稿件 / 审阅 / 评估 / 交付物）, `处理`（发现）and `资料与记录`（分析 / 来源与证据 / 工作概览 / 历史与恢复）(IA-012). `发现` is the Book-level aggregate entry for every unresolved finding from analysis gaps, review categories, evaluation risk items and other checks (IA-013); `待我处理` keeps only cross-Book decisions. *Amended 2026-11-17 (Owner, plan #1516 §1; see the amendment of that date in [ADR 0077](./0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)): the grouping of this bullet is replaced — the Book's navigation has two groups, `工作`（稿件 / 审阅 / 待办汇总 / 评估 / 交付物）and `资料与记录`（分析 / 来源与证据 / 工作概览）; `发现` is renamed `待办汇总` and sits in `工作`, and `历史与恢复` is folded into `工作概览`, whose record section is `导入记录`. The aggregate-entry meaning of IA-013 stands: the entry is still the one place for every unresolved finding of the Book.*
 - The sidebar remembers its collapsed state and has a toggle in the manuscript context header; collapsed rows are icons with accessible names plus the current Book's first character (IA-010).
 
 ### 3 · The manuscript surface
