@@ -329,8 +329,14 @@ function harvest(categoryIndex: number, definition: AnalysisKindDefinition, sett
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 
-beforeEach(async () => {
+/** A case starts with nothing of an earlier one, including the maps an earlier case registered and a timed-out one never removed. */
+function resetGeneratorState(): void {
   entries.clear(); refreshedRequests.clear(); controlRequests.clear(); j16Keys.clear(); j16SharedKeys.clear(); fixture.entries.clear(); emittedFiles.clear();
+  activeFixtureEntries.clear();
+}
+
+beforeEach(async () => {
+  resetGeneratorState();
   roots = await createServiceTestRoots('ai7-s69-generate-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
 });
@@ -373,14 +379,16 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     baselineAnalysisRoute: { fixtureIdentity: routedFixture.identity, fixtureSha256: routedFixture.sha256, fixtureLineage: routedFixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
-  if (inheritGeneratedEntries) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
+  // A private stock map (ownProfile) must never receive the generator's entries: they carry no attempt, which the stock fixture refuses.
+  const registered = inheritGeneratedEntries && !ownProfile;
+  if (registered) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
   try {
     const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...seed.imported });
     store.markCleanShutdown();
     return result;
   } finally {
     await owner.dispose();
-    activeFixtureEntries.delete(routedFixture.entries as Map<string, ModelFixtureEntry>);
+    if (registered) activeFixtureEntries.delete(routedFixture.entries as Map<string, ModelFixtureEntry>);
     store.close();
     await scenarioRoots.dispose();
   }
@@ -708,6 +716,16 @@ it('generates the authored review fixture without unreachable committed entries'
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);
 
+
+it('keeps a late entry of an ended case out of the stock map of the next', () => {
+  // A case that timed out leaves its map registered until its callback ends; the next case must not see that map filled.
+  const stale = new Map<string, ModelFixtureEntry>();
+  activeFixtureEntries.add(stale);
+  resetGeneratorState();
+  add({ unitOrdinal: 1, requestDigest: 'a'.repeat(64), attempt: null, contentDigest: null,
+    response: { kind: 'unit-result', text: '{}', usage: { inputTokens: 1, outputTokens: 1 } } }, 0, 'late');
+  expect(stale.size).toBe(0);
+});
 
 it('authors the stock review synthesis through its independent native-child fixture', async () => {
   const leafPath = resolve(FIXTURE_PATH, '..', 'sample1-stock-typos-leaf-authored.json');

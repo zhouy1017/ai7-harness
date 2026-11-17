@@ -179,13 +179,14 @@ async function verifyWordManifest(store: EditorialStore, book: ImportedBook, com
   }
 }
 
-// What each case follows its import with. The 201-edit case runs the whole lifecycle; the 2001-edit cases prove the import of
-// every edit in their own mode, and only the 'suggestions' one (the larger: 2001 marks as well) carries it through the
-// selected-Book merge, which reads the closed source file and so proves it persisted. Reopening a store and merging it do
-// not depend on the mode (the rows are the same signals and materials), and the 'accepted-baseline' merge keeps its own
-// single-edit proof in `database-merge.test.ts` ('carries Word accepted-baseline through public package inspection …').
+// What each case follows its import with. Both modes run the whole lifecycle at 201 edits (several pages of every list),
+// so 'accepted-baseline' proves zero marks and the complete manifest after reopen and after the selected-Book merge. At 2001
+// edits each mode proves the import of every edit with its own marks (2001 or none); only 'suggestions' continues through
+// the selected-Book merge, which reads the closed source file and so proves it persisted. The merged and reopened rows are the
+// same signals and materials in either mode, so what size adds to them (paging of 2001 entries) is carried once, by that case.
 const CASES = [
   { mode: 'suggestions', count: 201, reopen: true, merge: true, name: 'all pages, reopen and selected-Book merge' },
+  { mode: 'accepted-baseline', count: 201, reopen: true, merge: true, name: 'all pages, reopen and selected-Book merge, with no marks' },
   { mode: 'suggestions', count: 2_001, reopen: false, merge: true, name: 'all pages and selected-Book merge' },
   { mode: 'accepted-baseline', count: 2_001, reopen: false, merge: false, name: 'all pages, with no marks' },
 ] as const;
