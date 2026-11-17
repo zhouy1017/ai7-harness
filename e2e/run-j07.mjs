@@ -1619,7 +1619,7 @@ async function main() {
     // and nothing is written or recorded.
     await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
     await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-action="open"]`, 'cancel-open');
-    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-native-dialog', 120_000);
+    await waitFor(renderer, `window.__j07.exportCard() === null && (document.querySelector('#persistence-status')?.textContent ?? '').includes('取消')`, 'cancel-native-dialog', 120_000);
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
 
     at('j14-designate-keyboard');

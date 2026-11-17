@@ -993,13 +993,9 @@ async function main() {
     await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); mode.value='direct'; mode.dispatchEvent(new Event('change')); return true; })()`, 'ordinary-proxy-reset');
     await click(primary, '保存网络代理', 'ordinary-proxy-reset-save');
     await waitFor(primary, `document.querySelector('[data-model-service-proxy="direct"]')`, 'ordinary-proxy-reset-saved');
-    // The deliberately unused loopback proxy reports a persistent error. Dismiss it through the UI
-    // after restoring direct mode so the following page can expose its own ordinary status.
-    await assertRenderer(primary, `(() => {
-      const status=document.querySelector('#persistence-status'); const dismiss=status?.querySelector('button[aria-label="关闭错误提示"]');
-      if(!(status instanceof HTMLElement)||status.dataset.tone!=='error'||!status.textContent.includes('代理不可达')||!(dismiss instanceof HTMLButtonElement))return false;
-      dismiss.click(); return status.hidden;
-    })()`, 'ordinary-proxy-probe-error-dismissed');
+    // The deliberately unused loopback proxy reports a persistent error. The save that restores direct mode is the retry
+    // that worked (#1519): its success clears that error, so the following page exposes its own ordinary status.
+    await waitFor(primary, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('代理不可达')`, 'ordinary-proxy-probe-error-cleared');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===4 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、本社审阅偏好、范例、资料库'`, 'ordinary-knowledge-four-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');

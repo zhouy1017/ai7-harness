@@ -1390,7 +1390,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), nodeText: text.data, anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
-  await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent.startsWith('已到达')`, 'search-arrival-settled');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'search-arrival-settled');
   await assertRenderer(renderer, readableEditor, 'search-arrival-readable-editor');
   await waitForExactSearchRange(renderer);
   await clickButton(renderer, '返回查找前位置', 'search-return');
@@ -1903,7 +1903,7 @@ async function runProtectionJourney(renderer) {
   at('protection-retry-recovery');
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-fault-off');
   await assertRenderer(renderer, `(() => { const retry = document.querySelector('#editing-protection-options [data-protection-action="retry"]'); if (!(retry instanceof HTMLButtonElement)) return false; if (retry.disabled) return true; retry.click(); return true; })()`, 'protection-retry-click');
-  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, oneEntry: p.journal === ${durable + 1}, writable: p.writable, closeRisk: p.closeRisk === 'false', status: document.querySelector('[data-toast]')?.textContent === '已写入修订日志', optionsClosed: document.querySelector('#editing-protection-options')?.hidden === true, reasonsGone: document.querySelector('.editing-protection-blocked') === null })`, 'protection-retry-recovered', 60_000);
+  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, oneEntry: p.journal === ${durable + 1}, writable: p.writable, closeRisk: p.closeRisk === 'false', optionsClosed: document.querySelector('#editing-protection-options')?.hidden === true, reasonsGone: document.querySelector('.editing-protection-blocked') === null })`, 'protection-retry-recovered', 60_000);
   at('protection-reversed-input');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-reversed-arm');
   await typeAtWindowEnd(renderer, protectionText(12, 7_000), 'protection-reversed-type');
@@ -2164,6 +2164,23 @@ async function main() {
         return innerWidth===${size.width} && innerHeight===${size.height} && (${size.width}!==1280 || commentsVisible) && mode.dataset.inputMode==='direct-edit' && rects.length>=5 && rects.every(r=>r.width>0 && r.left>=box.left && r.right<=Math.min(box.right,innerWidth) && Math.abs((r.top+r.height/2)-(rects[0].top+rects[0].height/2))<2 && r.bottom<=box.bottom)
           && controls.every(el=>el.scrollWidth<=el.clientWidth+1);
       })()`) === true, 'toolbar-one-row');
+      // #1519: a busy line appears in the bar fixed to the bottom of the content area — in view and beside the sidebar — and the
+      // manuscript keeps the height it had. The line is the one a command pressed during an IME composition gets.
+      const barLayout = `(() => {
+        const bar = document.querySelector('#persistence-status'); const side = document.querySelector('#app-sidebar'); const shell = document.querySelector('.editor-shell');
+        const box = bar.getBoundingClientRect();
+        return { shell: Math.round(shell.getBoundingClientRect().height * 100), page: document.documentElement.scrollHeight, shown: !bar.hidden && box.width > 0,
+          fixed: getComputedStyle(bar).position === 'fixed',
+          inView: box.top >= 0 && box.bottom <= innerHeight && box.left >= side.getBoundingClientRect().right - 0.5 && box.right <= innerWidth + 0.5 };
+      })()`;
+      const quiet = await renderer.evaluate(barLayout);
+      await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').focus({ preventScroll: true })`);
+      await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
+      await press(renderer, 'f', process.platform === 'darwin' ? 4 : 2);
+      await waitFor(renderer, `!document.querySelector('#persistence-status').hidden && document.querySelector('#persistence-status').textContent.includes('输入法组合尚未结束')`, 'status-bar-busy-shown');
+      const busy = await renderer.evaluate(barLayout);
+      await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
+      requireJourney(busy?.shown === true && busy.fixed === true && busy.inView === true && busy.shell === quiet?.shell && busy.page === quiet?.page, 'status-bar-busy-layout', { quiet, busy });
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to

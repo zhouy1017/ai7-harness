@@ -1214,6 +1214,8 @@ async function main() {
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
     await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
     await clickSelector(renderer, '#persistence-status .status-dismiss', 'mark-rail-storage-error-dismiss');
+    // × only dismisses: the bar is also the manuscript page's save menu trigger, and the click must not open that menu (#1519).
+    await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true && document.querySelector('#manuscript-save-menu') instanceof HTMLDetailsElement && document.querySelector('#manuscript-save-menu').open===false`, 'mark-rail-storage-error-dismiss-only');
     await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
     // Hold the real committed storage completion, replace the editor, then release the old click.
     await renderer.evaluate(`(() => {

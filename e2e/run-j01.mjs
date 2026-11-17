@@ -1801,8 +1801,9 @@ async function runJourney(
       const blockId = block.dataset.blockId;
       const before = block.textContent;
       if (!blockId || before === null) return false;
-      const isBusy = () => status.dataset.tone === 'busy' && status.textContent.includes('写入修订日志');
-      const isDurable = () => status.dataset.tone === 'success' && status.textContent.includes('已写入修订日志');
+      // Autosave has no tone (#1519): its two lines are the live region's text, neither a toast nor a bar.
+      const isBusy = () => status.textContent.startsWith('正在') && status.textContent.includes('写入修订日志');
+      const isDurable = () => status.textContent.includes('已写入修订日志');
       let busy = isBusy();
       globalThis.__ai7JournalProbe = new Promise((resolve) => {
         let settled = false;

@@ -1457,6 +1457,15 @@ async function main() {
         requireJourney(existsSync(`${navigationHoldPath}.held`), 'navigation-answer-held');
         await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'navigation-open-knowledge');
         await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-open');
+        // #1519: a page change says nothing in a toast; the title the page opened with is not covered by one (both window sizes).
+        await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '知识库已打开'`, `navigation-knowledge-status-${width}`);
+        await assertRenderer(renderer, `(() => {
+          const toast = document.querySelector('[data-toast]'); const title = document.querySelector('#context-title');
+          if (!(title instanceof HTMLElement) || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+          const box = title.getBoundingClientRect(); const hit = document.elementFromPoint(box.left + Math.min(box.width, 40) / 2, box.top + box.height / 2);
+          const toasting = toast instanceof HTMLElement && !toast.hidden;
+          return box.width > 0 && box.bottom <= innerHeight && (!toasting || (!toast.contains(hit) && toast.textContent !== '知识库已打开'));
+        })()`, `navigation-no-toast-over-title-${width}`);
         await renderer.evaluate(`window.__j11NavigationSnapshot = {screen:document.querySelector('#screen').firstElementChild,focus:document.activeElement,status:document.querySelector('#persistence-status').textContent}`);
         requireJourney(!existsSync(`${navigationHoldPath}.released`), 'navigation-still-held');
         await writeFile(navigationHoldPath, 'release');
@@ -2169,7 +2178,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
     await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'readers-report-edit-save-ready');
     await click(renderer, '保存', 'readers-report-edit-save');
-    await waitFor(renderer, `${notice}.includes('已写入修订日志')`, 'readers-report-edit-durable');
+    await waitFor(renderer, `${status}.includes('已写入修订日志')`, 'readers-report-edit-durable');
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="saveVersion"]', 'readers-report-save-version');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${notice} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
 

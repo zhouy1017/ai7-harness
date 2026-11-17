@@ -399,19 +399,30 @@ async function runSettingsPages(renderer, cancellation) {
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-ready');
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-conflict');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('「书库」') && ${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-refused');
+  // #1519: the refusal stands in a bar fixed to the bottom of the content area — inside the window, beside the sidebar, on a page taller
+  // than the window and without scrolling — and its appearance did not change the page's height. Both Gate-relevant window sizes.
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `(() => {
+      const bar = document.querySelector('#persistence-status'); const side = document.querySelector('#app-sidebar');
+      if (!(bar instanceof HTMLElement) || bar.hidden || !(side instanceof HTMLElement) || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+      const box = bar.getBoundingClientRect(); const edge = side.getBoundingClientRect().right;
+      return getComputedStyle(bar).position === 'fixed' && scrollY === 0 && document.documentElement.scrollHeight > innerHeight &&
+        box.top >= 0 && box.bottom <= innerHeight && box.left >= edge - 0.5 && box.right <= innerWidth + 0.5 && box.width > 0;
+    })()`, `keyboard-error-fixed-${width}`);
+  }
+  await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
   // 全部恢复默认 for the whole section.
   await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.knowledge': 'Mod+Shift+K' } })`);
   await click(renderer, '返回', 'keyboard-back');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-back-library');
+  // A stale refusal does not follow the editor to another page.
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('「书库」')`, 'keyboard-error-cleared-on-page-change');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen-all');
   await waitFor(renderer, `${label('nav.knowledge')}===${JSON.stringify(darwin ? 'Command+Shift+K' : 'Ctrl+Shift+K')}`, 'keyboard-two-remaps');
   await clickSelector(renderer, '[data-keyboard-reset-all]', 'keyboard-reset-all');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-all-restored');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-all-restored-kept');
-  // A4: a later successful reset leaves the earlier refusal visible until the editor acknowledges it.
-  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('「书库」') && document.querySelector('#persistence-status')?.hidden===false`, 'keyboard-error-retained-after-success');
-  await clickSelector(renderer, '#persistence-status .status-dismiss', 'keyboard-error-dismiss');
-  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true`, 'keyboard-error-dismissed');
   await click(renderer, '返回', 'keyboard-done');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-done-hub');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'keyboard-done-library');
