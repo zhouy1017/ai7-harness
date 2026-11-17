@@ -127,27 +127,6 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     }
     section.dataset['exportPhase'] = phase;
     section.setAttribute('aria-busy', String(busy));
-    const inline = el('div', 'export-options');
-    const formats = el('fieldset', 'export-formats');
-    formats.append(el('legend', undefined, '导出格式'));
-    for (const [value, label] of [['docx', 'DOCX'], ['pdf', 'PDF'], ['markdown', 'Markdown']] as const) {
-      const choice = el('label', 'export-format-option'); const radio = el('input');
-      radio.type = 'radio'; radio.name = 'export-format'; radio.value = value; radio.checked = format === value; radio.disabled = busy || receipt !== null;
-      choice.dataset['exportFormat'] = value;
-      radio.addEventListener('change', () => { if (radio.checked) format = value; });
-      choice.append(radio, el('span', undefined, label)); formats.append(choice);
-    }
-    inline.append(formats);
-    for (const key of EXPORT_OPTION_ORDER) {
-      const label = el('label', 'export-option');
-      const box = el('input');
-      box.type = 'checkbox'; box.checked = switches[key]; box.disabled = busy || receipt !== null;
-      box.dataset['exportOption'] = key;
-      box.addEventListener('change', () => { switches = { ...switches, [key]: box.checked }; });
-      label.append(box, el('span', undefined, EXPORT_OPTION_LABELS[key]));
-      inline.append(label);
-    }
-    section.append(inline);
     if (problem !== null) {
       const alert = el('p', 'export-problem', problem); alert.setAttribute('role', 'alert'); section.append(alert);
     }
@@ -166,11 +145,19 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     }
     if (reviewed !== null) {
       const details = el('details', 'export-fidelity-details');
+      details.open = hasLoss();
       details.append(el('summary', undefined, '查看导出详情'), renderExportFidelity(reviewed)); section.append(details);
       section.append(el('p', 'export-format-line', reviewed.formatLine));
     }
+    if (phase === 'cancelled' && activeTarget !== null) {
+      const target = activeTarget;
+      const retry = el('button', 'secondary', '重新选择保存位置'); retry.type = 'button'; retry.dataset['exportAction'] = 'retry';
+      retry.addEventListener('click', () => void exportFile(target, reviewed?.options, reviewed?.format, false)); section.append(retry);
+    }
     root.replaceChildren(section);
   }
+
+  function hasLoss(): boolean { return reviewed?.fidelity.some(row => row.status === 'degraded' || row.status === 'unavailable') ?? false; }
 
   function reset(): void {
     if (busy) return;
@@ -178,23 +165,23 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     receipt = null; reviewed = null; problem = null; activeTarget = null; phase = 'idle'; render(); focus?.focus();
   }
 
-  async function exportFile(target: ManuscriptExportTargetInput): Promise<void> {
+  async function exportFile(target: ManuscriptExportTargetInput, oneTime?: ManuscriptExportOptions, selectedFormat = format, remember = true): Promise<void> {
     if (destroyed || busy) return;
     if (options.beforeExport && !await options.beforeExport()) return;
     if (destroyed || busy) return;
     busy = true; activeTarget = target; receipt = null; reviewed = null; problem = null; phase = 'reviewing'; render();
-    const selected = { ...switches };
+    const selected = { ...(oneTime ?? switches) };
     try {
-      await rememberActionDefaults({ exportFormat: format, ...selected }).catch(() => options.setStatus('未能记住导出选项，本次仍会继续导出。', 'error'));
+      if (remember) await rememberActionDefaults({ exportFormat: selectedFormat, ...selected }).catch(() => options.setStatus('未能记住导出选项，本次仍会继续导出。', 'error'));
       options.setStatus(EXPORT_STATUS_LINES.choosing, 'busy');
-      const review = await api.reviewManuscriptExport({ target, options: selected, format });
+      const review = await api.reviewManuscriptExport({ target, options: selected, format: selectedFormat });
       if (destroyed) return;
       if (review.bookId !== options.bookId) throw new Error(EXPORT_STATUS_LINES.reviewFailed);
       reviewed = review; phase = 'choosing'; render();
       const chosen = await api.chooseManuscriptExportDestination({ revisionId: review.target.revisionId, target,
         options: selected, reviewDigest: review.reviewDigest, suggestedFileName: review.suggestedFileName, format: review.format });
       if (destroyed) return;
-      if (chosen.outcome === 'cancelled') { phase = 'idle'; activeTarget = null; options.setStatus(EXPORT_STATUS_LINES.cancelled); return; }
+      if (chosen.outcome === 'cancelled') { phase = hasLoss() ? 'cancelled' : 'idle'; if (phase === 'idle') activeTarget = null; options.setStatus(EXPORT_STATUS_LINES.cancelled); return; }
       if (chosen.preparation.bookId !== options.bookId) throw new Error(EXPORT_STATUS_LINES.chooseFailed);
       phase = 'writing'; render(); options.setStatus(EXPORT_STATUS_LINES.writing, 'busy');
       const result = await api.approveManuscriptExport({ preparationId: chosen.preparation.preparationId });
@@ -227,13 +214,15 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       const summary = el('summary', undefined, '导出 ▾'); menu.append(summary);
       const body = el('div', 'export-menu-body'); menu.append(body);
       for (const [value, name] of [['docx', 'DOCX'], ['pdf', 'PDF'], ['markdown', 'Markdown']] as const) {
-        const button = el('button', 'quiet', name); button.type = 'button'; button.dataset['exportAction'] = 'open';
+        const button = el('button', 'quiet', `导出 ${name}`); button.type = 'button'; button.dataset['exportAction'] = 'open';
         button.dataset['exportTarget'] = target().kind; button.dataset['exportFormatAction'] = value;
         button.setAttribute('aria-label', `导出 ${label ?? '稿件'} · ${name}`);
         button.addEventListener('click', () => { if (busy) return; format = value; opener = summary; menu.open = false; void exportFile(target()); }); body.append(button);
       }
-      const settings = el('details', 'export-menu-options'); settings.append(el('summary', undefined, '导出选项'));
-      for (const key of EXPORT_OPTION_ORDER) { const label = el('label', 'export-option'); const box = el('input'); box.type = 'checkbox'; box.checked = switches[key];
+      const clean = el('button', 'quiet', '导出干净稿（DOCX，不含批注、修改建议和备注）'); clean.type = 'button'; clean.dataset['exportClean'] = '';
+      clean.addEventListener('click', () => { if (busy) return; opener = summary; menu.open = false; void exportFile(target(), { includeAnnotations: false, includeSuggestions: false, includeEditorNotes: false }, 'docx', false); }); body.append(clean);
+      const settings = el('div', 'export-menu-options');
+      for (const key of EXPORT_OPTION_ORDER) { const label = el('label', 'export-option'); const box = el('input'); box.type = 'checkbox'; box.dataset['exportOption'] = key; box.checked = switches[key];
         box.addEventListener('change', () => { switches = { ...switches, [key]: box.checked }; void rememberActionDefaults({ [key]: box.checked }).catch(() => options.setStatus('未能记住导出选项。', 'error')); });
         menu.addEventListener('toggle', () => { box.checked = switches[key]; }); label.append(box, el('span', undefined, EXPORT_OPTION_LABELS[key])); settings.append(label); }
       body.append(settings);

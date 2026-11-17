@@ -48,11 +48,11 @@ export function wordIntakeRefusalLabel(code: WordIntakeRefusalCode): string { re
 
 /** ADR 0094 §5's two tracked-change import modes, by the names the import confirmation commits. */
 export const WORD_IMPORT_MODE_NAMES: Readonly<Record<WordTrackedChangesChoice['mode'], string>> = {
-  suggestions: '转为 AI7 修订建议',
+  suggestions: '转为 AI7 修改建议',
   get 'accepted-baseline'() { return technicalWords('直接并入正文 · 定稿基线', '导入修订后的正文'); },
 };
 
-/** The choice as offered before preparation: 转为 AI7 修订建议 is recommended and the default. */
+/** The choice as offered before preparation: 转为 AI7 修改建议 is recommended and the default. */
 export function wordImportModeOption(mode: WordTrackedChangesChoice['mode']): string {
   return mode === 'suggestions' ? `${WORD_IMPORT_MODE_NAMES.suggestions} · 推荐` : WORD_IMPORT_MODE_NAMES[mode];
 }

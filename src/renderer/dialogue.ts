@@ -12,7 +12,6 @@ import {
   DIALOGUE_QUEUED_CANCELLED,
   DIALOGUE_ANSWER_HEADING,
   DIALOGUE_AUTHORITY_NOTE,
-  DIALOGUE_CONVERT_INCOMPLETE,
   DIALOGUE_CONVERT_ORIGINAL,
   DIALOGUE_CONVERT_PROPOSED,
   DIALOGUE_CONVERT_RATIONALE,
@@ -34,6 +33,7 @@ import {
   dialogueConvertedLine,
   dialogueIncompleteLine,
 } from './dialogue-labels.js';
+import { technicalLayerVisible } from './technical-layer.js';
 import { dialogueReplacementText } from './dialogue-answer.js';
 
 /**
@@ -101,14 +101,14 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   reasoning.hidden = true;
   const convertHost = el('div', 'dialogue-convert-host');
   const note = el('p', 'field-note dialogue-authority', DIALOGUE_AUTHORITY_NOTE);
-  const followUpForm = el('form', 'editorial-mark-composer dialogue-follow-up');
+  const followUpForm = el('form', 'dialogue-follow-up');
   const followUp = el('textarea');
   followUp.id = uid('follow-up');
   followUp.rows = 3;
   followUp.maxLength = MAX_DIALOGUE_QUESTION_CHARACTERS;
   followUp.required = true;
   followUp.dataset['dialogueFollowUp'] = '';
-  const followUpLabel = el('label', undefined, '继续追问');
+  const followUpLabel = el('label', undefined, '追问');
   followUpLabel.htmlFor = followUp.id;
   const sendFollowUp = el('button', 'secondary', '发送追问');
   sendFollowUp.type = 'submit';
@@ -119,7 +119,8 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     if (!sendFollowUp.disabled && followUp.value.trim()) void act('follow-up');
   });
   followUpForm.hidden = true;
-  element.append(context, reasoning, attemptsHost, actions, promoteRow, convertHost, followUpForm, note);
+  element.append(context, reasoning, attemptsHost, actions, convertHost, followUpForm);
+  if (technicalLayerVisible) element.append(note);
 
   let dialogueId: string | null = null;
   let dialogue: DialogueProjection | null = null;
@@ -138,13 +139,26 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   }
 
   function fragmentNode(text: string, breakAfter: boolean): HTMLElement {
-    const node = el('span', `dialogue-fragment${breakAfter ? ' dialogue-fragment-break' : ''}`, text.replace(/\[retrieval:[0-9a-f]{64}\]/gu, '〔稿件引用〕'));
+    const node = el('span', `dialogue-fragment${breakAfter ? ' dialogue-fragment-break' : ''}`);
+    const pattern = /\[retrieval:([0-9a-f]{64})\]/gu;
+    let cursor = 0;
+    for (const match of text.matchAll(pattern)) {
+      node.append(text.slice(cursor, match.index));
+      const index = dialogue?.anchors?.findIndex(candidate => candidate.candidateId === match[1]) ?? -1;
+      const candidate = dialogue?.anchors?.[index];
+      if (candidate?.anchor.blockId !== undefined) {
+        const citation = el('button', 'quiet dialogue-citation', `〔${index + 1}〕`); citation.type = 'button';
+        citation.addEventListener('click', () => options.jump({ manuscriptId: dialogue!.manuscriptId, blockId: candidate.anchor.blockId! })); node.append(citation);
+      } else node.append('〔稿件引用不可用〕');
+      cursor = match.index + match[0].length;
+    }
+    node.append(text.slice(cursor));
     node.dataset['dialogueFragment'] = '';
     return node;
   }
 
   function attemptSection(attempt: DialogueAttemptProjection, latest: boolean): { section: HTMLElement; answer: HTMLElement } {
-    const section = el('section', 'dialogue-attempt');
+    const section = el('details', 'dialogue-attempt'); section.open = latest;
     section.dataset['dialogueAttempt'] = attempt.attemptId;
     section.dataset['dialogueState'] = attempt.state;
     section.dataset['dialogueKind'] = attempt.kind;
@@ -153,7 +167,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     section.setAttribute('aria-labelledby', heading.id);
     const state = el('span', `state-term status-pill review-pill dialogue-state dialogue-state-${attempt.state}`, DIALOGUE_STATE_LABELS[attempt.state]);
     state.dataset['dialogueStateLabel'] = attempt.state;
-    const head = el('div', 'dialogue-attempt-head');
+    const head = el('summary', 'dialogue-attempt-head');
     head.append(heading, state);
     const answer = el('div', 'dialogue-answer');
     answer.dataset['dialogueAnswer'] = attempt.attemptId;
@@ -163,8 +177,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       head.append(el('span', 'dialogue-source-unavailable', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
     }
     for (const fragment of attempt.fragments) answer.append(fragmentNode(fragment.text, fragment.breakAfter));
+    section.append(head);
     if (attempt.question !== undefined) section.append(el('p', 'dialogue-question', `追问：${attempt.question}`));
-    section.append(head, answer);
+    section.append(answer);
     const incomplete = dialogueIncompleteLine(attempt);
     if (incomplete !== null || attempt.convertedMarkIds.length > 0) {
       const status = el('span');
@@ -204,9 +219,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const question = el('p', 'dialogue-question', next.question ?? DIALOGUE_QUESTION_MISSING);
     context.replaceChildren(selectionHeading, quote, jump, questionHeading, question);
     if (next.retrievalWarning !== null && next.retrievalWarning !== undefined) context.append(el('p', 'field-note', next.retrievalWarning));
-    for (const candidate of next.anchors ?? []) {
+    for (const [index, candidate] of (next.anchors ?? []).entries()) {
       if (candidate.anchor.blockId === undefined) continue;
-      const anchor = el('button', 'quiet dialogue-retrieval-anchor', '跳到引用段落');
+      const anchor = el('button', 'quiet dialogue-retrieval-anchor', `跳到引用段落〔${index + 1}〕`);
       anchor.type = 'button';
       anchor.dataset['dialogueRetrievalAnchor'] = candidate.candidateId;
       anchor.addEventListener('click', () => options.jump({ manuscriptId: next.manuscriptId, blockId: candidate.anchor.blockId! }));
@@ -223,6 +238,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const node = el('button', primary ? 'secondary' : 'quiet', DIALOGUE_ACTIONS[key]);
     node.type = 'button';
     node.dataset['dialogueAction'] = key;
+    node.hidden = !enabled;
     node.disabled = working || !enabled;
     if (!enabled && why !== undefined) node.title = why;
     node.addEventListener('click', () => {
@@ -250,14 +266,20 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     if (latest !== undefined && latest.state !== 'answering') {
       buttons.push(actionButton('continue', can.continue, can.continue, () => void act('continue')));
       buttons.push(actionButton('regenerate', can.regenerate, !can.continue, () => void act('regenerate')));
-      const incomplete = latest.state !== 'completed';
-      // 转为修改建议 converts the answer's own replacement words in one step (Issue #1410 item 10); 编辑后… opens the form first.
-      buttons.push(actionButton('convert', can.convert && !converting, false, () => quickConvert(), incomplete ? DIALOGUE_CONVERT_INCOMPLETE : undefined));
-      buttons.push(actionButton('convert-edit', can.convert && !converting, false, () => openConvert(), incomplete ? DIALOGUE_CONVERT_INCOMPLETE : undefined));
     }
-    actions.replaceChildren(...buttons);
+    const convertMenu = el('details', 'dialogue-convert-menu'); convertMenu.hidden = !can.convert || converting;
+    if (can.convert && !converting) {
+      const direct = actionButton('convert', true, false, () => quickConvert()); direct.textContent = '直接';
+      const edit = actionButton('convert-edit', true, false, () => openConvert()); edit.textContent = '编辑后';
+      convertMenu.append(el('summary', undefined, '转为修改建议 ▾'), direct, edit);
+    }
+    const more = el('details', 'dialogue-more'); more.append(el('summary', undefined, '更多'), promoteRow);
+    actions.replaceChildren(convertMenu, ...buttons.filter(button => button.dataset['dialogueAction'] !== 'continue'), more);
+    const continuation = buttons.find(button => button.dataset['dialogueAction'] === 'continue');
+    if (continuation && !continuation.hidden) more.append(continuation);
     paintPromote(latest);
     paintReasoning(latest);
+    more.hidden = !can.convert && !can.continue;
     if (active !== null) {
       const target = buttons.find((button) => button.dataset['dialogueAction'] === active && !button.disabled) ??
         buttons.find((button) => !button.disabled);
@@ -267,7 +289,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
 
   /** 转为任务意图草稿 on the latest answer: offered once it settled, pressable only while it is a completed answer (DIALOG-013). */
   function paintPromote(latest: DialogueAttemptProjection | undefined): void {
-    if (dialogue === null || latest === undefined || latest.state === 'answering') {
+    if (dialogue === null || latest === undefined || latest.state === 'answering' || !dialogue.actions.convert) {
       promoteRow.replaceChildren();
       return;
     }

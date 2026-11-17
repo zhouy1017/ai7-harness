@@ -108,9 +108,9 @@ export function createImportReview(options: ImportReviewOptions) {
     const groupHeading = element('legend', undefined, 'Word 修订导入方式');
     group.append(groupHeading);
     if (projection.compatibility === 'unsupported') {
-      group.append(element('p', undefined, `此文件含当前不支持的修订结构，不能作为首份稿件导入；定位到 ${projection.locationCount} 处，完整原始文件仍留在本机暂存中，来源材料继续按原有导入边界处理。`));
+      group.append(element('p', undefined, `此文件含暂不支持的 Word 修订，不能作为首份稿件导入。请在 Word 中接受或拒绝全部修订后重新保存，再导入；也可以将此文件保留为来源材料。`));
       const reasons = element('ul'); for (const code of projection.reasonCodes) reasons.append(element('li', undefined, wordIntakeRefusalLabel(code)));
-      group.append(reasons);
+      const details = element('details'); details.append(element('summary', undefined, '查看原因'), reasons); group.append(details);
       return { elements: [group], choice: () => undefined, allowed: () => false,
         bind: (control) => { control.disabled = true; }, setBusy: () => undefined };
     }
@@ -126,7 +126,8 @@ export function createImportReview(options: ImportReviewOptions) {
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
       input.name = `word-import-mode-${staged.draftId}`; input.value = mode; input.dataset['wordImportMode'] = mode;
-      line.append(input, element('span', undefined, wordImportModeOption(mode))); group.append(line); modes.push({ input, mode });
+      line.append(input, element('span', undefined, wordImportModeOption(mode)));
+      line.append(element('span', 'field-note', mode === 'suggestions' ? '以修改前的正文导入，每处 Word 修订转为待处理的修改建议。' : '以接受全部修订后的正文导入，原始修订留在原文件中。')); group.append(line); modes.push({ input, mode });
       input.addEventListener('change', () => { if (!input.checked || busy) return;
         selected = { ...selected, mode, acceptedBaselineConfirmed: mode === 'accepted-baseline' }; changed(); });
     }
@@ -146,7 +147,7 @@ export function createImportReview(options: ImportReviewOptions) {
       learning.checked = selected.learnFromEdits; learning.disabled = busy;
       const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
       notice.textContent = !reading.usable ? reading.blockCount === 0
-        ? selected.mode === 'suggestions' ? technicalWords('撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。', '撤销修订后没有可编辑的正文；可以改为「导入修订后的正文」。')
+        ? selected.mode === 'suggestions' ? technicalWords('撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修改建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。', '撤销修订后没有可编辑的正文；可以改为「导入修订后的正文」。')
           : technicalWords('接受修订后没有可编辑的非空稿件，不能建立该基线。', '接受修订后没有可编辑的正文。')
         : technicalWords('所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。', '暂不支持按这种方式导入，请选择另一种方式。')
         : technicalWords('最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。', '');

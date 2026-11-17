@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { mountDialogue, type DialogueSurfaceOptions } from '../../src/renderer/dialogue.js';
 import type { DialogueProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
@@ -54,6 +55,28 @@ describe('the dialogue drawer', () => {
     expect(convert).toHaveBeenCalledWith({ dialogueId: 'dialogue', attemptId: 'first', proposedText: '改写内容', rationale: '' });
     expect(root.querySelector('.dialogue-convert')).toBeNull();
     surface.stop();
+  });
+
+  it('folds earlier attempts and places the follow-up after the latest answer', async () => {
+    setTechnicalLayerVisible(false);
+    const next = projection(); const attempts = [...next.attempts, { ...next.attempts[0]!, attemptId: 'second', ordinal: 2, kind: 'regenerate' as const }];
+    const { root, surface } = mount({ ...next, attempts });
+    await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
+    expect(root.querySelectorAll('.dialogue-attempt').map(node => node.open)).toEqual([false, true]);
+    expect(root.children.indexOf(root.querySelector('.dialogue-attempts')!)).toBeLessThan(root.children.indexOf(root.querySelector('.dialogue-follow-up')!));
+    expect(root.querySelector('.dialogue-follow-up')!.className).not.toContain('editorial-mark-composer');
+    expect(root.querySelector('.dialogue-authority') === null).toBe(true); surface.stop();
+  });
+
+  it('numbers clickable citations and their matching jump buttons', async () => {
+    const id = 'a'.repeat(64); const next = projection();
+    const { root, options, surface } = mount({ ...next, anchors: [{ candidateId: id, sourceKind: 'manuscript', sourceId: 'manuscript', revisionOrIndexDigest: id, anchor: { blockId: 'quoted', start: 0, end: 2 }, score: 1, preview: '' }],
+      attempts: [{ ...next.attempts[0]!, fragments: [{ text: `参考[retrieval:${id}]。`, breakAfter: false }] }] });
+    await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
+    expect(root.querySelector('.dialogue-citation')!.textContent).toBe('〔1〕');
+    expect(root.querySelector('[data-dialogue-retrieval-anchor]')!.textContent).toContain('〔1〕');
+    root.querySelector('.dialogue-citation')!.click();
+    expect(options.jump).toHaveBeenCalledWith({ manuscriptId: 'manuscript', blockId: 'quoted' }); surface.stop();
   });
 
   it('does not render internal workspace JSON even if an origin-tagged response contains fragments', async () => {

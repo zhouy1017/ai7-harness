@@ -388,7 +388,7 @@ export function mountMenuControls(root: HTMLElement): () => void {
     const menu = target.closest<HTMLDetailsElement>(selector);
     if (!menu) return;
     if (event.key === 'Escape' && menu.open) { event.preventDefault(); event.stopPropagation(); close(menu, true); return; }
-    if (target.matches('input, textarea, select, [role="combobox"]')) return;
+    if (target.matches('input:not([type="checkbox"]), textarea, select, [role="combobox"]')) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation();
     menu.open = true; position();
@@ -413,7 +413,7 @@ export function mountMenuControls(root: HTMLElement): () => void {
 }
 
 export function menuDestinations(panel: HTMLElement): HTMLElement[] {
-  return Array.from(panel.querySelectorAll<HTMLElement>('button, summary')).filter((item) => {
+  return Array.from(panel.querySelectorAll<HTMLElement>('button, summary, input[type="checkbox"]')).filter((item) => {
     if (item.matches(':disabled')) return false;
     for (let node: HTMLElement | null = item; node && panel.contains(node); node = node.parentElement) {
       if (node.hidden || node.hasAttribute('inert')) return false;

@@ -1,3 +1,4 @@
+import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -436,6 +437,7 @@ async function click(renderer, label, name) {
 }
 /** Press the enabled button or native disclosure a selector names. */
 async function clickSelector(renderer, selector, name) {
+  if (selector.includes('export')) { await pointerClick(renderer, waitFor, selector, name); return; }
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLElement) || !button.matches('button, summary') || button.matches(':disabled')) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
@@ -639,6 +641,7 @@ async function reopenDeliverables(renderer, name) {
  * for DOCX. Returns the service's receipt of the export.
  */
 async function exportAs(renderer, format, destination, fileName, name) {
+  await clickSelector(renderer, `section.deliverables-publication [data-export-menu] > summary`, `${name}-menu`);
   await clickSelector(renderer, `[data-screen="book-deliverables"] section.deliverables-publication [data-export-format-action="${format}"]`, `${name}-open`);
   await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.exportCard()?.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, `${name}-written`, 120_000);
   const records = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ outcome: record.outcome, format: record.format, fileName: record.fileName, destination: record.destination, revisionLabel: record.target.revisionLabel, byteLength: record.byteLength, fileSha256: record.technical.fileSha256 })))`);
@@ -1154,6 +1157,7 @@ async function main() {
       expected[0] += FIRST_EDIT;
       await openDeliverables(native, name);
       at('export-open-current');
+      await clickSelector(native, 'section.deliverables-publication [data-export-menu] > summary', `${name}-export-menu`);
       await clickSelector(native, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', `${name}-open-export`);
       await waitFor(native, `window.__j07.exportCard()?.dataset.exportPhase==='done' && window.__j07.exportCard().querySelector('section.export-fidelity')`, `${name}-export-reviewed`, 120_000);
       const review = await native.evaluate(`window.ai7.reviewManuscriptExport({target:{kind:'current'},options:{includeAnnotations:true,includeSuggestions:true,includeEditorNotes:false},format:'docx'})`);
@@ -1527,6 +1531,7 @@ async function main() {
     // Markdown 备用格式 since Issue #500), focus on it.
     await openDeliverables(renderer, 'export');
     await assertRenderer(renderer, `(() => { const menus = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] [data-export-menu]')); return window.__j07.exportCard() === null && menus.length === 3 && menus.every(menu=>Array.from(menu.querySelectorAll('[data-export-format-action]')).map(node=>node.dataset.exportFormatAction).join(',')==='docx,pdf,markdown') && window.__j07.block().querySelector('section.export-records-section')?.dataset.exportRecords === '0'; })()`, 'export-openers-name-their-version');
+    await clickSelector(renderer, 'section.deliverables-publication [data-export-menu] > summary', 'export-current-menu');
     await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', 'export-open');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.exportCard()?.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'export-written', 120_000);
     at('export-receipt-recorded');
@@ -1611,15 +1616,18 @@ async function main() {
     await assertRenderer(renderer, `(() => { const prompt = window.__j07.block().querySelector('.publication-actuals-prompt'); return prompt?.textContent === ${JSON.stringify(ACTUALS_PROMPT)} && prompt.querySelectorAll('button, a, input, select, textarea, [tabindex]').length === 0 && prompt.closest('button, a') === null && prompt.nextElementSibling === window.__j07.action('actuals') && prompt.nextElementSibling?.textContent === '录入…'; })()`, 'actuals-prompt-pending-with-entry');
     await assertNoForbiddenWords(renderer, 'restart-without-forbidden-words');
     // The only controls that name 导出 are 导出… of each version (Issue #413); nothing publishes or sends.
-    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' && node.textContent === '导出…') && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
+    await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' || node.hasAttribute('data-export-clean')) && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
 
     at('export-cancel-creates-nothing');
     // This launch's Save dialog answers once more. 一审稿's 导出… reviews that milestone exactly as it was saved —
     // nothing to save first — and takes the destination; 取消 then closes the card with focus back on its opener,
     // and nothing is written or recorded.
     await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
-    await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-action="open"]`, 'cancel-open');
-    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-native-dialog', 120_000);
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-menu');
+    await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="markdown"]`, 'cancel-open');
+    await waitFor(renderer, `window.__j07.status().includes('取消') && window.__j07.exportCard()?.querySelector('.export-fidelity-details')?.open === true`, 'cancel-native-dialog', 120_000);
+    await exportAct(renderer, 'retry', 'cancel-retry');
+    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'cancelled'`, 'cancel-retry-keeps-card', 120_000);
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
 
     at('j14-designate-keyboard');
@@ -1678,7 +1686,17 @@ async function main() {
     await waitFor(renderer, `window.__j07.form() === null`, 'forced-colors-form-closed', 10_000);
 
     at('j14-export-keyboard');
-    await assertRenderer(renderer, `document.querySelectorAll('.deliverables-export-slot .export-preferences input').length === 6`, 'export-options-inline-without-a-dialog');
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await clickSelector(renderer, 'section.deliverables-publication [data-export-menu] > summary', 'export-keyboard-menu');
+      for (let index = 0; index < 5; index += 1) await press(renderer, 'ArrowDown');
+      await assertRenderer(renderer, `document.activeElement?.matches('input[data-export-option="includeAnnotations"]') === true`, 'export-options-inline-without-a-dialog');
+      await assertRenderer(renderer, `(() => { const rect = document.querySelector('section.deliverables-publication .export-menu-body').getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight; })()`, 'export-menu-within-window');
+      await press(renderer, 'ArrowDown');
+      await assertRenderer(renderer, `document.activeElement?.matches('input[data-export-option="includeSuggestions"]') === true`, 'export-next-switch-reachable');
+      await press(renderer, 'Escape');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('export-pdf');
     // Issue #500 (S64b): a launch whose Save dialog answers with a PDF. The same revision, PDF chosen: AI7 prints the
@@ -2019,7 +2037,7 @@ async function main() {
     at('document-delivery-export');
     // The export card is the delivered version's — 新闻稿 · 版本 2, DOCX chosen — and exports it under this launch's
     // Save-dialog answer; the Delivery Record then names the file, and the file reads as that version of the 新闻稿.
-    await assertRenderer(renderer, `(() => { const menu=document.querySelector('ol.production-document-deliveries > li [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'delivery-export-menu');
+    await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-menu] > summary', 'delivery-export-menu');
     await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-format-action="docx"]', 'delivery-export-start');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)}`, 'delivery-export-written', 120_000);
     await waitFor(renderer, `window.__j07.deliveries('news-release')[0]?.dataset.deliveryExport === 'created'`, 'delivery-export-on-the-record', 30_000);
