@@ -87,9 +87,12 @@ describe('the Agent 工作区 capability declaration', () => {
 describe('the 工作概览 entry to the Agent 工作区', () => {
   it('offers the workspace independently of a profile card', () => {
     const source = readFileSync(new URL('../../src/renderer/book-overview-screen.ts', import.meta.url), 'utf8');
-    expect(source).not.toContain('renderEditorialWorkspaceProfile');
     expect(source).toContain('AGENT_WORKSPACE_WORDS.overviewEntry');
-    expect(source).not.toContain('openAgentWorkspaceProfile');
+    const shell = readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8');
+    for (const owner of [shell, source]) {
+      expect(owner).not.toContain('renderEditorialWorkspaceProfile');
+      expect(owner).not.toContain('openAgentWorkspaceProfile');
+    }
   });
 });
 
