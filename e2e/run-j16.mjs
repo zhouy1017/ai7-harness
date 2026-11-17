@@ -1390,7 +1390,8 @@ async function main() {
     requireJourney(stopped.attempts[0].label === '回答已停止 · 内容不完整' && stopped.attempts[0].incomplete === '你停止了回答；只保留了完整的句子。' &&
       JSON.stringify(stopped.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
       JSON.stringify(stopped.actions) === JSON.stringify([['regenerate', '重新回答', 'enabled'], ['continue', '继续回答', 'enabled']]), 'dialogue-stopped-words', stopped);
-    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]') === null`, 'dialogue-stopped-convert-why');
+    at('dialogue-stopped-convert-hidden');
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]') === null`, 'dialogue-stopped-convert-hidden');
 
     at('dialogue-continue-after-mid-stream-stop');
     // Issue #833 synchronized J-16 delta: the held answer is stopped with complete fragments and an
@@ -1441,11 +1442,13 @@ async function main() {
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue' && document.activeElement === document.querySelector('#task-drawer-title') && document.querySelector('#task-drawer .dialogue')?.dataset.dialogue === 'ready'`, 'dialogue-keyboard-open', 10_000);
     let reached = false;
-    for (let presses = 0; presses < 12 && !reached; presses += 1) {
+    for (let presses = 0; presses < 24 && !reached; presses += 1) {
       await pressTab(renderer);
+      if (await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-convert-menu > summary') === true`)) await pressEnter(renderer);
       reached = await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-actions [data-dialogue-action]:focus-visible') === true`);
     }
     requireJourney(reached, 'dialogue-keyboard-actions');
+    await pressEscape(renderer);
     await pressEscape(renderer);
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'dialogue-keyboard-closed', 10_000);
 
@@ -1552,7 +1555,9 @@ async function main() {
       retrievalDialogue.anchors[0].sourceKind === 'manuscript' && retrievalDialogue.anchors[0].anchor.blockId === askBlock &&
       retrievalDialogue.anchors[0].anchor.end > retrievalDialogue.anchors[0].anchor.start && retrievalDialogue.retrievalWarning === null,
       'dialogue-retrieval-exact-anchor');
-    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-retrieval-anchor]', 'dialogue-retrieval-jump');
+    at('dialogue-numbered-citation');
+    await waitFor(renderer, `document.querySelector('#task-drawer .dialogue-citation')?.textContent === '〔1〕'`, 'dialogue-numbered-citation-visible');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue-citation', 'dialogue-numbered-citation-jump');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id="${askBlock}"]') !== null`, 'dialogue-retrieval-jumped');
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
@@ -1797,7 +1802,7 @@ async function main() {
     const promotingId = promoting.dialogueId;
     const promotingRead = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(promotingId)}, afterFragment: 0 }).then((dialogue) => ({ attemptId: dialogue.attempts.at(-1).attemptId, selection: dialogue.selection, attempts: dialogue.attempts.length }))`);
     await pointerClick(renderer, waitFor, '#task-drawer .dialogue-more > summary', 'dialogue-promote-more');
-    await clickSelector(renderer, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
+    await pointerClick(renderer, waitFor, '#task-drawer .dialogue [data-dialogue-promote]', 'dialogue-promote-click');
     const answerDraft = await waitForComposer(renderer, (composer) => composer.state === 'draft' && composer.answer !== null, 'dialogue-promote-composer', 30_000);
     const answerRecord = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: ${JSON.stringify(answerDraft.draftId)} }).then((read) => { const draft = read.drafts[0]; return { origin: draft.origin, answer: draft.version.answer, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion }; })`);
     requireJourney(answerDraft.answer === promotingRead.attemptId && answerRecord.origin === 'dialogue-answer' && answerRecord.answer?.dialogueId === promotingId &&

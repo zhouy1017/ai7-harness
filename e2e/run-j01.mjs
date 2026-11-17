@@ -1904,7 +1904,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   await assertRenderer(renderer, `(() => {
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
-    return option('suggestions').startsWith('转为 AI7 修改建议 · 推荐') && option('accepted-baseline').startsWith('直接并入正文 · 定稿基线') &&
+    return option('suggestions') === '转为 AI7 修改建议 · 推荐以修改前的正文导入，可精确对应的文字修改转为待处理的修改建议，结构修改作为关联原文件的批注保留。' && option('accepted-baseline') === '直接并入正文 · 定稿基线以接受全部修订后的正文导入，原始修订留在原文件中。' &&
       controls.querySelector('legend')?.textContent.includes(${JSON.stringify(previewLabel)}) &&
       controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
   })()`, 'word-preview-label-and-reading-reason');

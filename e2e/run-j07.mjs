@@ -1619,15 +1619,18 @@ async function main() {
     await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]')); const actions = Array.from(window.__j07.block().querySelectorAll('[data-publication-action]')).map((node) => node.dataset.publicationAction); return !controls.some((node) => /发布|发送/.test(node.textContent ?? '')) && controls.filter((node) => /导出/.test(node.textContent ?? '')).every((node) => node.dataset.exportAction === 'open' || node.hasAttribute('data-export-clean')) && JSON.stringify(actions) === '["designate","actuals"]' && ${EXPORT_MEMBERS_ONLY}; })()`, 'no-publish-or-send-action');
 
     at('export-cancel-creates-nothing');
-    // This launch's Save dialog answers once more. 一审稿's 导出… reviews that milestone exactly as it was saved —
-    // nothing to save first — and takes the destination; 取消 then closes the card with focus back on its opener,
-    // and nothing is written or recorded.
+    // Native cancellation of a lossless DOCX closes the card; lossy Markdown keeps its open rows,
+    // focuses the retry, and a second native cancellation still writes and records no export.
     await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
     await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-menu');
-    await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="markdown"]`, 'cancel-open');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="docx"]`, 'cancel-lossless-open');
+    await waitFor(renderer, `window.__j07.exportCard() === null && window.__j07.status().includes('取消')`, 'cancel-lossless-card-gone', 120_000);
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-menu] > summary`, 'cancel-lossy-menu');
+    await clickSelector(renderer, `ol.milestone-list > li[data-milestone-id="${first}"] [data-export-format-action="markdown"]`, 'cancel-open');
     await waitFor(renderer, `window.__j07.status().includes('取消') && window.__j07.exportCard()?.querySelector('.export-fidelity-details')?.open === true`, 'cancel-native-dialog', 120_000);
+    await assertRenderer(renderer, `(() => { window.__j07.cancelledCard = window.__j07.exportCard(); return document.activeElement === window.__j07.exportAction('retry'); })()`, 'cancel-retry-focused');
     await exportAct(renderer, 'retry', 'cancel-retry');
-    await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'cancelled'`, 'cancel-retry-keeps-card', 120_000);
+    await waitFor(renderer, `window.__j07.exportCard() !== window.__j07.cancelledCard && window.__j07.exportCard()?.dataset.exportPhase === 'cancelled'`, 'cancel-retry-keeps-card', 120_000);
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
 
     at('j14-designate-keyboard');

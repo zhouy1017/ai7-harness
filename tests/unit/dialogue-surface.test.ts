@@ -37,6 +37,7 @@ describe('the dialogue drawer', () => {
     root.querySelector('[data-dialogue-action="convert-edit"]')!.click();
     expect(root.querySelectorAll('textarea').find((node) => node.name === 'proposedText')!.value).toBe('改写内容');
     root.querySelector('[data-dialogue-action="convert-cancel"]')!.click();
+    expect(miniDocument.activeElement === root.querySelector('.dialogue-convert-menu summary')).toBe(true);
     root.querySelector('[data-dialogue-follow-up]')!.value = '再简洁一些。';
     root.querySelector('.dialogue-follow-up')!.dispatchEvent({ type: 'submit', bubbles: true });
     await vi.waitFor(() => expect(follow).toHaveBeenCalledWith({ dialogueId: 'dialogue', attemptId: 'first', question: '再简洁一些。' }));
@@ -77,6 +78,34 @@ describe('the dialogue drawer', () => {
     expect(root.querySelector('[data-dialogue-retrieval-anchor]')!.textContent).toContain('〔1〕');
     root.querySelector('.dialogue-citation')!.click();
     expect(options.jump).toHaveBeenCalledWith({ manuscriptId: 'manuscript', blockId: 'quoted' }); surface.stop();
+  });
+
+  it('updates the disclaimer when developer mode changes after mount', async () => {
+    setTechnicalLayerVisible(false); const { root, surface } = mount();
+    await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
+    expect(root.querySelector('.dialogue-authority') === null).toBe(true);
+    setTechnicalLayerVisible(true); surface.show('dialogue');
+    await vi.waitFor(() => expect(root.querySelectorAll('.dialogue-authority').length).toBe(1));
+    setTechnicalLayerVisible(false); surface.show('dialogue');
+    await vi.waitFor(() => expect(root.querySelectorAll('.dialogue-authority').length).toBe(0)); surface.stop();
+  });
+
+  it('uses incoming streaming anchors and leaves unlisted citations neutral', async () => {
+    const id = 'a'.repeat(64); const next = projection();
+    const first = { ...next.attempts[0]!, state: 'answering' as const, fragments: [{ text: `[retrieval:${'b'.repeat(64)}]`, breakAfter: false }] };
+    const { root, options, surface } = mount({ ...next, anchors: [], attempts: [first] });
+    await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
+    expect(root.querySelector('.dialogue-answer')!.textContent).toBe('〔稿件引用〕');
+    options.api.inspectDialogue = async () => ({ ...next, anchors: [{ candidateId: id, sourceKind: 'manuscript', sourceId: 'manuscript', revisionOrIndexDigest: id, anchor: { blockId: 'quoted', start: 0, end: 2 }, score: 1, preview: '' }],
+      attempts: [{ ...first, fragmentsFrom: 1, fragmentTotal: 2, fragments: [{ text: `[retrieval:${id}]`, breakAfter: false }] }] });
+    await vi.waitFor(() => expect(root.querySelectorAll('.dialogue-citation').length).toBe(1));
+    root.querySelector('.dialogue-citation')!.click(); expect(options.jump).toHaveBeenCalledWith({ manuscriptId: 'manuscript', blockId: 'quoted' }); surface.stop();
+  });
+
+  it('omits unavailable answer actions', async () => {
+    const { root, surface } = mount({ ...projection(), actions: { stop: false, continue: false, convert: false, regenerate: false } });
+    await vi.waitFor(() => expect(root.dataset['dialogue']).toBe('ready'));
+    expect(root.querySelectorAll('[data-dialogue-action="regenerate"]').length).toBe(0); surface.stop();
   });
 
   it('does not render internal workspace JSON even if an origin-tagged response contains fragments', async () => {

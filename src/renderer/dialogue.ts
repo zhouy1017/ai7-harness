@@ -25,7 +25,7 @@ import {
   DIALOGUE_SELECTION_HEADING,
   DIALOGUE_STATE_LABELS,
   DIALOGUE_STATUS,
-  DIALOGUE_PROMOTE_INCOMPLETE,
+  DIALOGUE_MENU_WORDS,
   DIALOGUE_PROMOTE_LABEL,
   DIALOGUE_PROMOTE_STATUS,
   dialogueAttemptHeading,
@@ -33,6 +33,7 @@ import {
   dialogueConvertedLine,
   dialogueIncompleteLine,
 } from './dialogue-labels.js';
+import { menuPanel } from './components/controls.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import { dialogueReplacementText } from './dialogue-answer.js';
 
@@ -108,7 +109,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   followUp.maxLength = MAX_DIALOGUE_QUESTION_CHARACTERS;
   followUp.required = true;
   followUp.dataset['dialogueFollowUp'] = '';
-  const followUpLabel = el('label', undefined, '追问');
+  const followUpLabel = el('label', undefined, DIALOGUE_MENU_WORDS.followUp);
   followUpLabel.htmlFor = followUp.id;
   const sendFollowUp = el('button', 'secondary', '发送追问');
   sendFollowUp.type = 'submit';
@@ -120,7 +121,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   });
   followUpForm.hidden = true;
   element.append(context, reasoning, attemptsHost, actions, convertHost, followUpForm);
-  if (technicalLayerVisible) element.append(note);
+
 
   let dialogueId: string | null = null;
   let dialogue: DialogueProjection | null = null;
@@ -138,18 +139,18 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     timer = undefined;
   }
 
-  function fragmentNode(text: string, breakAfter: boolean): HTMLElement {
+  function fragmentNode(text: string, breakAfter: boolean, anchors = dialogue?.anchors): HTMLElement {
     const node = el('span', `dialogue-fragment${breakAfter ? ' dialogue-fragment-break' : ''}`);
     const pattern = /\[retrieval:([0-9a-f]{64})\]/gu;
     let cursor = 0;
     for (const match of text.matchAll(pattern)) {
       node.append(text.slice(cursor, match.index));
-      const index = dialogue?.anchors?.findIndex(candidate => candidate.candidateId === match[1]) ?? -1;
-      const candidate = dialogue?.anchors?.[index];
+      const index = anchors?.findIndex(candidate => candidate.candidateId === match[1]) ?? -1;
+      const candidate = anchors?.[index];
       if (candidate?.anchor.blockId !== undefined) {
         const citation = el('button', 'quiet dialogue-citation', `〔${index + 1}〕`); citation.type = 'button';
         citation.addEventListener('click', () => options.jump({ manuscriptId: dialogue!.manuscriptId, blockId: candidate.anchor.blockId! })); node.append(citation);
-      } else node.append('〔稿件引用不可用〕');
+      } else node.append('〔稿件引用〕');
       cursor = match.index + match[0].length;
     }
     node.append(text.slice(cursor));
@@ -196,6 +197,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   /** Paint the whole dialogue: its context, every attempt and the actions the latest allows. */
   function paint(next: DialogueProjection): void {
     dialogue = next;
+    if (technicalLayerVisible) element.append(note); else note.remove();
     element.dataset['dialogue'] = 'ready';
     element.dataset['dialogueId'] = next.dialogueId;
     const latest = next.attempts.at(-1) ?? null;
@@ -265,18 +267,18 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     }
     if (latest !== undefined && latest.state !== 'answering') {
       buttons.push(actionButton('continue', can.continue, can.continue, () => void act('continue')));
-      buttons.push(actionButton('regenerate', can.regenerate, !can.continue, () => void act('regenerate')));
+      if (can.regenerate) buttons.push(actionButton('regenerate', true, !can.continue, () => void act('regenerate')));
     }
-    const convertMenu = el('details', 'dialogue-convert-menu'); convertMenu.hidden = !can.convert || converting;
+    const convertMenu = el('details', 'dialogue-convert-menu ui-disclosure-menu'); convertMenu.hidden = !can.convert || converting;
     if (can.convert && !converting) {
-      const direct = actionButton('convert', true, false, () => quickConvert()); direct.textContent = '直接';
-      const edit = actionButton('convert-edit', true, false, () => openConvert()); edit.textContent = '编辑后';
-      convertMenu.append(el('summary', undefined, '转为修改建议 ▾'), direct, edit);
+      const direct = actionButton('convert', true, false, () => quickConvert()); direct.textContent = DIALOGUE_MENU_WORDS.direct;
+      const edit = actionButton('convert-edit', true, false, () => openConvert()); edit.textContent = DIALOGUE_MENU_WORDS.edit;
+      convertMenu.append(el('summary', undefined, DIALOGUE_MENU_WORDS.convert), menuPanel(direct, edit));
     }
-    const more = el('details', 'dialogue-more'); more.append(el('summary', undefined, '更多'), promoteRow);
+    const more = el('details', 'dialogue-more ui-disclosure-menu'); const morePanel = menuPanel(promoteRow); more.append(el('summary', undefined, DIALOGUE_MENU_WORDS.more), morePanel);
     actions.replaceChildren(convertMenu, ...buttons.filter(button => button.dataset['dialogueAction'] !== 'continue'), more);
     const continuation = buttons.find(button => button.dataset['dialogueAction'] === 'continue');
-    if (continuation && !continuation.hidden) more.append(continuation);
+    if (continuation && !continuation.hidden) morePanel.append(continuation);
     paintPromote(latest);
     paintReasoning(latest);
     more.hidden = !can.convert && !can.continue;
@@ -299,7 +301,6 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     promote.dataset['dialoguePromote'] = latest.attemptId;
     const can = target.actions.convert;
     promote.disabled = working || !can;
-    if (!can) promote.title = DIALOGUE_PROMOTE_INCOMPLETE;
     promote.addEventListener('click', () => {
       if (promote.disabled) return;
       promote.disabled = true;
@@ -345,7 +346,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
         paint(next);
       } else if (appends(next)) {
         // New fragments are appended; nothing on screen is redrawn and focus stays where it is (DIALOG-006, 010).
-        for (const fragment of next.attempts.at(-1)!.fragments) shown!.host.append(fragmentNode(fragment.text, fragment.breakAfter));
+        for (const fragment of next.attempts.at(-1)!.fragments) shown!.host.append(fragmentNode(fragment.text, fragment.breakAfter, next.anchors));
         shown!.count = next.attempts.at(-1)!.fragmentTotal;
         paintReasoning(next.attempts.at(-1));
       } else {
@@ -483,7 +484,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       converting = false;
       form.remove();
       paintActions();
-      if (focusConvert) actions.querySelector<HTMLButtonElement>('[data-dialogue-action="convert"]')?.focus();
+      if (focusConvert) actions.querySelector<HTMLElement>('.dialogue-convert-menu summary')?.focus();
     };
     cancel.addEventListener('click', () => closeForm(true));
     form.addEventListener('keydown', (event) => {
@@ -508,7 +509,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
         options.setStatus(result.completionLabel, 'success');
         if (dialogueId === result.dialogue.dialogueId) paint(result.dialogue);
         options.onConverted(result.dialogue, result.markId);
-        actions.querySelector<HTMLButtonElement>('[data-dialogue-action="convert"]')?.focus();
+        actions.querySelector<HTMLElement>('.dialogue-convert-menu summary')?.focus();
       }, (error: unknown) => {
         submit.disabled = false;
         options.setStatus(options.errorMessage(error, DIALOGUE_STATUS.convertFailed), 'error');

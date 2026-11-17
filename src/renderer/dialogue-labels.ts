@@ -97,8 +97,6 @@ export function dialogueIncompleteLine(attempt: Pick<DialogueAttemptProjection, 
   }
 }
 
-/** An Incomplete Dialogue Answer is never converted (DIALOG-013). */
-export const DIALOGUE_CONVERT_INCOMPLETE = '内容不完整的回答不能转为修改建议。';
 
 // ---- 转为修改建议 ---------------------------------------------------------------------------------------------
 
@@ -138,7 +136,6 @@ export function dialogueResultTaskLine(dialogue: Pick<DialogueProjection, 'quest
 
 /** 转为任务意图草稿 on a completed dialogue answer (Issue #52, S17b; DIALOG-016). */
 export const DIALOGUE_PROMOTE_LABEL = '转为任务意图草稿';
-export const DIALOGUE_PROMOTE_INCOMPLETE = '内容不完整的回答不能转为任务意图草稿。';
 export const DIALOGUE_PROMOTE_STATUS = {
   promoting: '正在转为任务意图草稿…',
   promoted: '已转为任务意图草稿：它带着这次回答和所选文字，不会发送，也不会开始任务。',
@@ -151,3 +148,5 @@ export const DIALOGUE_PROMOTE_STATUS = {
 export function dialogueReasoningLine(anchors: number): string {
   return anchors > 0 ? `正在比对检索到的 ${anchors} 个段落…` : '正在检索与所选文字相关的段落…';
 }
+
+export const DIALOGUE_MENU_WORDS = { convert: '转为修改建议 ▾', direct: '直接', edit: '编辑后', more: '更多', followUp: '追问' } as const;

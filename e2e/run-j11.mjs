@@ -2185,6 +2185,7 @@ async function main() {
       JSON.stringify(versioned.templates[1][3]) === JSON.stringify([['prepare', '起草', false]]), 'readers-report-versioned-words', versioned);
     await mkdir(draftExportsRoot, { recursive: true });
     await pointerClick(renderer, waitFor, '.evaluation-readers-report li[data-template="author"] [data-export-menu] > summary', 'readers-report-export-menu');
+    await assertRenderer(renderer, `(() => { const menu=document.querySelector('.evaluation-readers-report li[data-template="author"] [data-export-menu]'); return menu.open && [...menu.querySelectorAll('[data-export-format-action]')].map(button => button.dataset.exportFormatAction).join(',') === 'docx,pdf,markdown' && menu.querySelectorAll('[data-export-clean]').length === 1; })()`, 'readers-report-export-four-choices');
     await pointerClick(renderer, waitFor, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-export-format-action="docx"]', 'readers-report-export-open');
     const draftCard = `document.querySelector('[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export')`;
     await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'done' && ${draftCard}.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'readers-report-export-written', 120_000);

@@ -80,7 +80,7 @@ export function renderExportFidelity(
   section.dataset['exportDegraded'] = reviewed.degraded ? 'true' : 'false';
   section.dataset['exportRestoration'] = reviewed.restoration;
   if (parts.heading) section.append(el('h5', undefined, EXPORT_FIDELITY_HEADING));
-  section.append(el('p', 'export-restoration-line', reviewed.restorationLine.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线')));
+  section.append(el('p', 'export-restoration-line', reviewed.restorationLine.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线').replaceAll('修订建议', '修改建议')));
   if (reviewed.retentionSummary !== null) section.append(el('p', 'export-retention-summary', reviewed.retentionSummary));
   const list = el('ol', 'export-fidelity-list');
   for (const row of exportShownRows(reviewed.fidelity)) list.append(renderExportFidelityRow(row));
@@ -152,7 +152,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     if (phase === 'cancelled' && activeTarget !== null) {
       const target = activeTarget;
       const retry = el('button', 'secondary', '重新选择保存位置'); retry.type = 'button'; retry.dataset['exportAction'] = 'retry';
-      retry.addEventListener('click', () => void exportFile(target, reviewed?.options, reviewed?.format, false)); section.append(retry);
+      retry.addEventListener('click', () => void exportFile(target, reviewed?.options, reviewed?.format, false)); section.append(retry, actionButton('close', 'quiet', () => reset()));
     }
     root.replaceChildren(section);
   }
@@ -196,6 +196,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     } finally {
       busy = false; render();
       if (receipt !== null) root.querySelector<HTMLElement>('[data-export-action="reveal"], [data-export-action="close"]')?.focus();
+      else if (phase === 'cancelled') root.querySelector<HTMLElement>('[data-export-action="retry"]')?.focus();
       else if (phase === 'idle') opener?.focus();
     }
   }

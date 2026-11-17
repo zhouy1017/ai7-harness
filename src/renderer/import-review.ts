@@ -19,7 +19,7 @@ import { renderFidelityReview } from './import-fidelity.js';
 import { STRUCTURE_CHOICE_REQUIRED, renderStructureReview } from './import-structure.js';
 import { bookChoiceWords } from './technical-layer-labels.js';
 import {
-  wordIntakeRefusalLabel,
+  wordIntakeRefusalLabel, WORD_IMPORT_CONSEQUENCES, unsupportedWordImportText, WORD_IMPORT_REASONS,
   wordImportModeOption,
   reimportFidelityHeading,
   WORD_IMPORT_MODE_NAMES,
@@ -108,9 +108,9 @@ export function createImportReview(options: ImportReviewOptions) {
     const groupHeading = element('legend', undefined, 'Word 修订导入方式');
     group.append(groupHeading);
     if (projection.compatibility === 'unsupported') {
-      group.append(element('p', undefined, `此文件含暂不支持的 Word 修订，不能作为首份稿件导入。请在 Word 中接受或拒绝全部修订后重新保存，再导入；也可以将此文件保留为来源材料。`));
+      group.append(element('p', undefined, unsupportedWordImportText(projection.locationCount)));
       const reasons = element('ul'); for (const code of projection.reasonCodes) reasons.append(element('li', undefined, wordIntakeRefusalLabel(code)));
-      const details = element('details'); details.append(element('summary', undefined, '查看原因'), reasons); group.append(details);
+      const details = element('details'); details.append(element('summary', undefined, WORD_IMPORT_REASONS), reasons); group.append(details);
       return { elements: [group], choice: () => undefined, allowed: () => false,
         bind: (control) => { control.disabled = true; }, setBusy: () => undefined };
     }
@@ -127,7 +127,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
       input.name = `word-import-mode-${staged.draftId}`; input.value = mode; input.dataset['wordImportMode'] = mode;
       line.append(input, element('span', undefined, wordImportModeOption(mode)));
-      line.append(element('span', 'field-note', mode === 'suggestions' ? '以修改前的正文导入，每处 Word 修订转为待处理的修改建议。' : '以接受全部修订后的正文导入，原始修订留在原文件中。')); group.append(line); modes.push({ input, mode });
+      line.append(element('span', 'field-note', WORD_IMPORT_CONSEQUENCES[mode])); group.append(line); modes.push({ input, mode });
       input.addEventListener('change', () => { if (!input.checked || busy) return;
         selected = { ...selected, mode, acceptedBaselineConfirmed: mode === 'accepted-baseline' }; changed(); });
     }
