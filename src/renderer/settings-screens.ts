@@ -100,9 +100,10 @@ async function renderNotificationSettings(): Promise<void> {
     }
   };
   for (const [key, label] of rows) {
-    const row = element('label', 'field');
+    const row = element('label', 'settings-row');
     const control = document.createElement('input');
     control.type = 'checkbox';
+    control.setAttribute('role', 'switch');
     control.dataset['notificationPreference'] = key;
     controls.set(key, control);
     control.addEventListener('change', () => {
@@ -116,7 +117,9 @@ async function renderNotificationSettings(): Promise<void> {
         paint();
       });
     });
-    row.append(control, document.createTextNode(label));
+    const toggle = element('span', 'settings-switch');
+    toggle.append(control);
+    row.append(element('span', 'settings-row-copy', label), toggle);
     content.append(row);
   }
   paint();

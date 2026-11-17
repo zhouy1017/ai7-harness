@@ -218,6 +218,21 @@ describe('renderer projection observer', () => {
 });
 
 describe('quiet notice lifetime', () => {
+  it('clears a saving status when protection has no separate cause to announce', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update('正在保存…', 'busy'); update('', 'error');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('确认结果与当前编辑不符', 'error');
+      expect(surface.textContent).toBe('确认结果与当前编辑不符');
+      expect(surface.dataset['tone']).toBe('error');
+    } finally { restore(); }
+  });
+
   it.each(['error', 'busy'] as const)('keeps %s visible beyond the transient lifetime without a toast', (tone) => {
     const restore = installMiniDom();
     vi.useFakeTimers();

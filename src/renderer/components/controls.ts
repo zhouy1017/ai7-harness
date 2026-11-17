@@ -251,7 +251,7 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
     const inFilter = event.target === filter;
     if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close(true); return; }
     if (event.key === 'Tab') { close(); return; }
-    if (event.key === 'Enter' && open) { event.preventDefault(); event.stopPropagation(); choose(active); return; }
+    if ((event.key === 'Enter' || event.key === ' ' && !inFilter && !(typeahead.length > 0 && Date.now() - typedAt <= 700)) && open) { event.preventDefault(); event.stopPropagation(); choose(active); return; }
     if (['ArrowDown', 'ArrowUp'].includes(event.key) || !inFilter && ['Home', 'End'].includes(event.key)) {
       event.preventDefault();
       event.stopPropagation();
@@ -261,7 +261,7 @@ export function enhanceSelect(select: HTMLSelectElement): EnhancedSelect | null 
         : Math.max(0, Math.min(visible.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
       setActive(visible[index] ?? -1); return;
     }
-    if (!inFilter && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && event.key !== ' ') {
+    if (!inFilter && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key !== ' ' || typeahead.length > 0 && Date.now() - typedAt <= 700)) {
       event.preventDefault();
       const now = Date.now(); typeahead = now - typedAt > 700 ? event.key : typeahead + event.key; typedAt = now;
       if (!open) show();
@@ -541,4 +541,10 @@ export function tabButton(options: { label: string; id: string; panel: string; s
     tabs[next]?.click();
   });
   return button;
+}
+
+/** Shared presentation; native controls retain their values and form ownership. */
+export function styleInput(input: HTMLInputElement): HTMLInputElement {
+  input.classList.add(input.type === 'checkbox' ? 'ui-checkbox' : 'ui-input');
+  return input;
 }

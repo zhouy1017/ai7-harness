@@ -242,13 +242,15 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     } else if (sheet === null) {
       const opener = action(WRITING_ACTIONS.open, 'secondary', 'new', () => {
         sheet = newSheet(null);
-        paint('legend');
+        paint('[data-writing-field="title"]');
       });
       opener.disabled = busy || page.unavailable !== null;
       opener.setAttribute('aria-expanded', 'false');
       section.append(opener);
     } else {
-      section.append(sheetNode(page, sheet));
+      const surface = sheetNode(page, sheet);
+      section.append(surface);
+      surface.show();
     }
     if (keep !== null) section.querySelector<HTMLElement>(keep)?.focus();
     // 创建后直接打开 (Issue #1403): a draft the editor began here is made a document under its title and opened.
@@ -271,7 +273,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   }
 
   /** The sheet: types, references, the editor's words, the four rows, and 先看计划 / 快速开始 / 取消. */
-  function sheetNode(page: WritingTaskProjection, state: Sheet): HTMLElement {
+  function sheetNode(page: WritingTaskProjection, state: Sheet): HTMLDialogElement {
     const form = el('form', 'writing-sheet');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
@@ -400,7 +402,6 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     sheetContent(surface, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== row), row, form);
     surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
     surface.addEventListener('close', () => { if (!busy) { sheet = null; paint('[data-writing-action="new"]'); } });
-    surface.open = true;
     return surface;
   }
 
@@ -479,7 +480,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const state = sheet;
     if (state.typeId === null) {
       state.problem = WRITING_PICK_TYPE;
-      paint('legend');
+      paint('[data-writing-field="title"]');
       return;
     }
     const tooLong = (['audience', 'channel', 'requirements'] as const)
@@ -617,7 +618,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     refresh,
     open: (typeId, title) => {
       sheet = newSheet(typeId, title);
-      if (projection !== null) paint('legend');
+      if (projection !== null) paint('[data-writing-field="title"]');
       else refresh();
     },
     destroy: () => {

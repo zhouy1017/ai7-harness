@@ -1679,7 +1679,12 @@ async function main() {
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
-    await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
+    await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet?.open && sheet.contains(document.activeElement) && document.activeElement!==sheet; })()`, 'overview-sheet-focus');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
+    await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet-reopen');
     const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
     await selectOverviewBooks(overviewBooks.slice(0, 2));
     await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-two');
@@ -1702,6 +1707,18 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
     // #1375: release two real reading units; both changed cards must keep More and summary focus in ordinary mode.
     const pollOverviewSelector=`.task-overview-card[data-task-item="${overviewIds[0]}"]`;
+    for (const [width, height] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      const summarySelector = `${pollOverviewSelector} .task-overview-more > summary`;
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-open');
+      await assertRenderer(renderer, `(() => {
+        const panel = document.querySelector(${JSON.stringify(pollOverviewSelector)}).querySelector('.ui-menu-panel');
+        const box = panel.getBoundingClientRect(), minimum = parseFloat(getComputedStyle(panel).minWidth);
+        return innerWidth === ${width} && innerHeight === ${height} && minimum > 0 && box.width >= minimum && box.right <= innerWidth && box.left >= 0;
+      })()`, 'overview-ordinary-menu-geometry');
+      await pointerClick(renderer, waitFor, summarySelector, 'overview-ordinary-menu-close');
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await assertRenderer(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card.querySelector('.task-overview-more');more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'overview-more-poll-open');
     for(const done of [2,3]) {
       await renderer.evaluate(`globalThis.__j09PollCard=document.querySelector(${JSON.stringify(pollOverviewSelector)})`);

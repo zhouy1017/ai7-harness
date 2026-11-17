@@ -1,3 +1,4 @@
+import { styleInput } from './controls.js';
 import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation, type RuntimeExecutionConfig, type TaskExecutionLaunchResult } from '../../shared/runtime-execution-config.js';
 import type { ServiceOperationMap, TaskLaunchPreviewInput, TaskPlanKind, RendererApi } from '../../shared/protocol.js';
 import type { PlanEditsProjection } from '../../shared/protocol/analysis-plan.js';
@@ -94,7 +95,7 @@ export const LAUNCH_BUDGET_TIERS: ReadonlyArray<readonly [string, string]> = [
   ['50000', '较少'], ['100000', '标准（推荐）'], ['200000', '较多'], ['', '不设上限'],
 ];
 export function launchBudgetControl(current: number | null): HTMLSelectElement {
-  const budget = el('select'); budget.dataset['taskLaunchOption'] = 'budget'; budget.setAttribute('aria-label', '本次用量');
+  const budget = el('select', 'ui-input'); budget.dataset['taskLaunchOption'] = 'budget'; budget.setAttribute('aria-label', '本次用量');
   const value = current === null ? '' : String(current);
   const tiers = [...LAUNCH_BUDGET_TIERS];
   if (!tiers.some(([entry]) => entry === value)) tiers.push([value, '上次上限']);
@@ -169,7 +170,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
 
   const runOptions = el('div', 'task-launch-option-rows');
   const budget = technicalLayerVisible ? el('input') : launchBudgetControl(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? null);
-  if (budget instanceof HTMLInputElement) { budget.inputMode = 'numeric'; budget.value = String(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? ''); budget.dataset['taskLaunchOption'] = 'budget'; budget.setAttribute('aria-label', '本次预算上限'); }
+  if (budget instanceof HTMLInputElement) { styleInput(budget); budget.inputMode = 'numeric'; budget.value = String(request.input.planEdits?.runBudgetCeiling?.maxTotalTokens ?? ''); budget.dataset['taskLaunchOption'] = 'budget'; budget.setAttribute('aria-label', '本次预算上限'); }
   const previousBudget = budget.value;
   const budgetLabel = el('label', undefined, '本次用量'); budgetLabel.append(budget, el('small', undefined, '达到上限后暂停，可调整后重新开始。')); runOptions.append(budgetLabel);
   usage.textContent = '计划预览按当前稿件和本次选项计算，不记录任务；开始时固定当前稿件。';
@@ -180,7 +181,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     const option = el('option', undefined, label); option.value = value!; retry.append(option);
   }
   retry.value = request.input.planEdits?.askFirstAdaptations?.includes('safe-retry') ? 'ask-first' : request.input.planEdits?.disallowedAdaptations.includes('safe-retry') ? 'never' : 'auto';
-  const sampling = el('input'); sampling.type = 'checkbox'; sampling.dataset['taskLaunchOption'] = 'sampling';
+  const sampling = el('input'); sampling.type = 'checkbox'; styleInput(sampling); sampling.dataset['taskLaunchOption'] = 'sampling';
   sampling.checked = !request.input.planEdits?.removedSteps.includes('assurance-sampling');
   const retryLabel = el('label', undefined, '遇到失败时'); retryLabel.append(retry);
   retryLabel.append(el('small', undefined, '仅处理可重试的失败，其他失败仍会停下。')); runOptions.append(retryLabel);

@@ -1,3 +1,4 @@
+import { styleInput } from './components/controls.js';
 import type { ExemplarBookProjection, ExemplarProjection, RendererApi, ImportedExemplarPreview } from '../shared/protocol.js';
 import { technicalWords } from './technical-layer.js';
 
@@ -28,7 +29,7 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
     form.className = 'exemplar-import-form';
     const fields = (caption: string, value: string, maximum: number): HTMLInputElement => {
       const label = node('label', caption);
-      const input = node('input');
+      const input = styleInput(node('input'));
       input.value = value;
       input.maxLength = maximum;
       input.required = true;
