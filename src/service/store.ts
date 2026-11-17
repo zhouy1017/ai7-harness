@@ -1,3 +1,4 @@
+import { writeImportedManuscriptRows } from './import-intake-operations.js';
 import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
@@ -11764,50 +11765,10 @@ export class EditorialStore {
           )
           .run(degradationDecisionId, fidelityReviewId, decision, now);
       }
-      this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'primary', ?)").run(manuscriptId, bookId, now);
-      this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)').run(branchId, manuscriptId, '主分支', now);
-      this.#authority
-        .prepare(
-          `INSERT INTO manuscript_revisions(
-             revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
-             source_version_id, revision_digest, created_at
-           ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
-        )
-        .run(revisionId, manuscriptId, branchId, sourceVersionId, revisionDigest, now);
-      this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(revisionId, branchId);
-      if (!shaped) {
-        this.#authority.prepare(
-          `INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id)
-           SELECT staged_block_id, ?, ? FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
-        ).run(manuscriptId, revisionId, input.draftId);
-        this.#authority.prepare(
-          `INSERT INTO manuscript_block_versions(
-             revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-           ) SELECT ?, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
-             FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
-        ).run(revisionId, input.draftId);
-        this.#authority.prepare(
-          `INSERT INTO working_blocks(
-             branch_id, block_id, position, kind, level, text, digest, grapheme_length
-           ) SELECT ?, staged_block_id, position, kind, level, text, digest, grapheme_length
-             FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
-        ).run(branchId, input.draftId);
-        // ADR 0086 §3: every block of r1 is its staged body paragraph, which the staged sources name.
-        const mapped = word === undefined ? this.#authority.prepare(
-          `INSERT INTO manuscript_block_sources(
-             revision_id, block_id, source_version_id, source_part, source_paragraph_index,
-             box_ordinal, box_paragraph_ordinal, source_paragraph_digest, created_at
-           ) SELECT ?, b.staged_block_id, ?, 'body', s.source_paragraph_index, NULL, NULL, b.digest, ?
-             FROM staged_import_blocks b
-             JOIN staged_import_block_sources s ON s.draft_id = b.draft_id AND s.position = b.position
-             WHERE b.draft_id = ? ORDER BY b.position`,
-        ).run(revisionId, sourceVersionId, now, input.draftId) : null;
-        const noted = commitNoteSources(this.#authority, { revisionId, sourceVersionId, draftId: input.draftId, createdAt: now });
-        requireStore(mapped === null || Number(mapped.changes) + noted === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
-      } else {
-        ({ blockCount, unmapped: unmappedBlocks } = insertMergedImportBlocks(this.#authority,
-          { draftId: input.draftId, manuscriptId, revisionId, branchId, sourceVersionId, now }, merged ?? [], structure));
-      }
+      const written = writeImportedManuscriptRows(this.#authority, {
+        input, bookId, manuscriptId, branchId, revisionId, sourceVersionId, revisionDigest, workingDigest,
+        now, shaped, word, snapshot, blockCount, unmappedBlocks, characterCount, merged, structure,
+      }, () => {
       this.#authority
         .prepare(
           `INSERT INTO workflow_profiles(
@@ -11896,19 +11857,10 @@ export class EditorialStore {
           provenanceId,
           now,
         );
-      this.#authority
-        .prepare(
-          `INSERT INTO branch_working_state(
-             branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
-             total_graphemes, history_sequence, last_checkpoint_sequence
-           ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
-        )
-        .run(branchId, manuscriptId, revisionId, workingDigest, characterCount);
-      requireStore(
-        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
-        'IMPORT_POSTCONDITION_FAILED',
-        '稿件索引无法由暂存快照精确建立。',
-      );
+        return immutableResult;
+      }, (branchId) => this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)));
+      ({ blockCount, unmappedBlocks } = written);
+      const immutableResult = written.between;
       // Issue #411 (D5): the file's comments and tracked changes become 批注 and 修改建议 on r1 in this same
       // transaction, whose source is the file's author — all of them, or no import. A staged body block keeps
       // its identity in r1 whether or not text boxes were merged.
