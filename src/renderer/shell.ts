@@ -349,7 +349,14 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   bookGroup.setAttribute('aria-label', SHELL_LABELS.currentBook);
   bookGroup.hidden = true;
   const bookHeading = el('p', 'sidebar-current-book sidebar-group-label');
-  bookGroup.append(bookHeading);
+  // The open Book has no row in the list below, so its 置顶 star and menu live on its heading (#1521).
+  const bookHeadingRow = el('div', 'sidebar-book-row sidebar-current-book-row');
+  const currentPin = el('button', 'sidebar-pin', '☆');
+  currentPin.type = 'button';
+  currentPin.dataset['navCurrentPin'] = '';
+  currentPin.hidden = true;
+  bookHeadingRow.append(bookHeading, currentPin);
+  bookGroup.append(bookHeadingRow);
   const sectionLinks = new Map<ShellBookSection, HTMLAnchorElement>();
   let agentWorkspaceLink: HTMLAnchorElement | null = null;
   for (const group of SHELL_BOOK_GROUPS) {
@@ -397,6 +404,35 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   bookMenu.setAttribute('aria-label', '图书操作');
   let bookMenuOpen = false;
   bookMenu.addEventListener('toggle', (event) => { bookMenuOpen = (event as ToggleEvent).newState === 'open'; });
+  /** One pin write for the list's star, the heading's star and the menu: the same preference, the same failure line. */
+  const togglePinOf = (bookId: string, title: string): void => {
+    if (interrupted) return;
+    void preferences.togglePin({ bookId, title }, options.pinLimit).catch((error: unknown) => {
+      options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
+    });
+  };
+  /** The right-click menu of a Book (a list row or the open Book's heading): its one action presses that Book's star. */
+  const openPinMenu = (event: MouseEvent, pin: HTMLButtonElement): void => {
+    event.preventDefault();
+    if (interrupted) return;
+    const action = el('button', 'quiet', pin.title);
+    action.type = 'button';
+    action.setAttribute('role', 'menuitem');
+    action.addEventListener('click', () => {
+      bookMenu.hidePopover();
+      bookMenuOpen = false;
+      pin.focus();
+      pin.click();
+    });
+    bookMenu.replaceChildren(action);
+    bookMenu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 240))}px`;
+    bookMenu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 48))}px`;
+    bookMenu.showPopover();
+    bookMenuOpen = true;
+    action.focus();
+  };
+  currentPin.addEventListener('click', () => { if (book !== null) togglePinOf(book.bookId, book.title); });
+  bookHeadingRow.addEventListener('contextmenu', (event) => { if (book !== null) openPinMenu(event, currentPin); });
   // With a Book open its own groups lead the sidebar (Issue #1413 cluster 5); without one the group is hidden.
   sidebar.replaceChildren(bookGroup, destinations, books, foot, bookMenu);
 
@@ -415,6 +451,14 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     const focusBook = focused?.dataset[focusKind];
     options.preferenceNotice.textContent = preferences.notice ?? '';
     options.preferenceNotice.hidden = preferences.notice === null;
+    // The open Book's star keeps its element (and so its focus) across a pin or unpin; only its state is painted.
+    const heldPinned = book !== null && values['shell.pinnedBooks'].some((entry) => entry.bookId === book!.bookId);
+    const pinName = book === null ? '' : heldPinned ? SHELL_LABELS.unpin(book.title) : SHELL_LABELS.pin(book.title);
+    currentPin.hidden = book === null;
+    currentPin.textContent = heldPinned ? '★' : '☆';
+    currentPin.setAttribute('aria-pressed', String(heldPinned));
+    currentPin.setAttribute('aria-label', pinName);
+    currentPin.title = pinName;
     const rows = sidebarBookRows(values['shell.pinnedBooks'], values['shell.recentBooks'], book?.bookId ?? null);
     const list = (heading: string, entries: ReadonlyArray<SidebarBookRow>, kind: 'pinned' | 'recent'): HTMLElement | null => {
       if (entries.length === 0) return null;
@@ -437,31 +481,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         pin.setAttribute('aria-pressed', String(row.pinned));
         pin.setAttribute('aria-label', row.pinned ? SHELL_LABELS.unpin(row.title) : SHELL_LABELS.pin(row.title));
         pin.title = pin.getAttribute('aria-label') ?? '';
-        pin.addEventListener('click', () => {
-          if (interrupted) return;
-          void preferences.togglePin({ bookId: row.bookId, title: row.title }, options.pinLimit).catch((error: unknown) => {
-            options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
-          });
-        });
-        item.addEventListener('contextmenu', (event) => {
-          event.preventDefault();
-          if (interrupted) return;
-          const action = el('button', 'quiet', pin.title);
-          action.type = 'button';
-          action.setAttribute('role', 'menuitem');
-          action.addEventListener('click', () => {
-            bookMenu.hidePopover();
-            bookMenuOpen = false;
-            pin.focus();
-            pin.click();
-          });
-          bookMenu.replaceChildren(action);
-          bookMenu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 240))}px`;
-          bookMenu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 48))}px`;
-          bookMenu.showPopover();
-          bookMenuOpen = true;
-          action.focus();
-        });
+        pin.addEventListener('click', () => togglePinOf(row.bookId, row.title));
+        item.addEventListener('contextmenu', (event) => openPinMenu(event, pin));
         item.append(link, pin);
         items.append(item);
       }

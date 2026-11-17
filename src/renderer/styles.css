@@ -154,6 +154,8 @@ body { padding-left: var(--sidebar-width); }
 /* Issue #1413 cluster 5: the current Book leads, set off by its title; at most three other Books show, the rest fold. */
 .sidebar-book:not([hidden]) { order: -1; padding: .35rem 0 .45rem; border-top: 0; border-bottom: 1px solid var(--boundary); }
 .sidebar-book .sidebar-current-book { color: var(--text); font-size: .9rem; letter-spacing: 0; }
+.sidebar-current-book-row .sidebar-current-book { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.sidebar-current-book-row:hover .sidebar-current-book, .sidebar-current-book-row:focus-within .sidebar-current-book { padding-right: 30px; }
 .sidebar-more-books > summary { list-style: none; color: var(--text-subdued); font-size: .82rem; font-weight: 600; }
 .sidebar-more-books > summary::-webkit-details-marker { display: none; }
 .sidebar-more-books[open] > summary { color: var(--text); }
