@@ -1,4 +1,5 @@
 import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { statusCardExpression } from './task-status-card.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1734,6 +1735,13 @@ async function main() {
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
     await overviewAction(fourth.itemId, 'run');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
+    // 状态卡 (Issue #1527): the Run under way in ordinary mode is one card — its bar, stage and time, 暂停 and 取消任务 — at the wide window and at the Gate's.
+    at('task-status-running');
+    for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      await waitFor(renderer, statusCardExpression({ ended: false }), `task-status-running-${statusWidth}`, 30_000);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);

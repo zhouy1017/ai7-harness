@@ -1050,6 +1050,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-relaunch',
     'review-destination',
     'dispatch-model-choice',
+    'task-status-finished',
     'review-sheet',
     'review-prepare',
     'review-bar-ready',
@@ -1331,6 +1332,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-09': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
     'task-overview-continuous-enqueue',
+    'task-status-running',
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',

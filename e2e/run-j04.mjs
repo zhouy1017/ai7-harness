@@ -1,5 +1,6 @@
 import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
+import { statusCardExpression } from './task-status-card.mjs';
 import { launchReviewFromSheet } from './launch-review-sheet.mjs';
 import { commentsModelFilter } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -3929,6 +3930,15 @@ async function main() {
             await reviewAction(renderer,'[data-review-action="view-plan"]',`dispatch-plan-open-${planWidth}`);
             await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(reviewRunId)}`,`dispatch-plan-read-${planWidth}`);
             await assertRenderer(renderer,`(() => {const drawer=document.querySelector('#task-drawer'),text=drawer.innerText;return document.documentElement.dataset.technicalLayerVisible==='false' && !/[0-9a-f]{8}-[0-9a-f-]{27}/iu.test(text) && !/https?:\\/\\//u.test(text) && !drawer.querySelector('[data-task-drawer-control="start"],[data-task-drawer-control="update-plan"]');})()`,`dispatch-plan-editorial-only-${planWidth}`);
+            // 状态卡 (Issue #1527): the finished Task in ordinary mode is its result in one sentence, how long it took, the model it ran on and
+            // 查看结果 — at the wide window and at the Gate's. 查看结果 opens the result, and closing it brings the drawer back on the same Task.
+            at('task-status-finished');
+            await clickSelector(renderer,'#task-drawer [data-task-drawer-mode="compact"]',`task-status-finished-run-view-${planWidth}`);
+            await waitFor(renderer,statusCardExpression({ ended: true, model: chosenLabel }),`task-status-finished-card-${planWidth}`,30_000);
+            await clickSelector(renderer,'#task-drawer [data-task-drawer-control="view-result"]',`task-status-finished-result-${planWidth}`);
+            await waitFor(renderer,`document.querySelector('.task-result-window [data-task-result-action="close"]') && document.querySelector('#task-drawer')?.hidden===true`,`task-status-finished-result-open-${planWidth}`);
+            await clickSelector(renderer,'.task-result-window [data-task-result-action="close"]',`task-status-finished-result-close-${planWidth}`);
+            await waitFor(renderer,`document.querySelector('#task-drawer')?.hidden===false && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(reviewRunId)} && document.querySelector('.task-result-window')===null`,`task-status-finished-back-${planWidth}`);
             await reviewAction(renderer,'#task-drawer [data-task-drawer-control="close"]',`dispatch-plan-close-${planWidth}`);
           }
           await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
