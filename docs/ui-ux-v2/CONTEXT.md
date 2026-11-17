@@ -105,7 +105,7 @@ The normal work-surface state in which the Manuscript remains dominant, the side
 _Avoid_: document-only application, chat mode, workflow phase
 
 **Reading and Revision Mode** (`阅读与修订模式`):
-The default input state of the manuscript and every derivative document, in which typing, deletion, paste, cut, drop and IME commits never reach the text while selection, copy, find, navigation and marks work; the editor's changes are made through `修改此处` as Editor Revisions, and `自由直接编辑` is the explicit switch to direct typing ([ADR 0096 §4.3](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
+The default input state of the manuscript and every derivative document, in which the default 改稿方式 is 「修订 · 自动应用」: typing, deletion, selection replacement, paste, cut, drop and IME commits change the text in place and are recorded as tracked Editor Revisions, applied once the editor pauses or leaves the paragraph, while selection, copy, find, navigation and marks work as before; `修订 · 待我确认` keeps each revision as an open card until the editor applies it, `直接改稿 · 不留痕` is the explicit switch to editing without revision cards, and `修改此处` remains a deliberate composer for a selection's revision ([ADR 0096 §4.3](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md#43-reading-and-revision-mode-by-default)).
 _Avoid_: read-only state, Protective Read-only State, locked manuscript, track-changes mode
 
 **Contextual Collaboration Mode** (`上下文协作模式`):
