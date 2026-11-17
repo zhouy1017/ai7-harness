@@ -1,5 +1,5 @@
 import { chooseDispatch } from './dispatch-chooser.mjs';
-import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
+import { commentsPaneForms, commentsSelectMark, commentsTriageForms } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
@@ -1161,6 +1161,7 @@ async function main() {
     await settled(renderer, 'local-workflow-settled');
 
     await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
+    await commentsTriageForms(renderer, requireJourney, waitFor, at);
 
     at('editor-revision');
     // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.

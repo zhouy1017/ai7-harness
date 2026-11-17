@@ -1098,6 +1098,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   'J-05': Object.freeze([
     'comments-inline-apply-column',
     'comments-inline-apply-overlay',
+    // Issue #1523: 下一条待处理 across pages, keyboard triage and the Book's count, docked and as the overlay.
+    'comments-triage-column',
+    'comments-triage-overlay',
     'editor-revision',
     'ai-locks',
     'scoped-dispatch-wide',
