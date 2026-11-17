@@ -72,6 +72,8 @@ describe('the sidebar', () => {
   it('shows icons only when collapsed or narrower than 760 px', () => {
     expect(SIDEBAR_ICONS_ONLY_BELOW_PX).toBe(760);
     expect(sidebarMode(false, false)).toBe('full');
+    expect(sidebarMode(false, false, true)).toBe('icons');
+    expect(sidebarMode(true, false, true)).toBe('icons');
     expect(sidebarMode(true, false)).toBe('icons');
     expect(sidebarMode(false, true)).toBe('icons');
     expect(sidebarMode(true, true)).toBe('icons');

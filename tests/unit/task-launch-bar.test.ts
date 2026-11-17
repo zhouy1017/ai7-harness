@@ -35,7 +35,7 @@ it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('k
   const root = document.createElement('aside'); document.body.append(root);
   const setStatus = vi.fn();
   const options = { root, shell: document.body, api, setStatus, errorMessage: (_error: unknown, fallback: string) => fallback,
-    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0];
+    onOpen: vi.fn(), onClose: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0];
   const drawer = mountTaskDrawer(options); drawer.open = vi.fn();
   const input = operation === 'launchBaselineAnalysis' ? { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }
     : operation === 'launchCustomAnalysis' ? { dimensionId: 'dimension', update: null } : operation === 'launchWritingTask' ? WRITING_REQUEST

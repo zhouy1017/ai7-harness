@@ -95,11 +95,12 @@ export async function commentsOrdinaryMode(renderer, check, waitFor) {
 }
 
 export async function commentsLayouts(renderer, check, waitFor) {
+  await rightColumnGeometry(renderer, check, waitFor);
   const native = await renderer.evaluate(`({ width: innerWidth, height: innerHeight })`);
   for (const size of [native, { width: 1280, height: 800 }, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
     check(await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(!entry||entry.disabled)return false; if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`), 'comments-layout-open');
-    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1120 ? p.width>=300 && p.width<=340 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute' && p.width>=Math.min(300,document.querySelector('.editor-workspace').getBoundingClientRect().width-e.width) && p.left>=document.querySelector('.editor-workspace').getBoundingClientRect().left-1); })()`, 'comments-responsive-geometry');
+    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'), editor=document.querySelector('.editor-window'), prose=editor.querySelector('.ProseMirror'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(), style=getComputedStyle(editor); const measure=28*parseFloat(getComputedStyle(prose).fontSize), content=editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1008 ? content>=measure-1 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute'); })()`, 'comments-responsive-geometry');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='on' && getComputedStyle(document.querySelector('.manuscript-comments-pane')).display==='none'; })()`), 'comments-focus-hidden');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='off' && !document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-focus-restored');
     check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
@@ -119,11 +120,15 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
     for(const [form,size] of [['column',{width:1280,height:800}],['overlay',{width:1008,height:681}]]) {
       at('comments-inline-'+action+'-'+form);
       await seedCommentsPane(renderer,check,waitFor,size);
-      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify(form==='overlay'?'absolute':'static')}`, 'comments-'+form+'-viewport');
+      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify('static')}`, 'comments-'+form+'-viewport');
       await commentsGeometryAndScroll(renderer,check,waitFor);
       if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
       else await commentsReplyAndResolve(renderer,check,waitFor);
-      if(form==='overlay')await commentsSeedConnectorCases(renderer,check,waitFor);
+      if(form==='overlay') {
+        await renderer.send('Emulation.setDeviceMetricsOverride', {width:640,height:681,deviceScaleFactor:1,mobile:false});
+        await waitFor(renderer, `getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute'`, 'comments-small-overlay');
+        await commentsSeedConnectorCases(renderer,check,waitFor);
+      }
       check(true,'comments-'+form+'-complete');
     }
   } finally {
@@ -632,4 +637,34 @@ async function commentsHandledFilter(renderer, check, waitFor, indexes) {
   await waitFor(renderer, `__comments.ids.every((id,index)=>{const handled=${JSON.stringify(indexes)}.includes(index);return document.querySelector('[data-comment-card="'+id+'"]')?.hidden===!handled && document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(handled?undefined:'true');})`, 'comments-handled-cards-and-highlights');
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-status-filter="all"]').click();return true;})()`), 'comments-handled-reset');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false)`, 'comments-handled-all-restored');
+}
+
+// Exercise the column through actual mouse input at both supported forms.
+export async function rightColumnGeometry(renderer, check, waitFor) {
+  const native = await renderer.evaluate('({width:innerWidth,height:innerHeight})');
+  const click = async selector => {
+    const point = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!node)return null;const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
+    check(point !== null, 'right-column-control');
+    await renderer.send('Input.dispatchMouseEvent', {type:'mousePressed',...point,button:'left',clickCount:1});
+    await renderer.send('Input.dispatchMouseEvent', {type:'mouseReleased',...point,button:'left',clickCount:1});
+  };
+  const measure = `(() => { const editor=document.querySelector('.editor-window'), style=getComputedStyle(editor), prose=editor.querySelector('.ProseMirror'); return editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(prose).fontSize)-1; })()`;
+  const initial = await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`);
+  try {
+    for (const size of [{width:1280,height:800},{width:1008,height:681}]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', {...size,deviceScaleFactor:1,mobile:false});
+      if(await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`)) await click('[data-edge-entry="comments"]');
+      await waitFor(renderer, `${measure} && (()=>{const p=document.querySelector('.manuscript-comments-pane'),t=document.querySelector('.manuscript-surface');return !p.hidden&&t.getBoundingClientRect().right<=p.getBoundingClientRect().left+1;})()`, 'right-column-docked-measure');
+      await click('[data-edge-entry="navigation"]');
+      await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden && !document.querySelector('.manuscript-navigator').hidden`, 'right-column-navigation-replaces');
+      await click('[data-edge-entry="navigation"]');
+      await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden && localStorage.getItem('ai7.comments-pane.'+document.querySelector('.editor-shell').dataset.bookId)==='true'`, 'right-column-comments-restored');
+      await click('[data-edge-entry="tasks"]');
+      await waitFor(renderer, `${measure} && document.querySelector('.manuscript-comments-pane').hidden && !document.querySelector('#task-drawer').hidden && document.documentElement.dataset.sidebar==='icons'`, 'right-column-drawer-measure');
+      await click('.task-drawer-close');
+      await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden && ${measure}`, 'right-column-drawer-restores');
+    }
+    if(initial) await click('[data-edge-entry="comments"]');
+  } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+  await waitFor(renderer, `innerWidth===${native.width} && innerHeight===${native.height}`, 'right-column-native-restored');
 }

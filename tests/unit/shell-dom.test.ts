@@ -37,13 +37,14 @@ function mounted(notice: string | null = null) {
   const openBook = vi.fn();
   const openDestination = vi.fn();
   miniDocument.body.append(sidebar as unknown as MiniElement);
+  const toggle = document.createElement('button');
   const surface = mountShell({
     sidebar, preferenceNotice, actions, preferences, title: document.createElement('h1'), position, pinLimit: 6,
-    attentionEntry: document.createElement('button'), toggle: document.createElement('button'),
+    attentionEntry: document.createElement('button'), toggle,
     setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback,
     openDestination, openSection: vi.fn(), openAgentWorkspace, openBook, openSettings: vi.fn(),
   });
-  return { sidebar, preferences, preferenceNotice, surface, actions, openAgentWorkspace, position, openBook, openDestination };
+  return { toggle, sidebar, preferences, preferenceNotice, surface, actions, openAgentWorkspace, position, openBook, openDestination };
 }
 
 describe('mounted shell preferences', () => {
@@ -155,4 +156,21 @@ describe('sidebar book entries', () => {
     expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')?.title).toContain('甲书');
     expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')?.title).toBe('书库');
   });
+});
+
+it('automatically shows icons without saving collapse and keeps the toggle working', async () => {
+  let notify = () => {};
+  vi.stubGlobal('MutationObserver', class { constructor(callback: () => void) { notify = callback; } observe() {} });
+  const { toggle, preferences } = mounted();
+  await preferences.load();
+  document.documentElement.dataset['rightColumn'] = 'icons'; notify();
+  expect(document.documentElement.dataset['sidebar']).toBe('icons');
+  expect(preferences.current['shell.sidebarCollapsed']).toBe(false);
+  expect(toggle.disabled).toBe(false);
+  toggle.click();
+  await vi.waitFor(() => expect(preferences.current['shell.sidebarCollapsed']).toBe(true));
+  document.documentElement.dataset['rightColumn'] = 'none'; notify();
+  expect(document.documentElement.dataset['sidebar']).toBe('icons');
+  toggle.click();
+  await vi.waitFor(() => expect(document.documentElement.dataset['sidebar']).toBe('full'));
 });

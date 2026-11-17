@@ -39,7 +39,7 @@ function harness() {
   const drawer: TaskDrawerSurface = mountTaskDrawer({
     resumeDraft: (bookId: string, resume: () => void) => { selectedBook = bookId; resume(); },
     root, shell: miniDocument.body, api, technicalDetails: () => miniDocument.createElement('div'),
-    errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(),
+    errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onClose: vi.fn(), onRecorded: vi.fn(),
   } as unknown as MountTaskDrawerOptions);
   const find = (selector: string): MiniElement | null => root.querySelector(selector);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));

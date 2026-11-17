@@ -163,7 +163,7 @@ function shell(rendererApi = api) {
     viewPreferences: {} as ScreenOptions['viewPreferences'],
     preferences: { current: { 'analysis.lastViewedRevision': {} }, viewAnalysis: vi.fn() } as unknown as ScreenOptions['preferences'],
     commandDispatcher: { register: () => () => children.destroyed.push('commands') } as unknown as ScreenOptions['commandDispatcher'],
-    taskDrawer: { close: vi.fn(), openPanel: vi.fn(), openDialogue: vi.fn(), openComposer: vi.fn() } as unknown as ScreenOptions['taskDrawer'],
+    taskDrawer: { isOpen: () => false, setColumnVisible: vi.fn(), close: vi.fn(), openPanel: vi.fn(), openDialogue: vi.fn(), openComposer: vi.fn() } as unknown as ScreenOptions['taskDrawer'],
     interrupted: () => false,
     attach: (content, surface) => { replace(content); showing = surface; },
     setContextActions: (...nodes) => contextView.replaceChildren(...nodes), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
@@ -653,4 +653,37 @@ describe('a derivative document on 稿件 (Issues #1403–#1405)', () => {
     expect(app.screen.querySelector('.document-title-input')).toBeNull();
     app.showing?.destroy();
   });
+});
+
+vi.mock('../../src/renderer/right-column.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../src/renderer/right-column.js')>(),
+  mountColumnMeasure: () => ({ destroy: vi.fn() }),
+}));
+
+it('restores comments after navigation and the drawer without saving a temporary close', () => {
+  const setItem = vi.fn();
+  vi.stubGlobal('localStorage', { getItem: () => 'true', setItem });
+  let commands: Record<string, () => void> = {};
+  const app = shell(); app.open(windowOf('book-one'), {
+    commandDispatcher: { register: (handlers: typeof commands) => { commands = handlers; return () => {}; } } as unknown as ScreenOptions['commandDispatcher'],
+  });
+  const pane = app.screen.querySelector<HTMLElement>('.manuscript-comments-pane')!;
+  for (const entry of ['navigation']) {
+    const control = app.screen.querySelector<HTMLButtonElement>(`[data-edge-entry="${entry}"]`)!;
+    control.click(); expect(pane.hidden).toBe(true);
+    control.click(); expect(pane.hidden).toBe(false);
+  }
+  {
+    app.showing!.closeSupportingPanel(); expect(pane.hidden).toBe(true);
+    app.showing!.restoreSupportingPanel(); expect(pane.hidden).toBe(false);
+  }
+  for (const key of ['search.find', 'edit.replace']) {
+    commands[key]!(); expect(pane.hidden).toBe(true);
+    app.screen.querySelector<HTMLButtonElement>('[data-edge-entry="navigation"]')!.click();
+    expect(pane.hidden).toBe(false);
+  }
+  expect(setItem).not.toHaveBeenCalled();
+  app.screen.querySelector<HTMLButtonElement>('[aria-label="关闭批注栏"]')!.click();
+  expect(setItem).toHaveBeenCalledWith('ai7.comments-pane.book-one', 'false');
+  app.showing!.destroy();
 });

@@ -225,6 +225,7 @@ export interface TaskDrawerSurface {
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
+  setColumnVisible(visible: boolean): void;
   isOpen(): boolean;
   /** The central destination changed: stay beside a destination of the same Book, close for anything else. */
   followScreen(state: string, bookId: string | null): void;
@@ -304,6 +305,8 @@ export interface MountTaskDrawerOptions {
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** The one side slot (IA): the drawer is opening, so 导航 closes. */
   onOpen(): void;
+  /** The one side slot closed: the manuscript brings the 批注栏 it temporarily replaced back (no preference write). */
+  onClose(): void;
   /** The bar started the Task or reconfirmed its plan: the surfaces of that kind on screen read it again. `ref` is the Task's plan. */
   onRecorded(kind: TaskPlanKind, bookId: string, ref?: string): void;
   /** 查看运行 / 查看运行记录 / 查看审阅: the started Task's own surface (AUTH-007). */
@@ -478,6 +481,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let redoOnOpen = false;
   root.classList.add('task-drawer');
   root.setAttribute('aria-labelledby', 'task-drawer-title');
+  let columnSuspended = false;
   root.hidden = true;
   root.dataset['taskDrawer'] = 'closed';
   root.dataset['taskDrawerMode'] = mode;
@@ -3088,8 +3092,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (request === null || request.kind !== kind) return;
       read();
     },
+    setColumnVisible(visible) {
+      if (visible && !columnSuspended || !visible && root.hidden) return;
+      columnSuspended = !visible;
+      root.hidden = !visible;
+      root.dataset['taskDrawer'] = visible ? 'open' : 'closed';
+      shell.dataset['taskDrawer'] = visible ? 'open' : 'closed';
+    },
     close(restoreFocus) {
-      if (root.hidden) return;
+      if (root.hidden && !columnSuspended) return;
+      columnSuspended = false;
       ticket += 1;
       clearPoll();
       panel.stop();
@@ -3107,6 +3119,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';
+      options.onClose();
       const target = restoreFocus ? returnFocus() : null;
       returnFocus = () => null;
       if (target !== null && target.isConnected) target.focus();
