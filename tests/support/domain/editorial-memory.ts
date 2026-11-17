@@ -6,8 +6,11 @@ import { initializeHouseReviewPreferenceSchema } from '../../../src/service/hous
 import { initializeEditorialLearningSchema } from '../../../src/service/learning/ledger.js';
 import { initializeSupervisionSchema } from '../../../src/service/learning/supervision-directives.js';
 
+export const memorySchemaTiming = { builds: 0, milliseconds: 0 };
+
 /** Production-owned domain relations; no database path, file access or copied schema definitions. */
 export function editorialMemoryDatabase(): DatabaseSync {
+  const started = performance.now();
   const db = new DatabaseSync(':memory:');
   try {
     configureDatabase(db);
@@ -17,6 +20,7 @@ export function editorialMemoryDatabase(): DatabaseSync {
     initializeHouseReviewPreferenceSchema(db, 78);
     initializeEditorialLearningSchema(db);
     initializeSupervisionSchema(db, 86);
+    memorySchemaTiming.builds += 1; memorySchemaTiming.milliseconds += performance.now() - started;
     return db;
   } catch (error) { db.close(); throw error; }
 }
