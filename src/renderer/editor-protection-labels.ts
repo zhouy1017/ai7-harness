@@ -81,6 +81,6 @@ export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存
 
 /** Only a distinct cause belongs in the status bar; the banner owns the general state. */
 export function protectionFailureReason(error: unknown): string {
-  const reason = error instanceof Error ? error.message.trim() : '';
-  return reason === PROTECTION_HEADLINE || reason === PROTECTION_READ_ONLY_HEADLINE ? '' : reason;
+  const reason = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').trim();
+  return reason === PROTECTION_HEADLINE || reason === PROTECTION_READ_ONLY_HEADLINE ? '' : reason || '保存失败，未提供具体原因。';
 }

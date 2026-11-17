@@ -100,3 +100,29 @@ it('Escape in a focused upper sheet leaves the lower sheet open', async () => {
   expect(upper.open).toBe(false); expect(lower.open).toBe(true);
   lower.close();
 });
+
+it('lets Escape from a closed chooser reach its sheet', async () => {
+  vi.stubGlobal('window', { removeEventListener: () => {} });
+  vi.stubGlobal('Event', class { defaultPrevented = false; constructor(readonly type: string) {} });
+  const sheet = createSheet('chooser-host');
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed: () => {} });
+  sheet.append(chooser.element); document.body.append(sheet); sheet.show(); await Promise.resolve();
+  const summary = chooser.element.querySelector('summary')!;
+  chooser.element.open = true;
+  (summary as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
+  expect(chooser.element.open).toBe(false); expect(sheet.open).toBe(true);
+  (summary as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
+  expect(sheet.open).toBe(false);
+});
+
+it('leaves outside focus in place on close and returns hidden menu openers to their summary', async () => {
+  const opener = document.createElement('button'), outside = document.createElement('input');
+  const menu = document.createElement('details'), summary = document.createElement('summary');
+  menu.append(summary, opener); document.body.append(menu, outside); opener.focus();
+  const sheet = createSheet('menu-sheet'), control = document.createElement('button');
+  sheet.append(control); document.body.append(sheet); sheet.show(); await Promise.resolve();
+  outside.focus(); sheet.close(); expect(miniDocument.activeElement).toBe(outside);
+  opener.focus(); sheet.show(); await Promise.resolve();
+  Object.defineProperty(opener, 'getClientRects', { value: () => [] });
+  sheet.close(); expect(miniDocument.activeElement).toBe(summary);
+});
