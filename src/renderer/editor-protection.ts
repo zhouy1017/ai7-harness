@@ -166,8 +166,8 @@ function actionName(action: HTMLElement | null): string | null {
 }
 
 /**
- * The protection surface: a banner in the context header while protection is in force — headline, Last Durable Edit
- * Boundary, At-risk Edit Extent, automatic retry state and one 查看保护选项 (DUR-003) — and the options it opens, which
+ * The protection surface: a compact state pill, sentence and 处理… action in the context header (DUR-003).
+ * Last Durable Edit Boundary, At-risk Edit Extent and retry state live in the options dialog, which
  * always offer 重试写入 and 复制受影响内容 (DUR-009). It stays visible in 专注模式 (ED-058) and cannot be hidden from `视图`.
  */
 export function mountProtectionSurface(options: ProtectionSurfaceOptions): ProtectionSurface {

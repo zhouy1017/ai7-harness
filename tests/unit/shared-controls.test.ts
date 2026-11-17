@@ -46,9 +46,10 @@ it('supplies focus, category fallback and danger styles', () => {
 });
 
 it('uses shared controls on the listed form surfaces', () => {
-  for (const file of ['feedback-history.ts', 'imported-exemplars.ts', 'task-drawer.ts', 'keyboard-settings.ts']) {
+  for (const file of ['feedback-history.ts', 'imported-exemplars.ts', 'task-drawer.ts', 'keyboard-settings.ts', 'library-screen.ts']) {
     expect(readFileSync(`src/renderer/${file}`, 'utf8')).toContain('styleInput(');
   }
+  expect(readFileSync('src/renderer/settings-screens.ts', 'utf8')).toContain("element('span', 'settings-switch')");
 });
 
 it('closes on Escape even after focus moves outside the sheet', async () => {
