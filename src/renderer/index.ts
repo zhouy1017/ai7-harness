@@ -1,6 +1,10 @@
+import { createLibraryScreen } from './library-screen.js';
+import { createBookOverviewScreen } from './book-overview-screen.js';
+import { createSettingsScreens } from './settings-screens.js';
+import { createGlobalPages } from './global-pages.js';
 import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, type NavigationCheckpoint } from './navigation-generation.js';
-import { importSteps } from './components/import-steps.js';
-import { icon } from './components/icon-sprite.js';
+
+
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
 import { createStatusSurface } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
@@ -14,81 +18,26 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
-import { applyOnce, applyFindingBatches } from './manuscript-apply.js';
-import { showToast } from './components/toast.js';
+import { applyFindingBatches } from './manuscript-apply.js';
+
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
 import type { BookFindingProjection, ProductionDocumentProjection } from '../shared/protocol.js';
-import {
-  APPEARANCE_BACK,
-  APPEARANCE_CHOICES,
-  APPEARANCE_LEDE,
-  APPEARANCE_LEGEND,
-  APPEARANCE_SAVED,
-  APPEARANCE_SAVE_FAILED,
-  APPEARANCE_SECTION,
-  APPEARANCE_STATUS,
-  APPEARANCE_TITLE,
-} from './appearance-labels.js';
-import { mountLearningAskFrequency } from './learning-settings.js';
+
+
 import { mountDiagnostics } from './diagnostics.js';
 import { DIAGNOSTICS_OPENED } from './diagnostics-labels.js';
 import { mountProposalWorkspace } from './proposal-workspace.js';
 import { hasErrorCode, rendererErrorCode, rendererErrorData, rendererErrorMessage } from './error-words.js';
 import { preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
-import type {
-  AgentWorkspacePromotionProjection,
-  BaselineAnalysisGoal,
-  BaselineAnalysisWireProjection as BaselineAnalysisProjection,
-  BookTaskItemProjection,
-  DefaultExecutionRuleReference,
-  QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult,
-  BaselineAnalysisUpdateRequest,
-  BookManuscriptAnchorProjection,
-  BookRecordPresentation,
-  BookSummaryFilter,
-  BookSummaryPageProjection,
-  BookWorkbenchRoute,
-  BookWorkOverviewProjection,
-  ContinueImportProjection,
-  ForegroundExecutionBoundaryProjection,
-  GlobalAttentionItemProjection,
-  GlobalAttentionProjection,
-  GlobalAttentionTarget,
-  ImportCommitProjection,
-  ManuscriptReimportCommitProjection,
-  ReimportUnfollowedMarkProjection,
-  ImportDraftRecoveryProjection,
-  ImportStartupProjection,
-  HistoricalRevisionProjection,
-  ManuscriptWindowProjection,
-  PriorWorkItemProjection,
-  RecoveryComparisonProjection,
-  RecoveryRestorationProjection,
-  RecoverySelection,
-  RecoveryWindowProjection,
-  ResolvedBookWorkbenchRoute,
-  ReviewBeforeImportProjection,
-  ReviewBeforeSourceImportProjection,
-  ServiceWireJobProjection as ServiceJobProjection,
-  SourceImportCommitProjection,
-  StagedImportProjection,
-  StartupProjection,
-  TaskAuthorizationProjection,
-  TaskPlanKind,
-  TaskPlanProjection,
-} from '../shared/protocol.js';
+import type { AgentWorkspacePromotionProjection, BaselineAnalysisGoal, BaselineAnalysisWireProjection as BaselineAnalysisProjection, BookTaskItemProjection, DefaultExecutionRuleReference, QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult, BaselineAnalysisUpdateRequest, BookManuscriptAnchorProjection, BookRecordPresentation, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ContinueImportProjection, ForegroundExecutionBoundaryProjection, GlobalAttentionItemProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportDraftRecoveryProjection, ImportStartupProjection, HistoricalRevisionProjection, ManuscriptWindowProjection, PriorWorkItemProjection, RecoveryComparisonProjection, RecoveryRestorationProjection, RecoverySelection, RecoveryWindowProjection, ResolvedBookWorkbenchRoute, ReviewBeforeImportProjection, ReviewBeforeSourceImportProjection, ServiceWireJobProjection as ServiceJobProjection, StagedImportProjection, StartupProjection, TaskAuthorizationProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import { createNotificationObserver, mountQuietNotice, openCurrentBookCompletion } from './notifications.js';
-import { NOTIFICATION_BOOK_LIST_LINE, NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
-import {
-  GLOBAL_ATTENTION_COUNTED_GROUPS,
-  J03_TASK_GOAL,
-  MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
-} from '../shared/protocol.js';
-import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
+
+import { J03_TASK_GOAL } from '../shared/protocol.js';
+
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
-import { mountBookPeople } from './book-people.js';
+
 import { mountEvaluation } from './evaluation.js';
 import { mountResearchEvidence } from './research-evidence.js';
 import { SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
@@ -96,120 +45,54 @@ import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
-import { mountEvaluationCalibration } from './evaluation-calibration.js';
-import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
+
+import { mountSeries, mountSeriesList } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
-import {
-  activeCommandBindings,
-  BOOK_SECTION_COMMANDS,
-  configureCommandLabels,
-  createCommandDispatcher,
-  refreshShortcutLabels,
-  type CommandPlatform,
-} from './commands.js';
+import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
 import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
-import { mountKeyboardSettings } from './keyboard-settings.js';
-import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
-import { mountUsage } from './usage.js';
-import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
+
+
+
+
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
-import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
-import {
-  EVALUATION_STATUS,
-  EVALUATION_TITLE,
-  evaluationOverviewLine,
-} from './evaluation-labels.js';
+
+import { EVALUATION_STATUS } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
-import {
-  TASK_PANEL_COMPOSE_STATUS,
-  TASK_PANEL_JUMP_GONE,
-  TASK_PANEL_LEAVE_STATUS,
-  returnChipPlace,
-} from './task-panel-labels.js';
-import {
-  BOOK_FILTER_ACTIONS,
-  BOOK_FILTER_FIELD_LABEL,
-  BOOK_FILTER_FIELDS,
-  BOOK_FILTER_LEGEND,
-  BOOK_FILTER_NONE,
-  BOOK_FILTER_STATUS_LINES,
-  BOOK_FILTER_TEXT_LABEL,
-  bookCardPeopleLine,
-  bookCardRelatedLine,
-  bookFilterLine,
-} from './book-people-labels.js';
-import {
-  DOCUMENT_STATUS_LINES,
-  showRestoreStands,
-} from './production-document-labels.js';
+import { TASK_PANEL_COMPOSE_STATUS, TASK_PANEL_JUMP_GONE, TASK_PANEL_LEAVE_STATUS, returnChipPlace } from './task-panel-labels.js';
+
+import { DOCUMENT_STATUS_LINES, showRestoreStands } from './production-document-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
 import { mountDerivativesWorkspace } from './derivatives-workspace.js';
 import { conflictCompletionOn } from './proposal-conflict-labels.js';
-import {
-  fidelityDetailText,
-  fidelityDisclosureSummary,
-  fidelityOutcomeLabel,
-  WORD_IMPORT_MODE_NAMES,
-} from './import-fidelity-labels.js';
+import { fidelityDetailText, fidelityDisclosureSummary, fidelityOutcomeLabel, WORD_IMPORT_MODE_NAMES } from './import-fidelity-labels.js';
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
-import {
-  DELIVERABLES_ENTRY_LABEL,
-  DELIVERABLES_STATUS_LINES,
-  DELIVERABLES_UNAVAILABLE,
-  PUBLICATION_ACTION_LABELS,
-  deliverablesOverviewLine,
-  publicationStateOf,
-} from './deliverables-labels.js';
-import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
-import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
+import { DELIVERABLES_STATUS_LINES } from './deliverables-labels.js';
+import { ViewPreferences, mountRegionSeparator } from './layout.js';
+import { createGlobalAttentionReader, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
 import { bookIdentityRows, recoveryIdentityRows } from './technical-layer-labels.js';
-import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
+
 import { analysisRefusalView } from './overview-refusal-labels.js';
-import {
-  SELECTION_TASK_STATUS,
-  selectionProcedureEntries,
-  selectionProcedureStepReason,
-  selectionTaskChoices,
-  type SelectionProcedureEntry,
-  type SelectionTaskChoice,
-  type SelectionTaskChoices,
-  SELECTION_TASK_PICK_RANGE,
-} from './selection-task-labels.js';
+import { SELECTION_TASK_STATUS, selectionProcedureEntries, selectionProcedureStepReason, selectionTaskChoices, type SelectionProcedureEntry, type SelectionTaskChoice, type SelectionTaskChoices, SELECTION_TASK_PICK_RANGE } from './selection-task-labels.js';
 import type { SelectionSpanReading } from './editorial-marks.js';
 import type { ComposerRange } from './task-panel.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import { mountProcedureRecommendationSlots } from './procedure-choice.js';
 import { mountTaskDrawer } from './task-drawer.js';
-import {
-  TASK_DRAWER_TITLE,
-  TASK_PLAN_OPEN,
-  TASK_PLAN_OPEN_START,
-  taskPlanQuickStartFellBack,
-  taskPlanSummaryLine,
-} from './task-drawer-labels.js';
-import {
-  REVIEW_ACTION_LABELS,
-  REVIEW_CARD_HEADING,
-  REVIEW_STATUS_LINES,
-  REVIEW_WORKSPACE_UNAVAILABLE,
-  reviewOverviewLine,
-} from './review-labels.js';
-import {
-  localInstantLabel,
-  taskAuthorizationDispatchNote,
-} from './plan-preview-labels.js';
-import { MAX_PINNED_BOOKS, showOnboardingCard, readSampleGuidance, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
+import { TASK_DRAWER_TITLE, TASK_PLAN_OPEN, TASK_PLAN_OPEN_START, taskPlanQuickStartFellBack, taskPlanSummaryLine } from './task-drawer-labels.js';
+import { REVIEW_STATUS_LINES } from './review-labels.js';
+import { localInstantLabel, taskAuthorizationDispatchNote } from './plan-preview-labels.js';
+import { MAX_PINNED_BOOKS, type ShellBookEntry, type ShellBookSection } from '../shared/preferences.js';
 import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
-import { developerModeRow, mountHelp } from './help.js';
-import { HELP_OPENED } from './help-labels.js';
-import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labels.js';
-import { SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
+
+
+
+import { SETTINGS_HUB_GROUPS, SHELL_LABELS } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
-import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
+import { type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
-import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
+import type { RendererApi } from '../shared/protocol.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -1193,279 +1076,6 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   // The sidebar marks where the window is, and a Book screen makes its Book current and recent (Issue #934).
   shell.follow(state, place);
   refreshCommandEntries();
-}
-
-/**
- * 待我处理 from the header (Issue #424): the screen opens in the library state — the window leaves the Book it
- * showed, as 返回图书列表 does — after the surface on screen has settled what it must first.
- */
-async function openGlobalAttention(bookId?: string | null): Promise<void> {
-  const navigationRoute = navigation.begin();
-  if (authorityInterrupted) return;
-  const guard = leaveGuard;
-  if (guard !== null) {
-    setStatus(GLOBAL_ATTENTION_STATUS_LINES.leaving, 'busy');
-    try {
-      const left = await guard();
-      if (!navigationRoute.isCurrent()) return;
-      if (!left) {
-        // The surface's own refusal stands; only a silent one is named here.
-        if (persistenceStatus.textContent === GLOBAL_ATTENTION_STATUS_LINES.leaving) setStatus(GLOBAL_ATTENTION_STATUS_LINES.stayed, 'error');
-        return;
-      }
-    } catch (error) {
-      if (!navigation.errorIsCurrent(error, navigationRoute)) return;
-      setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
-      return;
-    }
-  }
-  try {
-    await api.leaveBookWorkbench();
-    if (!navigationRoute.isCurrent()) return;
-    renderGlobalAttention(bookId);
-  } catch (error) {
-    if (!navigation.errorIsCurrent(error, navigationRoute)) return;
-    setStatus(rendererErrorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable), 'error');
-  }
-}
-
-/** 待我处理's screen (editor-surfaces §8.1): the surface is `global-attention.ts`; this gives it its way out. */
-function renderGlobalAttention(bookId?: string | null): void {
-  const content = panel();
-  content.classList.add('global-attention');
-  // A notice for several events of one Book opens the list of that Book alone (NOTIF-008), its own count beside it.
-  const bookOnly = (projection: GlobalAttentionProjection): GlobalAttentionProjection => {
-    const groups = projection.groups.map((group) => {
-      const items = group.items.filter((item) => item.book.bookId === bookId);
-      return { ...group, items, total: items.length };
-    });
-    const actionableCount = groups.reduce((count, group) => count + (GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key) ? group.total : 0), 0);
-    return { ...projection, groups, actionableCount };
-  };
-  const surface = mountGlobalAttention({
-    openTasks: () => renderTaskOverview(),
-    root: content,
-    reader: bookId === undefined ? globalAttentionReader : {
-      ...globalAttentionReader,
-      subscribe: (listener) => globalAttentionReader.subscribe((reading) =>
-        listener(reading.kind === 'projection' ? { kind: 'projection', projection: bookOnly(reading.projection) } : reading)),
-    },
-    technicalDetails,
-    setStatus,
-    errorMessage: rendererErrorMessage,
-    openNetworkProxySettings: () => renderModelServiceSettings(),
-    open: openGlobalAttentionItem,
-  });
-  replaceScreen('global-attention', content);
-  globalAttentionSurface = surface;
-  surface.start();
-  setStatus(bookId === undefined ? GLOBAL_ATTENTION_STATUS_LINES.opened : NOTIFICATION_BOOK_LIST_LINE);
-}
-
-/** Global cross-Book task queue (Issue #1328): the page is a projection; records remain Book-owned. */
-function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' = 'run'): void {
-  overviewDrawerBookId = item.bookId;
-  const finder = () => [...screen.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId) ?? null;
-  if (item.target.kind === 'task-intent-draft') taskDrawer.openDraft(item.target.bookId, item.target.draftId, finder);
-  else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
-  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo' });
-}
-/** Task notices use the overview; other attention notices retain their existing destination. */
-async function openTaskNotification(itemId: string, target: GlobalAttentionTarget): Promise<void> {
-  const navigationRoute = navigation.begin();
-  if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(target.kind)) {
-    await openGlobalAttentionTarget(target); return;
-  }
-  const overview = await api.inspectTaskOverview();
-  if (!navigationRoute.isCurrent()) return;
-  const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === itemId);
-  if (!task) { await openGlobalAttentionTarget(target); return; }
-  renderTaskOverview(itemId);
-  if (['completed', 'cancelled', 'stopped'].includes(task.state)) await openOverviewResult(task);
-  else openOverviewTask(task);
-}
-async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
-  if (!item.bookId) return;
-  const resultApi = taskOverviewApi(api, () => item.bookId);
-  if (item.result || item.attention.object.kind === 'task') openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), resultApi);
-  else openOverviewTask(item, 'run');
-}
-function renderTaskOverview(focusItemId?: string): void {
-  taskDrawer.close(false);
-  const content = panel(); content.classList.add('task-overview');
-  const surface = mountTaskOverview({ root: content, api: api, setStatus, beforeStart: settleScreen,
-    onChanged: () => globalAttentionReader.refresh(),
-    onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
-    openTarget: openOverviewTask,
-    openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
-    jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
-    openResult: (item) => void openOverviewResult(item), closeDrawer: () => taskDrawer.close(true),
-    configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
-      const current = navigation.route();
-      if (kind === 'review') renderBookReview(bookId, route.bookTitle);
-      // 写作 lives on 稿件 (Issue #1403).
-      else { const shown = await renderBookManuscript(bookId, route.bookTitle, current); if (!shown?.isCurrent()) return; }
-      const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
-    }),
-  });
-  replaceScreen('task-overview', content); taskOverviewSurface = surface;
-  if (focusItemId) { const page = navigation.read(content); surface.focus(focusItemId); window.setTimeout(() => { if (page.isCurrent()) surface.focus(focusItemId); }, 300); }
-}
-
-/**
- * An item opens its own record in this window (V2-UX-ATTN-007, D-006): the import or manuscript recovery the
- * startup would show, 稿件冲突 of the conflicted suggestion, ②A with its Run, ②A with the plan in the Task Drawer where 重新确认计划 is, or ②B with
- * the Review Run open. A Book another window already shows is shown there, as 书库 does. Opening decides
- * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
- */
-async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
-  const navigationRoute = navigation.begin();
-  if (item.nextStep === 'open-network-proxy') {
-    await renderModelServiceSettings();
-    return;
-  }
-  if (['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(item.target.kind)) {
-    const tasks = await api.inspectTaskOverview();
-    if (!navigationRoute.isCurrent()) return;
-    const task = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
-    if (task) { if (task.state === 'completed') await openOverviewResult(task); else openOverviewTask(task); return; }
-  }
-  await openGlobalAttentionTarget(item.target);
-}
-
-/** One record, opened in this window — 待我处理's items and the 任务 panel's cards (Issue #423, S77a) alike. */
-async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysisRevisionId?: string): Promise<void> {
-  navigation.begin();
-  switch (target.kind) {
-    case 'apply-receipt':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        const receipt = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'settled' });
-        if (!navigationRoute.isCurrent()) return;
-        const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
-        const content = panel(); const heading = element('h2', undefined, labels[receipt.state]); const reason = element('p', undefined, receipt.reason);
-        heading.dataset['applyReceiptState'] = receipt.state; content.append(heading, reason);
-        // The raw receipt is diagnostics only (Issue #1431 item 103), gated like the proposal workspace's.
-        const details = element('details'); const full = element('pre', undefined, JSON.stringify(receipt, null, 2)); details.append(element('summary', undefined, '查看完整凭据'), full);
-        if (technicalLayerVisible) content.append(technicalDisclosure(details));
-        // EREC-005: the editor's re-check reads the authoritative records by the same Effect identity; it dispatches nothing.
-        if (receipt.state === 'unresolved') {
-          const recheck = button('重新核对应用结果', 'primary', async () => {
-            const next = await api.inspectApplyReceipt({ manuscriptId: target.manuscriptId, branchId: target.branchId, clientEffectId: target.clientEffectId, recovery: 'recheck' });
-            heading.textContent = labels[next.state]; heading.dataset['applyReceiptState'] = next.state; reason.textContent = next.reason; full.textContent = JSON.stringify(next, null, 2);
-            if (next.state !== 'unresolved') recheck.remove();
-          });
-          content.append(recheck);
-        }
-        content.append(button('在稿件中查看', 'secondary', async () => { const current = navigation.begin(); const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null }); if (current.isCurrent()) await openEditorWindow(opened, route.bookTitle); }), button('返回提案', 'secondary', () => renderProposalWorkspace({ manuscriptId: target.manuscriptId, branchId: target.branchId, resultId: null }, target.bookId, route.bookTitle)));
-        replaceScreen('apply-receipt', content, { bookId: target.bookId, title: route.bookTitle, section: 'review' });
-      });
-      return;
-    case 'manuscript-recovery':
-      await returnToRecoveryComparison(target.attentionId);
-      return;
-    // 解决冲突… (Issue #57): 稿件冲突 of that suggestion, whose 返回稿件 opens the manuscript at its paragraph. The
-    // workspace reads and writes through this window's hold on the manuscript, which reading it grants — as opening
-    // the manuscript first does on the way there from its card.
-    case 'manuscript-conflict':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        const opened = await api.getManuscriptWindow({ manuscriptId: target.manuscriptId, branchId: target.branchId, cursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        renderProposalConflict({ bookId: target.bookId, manuscriptId: target.manuscriptId, branchId: target.branchId, markId: target.markId, onDocument: opened.deliverable === 'production-document' }, route.bookTitle);
-      });
-      return;
-    case 'import-recovery': {
-      const navigationRoute = navigation.begin();
-      const startup = await api.getImportStartup();
-      if (!navigationRoute.isCurrent()) return;
-      await renderStartupProjection(startup);
-      return;
-    }
-    case 'analysis':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => renderBookAnalysis(route.bookId, route.bookTitle, analysisRevisionId));
-      return;
-    case 'analysis-plan':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        renderBookAnalysis(route.bookId, route.bookTitle);
-        openTaskPlan(route.bookId, 'baseline-analysis', target.taskIntentId);
-      });
-      return;
-    case 'review':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null }));
-      return;
-    // A prepared Review Run's plan (Issue #423, S77a): ②B with the plan in the Task Drawer, whose bar starts it.
-    case 'review-plan':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        renderBookReview(route.bookId, route.bookTitle, { reviewRunId: target.reviewRunId, findingId: null });
-        openTaskPlan(route.bookId, 'review-run', target.reviewRunId);
-      });
-      return;
-    // 结果待确认 a completed Run left (Issue #757): the kind's own surface, with its plan in the Task Drawer, where the list is and
-    // 保留为缺口 is recorded.
-    case 'task-plan':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const current = navigation.route();
-        switch (target.taskKind) {
-          case 'review-run':
-            renderBookReview(route.bookId, route.bookTitle, target.ref === null ? null : { reviewRunId: target.ref, findingId: null });
-            break;
-          case 'initial-evaluation':
-          case 'readers-report':
-          case 'evaluation-rewrite':
-            renderBookEvaluation(route.bookId, route.bookTitle);
-            break;
-          case 'writing': {
-            const shown = await renderBookManuscript(route.bookId, route.bookTitle, current);
-            if (!shown?.isCurrent()) return;
-            break;
-          }
-          default:
-            renderBookAnalysis(route.bookId, route.bookTitle);
-        }
-        openTaskPlan(route.bookId, target.taskKind, target.ref);
-      });
-      return;
-    // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
-    case 'maintenance':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
-        renderBookDeliverables(route.bookId, route.bookTitle, { caseId: target.caseId, publicationVersionId: target.publicationVersionId }));
-      return;
-    // A 资料库 item waiting for a decision (Issue #427, S79c): 知识库 › 资料库, with the decision it waits for in focus. 知识库 is
-    // no Book's, so no Book route is asked for.
-    case 'library-material':
-      await renderKnowledgeBase('library', false, target.materialId);
-      return;
-    case 'learning-materials':
-      await renderQualityLearning('learning', target.bookId);
-      return;
-    // A dialogue (Issue #52, S17a): the Book's 工作概览 with the dialogue in the foreground beside it.
-    case 'global-agent-dialogue':
-      await renderGlobalAgent(target.dialogueId);
-      return;
-    case 'dialogue':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        navigation.present(() => renderBookOverview(overview));
-        taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
-      });
-      return;
-    // A Task Intent Draft (Issue #423, slice 7a; TASK-006): its own Book's 工作概览, with the draft in the composer beside it.
-    case 'task-intent-draft':
-      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        const navigationRoute = navigation.route();
-        const overview = await api.getBookOverview({ bookId: route.bookId, historyCursor: null });
-        if (!navigationRoute.isCurrent()) return;
-        navigation.present(() => renderBookOverview(overview));
-        taskDrawer.openDraft(route.bookId, target.draftId, () => null);
-      });
-      return;
-  }
 }
 
 /**
@@ -3263,449 +2873,6 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
   setStatus(DELIVERABLES_STATUS_LINES.opened);
 }
 
-function renderBookOverview(
-  overview: BookWorkOverviewProjection,
-  // A reimport lands in the manuscript instead (renderImported; Issue #412).
-  completion?: Exclude<ImportCommitProjection, ManuscriptReimportCommitProjection>,
-  recoveryReturn?: RecoveryReturnContext,
-): void {
-  const sourceCompletion: SourceImportCommitProjection | undefined =
-    completion && 'sourceImportRecordId' in completion ? completion : undefined;
-  const content = panel();
-  content.classList.add('book-overview');
-  content.dataset['bookId'] = overview.book.bookId;
-  content.dataset['manuscriptState'] = overview.manuscriptState.state;
-  if (completion) content.dataset['importCommitId'] = completion.commitId;
-  content.append(
-    element('h2', undefined, '工作概览'),
-    element('p', 'lede', overview.manuscriptState.label),
-  );
-  // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the
-  // editor last was, and whether the edits are in the journal — above the Book's own identity and
-  // every record below. Its continuation action sits with these manuscript readings.
-  const anchor = overview.manuscriptAnchor;
-  const guidance = element('section', 'onboarding-guidance');
-
-  const isSample = overview.records.some((record) => record.kind === 'source' && record.sourceDigest ===
-    'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
-  if (isSample && anchor !== null) {
-    void api.getPreferences().then(async (preferences) => {
-      const visible = await readSampleGuidance(isSample, preferences.values['onboarding.state'],
-        () => api.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
-      if (!guidance.isConnected || !visible) return;
-      guidance.dataset['onboardingGuidance'] = 'sample-book';
-      guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title));
-      const links = element('div', 'button-row');
-      const book = { bookId: overview.book.bookId, title: overview.book.title };
-      for (const { label, section } of SAMPLE_GUIDANCE_LABELS.steps) {
-        const link = button(label, 'secondary', () => void openBookSection(book, section));
-        link.dataset['onboardingStep'] = section;
-        links.append(link);
-      }
-      guidance.append(links);
-    }).catch(() => undefined);
-  }
-  if (anchor !== null) {
-    // The hero card (Issue #1413 cluster 4): the manuscript's revision, where the editor was and its save state, with
-    // 继续编辑稿件 as the page's one primary action.
-    const anchorSection = element('section', 'source-card manuscript-anchor overview-hero');
-    anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
-    const anchorValues = element('dl');
-    anchorValues.append(
-      ...(technicalLayerVisible ? [element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel)] : []),
-      element('dt', undefined, '上次位置'),
-      element('dd', undefined, anchor.entry === null
-        ? '尚未记录；打开稿件时从稿件开头开始'
-        : anchor.entry.state === 'nearest-anchor'
-          ? `${anchor.entry.label} · 原位置已不存在，将从最近的位置打开`
-          : anchor.entry.label),
-      element('dt', undefined, '保存状态'), element('dd', undefined, technicalWords(anchor.journalLabel, '已保存')),
-    );
-    anchorSection.append(element('h3', undefined, '稿件'), anchorValues, technicalDetails(
-      undefined,
-      element('dt', undefined, '稿件 ID'), element('dd', 'technical-identity', anchor.manuscriptId),
-      element('dt', undefined, '分支 ID'), element('dd', 'technical-identity', anchor.branchId),
-      element('dt', undefined, '修订版 ID'), element('dd', 'technical-identity', anchor.revisionId),
-      element('dt', undefined, '修订日志序号'), element('dd', 'technical-identity', String(anchor.journalSequence)),
-      element('dt', undefined, '上次位置段落 ID'),
-      element('dd', 'technical-identity', anchor.entry === null ? '—' : anchor.entry.blockId),
-      element('dt', undefined, '上次位置字素'),
-      element('dd', 'technical-identity', anchor.entry === null ? '—' : String(anchor.entry.grapheme)),
-    ));
-    content.append(anchorSection);
-    content.append(guidance);
-  }
-  const identity = element('section', 'source-card');
-  const identityValues = element('dl');
-  identityValues.append(
-    element('dt', undefined, '内部编号'), element('dd', undefined, overview.book.internalNumber ?? '未设置'),
-  );
-  identity.append(element('h3', undefined, '图书'), identityValues, technicalDetails(
-    undefined,
-    element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', overview.book.bookId),
-    element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
-  ));
-  // 人员 (Issue #431, S83; BOOK-006): the Book's 作者, 责编 and 相关人, and 编辑人员….
-  const peopleSlot = element('div', 'book-people-slot');
-
-  mountBookPeople({
-    root: peopleSlot,
-    bookId: overview.book.bookId,
-    people: overview.people,
-    api: api,
-    setStatus,
-    errorMessage: rendererErrorMessage,
-  });
-  // 书系 (Issue #63, S28a; SER-009): the Series the Book is in, and its membership change records.
-  const seriesSlot = element('section');
-
-  mountBookSeries({ root: seriesSlot, bookId: overview.book.bookId, api: api });
-
-  const agentEntry = element('div', 'agent-workspace-entry');
-  agentEntry.dataset['agentWorkspaceEntry'] = 'available';
-  const openAgent = button(AGENT_WORKSPACE_WORDS.overviewEntry, 'secondary', () => {
-    const back = agentWorkspaceReturn(overview.book.bookId, overview.book.title);
-    void leaveThen(() => openAgentWorkspace(overview.book.bookId, back));
-  });
-  openAgent.dataset['agentWorkspaceAction'] = 'open';
-  agentEntry.append(openAgent);
-
-
-  const taskHost = element('div');
-  taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
-  const inspectTaskAuthorization = async (): Promise<void> => {
-    const page = navigation.read(taskHost);
-    if (!page.isCurrent() || !taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    // The fixed Task belongs only to the development-ci baseline (ADR 0044, J-03).
-    // Reuse the existing settings projection; an unknown scope retains the original surface (#992).
-    const scope = await api.getModelServiceSettings().then(
-      (projection) => projection.launchPolicy.operationalScope,
-      () => null,
-    );
-    if (!page.isCurrent() || !taskHost.isConnected) return;
-    if (scope === 'ordinary-production' || scope === 'developer-live') {
-      taskHost.replaceChildren();
-      return;
-    }
-    await api.inspectTaskAuthorization().then(
-      (projection) => {
-        if (page.isCurrent() && taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
-          renderTaskAuthorization(taskHost, projection);
-        }
-      },
-      (error) => {
-        if (!page.isCurrent() || !taskHost.isConnected) return;
-        const unavailable = element('section', 'task-authorization-card attention-note');
-        unavailable.dataset['taskAuthorizationState'] = 'unavailable';
-        unavailable.append(
-          element('h3', undefined, TASK_DRAWER_TITLE),
-          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的任务记录。')),
-        );
-        taskHost.replaceChildren(unavailable);
-      },
-    );
-  };
-  // 工作概览 is a destination that shows the Book whole (editor-surfaces §2): the analysis is one line
-  // here — what state it is in — and its own destination under 资料与记录 is one step away (§3).
-  const analysisHost = element('section', 'book-analysis-summary');
-  analysisHost.dataset['analysisBookId'] = overview.book.bookId;
-  const inspectBaselineAnalysis = (): void => {
-    const page = navigation.read(analysisHost);
-    if (!page.isCurrent() || !analysisHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button('打开分析', 'secondary', () => renderBookAnalysis(overview.book.bookId, overview.book.title));
-    open.dataset['analysisAction'] = 'open-analysis';
-    void api.inspectBaselineAnalysis().then(
-      (projection) => {
-        if (!page.isCurrent() || !analysisHost.isConnected || projection.bookId !== analysisHost.dataset['analysisBookId']) return;
-        analysisHost.dataset['analysisState'] = projection.state;
-        if (projection.resultSetRevision !== null) void api.getPreferences().then((preferences) => {
-          if (guidance.isConnected && preferences.values['onboarding.state'] !== null) guidance.remove();
-        }, () => undefined);
-        analysisHost.replaceChildren(
-          element('h3', undefined, '分析'),
-          element('p', undefined, projection.resultSetRevision === null
-            ? `${technicalWords('基线分析', '稿件分析')} · ${projection.stateLabel}`
-            : technicalWords(`基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`,
-              `稿件分析 · ${projection.stateLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '与当前稿件一致' : '稿件已更新，可重新分析'}`)),
-          open,
-        );
-      },
-      (error) => {
-        if (!page.isCurrent() || !analysisHost.isConnected) return;
-        analysisHost.dataset['analysisState'] = 'unavailable';
-        const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
-        analysisHost.replaceChildren(element('h3', undefined, '分析'), element('p', 'attention-note', refusal.text));
-
-      },
-    );
-  };
-  // 审阅 is one line here as well (editor-surfaces §2, §4): the latest Review Run and what waits for the
-  // editor, one step from its destination under 工作, which comes before 资料与记录's 分析.
-  const reviewHost = element('section', 'book-review-summary');
-  reviewHost.dataset['reviewBookId'] = overview.book.bookId;
-  const inspectReviewSummary = (): void => {
-    const page = navigation.read(reviewHost);
-    if (!page.isCurrent() || !reviewHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button(REVIEW_ACTION_LABELS['open-review'], 'secondary', () => renderBookReview(overview.book.bookId, overview.book.title));
-    open.dataset['reviewAction'] = 'open-review';
-    // The line needs the Runs and the coverage only, so it asks for the page after the last finding —
-    // an empty one — and never carries a Run's findings onto the overview.
-    void api.inspectReviewWorkspace({ reviewRunId: null, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
-      (workspace) => {
-        if (!page.isCurrent() || !reviewHost.isConnected || workspace.bookId !== reviewHost.dataset['reviewBookId']) return;
-        reviewHost.dataset['reviewState'] = workspace.run === null ? 'empty' : workspace.run.state;
-        reviewHost.replaceChildren(element('h3', undefined, REVIEW_CARD_HEADING), element('p', undefined, reviewOverviewLine(workspace)), open);
-      },
-      (error) => {
-        if (!page.isCurrent() || !reviewHost.isConnected) return;
-        reviewHost.dataset['reviewState'] = 'unavailable';
-        reviewHost.replaceChildren(
-          element('h3', undefined, REVIEW_CARD_HEADING),
-          element('p', 'attention-note', rendererErrorMessage(error, REVIEW_WORKSPACE_UNAVAILABLE)),
-          open,
-        );
-      },
-    );
-  };
-  // 交付物 is one line too (editor-surfaces §2: 交付物一行计数): where the manuscript's 发稿 stands — how many
-  // milestones, which 发稿版本, whether the manuscript changed since — one step from its destination under
-  // 工作, after 审阅. No percentage (WORK-007).
-  const deliverablesHost = element('section', 'book-deliverables-summary');
-  deliverablesHost.dataset['deliverablesBookId'] = overview.book.bookId;
-  const inspectDeliverablesSummary = (): void => {
-    const page = navigation.read(deliverablesHost);
-    if (!page.isCurrent() || !deliverablesHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button(PUBLICATION_ACTION_LABELS.open, 'secondary', () => renderBookDeliverables(overview.book.bookId, overview.book.title));
-    open.dataset['deliverablesAction'] = 'open';
-    void api.inspectDeliverables().then(
-      (deliverables) => {
-        if (!page.isCurrent() || !deliverablesHost.isConnected || deliverables.bookId !== deliverablesHost.dataset['deliverablesBookId']) return;
-        deliverablesHost.dataset['deliverablesState'] = publicationStateOf(deliverables);
-        deliverablesHost.replaceChildren(
-          element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
-          element('p', undefined, deliverablesOverviewLine(deliverables)),
-          open,
-        );
-      },
-      (error) => {
-        if (!page.isCurrent() || !deliverablesHost.isConnected) return;
-        deliverablesHost.dataset['deliverablesState'] = 'unavailable';
-        deliverablesHost.replaceChildren(
-          element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
-          element('p', 'attention-note', rendererErrorMessage(error, DELIVERABLES_UNAVAILABLE)),
-          open,
-        );
-      },
-    );
-  };
-  // 评估 is one line too (Issue #429, S81a; editor-surfaces §5): the latest version, its state, total and conclusion, one step
-  // from its destination.
-  const evaluationHost = element('section', 'book-evaluation-summary');
-  evaluationHost.dataset['evaluationBookId'] = overview.book.bookId;
-  const inspectEvaluationSummary = (): void => {
-    const page = navigation.read(evaluationHost);
-    if (!page.isCurrent() || !evaluationHost.isConnected || overview.manuscriptState.state !== 'populated') return;
-    const open = button('打开评估', 'secondary', () => renderBookEvaluation(overview.book.bookId, overview.book.title));
-    open.dataset['evaluationAction'] = 'open';
-    void api.inspectEvaluation({ recordId: null }).then(
-      (workspace) => {
-        if (!page.isCurrent() || !evaluationHost.isConnected || workspace.bookId !== evaluationHost.dataset['evaluationBookId']) return;
-        evaluationHost.dataset['evaluationState'] = workspace.records[0]?.state ?? 'empty';
-        evaluationHost.replaceChildren(element('h3', undefined, EVALUATION_TITLE), element('p', undefined, evaluationOverviewLine(workspace)), open);
-      },
-      (error) => {
-        if (!page.isCurrent() || !evaluationHost.isConnected) return;
-        evaluationHost.dataset['evaluationState'] = 'unavailable';
-        evaluationHost.replaceChildren(
-          element('h3', undefined, EVALUATION_TITLE),
-          element('p', 'attention-note', rendererErrorMessage(error, EVALUATION_STATUS.unavailable)),
-          open,
-        );
-      },
-    );
-  };
-  // The four work areas side by side (Issue #1413 cluster 4): 审阅 · 评估 · 分析 · 交付物, each its state, its count and its way in.
-  const secondary = element('div', 'book-overview-secondary');
-  if (overview.manuscriptState.state === 'populated') {
-    const grid = element('div', 'book-overview-grid');
-    for (const host of [reviewHost, evaluationHost, analysisHost, deliverablesHost]) host.classList.add('book-overview-tile');
-    grid.append(reviewHost, evaluationHost, analysisHost, deliverablesHost);
-    content.append(grid);
-    const sources = element('section', 'overview-line book-sources-summary');
-    sources.append(element('h3', undefined, '来源与证据'),
-      button('查看来源与证据', 'quiet', () => renderBookSources(overview.book.bookId, overview.book.title)));
-    secondary.append(sources);
-    if (technicalLayerVisible) content.append(taskHost);
-  }
-
-  const detailHost = element('div');
-  const actions = element('div', 'button-row');
-  const completionActionButtons: HTMLButtonElement[] = [];
-  if (sourceCompletion) {
-    const sourceRecord = sourceCompletion.receipt.source;
-    const sourceImportRecord = sourceCompletion.receipt.record;
-    if (sourceRecord.sourceVersionId !== sourceCompletion.sourceVersionId ||
-      sourceImportRecord.sourceImportRecordId !== sourceCompletion.sourceImportRecordId) {
-      throw new Error('AI7_SOURCE_IMPORT_RESULT_INVALID');
-    }
-    const viewSource = button('查看来源材料', 'primary', () => detailHost.replaceChildren(recordPresentation(sourceRecord)));
-    viewSource.dataset['viewSourceVersionId'] = sourceCompletion.sourceVersionId;
-    const viewImportRecord = button('查看来源导入记录', 'secondary', () =>
-      detailHost.replaceChildren(recordPresentation(sourceImportRecord)));
-    viewImportRecord.dataset['viewSourceImportRecordId'] = sourceCompletion.sourceImportRecordId;
-    viewSource.disabled = true;
-    viewImportRecord.disabled = true;
-    completionActionButtons.push(viewSource, viewImportRecord);
-    actions.append(viewSource, viewImportRecord);
-  }
-  if (overview.primaryAction.kind === 'import-first-manuscript' && !sourceCompletion) {
-    const importFirst = button('导入首份稿件', 'primary', async () => {
-      importFirst.disabled = true;
-      setStatus('正在本地解析 DOCX…', 'busy');
-      try {
-        const result = await api.selectAndStageManuscript();
-        if (result.status === 'cancelled') {
-          importFirst.disabled = false;
-          setStatus('已取消文件选择');
-          return;
-        }
-        let staged = result.staged;
-        let exactChoice = staged.targetChoices.find(
-          (choice) => choice.kind === 'existing-book' && choice.bookId === overview.book.bookId,
-        );
-        if (!exactChoice) {
-          exactChoice = {
-            kind: 'existing-book',
-            id: `existing-book:${overview.book.bookId}`,
-            bookId: overview.book.bookId,
-            label: `${overview.book.title} · ${overview.book.internalNumber === null ? '' : `内部编号 ${overview.book.internalNumber} · `}图书 ID ${overview.book.bookId}`,
-            internalNumber: overview.book.internalNumber,
-            manuscriptState: 'empty',
-            reimportLineageSourceVersionIds: [],
-            reimportLineagePageAfter: null,
-            reimportLineagePreviousCursor: null,
-            reimportLineageNextCursor: null,
-            selected: false,
-          };
-          staged = { ...staged, targetChoices: [...staged.targetChoices, exactChoice] };
-        }
-        renderTargetChoice(staged, exactChoice.id, undefined, recoveryReturn);
-      } catch (error) {
-        importFirst.disabled = false;
-        setStatus(rendererErrorMessage(error, '无法开始首份稿件导入。'), 'error');
-      }
-    });
-    actions.append(importFirst);
-    if (completion) {
-      importFirst.disabled = true;
-      completionActionButtons.push(importFirst);
-    }
-  } else if (overview.primaryAction.kind === 'open-manuscript') {
-    const primaryActionButton = button('继续编辑稿件', 'primary', async () => {
-      setStatus('正在打开稿件…', 'busy');
-      try {
-        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: overview.book.bookId, bookTitle: overview.book.title }, recoveryReturn);
-      } catch (error) {
-        setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
-      }
-    });
-    actions.append(primaryActionButton);
-    if (completion) {
-      primaryActionButton.disabled = true;
-      completionActionButtons.push(primaryActionButton);
-    }
-  }
-
-
-  const records = element('section', 'review-section record-navigation');
-  records.append(element('h3', undefined, technicalWords('精确记录', '导入记录')));
-  const recordButtons = element('div', 'button-row');
-  for (const record of overview.records) {
-    if (!technicalLayerVisible && ['book', 'manuscript', 'revision', 'workflow'].includes(record.kind)) continue;
-    const open = button(editorialRecordLabel(record), 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
-    open.dataset['recordKind'] = record.kind;
-    if (record.kind === 'book') open.dataset['recordId'] = record.bookId;
-    else if (record.kind === 'manuscript') open.dataset['recordId'] = record.manuscriptId;
-    else if (record.kind === 'revision') open.dataset['recordId'] = record.revisionId;
-    else if (record.kind === 'source') open.dataset['recordId'] = record.sourceVersionId;
-    else if (record.kind === 'workflow') open.dataset['recordId'] = record.workflowInstanceId;
-    else if (record.kind === 'import-record') open.dataset['recordId'] = record.importRecordId;
-    else if (record.kind === 'source-import-record') open.dataset['recordId'] = record.sourceImportRecordId;
-    else open.dataset['recordId'] = record.reimportRecordId;
-    recordButtons.append(open);
-  }
-  records.append(recordButtons, detailHost);
-  const historyNavigation = element('div', 'button-row compact-actions');
-  const replaceHistoryPage = async (historyCursor: NonNullable<BookWorkOverviewProjection['historyPage']['nextCursor']>) => {
-    const current = navigation.begin();
-    setStatus('正在读取图书历史页…', 'busy');
-    try {
-      const next = await api.getBookOverview({ bookId: overview.book.bookId, historyCursor });
-      if (!current.isCurrent()) return;
-      navigation.present(() => renderBookOverview(next, undefined, recoveryReturn));
-    } catch (error) {
-      if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法读取图书历史页。'), 'error');
-    }
-  };
-  if (overview.historyPage.previousCursor !== null) {
-    const previous = button('较早记录', 'quiet', () => void replaceHistoryPage(overview.historyPage.previousCursor!));
-    previous.dataset['bookHistoryPrevious'] = overview.historyPage.previousCursor.stableId;
-    historyNavigation.append(previous);
-  }
-  if (overview.historyPage.nextCursor !== null) {
-    const next = button('较新记录', 'quiet', () => void replaceHistoryPage(overview.historyPage.nextCursor!));
-    next.dataset['bookHistoryNext'] = overview.historyPage.nextCursor.stableId;
-    historyNavigation.append(next);
-  }
-  records.append(historyNavigation);
-  // 导入与历史记录 folds away below the work (Issue #1413 cluster 4); a Book with no manuscript yet, an import just finished
-  // and 历史与恢复 open it.
-  const history = element('details', 'book-overview-history');
-  history.open = overview.manuscriptState.state !== 'populated' || sourceCompletion !== undefined;
-  history.append(element('summary', undefined, technicalWords('精确记录', '导入与历史记录')), records);
-  secondary.prepend(peopleSlot, seriesSlot, agentEntry);
-  content.append(secondary, history);
-  if (technicalLayerVisible) content.append(identity);
-  if (sourceCompletion) {
-    const receiptActions = element('div', 'button-row');
-    for (const action of Array.from(actions.children)) receiptActions.append(action);
-    records.prepend(receiptActions);
-    const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '继续编辑稿件');
-    if (open) actions.append(open);
-  }
-  (content.querySelector('.manuscript-anchor') ?? content).append(actions);
-  if (completion) content.prepend(importSteps('complete'));
-  appendRecoveryReturnAction(content, recoveryReturn);
-  replaceScreen(completion ? 'imported' : 'book-overview', content, { bookId: overview.book.bookId, title: overview.book.title, section: 'overview' });
-  shell.setContextActions(button('打开另一本图书', 'quiet', () => renderBookWorkbenchChooser(overview)));
-  // The drawer's bar started a Task of this Book (Issue #420): J-03's card and the one-line summaries read it again.
-  taskSurfaceRefresh = {
-    'fixed-task': inspectTaskAuthorization,
-    'baseline-analysis': inspectBaselineAnalysis,
-    'review-run': inspectReviewSummary,
-  };
-  if (completion) {
-    void acknowledgeCompletionAfterPaint(completion).then((acknowledged) => {
-      if (acknowledged && !authorityInterrupted && content.isConnected) {
-        for (const action of completionActionButtons) action.disabled = false;
-        setStatus(completion.completionLabel, 'success');
-      }
-      inspectTaskAuthorization();
-      inspectReviewSummary();
-      inspectEvaluationSummary();
-      inspectDeliverablesSummary();
-      inspectBaselineAnalysis();
-    });
-  } else {
-    inspectTaskAuthorization();
-    inspectReviewSummary();
-    inspectEvaluationSummary();
-    inspectDeliverablesSummary();
-    inspectBaselineAnalysis();
-    setStatus('图书工作概览已打开');
-  }
-}
-
 // ②A's baseline-analysis card lives in baseline-analysis-card.ts (Issue #1172); the shell lends it what it reaches.
 const { renderBaselineAnalysis, renderRunReport } = createBaselineAnalysisCard({
   awaitServiceJob, jumpToManuscript, leaveReturnChip, openEditorWindow, openTaskPlan, quickStartStartedLine, renderBookReview,
@@ -4032,290 +3199,6 @@ async function renderSeries(seriesId: string): Promise<void> {
   }
 }
 
-async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
-  if (!technicalLayerVisible) {
-    renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
-    return;
-  }
-  const content = panel();
-  content.classList.add('evaluation-calibration-page');
-  const host = element('div');
-  const back = element('div', 'button-row');
-  back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(
-    element('p', 'section-label', `设置 · ${CALIBRATION_PAGE_GROUP}`),
-    element('h2', undefined, CALIBRATION_PAGE_TITLE),
-    host,
-    back,
-  );
-  replaceScreen('evaluation-calibration', content);
-  const page = navigation.read(content);
-  setStatus(CALIBRATION_STATUS.loading, 'busy');
-  const surface = mountEvaluationCalibration({ root: host, focusBookId, api: api, setStatus, errorMessage: rendererErrorMessage });
-  try {
-    await surface.load();
-    if (!page.isCurrent()) return;
-    setStatus(CALIBRATION_STATUS.opened);
-  } catch (error) {
-    if (!navigation.errorIsCurrent(error, page)) return;
-    setStatus(rendererErrorMessage(error, CALIBRATION_STATUS.unavailable), 'error');
-  }
-}
-
-/** 设置 › 本机 › 通知 (Issue #937; NOTIF-005 to 007): four local switches, all off by default; none grants authority. */
-async function renderNotificationSettings(): Promise<void> {
-  const navigationRoute = navigation.begin();
-  const preferences = await api.getPreferences();
-  if (!navigationRoute.isCurrent()) return;
-  let values = preferences.values;
-  const content = panel();
-  content.dataset['notificationSettings'] = 'true';
-  content.append(element('h2', undefined, NOTIFICATION_SETTINGS_WORDS.title), element('p', 'field-note', NOTIFICATION_SETTINGS_WORDS.note));
-  if (preferences.notice) content.append(element('p', 'attention-note', preferences.notice));
-  const rows = [
-    ['notifications.enabled', NOTIFICATION_SETTINGS_WORDS.enabled],
-    ['notifications.completions', NOTIFICATION_SETTINGS_WORDS.completions],
-    ['notifications.sound', NOTIFICATION_SETTINGS_WORDS.sound],
-    ['notifications.bookName', NOTIFICATION_SETTINGS_WORDS.bookName],
-  ] as const;
-  const controls = new Map<string, HTMLInputElement>();
-  const paint = (): void => {
-    for (const [key] of rows) {
-      const control = controls.get(key)!;
-      control.checked = values[key];
-      control.disabled = key === 'notifications.completions' && !values['notifications.enabled'];
-    }
-  };
-  for (const [key, label] of rows) {
-    const row = element('label', 'field');
-    const control = document.createElement('input');
-    control.type = 'checkbox';
-    control.dataset['notificationPreference'] = key;
-    controls.set(key, control);
-    control.addEventListener('change', () => {
-      const value = control.checked;
-      control.disabled = true;
-      void api.savePreference({ key, value }).then((saved) => {
-        values = saved.values;
-        setStatus(NOTIFICATION_SETTINGS_WORDS.saved, 'success');
-      }).catch((error: unknown) => setStatus(rendererErrorMessage(error, NOTIFICATION_SETTINGS_WORDS.unsaved), 'error')).finally(() => {
-        control.disabled = false;
-        paint();
-      });
-    });
-    row.append(control, document.createTextNode(label));
-    content.append(row);
-  }
-  paint();
-  content.append(button(NOTIFICATION_SETTINGS_WORDS.back, 'secondary', renderSettingsHub));
-  replaceScreen('notifications', content);
-  setStatus(NOTIFICATION_SETTINGS_WORDS.opened);
-}
-
-/**
- * The exact persisted report of one historical Run, using the existing read-only report renderer (brief revision 2).
- * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
- */
-async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
-  const current = navigation.begin();
-  if (!technicalLayerVisible) {
-    renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
-    return;
-  }
-  const origin = screen.firstElementChild;
-  try {
-    const usage = await api.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
-    if (!current.isCurrent() || screen.firstElementChild !== origin) return;
-    if (usage.detail === null || usage.detail === undefined) throw new Error('USAGE_RUN_UNAVAILABLE');
-    run = usage.detail;
-    const content = panel();
-    content.dataset['usageRunDetail'] = run.runRecordId;
-    content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_RUN_TITLE),
-      element('p', undefined, run.bookTitle), element('p', 'technical-identity', usageRunIdentity(run.runRecordId)));
-    if (run.report === null) content.append(element('p', 'field-note', USAGE_RUN_REPORT_ABSENT));
-    else {
-      const report = renderRunReport(run.report);
-      report.setAttribute('open', '');
-      content.append(report);
-    }
-    content.append(button(USAGE_RETURN, 'quiet', () => renderUsage()));
-    replaceScreen('usage-run', content);
-    setStatus(USAGE_RUN_TITLE, 'success');
-  } catch (error) {
-    if (!navigation.errorIsCurrent(error, current)) return;
-    setStatus(rendererErrorMessage(error, USAGE_RUN_REPORT_ABSENT), 'error');
-  }
-}
-
-/** 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010). */
-function renderUsage(): void {
-  if (!technicalLayerVisible) {
-    renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
-    return;
-  }
-  const content = panel();
-  content.classList.add('usage-screen');
-  content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
-  const body = element('div');
-  mountUsage({
-    root: body, api: api, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel,
-    openRun: (run) => void openUsageRun(run),
-  });
-  const actions = element('div', 'button-row');
-  actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
-  content.append(body, actions);
-  replaceScreen('usage', content);
-  setStatus(USAGE_TITLE, 'success');
-}
-
-/** 设置 › 本机 › 键盘与无障碍 › 快捷键 (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-011). */
-function renderKeyboardSettings(): void {
-  const content = panel();
-  content.classList.add('keyboard-screen');
-  content.append(element('p', 'section-label', KEYBOARD_SECTION_LABEL), element('h2', undefined, KEYBOARD_TITLE));
-  const body = element('div');
-  const unmount = mountKeyboardSettings({
-    root: body, api: api, setStatus, errorMessage: rendererErrorMessage, onChanged: applyKeyboardBindings,
-  });
-  const actions = element('div', 'button-row');
-  actions.append(button(USAGE_RETURN, 'quiet', () => renderSettingsHub()));
-  content.append(body, actions);
-  replaceScreen('keyboard', content);
-  keyboardSettingsOff = unmount;
-  setStatus(KEYBOARD_TITLE, 'success');
-}
-
-/**
- * 设置 (Issue #934; editor-surfaces §8.6): 服务 · 编辑工作 · 本机, one row per page. A page that exists keeps its own render
- * function and its `data-settings-route`; a row whose page a later slice of the wave brings is unavailable, 即将提供.
- */
-
-function settingsPages(): Partial<Record<SettingsRoute, () => void>> {
-  return {
-    'model-service': () => void renderModelServiceSettings(),
-    'evaluation-calibration': () => void renderEvaluationCalibration(null),
-    'data-storage': () => void renderDataAndStorage(),
-    appearance: renderAppearance,
-    diagnostics: renderDiagnostics,
-    help: renderHelp,
-    usage: renderUsage,
-    keyboard: renderKeyboardSettings,
-    notifications: () => void renderNotificationSettings(),
-  };
-}
-
-function settingsNavigation(state: string): HTMLElement {
-  const nav = element('nav', 'settings-navigation');
-  nav.setAttribute('aria-label', '设置分类');
-  const hub = button('全部设置', 'quiet', renderSettingsHub);
-  if (state === 'settings') hub.setAttribute('aria-current', 'page');
-  nav.append(hub);
-  const pages = settingsPages();
-  for (const group of SETTINGS_HUB_GROUPS) {
-    const section = element('section');
-    section.append(element('h3', undefined, group.label));
-    for (const row of group.rows.filter((row) => technicalLayerVisible || !row.developerOnly)) {
-      const entry = button(row.label, 'quiet', () => pages[row.route]?.());
-      entry.dataset['settingsNav'] = row.route;
-      if (state === row.route) entry.setAttribute('aria-current', 'page');
-      section.append(entry);
-    }
-    if (group.key === 'local') {
-      const developer = button('开发者模式', 'quiet', () => {
-        renderSettingsHub();
-        screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
-      });
-      section.append(developer);
-    }
-    nav.append(section);
-  }
-  return nav;
-}
-
-function renderSettingsHub(): void {
-  const content = panel();
-  content.classList.add('settings-hub');
-  content.append(
-    element('p', 'section-label', SETTINGS_HUB_WORDS.section),
-    element('h2', undefined, SETTINGS_HUB_WORDS.title),
-    element('p', 'lede', SETTINGS_HUB_WORDS.lede),
-  );
-  const pages = settingsPages();
-  for (const group of SETTINGS_HUB_GROUPS) {
-    const rows = group.rows.filter((row) => technicalLayerVisible || row.developerOnly !== true);
-    if (rows.length === 0) continue;
-    const section = element('section', 'settings-group');
-    section.dataset['settingsGroup'] = group.key;
-    const heading = element('h3', undefined, group.label);
-    heading.id = `settings-group-${group.key}`;
-    section.setAttribute('aria-labelledby', heading.id);
-    const list = element('ul', 'settings-rows');
-    for (const row of rows) {
-      const item = element('li', 'settings-row');
-      item.dataset['settingsEntry'] = row.route;
-      const open = pages[row.route];
-      const entry = button('打开', 'secondary', () => open?.());
-      entry.classList.add('settings-hub-row');
-      entry.setAttribute('aria-label', row.label);
-      entry.dataset['settingsRoute'] = row.route;
-      if (technicalLayerVisible && row.developerOnly === true) entry.dataset['developerOnly'] = 'true';
-      const note = element('p', 'field-note', row.note);
-      note.id = `settings-note-${row.route}`;
-      entry.setAttribute('aria-describedby', note.id);
-      const copy = element('div', 'settings-row-copy');
-      copy.append(element('strong', undefined, row.label), note);
-      item.append(copy, entry);
-      if (open === undefined) {
-        entry.disabled = true;
-        item.dataset['settingsAvailability'] = 'coming-soon';
-        const soon = element('span', 'settings-coming-soon', SETTINGS_HUB_WORDS.comingSoon);
-        soon.id = `settings-soon-${row.route}`;
-        entry.setAttribute('aria-describedby', `${soon.id} ${note.id}`);
-        copy.append(soon);
-      }
-      list.append(item);
-    }
-    if (group.key === 'local') {
-      const item = element('li');
-      item.append(developerModeRow(() => {
-        renderSettingsHub();
-        screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
-      }));
-      list.append(item);
-    }
-    section.append(heading, list);
-    content.append(section);
-  }
-  if (technicalLayerVisible) mountLearningAskFrequency(content, api);
-  replaceScreen('settings', content);
-  setStatus(SETTINGS_HUB_WORDS.opened);
-}
-
-/**
- * Settings › Help (#1376 / #1382): a
- * 使用帮助 · 隐私说明 · 第三方许可 tab set and the 关于 line. Its versions come from the same service read 设置 › 数据与存储
- * uses, so the two screens cannot disagree.
- */
-function renderHelp(): void {
-  const content = panel();
-  content.classList.add('help-screen');
-  mountHelp({
-    root: content,
-    loadVersions: () => api.inspectDataVersion(),
-    back: renderSettingsHub,
-    modeChanged: () => {
-      renderHelp();
-      screen.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
-    },
-  });
-  replaceScreen('help', content);
-  content.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus();
-  setStatus(HELP_OPENED);
-}
-
 /**
  * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): reuse the window's owned Book route so
  * section changes preserve its manuscript capabilities. Reassigning even the same Book deliberately revokes those in main.
@@ -4471,446 +3354,11 @@ async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProject
   }
 }
 
-/**
- * 书库's search (Issue #431, S83; IA-008, BOOK-006): one field — or 书名, 作者 and 责编 together — and the words, read by
- * the service over every Book, paged as the list is. 显示全部图书 goes back to the whole list.
- */
-function renderBookFilter(
-  priorWork: ReadonlyArray<PriorWorkItemProjection>,
-  recoveryReturn: RecoveryReturnContext | undefined,
-  filter: BookSummaryFilter | null,
-  refresh = { request: 0 },
-): HTMLElement {
-  const form = element('form', 'book-filter');
-  form.noValidate = true;
-  const legend = element('p', 'book-filter-legend', BOOK_FILTER_LEGEND);
-  const fieldLabel = element('label', undefined, BOOK_FILTER_FIELD_LABEL);
-  const field = element('select');
-  field.id = 'book-filter-field';
-  for (const key of ['all', 'title', 'author', 'editor', 'series'] as const) {
-    const option = element('option', undefined, BOOK_FILTER_FIELDS[key]);
-    option.value = key;
-    field.append(option);
-  }
-  field.value = filter?.field ?? 'all';
-  fieldLabel.append(field);
-  const textLabel = element('label', undefined, BOOK_FILTER_TEXT_LABEL);
-  const text = element('input');
-  text.id = 'book-filter-text';
-  text.type = 'search';
-  // The service reads at most this many characters; a longer paste is cut here rather than refused as a bad request.
-  text.maxLength = MAX_BOOK_SUMMARY_FILTER_CHARACTERS;
-  text.value = filter?.text ?? '';
-  textLabel.append(text);
-  const find = button(BOOK_FILTER_ACTIONS.find, 'secondary', () => undefined);
-  find.type = 'submit';
-  find.dataset['bookFilterAction'] = 'find';
-  let clearControl: HTMLButtonElement | null = null;
-  const sync = (): void => { find.disabled = text.value.trim().length === 0; };
-  const restoreControls = (): void => {
-    sync();
-    if (clearControl !== null) clearControl.disabled = false;
-  };
-  text.addEventListener('input', sync);
-  sync();
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const words = text.value.trim();
-    if (words.length === 0 || find.disabled) return;
-    const next: BookSummaryFilter = {
-      field: field.value === 'title' || field.value === 'author' || field.value === 'editor' || field.value === 'series' ? field.value : 'all',
-      text: words,
-    };
-    find.disabled = true;
-    const current = ++refresh.request;
-    setStatus(BOOK_FILTER_STATUS_LINES.finding, 'busy');
-    void api.listBooks({ after: null, filter: next }).then(
-      (page) => {
-        if (!form.isConnected || current !== refresh.request) return;
-        renderLanding(priorWork, recoveryReturn, page, next);
-        setStatus(BOOK_FILTER_STATUS_LINES.found, 'success');
-        document.querySelector<HTMLElement>('#book-filter-text')?.focus();
-      },
-      (error) => {
-        if (!form.isConnected || current !== refresh.request) return;
-        restoreControls();
-        setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
-      },
-    );
-  });
-  const row = element('div', 'button-row compact-actions');
-  row.append(find);
-  if (filter !== null) {
-    const clear = button(BOOK_FILTER_ACTIONS.clear, 'quiet', () => {
-      clear.disabled = true;
-      const current = ++refresh.request;
-      void api.listBooks({ after: null }).then(
-        (page) => {
-          if (!form.isConnected || current !== refresh.request) return;
-          renderLanding(priorWork, recoveryReturn, page, null);
-          setStatus(BOOK_FILTER_STATUS_LINES.cleared, 'success');
-          document.querySelector<HTMLElement>('#book-filter-text')?.focus();
-        },
-        (error) => {
-          if (!form.isConnected || current !== refresh.request) return;
-          restoreControls();
-          setStatus(rendererErrorMessage(error, BOOK_FILTER_STATUS_LINES.findFailed), 'error');
-        },
-      );
-    });
-    clear.dataset['bookFilterAction'] = 'clear';
-    clearControl = clear;
-    row.append(clear);
-  }
-  form.append(legend, fieldLabel, textLabel, row);
-  return form;
-}
-
-function renderAppearance(): void {
-  const content = panel();
-  content.classList.add('appearance-settings');
-  content.append(element('p', 'section-label', APPEARANCE_SECTION), element('h2', undefined, APPEARANCE_TITLE),
-    element('p', 'lede', APPEARANCE_LEDE));
-  const choices = element('fieldset', 'appearance-choices');
-  choices.append(element('legend', undefined, APPEARANCE_LEGEND));
-  const radios: HTMLInputElement[] = [];
-  for (const choice of APPEARANCE_CHOICES) {
-    const label = element('label', 'appearance-choice');
-    const input = element('input');
-    input.type = 'radio'; input.name = 'appearance-theme'; input.value = choice.value;
-    input.dataset['appearanceTheme'] = choice.value;
-    input.checked = appearance.preference === choice.value;
-    // The radios stay enabled while saving: disabling the focused one would drop keyboard focus (KEY-013).
-    input.addEventListener('change', () => {
-      if (!input.checked) return;
-      void appearance.choose(choice.value).then(() => { setStatus(APPEARANCE_SAVED, 'success'); }, () => {
-        for (const radio of radios) radio.checked = radio.value === appearance.preference;
-        setStatus(APPEARANCE_SAVE_FAILED, 'error');
-      });
-    });
-    radios.push(input);
-    label.append(input, element('strong', undefined, choice.label));
-    choices.append(label);
-  }
-  const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });
-  const observer = new MutationObserver(() => { if (!content.isConnected) { unsubscribe(); observer.disconnect(); } });
-  observer.observe(screen, { childList: true });
-  const actions = element('div', 'button-row');
-  actions.append(button(APPEARANCE_BACK, 'quiet', () => void initializeStartup()));
-  // 工作区密度, 稿件阅读预设, 稿件排版 and 区域宽度 (Issue #951, wave 12 slice 12a; VIEW-001 to VIEW-009) share this page.
-  const viewSettings = renderViewSettings(viewPreferences, setStatus);
-  const viewObserver = new MutationObserver(() => { if (!content.isConnected) { viewSettings.destroy(); viewObserver.disconnect(); } });
-  viewObserver.observe(screen, { childList: true });
-  content.append(choices, viewSettings.element, actions);
-  replaceScreen('appearance', content);
-  setStatus(APPEARANCE_STATUS);
-}
-
-function renderLanding(
-  priorWork: ReadonlyArray<PriorWorkItemProjection>,
-  recoveryReturn: RecoveryReturnContext | undefined,
-  books: BookSummaryPageProjection,
-  // 书库's search (Issue #431, S83): the list shows only the Books it found, until 显示全部图书.
-  filter: BookSummaryFilter | null = null,
-): void {
-  const recoveryWork = priorWork.find((item) => item.recoveryAttention !== null);
-  const recoveryAttention = recoveryWork?.recoveryAttention;
-  const inferredRecoveryReturn = recoveryWork && recoveryAttention
-    ? {
-        attentionId: recoveryAttention.attentionId,
-        attentionVersion: recoveryAttention.attentionVersion,
-        bookTitle: recoveryWork.bookTitle,
-      } satisfies RecoveryReturnContext
-    : undefined;
-  const activeRecoveryReturn = recoveryReturn ?? inferredRecoveryReturn;
-  const content = panel();
-  const refresh = { request: 0 };
-  // 书库 (Issue #934; editor-surfaces §8.2): the sidebar's destination for every Book, with the two ways a Book begins. The
-  // screen keeps its state name `landing`, the window's first screen, which every Journey waits for.
-  content.classList.add('library-home');
-  const copy = element('div');
-  copy.append(
-    element('p', 'section-label', SHELL_LABELS.library),
-    element('h2', undefined, SHELL_LABELS.libraryTitle),
-    element('p', 'lede', '新建一本空图书，或从本地 DOCX 导入稿件。'),
-  );
-  const createBook = button('新建图书', 'secondary', renderBookCreationForm);
-  const importButton = button('导入稿件', 'primary', async () => {
-    importButton.disabled = true;
-    setStatus('正在本地解析 DOCX…', 'busy');
-    try {
-      const result = await api.selectAndStageManuscript();
-      if (result.status === 'cancelled') {
-        importButton.disabled = false;
-        setStatus('已取消文件选择');
-        return;
-      }
-      setStatus('DOCX 已完成本地暂存', 'success');
-      renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
-    } catch (error) {
-      renderError(error, () => renderLanding(priorWork, activeRecoveryReturn, books));
-    }
-  });
-  // 书系, 知识库 and 质量与学习 are the sidebar's destinations now, and 数据与存储, 模型服务 and 评估校准与预测 are rows of 设置
-  // (Issue #934): the library keeps only what begins a Book.
-  const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook);
-  copy.append(landingActions);
-  content.append(copy);
-  // The landing always paints first; this supporting card never replaces its normal actions.
-  const onboarding = element('section', 'onboarding-card');
-  content.append(onboarding);
-  if (filter === null && books.items.length === 0 && priorWork.length === 0) {
-    void Promise.all([api.getPreferences(), api.getProductDataLocation()]).then(([preferences, location]) => {
-      if (!onboarding.isConnected || !showOnboardingCard(books.items.length > 0, preferences.values['onboarding.state'])) return;
-      onboarding.dataset['onboardingCard'] = 'first-run';
-      const labels = FIRST_RUN_CARD_LABELS;
-      onboarding.append(element('h3', undefined, labels.title));
-      const steps = element('ol', 'onboarding-steps');
-      const data = element('li');
-      data.append(element('strong', undefined, labels.dataStep), ...(technicalLayerVisible ? [element('p', 'onboarding-data-location', location.canonicalRoot)] : []),
-        button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
-      const warnings = [location.dataLocationException === null ? null : location.channelDescription, location.syncWarning].filter((line): line is string => line !== null);
-      if (warnings.length > 0) data.append(element('p', 'field-note', `${warnings.map((line) => line.replace(/。$/u, '')).join('；')}。`));
-      const model = element('li');
-      model.append(element('strong', undefined, labels.modelStep), element('p', undefined, labels.modelNote),
-        button(labels.modelOpen, 'secondary', () => void renderModelServiceSettings()));
-      const start = element('li');
-      start.append(element('strong', undefined, labels.startStep), element('p', undefined, labels.startNote));
-      if (location.runtimeForm === 'source-checkout') {
-        const sample = button(labels.sampleImport, 'secondary', async () => {
-          sample.disabled = true;
-          setStatus(labels.sampleBusy, 'busy');
-          try {
-            const result = await api.importBundledSampleBook();
-            if (result.status === 'staged') {
-              setStatus(labels.sampleStaged, 'success');
-              renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
-            }
-          } catch (error) {
-            sample.disabled = false;
-            setStatus(rendererErrorMessage(error, labels.sampleFailed), 'error');
-          }
-        });
-        start.append(sample);
-      } else start.append(element('p', undefined, labels.sampleUnavailable));
-      steps.append(data, model, start);
-      const skip = button(labels.skip, 'quiet', async () => {
-        skip.disabled = true;
-        try {
-          await api.savePreference({ key: 'onboarding.state', value: 'skipped' });
-          onboarding.remove();
-          setStatus(labels.skipped);
-        } catch (error) {
-          skip.disabled = false;
-          setStatus(rendererErrorMessage(error, labels.skipFailed), 'error');
-        }
-      });
-      const help = button('帮助', 'quiet', () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); });
-      help.dataset['onboardingHelp'] = 'true';
-      onboarding.append(steps, help, skip);
-    }, () => undefined);
-  }
-  if (books.items.length > 0 || filter !== null) {
-    const library = element('section', 'recent-work');
-    library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
-    library.append(element('h3', undefined, SHELL_LABELS.allBooks));
-    library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter, refresh));
-    if (filter !== null) {
-      const result = element('p', 'field-note');
-      result.append(element('span', 'book-filter-line', bookFilterLine(filter)));
-      if (books.items.length === 0) result.append('；', element('span', 'book-filter-none', BOOK_FILTER_NONE));
-      library.append(result);
-    }
-    const list = element('div', 'recent-work-list');
-    for (const summary of books.items) {
-      const open = bookCardOpen(summary.title, summary.manuscriptStateLabel, async () => {
-        const navigationRoute = navigation.begin();
-        open.disabled = true;
-        setStatus('正在打开图书…', 'busy');
-        try {
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn, navigationRoute);
-        } catch (error) {
-          if (navigation.errorIsCurrent(error, navigationRoute)) setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
-        } finally { open.disabled = false; }
-      });
-      open.dataset['bookId'] = summary.bookId;
-      const row = element('article', 'book-summary-item');
-      row.append(open, bookCardAction('打开图书'));
-      // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
-      const peopleLine = bookCardPeopleLine(summary.people);
-      const relatedLine = bookCardRelatedLine(summary.people);
-      const facts = element('p', 'book-people-line field-note');
-      if (peopleLine !== null) facts.append(peopleLine);
-      if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
-      if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
-      if (facts.childNodes.length > 0) row.append(facts);
-      row.append(bookIdentityDisclosure(summary));
-      list.append(row);
-    }
-    library.append(list);
-    if (books.nextCursor) {
-      const loadMore = button('加载更多图书', 'secondary', async () => {
-        const current = navigation.begin();
-        const request = ++refresh.request;
-        loadMore.disabled = true;
-        setStatus('正在读取下一页图书摘要…', 'busy');
-        try {
-          const page = await api.listBooks({ after: books.nextCursor, ...(filter === null ? {} : { filter }) });
-          if (!current.isCurrent() || request !== refresh.request) return;
-          renderLanding(
-            priorWork,
-            activeRecoveryReturn,
-            { items: [...books.items, ...page.items], nextCursor: page.nextCursor },
-            filter,
-          );
-          setStatus('已加载更多图书摘要', 'success');
-        } catch (error) {
-          loadMore.disabled = false;
-          if (navigation.errorIsCurrent(error, current) && request === refresh.request) setStatus(rendererErrorMessage(error, '无法读取下一页图书摘要。'), 'error');
-        } finally { loadMore.disabled = false; }
-      });
-      const loadMoreActions = element('div', 'button-row');
-      loadMoreActions.append(loadMore);
-      library.append(loadMoreActions);
-    }
-    content.append(library);
-  }
-  if (priorWork.length > 0) {
-    const recent = element('section', 'recent-work');
-    recent.append(element('h3', undefined, '最近稿件'));
-    const list = element('div', 'recent-work-list');
-    for (const item of priorWork) {
-      const state = item.recoveryAttention ? '恢复待确认状态' : `当前稿件 ${item.revisionLabel}`;
-      const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
-      const open = bookCardOpen(item.bookTitle, state, async () => {
-        const current = navigation.begin();
-        open.disabled = true;
-        setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
-        try {
-          if (item.recoveryAttention) {
-            await returnToRecoveryComparison(item.recoveryAttention.attentionId, current);
-            return;
-          }
-          // The startup return takes the Book route like 书库 does, rather than opening this
-          // manuscript at its start: V2-UX-RET-002 asks both ways in to arrive at the same place, the
-          // position the editor left, and one route is what keeps them from drifting apart.
-          await requestBookWorkbenchRoute({ kind: 'book', bookId: item.bookId }, undefined, activeRecoveryReturn, current);
-        } catch (error) {
-          open.disabled = false;
-          if (navigation.errorIsCurrent(error, current)) setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
-        } finally { open.disabled = false; }
-      });
-      open.dataset['manuscriptId'] = item.manuscriptId;
-      const row = element('article', 'recent-work-item');
-      row.append(
-        open,
-        bookCardAction(item.recoveryAttention ? '返回恢复比较' : '继续编辑'),
-        element('p', 'field-note book-card-facts', context),
-        ...(item.recoveryAttention ? [element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。')] : []),
-      );
-      list.append(row);
-    }
-    recent.append(list);
-    content.append(recent);
-  }
-  appendRecoveryReturnAction(content, activeRecoveryReturn);
-  replaceScreen('landing', content);
-  setStatus('准备就绪');
-}
-
 // The review before an import lives in import-review.ts (Issue #1172); the shell lends it what it reaches.
 const { listSection, reimportRangeLine, renderManuscriptReimportReview, renderReview, renderSourceImportReview, renderTargetChoice } = createImportReview({
   abandonAndContinue, appendRecoveryReturnAction, awaitServiceJob, hasErrorCode, identityFindingDisclosure, initializeStartup,
-  instantValue, rendererErrorMessage, renderError, renderImported, replaceScreen, setStatus, sourceCard, technicalDetails,
+  instantValue, rendererErrorMessage, renderError, renderImported: (...args) => renderImported(...args), replaceScreen, setStatus, sourceCard, technicalDetails,
 });
-
-let dropImportBusy = false;
-screen.addEventListener('dragover', (event) => {
-  if (['landing', 'editor'].includes(screen.dataset['screen'] ?? '') && event.dataTransfer?.types.includes('Files')) event.preventDefault();
-});
-screen.addEventListener('drop', (event) => {
-  const file = event.dataTransfer?.files[0];
-  if (!file || !['landing', 'editor'].includes(screen.dataset['screen'] ?? '')) return;
-  event.preventDefault();
-  if (dropImportBusy || !/\.docx$/iu.test(file.name)) return;
-  dropImportBusy = true;
-  void (async () => {
-    if (!await settleScreen()) return;
-    const result = await api.stageDroppedManuscript(file);
-    if (result.status === 'staged') renderTargetChoice(result.staged, null);
-  })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法导入拖入的 DOCX。'), 'error')).finally(() => { dropImportBusy = false; });
-});
-
-function renderImported(result: ImportCommitProjection, recoveryReturn?: RecoveryReturnContext): void {
-  delete document.documentElement.dataset['ai7ImportCompletionPainted'];
-  delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
-  if ('reimportRecordId' in result) {
-    // A reimport returns to the manuscript (V2-UX-IMP-056; Issue #412, S63): the first import of a manuscript ends in
-    // the Book Work Overview once, an update of it does not.
-    navigation.present(() => renderEditorWindow(result.window, result.overview.book.title, recoveryReturn?.attentionId, undefined, undefined, result));
-    // Frame presentation and acknowledgement IPC can finish after a newer status, including a refused 跳到所选文字
-    // (Issue #807). Repeat the completion only if the status has not changed; the landing notice also keeps the result.
-    const landingStatusRevision = statusRevision;
-    void acknowledgeCompletionAfterPaint(result).then((acknowledged) => {
-      if (acknowledged && statusRevision === landingStatusRevision) setStatus(result.completionLabel, 'success');
-    });
-    return;
-  }
-  navigation.present(() => renderBookOverview(result.overview, result, recoveryReturn));
-}
-
-/** How many graphemes of a mark's words the reimport notice quotes. */
-const REIMPORT_NOTICE_WORDS = 40;
-
-/** One mark a reimport could not follow: its kind, the paragraph it stood in, and its words, cut at a bound. */
-function reimportUnfollowedLine(item: ReimportUnfollowedMarkProjection): string {
-  const words = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(item.words), ({ segment }) => segment);
-  const quoted = words.length > REIMPORT_NOTICE_WORDS ? `${words.slice(0, REIMPORT_NOTICE_WORDS).join('')}…` : item.words;
-  return `${MARK_KIND_LABELS[item.kind]} · 原第 ${item.fromPosition} 段 · 「${quoted}」`;
-}
-
-/**
- * What a reimport came to, where the editor lands after it (Issue #412, S63; V2-UX-IMP-056, IMP-057): the result, how
- * many rows were resolved and marks followed, and — kept until the editor dismisses it — every mark that could not
- * follow the new file, with its words and where it stood. It carries the commit it reports, which the completion
- * acknowledgement reads.
- */
-function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTMLElement {
-  const record = result.receipt;
-  const section = element('section', 'reimport-landing');
-  section.dataset['importCommitId'] = result.commitId;
-  section.dataset['reimportResultKind'] = result.resultKind;
-  section.dataset['reimportUnfollowedMarks'] = String(record.markOutcomes.unfollowed);
-  section.setAttribute('role', 'status');
-  section.append(
-    element('h3', undefined, result.completionLabel),
-    element('p', undefined, result.resultKind === 'changed'
-      ? `${technicalWords(`已形成修订版 ${result.window.revisionLabel}`, '稿件已更新')}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
-      : technicalWords('新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。', '新文件与当前稿件相同，没有需要更新的内容。')),
-  );
-  if (record.markOutcomes.unfollowed > 0) {
-    const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;
-    section.append(element('p', 'attention-note',
-      `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
-    const list = element('ul', 'reimport-unfollowed');
-    for (const item of record.markOutcomes.items) {
-      const entry = element('li', undefined, reimportUnfollowedLine(item));
-      entry.dataset['reimportUnfollowedMarkId'] = item.markId;
-      list.append(entry);
-    }
-    section.append(list);
-  }
-  const detail = element('div', 'reimport-landing-record');
-  const actions = element('div', 'button-row compact-actions');
-  const view = button('查看稿件重新导入记录', 'secondary', () => detail.replaceChildren(recordPresentation(record)));
-  view.dataset['viewReimportRecordId'] = result.reimportRecordId;
-  const dismiss = button('知道了', 'quiet', () => section.remove());
-  dismiss.dataset['dismissReimportLanding'] = result.commitId;
-  actions.append(view, dismiss);
-  section.append(actions, detail);
-  return section;
-}
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -5077,6 +3525,145 @@ const { renderKnowledgeBase, renderQualityLearning } = createKnowledgeBase({
 const { renderModelServiceSettings } = createModelServiceSettings({
   element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
 });
+
+const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNotification, openOverviewResult, renderTaskOverview, openGlobalAttentionItem, openGlobalAttentionTarget } = createGlobalPages({
+  technicalDetails,
+  get authorityInterrupted() { return authorityInterrupted; },
+  set authorityInterrupted(value) { authorityInterrupted = value; },
+  get leaveGuard() { return leaveGuard; },
+  set leaveGuard(value) { leaveGuard = value; },
+  setStatus: (...args) => setStatus(...args),
+  persistenceStatus,
+  rendererErrorMessage: (...args) => rendererErrorMessage(...args),
+  api,
+  panel: (...args) => panel(...args),
+  globalAttentionReader,
+  renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
+  replaceScreen: (...args) => replaceScreen(...args),
+  get globalAttentionSurface() { return globalAttentionSurface; },
+  set globalAttentionSurface(value) { globalAttentionSurface = value; },
+  get overviewDrawerBookId() { return overviewDrawerBookId; },
+  set overviewDrawerBookId(value) { overviewDrawerBookId = value; },
+  screen,
+  taskDrawer,
+  openTaskResult: (...args) => openTaskResult(...args),
+  get taskOverviewSurface() { return taskOverviewSurface; },
+  set taskOverviewSurface(value) { taskOverviewSurface = value; },
+  settleScreen: (...args) => settleScreen(...args),
+  taskNavigationBadge,
+  requestBookWorkbenchRoute: (...args) => requestBookWorkbenchRoute(...args),
+  jumpToSelectionText: (...args) => jumpToSelectionText(...args),
+  renderBookReview: (...args) => renderBookReview(...args),
+  renderBookManuscript: (...args) => renderBookManuscript(...args),
+  button: (...args) => button(...args),
+  element: (...args) => element(...args),
+  openEditorWindow: (...args) => openEditorWindow(...args),
+  renderProposalWorkspace: (...args) => renderProposalWorkspace(...args),
+  returnToRecoveryComparison: (...args) => returnToRecoveryComparison(...args),
+  renderProposalConflict: (...args) => renderProposalConflict(...args),
+  renderStartupProjection: (...args) => renderStartupProjection(...args),
+  renderBookAnalysis: (...args) => renderBookAnalysis(...args),
+  openTaskPlan: (...args) => openTaskPlan(...args),
+  renderBookEvaluation: (...args) => renderBookEvaluation(...args),
+  renderBookDeliverables: (...args) => renderBookDeliverables(...args),
+  renderKnowledgeBase: (...args) => renderKnowledgeBase(...args),
+  renderQualityLearning: (...args) => renderQualityLearning(...args),
+  renderGlobalAgent: (...args) => renderGlobalAgent(...args),
+  renderBookOverview: (...args) => renderBookOverview(...args),
+});
+
+
+const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHub, renderHelp, renderAppearance } = createSettingsScreens({
+  setStatus: (...args) => setStatus(...args),
+  panel: (...args) => panel(...args),
+  element: (...args) => element(...args),
+  button: (...args) => button(...args),
+  returnToOrigin: (...args) => returnToOrigin(...args),
+  replaceScreen: (...args) => replaceScreen(...args),
+  api,
+  rendererErrorMessage: (...args) => rendererErrorMessage(...args),
+  screen,
+  renderRunReport: (...args) => renderRunReport(...args),
+  applyKeyboardBindings: (...args) => applyKeyboardBindings(...args),
+  get keyboardSettingsOff() { return keyboardSettingsOff; },
+  set keyboardSettingsOff(value) { keyboardSettingsOff = value; },
+  renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
+  renderDataAndStorage: (...args) => renderDataAndStorage(...args),
+  renderDiagnostics: (...args) => renderDiagnostics(...args),
+  appearance,
+  initializeStartup: (...args) => initializeStartup(...args),
+  viewPreferences,
+});
+
+
+const { renderBookOverview } = createBookOverviewScreen({
+  panel: (...args) => panel(...args),
+  element: (...args) => element(...args),
+  api,
+  button: (...args) => button(...args),
+  openBookSection: (...args) => openBookSection(...args),
+  technicalDetails: (...args) => technicalDetails(...args),
+  setStatus: (...args) => setStatus(...args),
+  rendererErrorMessage: (...args) => rendererErrorMessage(...args),
+  agentWorkspaceReturn: (...args) => agentWorkspaceReturn(...args),
+  leaveThen: (...args) => leaveThen(...args),
+  openAgentWorkspace: (...args) => openAgentWorkspace(...args),
+  renderTaskAuthorization: (...args) => renderTaskAuthorization(...args),
+  renderBookAnalysis: (...args) => renderBookAnalysis(...args),
+  rendererErrorCode: (...args) => rendererErrorCode(...args),
+  renderBookReview: (...args) => renderBookReview(...args),
+  renderBookDeliverables: (...args) => renderBookDeliverables(...args),
+  renderBookEvaluation: (...args) => renderBookEvaluation(...args),
+  renderBookSources: (...args) => renderBookSources(...args),
+  recordPresentation: (...args) => recordPresentation(...args),
+  renderTargetChoice: (...args) => renderTargetChoice(...args),
+  renderResolvedBookWorkbenchRoute: (...args) => renderResolvedBookWorkbenchRoute(...args),
+  editorialRecordLabel: (...args) => editorialRecordLabel(...args),
+  appendRecoveryReturnAction: (...args) => appendRecoveryReturnAction(...args),
+  replaceScreen: (...args) => replaceScreen(...args),
+  shell,
+  renderBookWorkbenchChooser: (...args) => renderBookWorkbenchChooser(...args),
+  get taskSurfaceRefresh() { return taskSurfaceRefresh; },
+  set taskSurfaceRefresh(value) { taskSurfaceRefresh = value; },
+  acknowledgeCompletionAfterPaint: (...args) => acknowledgeCompletionAfterPaint(...args),
+  get authorityInterrupted() { return authorityInterrupted; },
+  set authorityInterrupted(value) { authorityInterrupted = value; },
+});
+
+
+const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine, reimportLandingSection, installDropHandlers } = createLibraryScreen({
+  element: (...args) => element(...args),
+  button: (...args) => button(...args),
+  setStatus: (...args) => setStatus(...args),
+  api,
+  rendererErrorMessage: (...args) => rendererErrorMessage(...args),
+  panel: (...args) => panel(...args),
+  renderBookCreationForm: (...args) => renderBookCreationForm(...args),
+  renderTargetChoice: (...args) => renderTargetChoice(...args),
+  renderError: (...args) => renderError(...args),
+  renderDataAndStorage: (...args) => renderDataAndStorage(...args),
+  renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
+  get authorityInterrupted() { return authorityInterrupted; },
+  set authorityInterrupted(value) { authorityInterrupted = value; },
+  leaveThen: (...args) => leaveThen(...args),
+  renderHelp: (...args) => renderHelp(...args),
+  bookCardOpen: (...args) => bookCardOpen(...args),
+  requestBookWorkbenchRoute: (...args) => requestBookWorkbenchRoute(...args),
+  bookCardAction: (...args) => bookCardAction(...args),
+  bookIdentityDisclosure: (...args) => bookIdentityDisclosure(...args),
+  returnToRecoveryComparison: (...args) => returnToRecoveryComparison(...args),
+  appendRecoveryReturnAction: (...args) => appendRecoveryReturnAction(...args),
+  replaceScreen: (...args) => replaceScreen(...args),
+  screen,
+  settleScreen: (...args) => settleScreen(...args),
+  renderEditorWindow: (...args) => renderEditorWindow(...args),
+  get statusRevision() { return statusRevision; },
+  set statusRevision(value) { statusRevision = value; },
+  acknowledgeCompletionAfterPaint: (...args) => acknowledgeCompletionAfterPaint(...args),
+  renderBookOverview: (...args) => renderBookOverview(...args),
+  recordPresentation: (...args) => recordPresentation(...args),
+});
+installDropHandlers();
 
 async function initializeRenderer(): Promise<void> {
   const navigationRoute = navigation.begin();
