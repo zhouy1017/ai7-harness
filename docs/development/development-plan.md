@@ -28,7 +28,7 @@ The Owner's [2026-11-14 decisions](https://github.com/zhouy1017/ai7-harness/issu
 | --- | --- |
 | #1147 / #1027 | Offline validation closed: batched inference failed the numerical tolerance. Product embedding is not shipped; the #1027 decision follows the #1074 result, with its decision point recorded on [#1540](https://github.com/zhouy1017/ai7-harness/issues/1540). |
 | #1152 | A bounded R4 check of the standards tables (plan #1516 §9). |
-| #1074 | Quality re-measurement awaits the Owner's authorization for a developer-live pass. |
+| #1074 | The R4 quality re-measurement is authorized (after #1538, plan #1516 §3 and §9); its real-editor half waits for the single human test after 0.8.0. |
 
 ## Delivered R2 → 0.7.1 Alpha (#1472)
 
