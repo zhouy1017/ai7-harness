@@ -230,6 +230,9 @@ describe('quiet notice lifetime', () => {
       update('确认结果与当前编辑不符', 'error');
       expect(surface.textContent).toBe('确认结果与当前编辑不符');
       expect(surface.dataset['tone']).toBe('error');
+      update('');
+      expect(surface.textContent).toBe('确认结果与当前编辑不符');
+      expect(surface.hidden).toBe(false);
     } finally { restore(); }
   });
 

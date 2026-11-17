@@ -186,6 +186,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       : active instanceof HTMLInputElement && active.name === 'writing-type' ? `input[name="writing-type"][value="${CSS.escape(active.value)}"]`
       : active.dataset['writingMaterial'] !== undefined ? `[data-writing-material="${CSS.escape(active.dataset['writingMaterial'])}"]`
       : null);
+    const existingSheet = section.querySelector<HTMLDialogElement>('dialog.writing-task-sheet');
     section.replaceChildren();
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const draftedCount = page.types.filter((type) => type.drafted !== null).length;
@@ -248,9 +249,9 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       opener.setAttribute('aria-expanded', 'false');
       section.append(opener);
     } else {
-      const surface = sheetNode(page, sheet);
+      const surface = sheetNode(page, sheet, existingSheet);
       section.append(surface);
-      surface.show();
+      if (!surface.open) surface.show();
     }
     if (keep !== null) section.querySelector<HTMLElement>(keep)?.focus();
     // 创建后直接打开 (Issue #1403): a draft the editor began here is made a document under its title and opened.
@@ -273,7 +274,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   }
 
   /** The sheet: types, references, the editor's words, the four rows, and 先看计划 / 快速开始 / 取消. */
-  function sheetNode(page: WritingTaskProjection, state: Sheet): HTMLDialogElement {
+  function sheetNode(page: WritingTaskProjection, state: Sheet, existing: HTMLDialogElement | null): HTMLDialogElement {
     const form = el('form', 'writing-sheet');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
@@ -385,13 +386,20 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     cancel.disabled = busy;
     row.append(start, plan, cancel);
     form.append(row);
-    const surface = createSheet('writing-task-sheet');
+    const surface = existing ?? createSheet('writing-task-sheet');
     const title = el('h3', undefined, '写作任务');
     title.id = uid('sheet-title');
     surface.setAttribute('aria-labelledby', title.id);
     sheetContent(surface, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== row), row, form);
-    surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
-    surface.addEventListener('close', () => { if (!busy) { sheet = null; paint('[data-writing-action="new"]'); } });
+    if (existing === null) {
+      surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
+      surface.addEventListener('close', () => {
+        if (!busy) {
+          sheet = null;
+          paint(document.activeElement === document.body || surface.contains(document.activeElement) ? '[data-writing-action="new"]' : null);
+        }
+      });
+    }
     return surface;
   }
 

@@ -55,12 +55,22 @@ export function createSheet(className: string): HTMLDialogElement {
     queueMicrotask(focusFirst);
   };
   sheet.close = (value?: string) => {
+    const returnFocus = document.activeElement === document.body || sheet.contains(document.activeElement);
     contentObserver?.disconnect();
     close(value);
     document.removeEventListener('keydown', outsideEscape);
     const index = shownSheets.indexOf(sheet);
     if (index >= 0) shownSheets.splice(index, 1);
-    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    if (returnFocus && opener?.isConnected) {
+      let destination = opener;
+      if (destination.getClientRects().length === 0) {
+        for (let menu = opener.closest('details'); menu; menu = menu.parentElement?.closest('details') ?? null) {
+          const summary = menu.querySelector('summary');
+          if (summary instanceof HTMLElement && summary.getClientRects().length > 0) { destination = summary; break; }
+        }
+      }
+      if (destination.getClientRects().length > 0) destination.focus({ preventScroll: true });
+    }
     opener = null;
   };
   return sheet;

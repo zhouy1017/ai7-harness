@@ -86,7 +86,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(settled));
     else queueMicrotask(settled);
   });
-  element.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); summary.focus(); } });
+  element.addEventListener('keydown', event => { if (event.key === 'Escape' && element.open) { event.preventDefault(); event.stopPropagation(); dismiss(); summary.focus(); } });
   return {
     element,
     /** Moving a chooser into a rebuilt sheet dismisses its native popover while retaining the details state. */

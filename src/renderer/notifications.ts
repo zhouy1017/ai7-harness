@@ -26,7 +26,7 @@ export function createStatusSurface(surface: HTMLElement): (message: string, ton
     }
   };
   return (message, tone) => {
-    if (message === '') { error = null; busy = null; }
+    if (message === '') { busy = null; }
     else if (tone === 'error') { error = message; busy = null; }
     else if (tone === 'busy') busy = message;
     else {
