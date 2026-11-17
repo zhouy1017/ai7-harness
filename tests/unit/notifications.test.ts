@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion, reportResult } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
@@ -280,6 +280,41 @@ describe('quiet notice lifetime', () => {
       update('正在打开图书…', 'busy');
       update('');
       expect(surface.hidden).toBe(true);
+    } finally { restore(); }
+  });
+
+  it('says a line without a tone once, through the announcer only; a success is said by its toast alone', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      update('设置已打开');
+      expect(announcer.textContent).toBe('设置已打开');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      update('设置已保存', 'success');
+      expect(announcer.textContent).toBe('');
+      expect(miniDocument.body.querySelector('[data-toast]')!.textContent).toBe('设置已保存');
+      update('无法保存', 'error');
+      expect(announcer.textContent).toBe('');
+      update('');
+      expect(announcer.textContent).toBe('');
+    } finally { restore(); }
+  });
+
+  it('a result that settles no error ends the busy line and says itself once in a toast', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      update('无法打开图书', 'error');
+      update('正在选择文件…', 'busy');
+      reportResult(update, '已取消文件选择');
+      expect(surface.textContent).toBe('无法打开图书');
+      expect(surface.dataset['tone']).toBe('error');
+      expect(announcer.textContent).toBe('');
+      expect(miniDocument.body.querySelector('[data-toast]')!.textContent).toBe('已取消文件选择');
     } finally { restore(); }
   });
 

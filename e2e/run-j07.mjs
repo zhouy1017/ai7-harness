@@ -1618,8 +1618,17 @@ async function main() {
     // nothing to save first — and takes the destination; 取消 then closes the card with focus back on its opener,
     // and nothing is written or recorded.
     await assertRenderer(renderer, `window.__j07.exportCard() === null`, 'cancel-no-card-after-restart');
+    await renderer.evaluate(`(() => {
+      const probe = { appeared: false, gone: false };
+      const isCard = (node) => node instanceof Element && (node.matches('section.manuscript-export') || node.querySelector('section.manuscript-export') !== null);
+      const observer = new MutationObserver((records) => { for (const record of records) { if (Array.from(record.addedNodes).some(isCard)) probe.appeared = true; if (Array.from(record.removedNodes).some(isCard)) probe.gone = true; } });
+      observer.observe(document.querySelector('[data-screen="book-deliverables"]'), { childList: true, subtree: true });
+      probe.stop = () => observer.disconnect(); window.__j07CancelProbe = probe; return true;
+    })()`);
     await clickSelector(renderer, `[data-screen="book-deliverables"] ol.milestone-list > li[data-milestone-id="${first}"] [data-export-action="open"]`, 'cancel-open');
-    await waitFor(renderer, `window.__j07.exportCard() === null && (document.querySelector('#persistence-status')?.textContent ?? '').includes('取消')`, 'cancel-native-dialog', 120_000);
+    // The card opened for the review and went away when the Save dialog was cancelled; nothing was said about it on screen (#1519).
+    await waitFor(renderer, `window.__j07CancelProbe.appeared === true && window.__j07CancelProbe.gone === true && window.__j07.exportCard() === null`, 'cancel-native-dialog', 120_000);
+    await renderer.evaluate(`(() => { window.__j07CancelProbe.stop(); delete window.__j07CancelProbe; return true; })()`);
     requireJourney(!existsSync(cancelledPath) && JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([EXPORT_FILE]), 'cancel-wrote-nothing');
 
     at('j14-designate-keyboard');

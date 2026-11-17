@@ -7,6 +7,15 @@ import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notifi
 export const QUIET_NOTICE_MS = 2_500;
 export function showTransientNotice(message: string): void { showToast(message); }
 
+/**
+ * A result the editor should see that settles no standing error — a cancelled dialog, a refusal to open a page, a quick start
+ * that fell back to a prepared plan: one toast, said once (the announcer says nothing), a busy line ended, an error left alone.
+ */
+export function reportResult(setStatus: (message: string) => void, message: string): void {
+  setStatus('');
+  showTransientNotice(message);
+}
+
 export type StatusTone = 'busy' | 'success' | 'error';
 export interface StatusSurface {
   (message: string, tone?: StatusTone): void;
@@ -16,10 +25,11 @@ export interface StatusSurface {
 
 /**
  * The one status line. An error and a busy line stand in the bar until replaced, dismissed or (for an error) cleared by the
- * next `success` or a new destination; a `success` is also said once in a toast. A status without a tone is the live
- * region's text only — no toast, no bar — and an empty message shows nothing.
+ * next `success` or a new destination; a `success` is also said once in a toast. A status without a tone is said once by the
+ * announcer — a polite live region that is always in the accessibility tree and never on screen — and its text stays in the
+ * bar's element for status readers; it shows no toast and no bar. An empty message shows nothing.
  */
-export function createStatusSurface(surface: HTMLElement): StatusSurface {
+export function createStatusSurface(surface: HTMLElement, announcer?: HTMLElement): StatusSurface {
   let error: string | null = null;
   let busy: string | null = null;
   const paint = (): void => {
@@ -46,7 +56,9 @@ export function createStatusSurface(surface: HTMLElement): StatusSurface {
       if (tone === 'success') { error = null; showToast(message, { tone }); }
     }
     paint();
-    // Keep the latest ordinary status in the live region, for assistive technology and existing status readers.
+    // Said once: a success by its toast, an error or busy line by the bar, any other line by the announcer.
+    if (announcer !== undefined) announcer.textContent = tone === undefined ? message : '';
+    // The latest ordinary status stays in the bar's element for existing status readers (it is not on screen while hidden).
     if (surface.hidden) {
       surface.textContent = message;
       if (tone) surface.dataset['tone'] = tone;

@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 import { admittedSpanText, ADMITTED_BASELINE_DOCX, fixedArchiveTime } from './composed-docx.mjs';
-import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass, statusBarClear } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
@@ -345,6 +345,8 @@ async function toggleHistoryUnclassified(renderer, name) {
 const status = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
 const notice = `(document.querySelector('[data-toast]')?.textContent ?? '')`;
 const peopleSection = '[data-screen="book-overview"] .book-people-slot > section.book-people';
+/** Records the text of every toast that shows from now until `window.__j11QuietProbe.stop()` (#1519). */
+const QUIET_PROBE = `(() => { const probe = { shown: [] }; const note = () => { const toast = document.querySelector('[data-toast]'); if (toast instanceof HTMLElement && !toast.hidden) probe.shown.push(toast.textContent); }; const observer = new MutationObserver(note); observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'], characterData: true }); probe.stop = () => observer.disconnect(); window.__j11QuietProbe = probe; return true; })()`;
 
 /** 新建图书 with a title, through its review, onto the new Book's 工作概览; the Book's identity. */
 async function createBook(renderer, title, name) {
@@ -1410,6 +1412,71 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'search-clear');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${notice} === '已显示全部图书'`, 'search-cleared');
 
+    // #1519: a failed 查找图书 stands in the bar fixed to the bottom of the content area — a short line and a very long one, at both
+    // window sizes, with the sidebar open and folded to icons. The bar is whole inside the window, wraps its words, and covers
+    // neither the sidebar, its pinned 设置 row, nor the last line of the page; × only dismisses it.
+    const LONG_FAILURE = '查找没有完成：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在窗口里自行折行，既不超出窗口，也不压住侧栏、侧栏底部的设置，或页面的最后一行。'.repeat(3);
+    const wheel = async (deltaY) => {
+      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 640, y: 300, deltaX: 0, deltaY });
+    };
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        for (const [kind, failure] of [['short', `new Error('read failed')`], ['long', `{ code: 'SERVICE_UNAVAILABLE', message: ${JSON.stringify(LONG_FAILURE)} }`]]) {
+          await fill(renderer, '#book-filter-text', '吴二', `library-error-${kind}-words`);
+          await assertRenderer(renderer, `(() => {
+            const original = Promise.prototype.then;
+            try {
+              Promise.prototype.then = function (success, failure) { Promise.prototype.then = original; return original.call(this, () => failure(${failure}), failure); };
+              document.querySelector('[data-book-filter-action="find"]').click();
+            } finally { Promise.prototype.then = original; }
+            return true;
+          })()`, `library-error-${kind}-find`);
+          await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return bar instanceof HTMLElement && !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith(${JSON.stringify(kind === 'short' ? '无法查找图书。' : '查找没有完成')}); })()`, `library-error-${kind}-shown`);
+          await assertRenderer(renderer, `innerWidth === ${width} && innerHeight === ${height} && scrollY === 0 && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "document.querySelector('#persistence-status').getBoundingClientRect().height > 40" : 'true'}`, `library-error-${kind}-in-view`);
+          if (kind === 'short') {
+            await wheel(100000);
+            await waitFor(renderer, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1`, 'library-error-scrolled-to-end');
+            await assertRenderer(renderer, `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = document.querySelector('#screen').lastElementChild; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`, 'library-error-clear-of-last-line');
+            await wheel(-100000);
+            await waitFor(renderer, `scrollY === 0`, 'library-error-scrolled-back');
+          }
+          await clickSelector(renderer, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);
+          await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, `library-error-${kind}-folded`);
+          await assertRenderer(renderer, statusBarClear(), `library-error-${kind}-clear-of-folded-sidebar`);
+          await clickSelector(renderer, '#sidebar-toggle', `library-error-${kind}-open-sidebar`);
+          await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, `library-error-${kind}-opened`);
+          await clickSelector(renderer, '#persistence-status .status-dismiss', `library-error-${kind}-dismiss`);
+          await waitFor(renderer, `document.querySelector('#persistence-status')?.hidden === true`, `library-error-${kind}-dismissed`);
+        }
+      }
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+    }
+
+    // #1519: a settings page opens as quietly as a Book page — neither its title nor its load line is a toast, and none covers the title.
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await renderer.evaluate(QUIET_PROBE);
+        await pointerClick(renderer, waitFor, SIDEBAR.settings, 'settings-quiet-open');
+        await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'settings-quiet-hub');
+        await click(renderer, '键盘与无障碍', 'settings-quiet-keyboard');
+        await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command]')`, 'settings-quiet-keyboard-ready');
+        await assertRenderer(renderer, `(() => {
+          const probe = window.__j11QuietProbe; probe.stop(); delete window.__j11QuietProbe;
+          const toast = document.querySelector('[data-toast]'); const title = document.querySelector('#context-title');
+          if (!(title instanceof HTMLElement) || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+          const box = title.getBoundingClientRect(); const hit = document.elementFromPoint(box.left + Math.min(box.width, 40) / 2, box.top + box.height / 2);
+          return box.width > 0 && probe.shown.every((text) => !['设置已打开', '键盘与无障碍', '已读取快捷键。'].includes(text)) && !(toast instanceof HTMLElement && !toast.hidden && toast.contains(hit));
+        })()`, `settings-no-toast-over-title-${width}`);
+        await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'settings-quiet-library');
+        await waitFor(renderer, `document.querySelector('[data-screen="landing"] form.book-filter')`, 'settings-quiet-library-ready');
+      }
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+    }
+
     // Hold the real request's completion callback until later navigation has acquired user input.
     // The Promise hook exists only during the synchronous click and is restored before any other work.
     for (const action of ['find', 'clear']) {
@@ -1455,16 +1522,16 @@ async function main() {
         const deadline = Date.now() + 20_000;
         while (!existsSync(`${navigationHoldPath}.held`) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
         requireJourney(existsSync(`${navigationHoldPath}.held`), 'navigation-answer-held');
+        await renderer.evaluate(QUIET_PROBE);
         await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'navigation-open-knowledge');
         await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready="true"]')`, 'navigation-knowledge-open');
-        // #1519: a page change says nothing in a toast; the title the page opened with is not covered by one (both window sizes).
-        await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '知识库已打开'`, `navigation-knowledge-status-${width}`);
+        // #1519: a page change says nothing in a toast: no toast named the page while it opened, and none covers its title.
         await assertRenderer(renderer, `(() => {
+          const probe = window.__j11QuietProbe; probe.stop(); delete window.__j11QuietProbe;
           const toast = document.querySelector('[data-toast]'); const title = document.querySelector('#context-title');
           if (!(title instanceof HTMLElement) || innerWidth !== ${width} || innerHeight !== ${height}) return false;
           const box = title.getBoundingClientRect(); const hit = document.elementFromPoint(box.left + Math.min(box.width, 40) / 2, box.top + box.height / 2);
-          const toasting = toast instanceof HTMLElement && !toast.hidden;
-          return box.width > 0 && box.bottom <= innerHeight && (!toasting || (!toast.contains(hit) && toast.textContent !== '知识库已打开'));
+          return box.width > 0 && box.bottom <= innerHeight && !probe.shown.includes('知识库已打开') && !(toast instanceof HTMLElement && !toast.hidden && toast.contains(hit));
         })()`, `navigation-no-toast-over-title-${width}`);
         await renderer.evaluate(`window.__j11NavigationSnapshot = {screen:document.querySelector('#screen').firstElementChild,focus:document.activeElement,status:document.querySelector('#persistence-status').textContent}`);
         requireJourney(!existsSync(`${navigationHoldPath}.released`), 'navigation-still-held');
@@ -2178,7 +2245,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); ${DIRECT_EDIT} && document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
     await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'readers-report-edit-save-ready');
     await click(renderer, '保存', 'readers-report-edit-save');
-    await waitFor(renderer, `${status}.includes('已写入修订日志')`, 'readers-report-edit-durable');
+    await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed'`, 'readers-report-edit-durable');
     await clickSelector(renderer, '.editor-shell[data-manuscript-kind="derivative"] [data-document-action="saveVersion"]', 'readers-report-save-version');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-manuscript-kind="derivative"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${notice} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
 

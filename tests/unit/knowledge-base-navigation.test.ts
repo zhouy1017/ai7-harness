@@ -34,7 +34,9 @@ it.each(['knowledge','quality'])('keeps the ordinary developer-only redirect not
  vi.stubGlobal('window',{ai7:{inspectGlobalAgent:async()=>({categories:[],books:[],items:[]}),inspectEditorialLearning:async()=>({enabled:true,controlEntries:0,items:[],signals:[],excludedBooks:[],excludedMaterials:[],nextItemOffset:null}),inspectHouseReviewPreference:async()=>({current:null,history:[]})}});
  const page=navigation();
  if(surface==='knowledge')await page.renderKnowledgeBase('rules');else await page.renderQualityLearning('learning');
- expect(page.setStatus).toHaveBeenLastCalledWith('该页在开发者模式下显示');
+ // The redirect is a result the editor should see once: a toast, with no line in the bar (the status call only ends a busy line).
+ expect(page.setStatus).toHaveBeenLastCalledWith('');
+ expect(miniDocument.body.querySelector('[data-toast]')?.textContent).toBe('该页在开发者模式下显示');
 });
 
 it.each(['guidelines', 'library'] as const)('returns a direct %s entry to its Book surface', async (tab) => {

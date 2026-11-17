@@ -1,4 +1,5 @@
 import { technicalWords, identityWords } from './technical-layer.js';
+import { reportResult } from './notifications.js';
 import {
   MAINTENANCE_CLASSIFICATIONS,
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
@@ -603,7 +604,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     pendingFocus = { publicationVersionId: draft.publicationVersionId, selector: '[data-maintenance-action="record"]' };
     draft = null;
     options.redraw();
-    if (announce) options.setStatus(MAINTENANCE_STATUS_LINES.cancelled);
+    if (announce) reportResult(options.setStatus, MAINTENANCE_STATUS_LINES.cancelled);
   }
 
   /** `更早的维护事项…`: the next page of the designation's cases before the oldest one shown; focus goes to the first. */

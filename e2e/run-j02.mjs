@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass, statusBarClear } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -1390,7 +1390,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), nodeText: text.data, anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'search-arrival-settled');
+  await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed' && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '返回查找前位置')`, 'search-arrival-settled');
   await assertRenderer(renderer, readableEditor, 'search-arrival-readable-editor');
   await waitForExactSearchRange(renderer);
   await clickButton(renderer, '返回查找前位置', 'search-return');
@@ -2173,14 +2173,20 @@ async function main() {
           fixed: getComputedStyle(bar).position === 'fixed',
           inView: box.top >= 0 && box.bottom <= innerHeight && box.left >= side.getBoundingClientRect().right - 0.5 && box.right <= innerWidth + 0.5 };
       })()`;
+      // The Task Drawer is open beside the page — docked at the wide size, over it at 1008×681 — and the bar stays clear of it.
+      await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="tasks"]'); if (!(entry instanceof HTMLButtonElement) || entry.disabled) return false; if (document.querySelector('#task-drawer')?.hidden !== false) entry.click(); return true; })()`, 'status-bar-drawer-open');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === false`, 'status-bar-drawer-ready');
       const quiet = await renderer.evaluate(barLayout);
       await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').focus({ preventScroll: true })`);
       await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
       await press(renderer, 'f', process.platform === 'darwin' ? 4 : 2);
       await waitFor(renderer, `!document.querySelector('#persistence-status').hidden && document.querySelector('#persistence-status').textContent.includes('输入法组合尚未结束')`, 'status-bar-busy-shown');
       const busy = await renderer.evaluate(barLayout);
+      const clear = await renderer.evaluate(statusBarClear(['.editor-shell', '.window-actions .btn']));
       await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
-      requireJourney(busy?.shown === true && busy.fixed === true && busy.inView === true && busy.shell === quiet?.shell && busy.page === quiet?.page, 'status-bar-busy-layout', { quiet, busy });
+      requireJourney(busy?.shown === true && busy.fixed === true && busy.inView === true && busy.shell === quiet?.shell && busy.page === quiet?.page && clear === true, 'status-bar-busy-layout', { quiet, busy, clear });
+      await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'status-bar-drawer-close');
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'status-bar-drawer-closed');
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     // The close and what follows it are their own stages: left under the last j14 step, a failure to

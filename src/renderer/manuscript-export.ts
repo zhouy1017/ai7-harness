@@ -1,3 +1,4 @@
+import { reportResult } from './notifications.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   type ExportFidelityRowProjection,
@@ -194,7 +195,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
       const chosen = await api.chooseManuscriptExportDestination({ revisionId: review.target.revisionId, target,
         options: selected, reviewDigest: review.reviewDigest, suggestedFileName: review.suggestedFileName, format: review.format });
       if (destroyed) return;
-      if (chosen.outcome === 'cancelled') { phase = 'idle'; activeTarget = null; options.setStatus(EXPORT_STATUS_LINES.cancelled); return; }
+      if (chosen.outcome === 'cancelled') { phase = 'idle'; activeTarget = null; reportResult(options.setStatus, EXPORT_STATUS_LINES.cancelled); return; }
       if (chosen.preparation.bookId !== options.bookId) throw new Error(EXPORT_STATUS_LINES.chooseFailed);
       phase = 'writing'; render(); options.setStatus(EXPORT_STATUS_LINES.writing, 'busy');
       const result = await api.approveManuscriptExport({ preparationId: chosen.preparation.preparationId });

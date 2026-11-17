@@ -1,5 +1,5 @@
 import { rendererErrorMessage } from '../../src/renderer/error-words.js';
-import { createNotificationObserver, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
 import { composeTaskOverview } from '../../src/service/task-overview.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 import { readFileSync } from 'node:fs';
@@ -782,4 +782,17 @@ it('keeps another task in the same Book quiet (#1510 own task)',async()=>{
  await page.run("taskDrawer.view=()=>({kind:'plan',bookId:'completion-book',task:{kind:'baseline-analysis',ref:'different-task'}})");
  page.observe();await Promise.resolve();await Promise.resolve();
  expect(page.context['openOverviewResult']).not.toHaveBeenCalled();expect(page.inspect).not.toHaveBeenCalled();
+});
+
+it('an error stands through a repaint of the same destination and ends when another destination is rendered (#1519)', () => {
+ const page=harness();
+ const bar=miniDocument.createElement('div');miniDocument.body.append(bar);
+ const surface=createStatusSurface(bar as unknown as HTMLElement);page.context['statusSurface']=surface;
+ const book=()=>{const node=document.createElement('section');node.dataset['bookId']='book-a';return node;};
+ page.replaceScreen('book-review',book());
+ surface('无法应用修改建议。','error');
+ page.replaceScreen('book-review',book());
+ expect(bar.hidden).toBe(false);expect(bar.textContent).toContain('无法应用修改建议。');
+ page.replaceScreen('book-findings',book());
+ expect(bar.hidden).toBe(true);
 });

@@ -1,4 +1,5 @@
 import { rendererApi } from './navigation-generation.js';
+import { reportResult } from './notifications.js';
 import { navigation, type NavigationCheckpoint } from './navigation-generation.js';
 import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
 import { filterChoices, stateTerm } from './components/controls.js';
@@ -76,7 +77,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const page = navigation.read(content);
       options.rememberReturn(content, () => renderKnowledgeBase());
       await mountKnowledgeBaseHome(home, rendererApi, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
-      if (page.isCurrent()) setStatus(notice ?? '知识库已打开');
+      if (page.isCurrent()) { if (notice === undefined) setStatus('知识库已打开'); else reportResult(setStatus, notice); }
       return;
     }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
@@ -439,7 +440,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const metrics = element('div'); section.append(metrics);
         await mountEditQualitySignals(metrics, rendererApi);
       }
-      if (page.isCurrent()) setStatus(notice ?? status.opened);
+      if (page.isCurrent()) { if (notice === undefined) setStatus(status.opened); else reportResult(setStatus, notice); }
     } catch (error) {
       if (!page.isCurrent()) return;
       setStatus(rendererErrorMessage(error, status.unavailable), 'error');

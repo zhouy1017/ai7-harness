@@ -136,7 +136,10 @@ button:focus-visible, input:focus-visible {
    the name stays the row's accessible name. */
 :root { --sidebar-width: 14rem; --sidebar-icons-width: 56px; }
 :root[data-sidebar="icons"] { --sidebar-width: var(--sidebar-icons-width); }
-body { padding-left: var(--sidebar-width); }
+/* The status bar (#1519) is fixed at the bottom of the content area: the strip it stands in is always reserved, so nothing — the
+   last line of a page, the manuscript's bottom controls, a sticky action bar — is ever under it, and its appearance changes no height. */
+:root { --status-strip: 2.6rem; }
+body { padding-left: var(--sidebar-width); padding-bottom: var(--status-strip); }
 .app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .4rem; width: var(--sidebar-width); padding: .5rem .55rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid var(--boundary); background: var(--shell); color: var(--text); }
 .app-sidebar ul { margin: 0; padding: 0; list-style: none; }
 .app-sidebar li + li { margin-top: .1rem; }
@@ -1531,13 +1534,13 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .dimension-list { list-style: none; padding: 0; }
 .dimension-list li { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: .55rem; border-bottom: 1px solid var(--boundary); }
 .neutral-weight { color: var(--text-subdued); font-size: .82rem; white-space: nowrap; }
-.commit-bar { position: sticky; bottom: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.4rem; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 28px var(--shadow); }
+.commit-bar { position: sticky; bottom: calc(1rem + var(--status-strip)); display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.4rem; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 28px var(--shadow); }
 /* A `.commit-bar` that carries only its action row keeps the actions on the same side as the bars
    that also carry an explanation, without giving the lone row a second justification rule. */
 .commit-bar > .compact-actions:only-child { margin-inline-start: auto; }
 /* The Book workbench's persistent action region: `.commit-bar`'s sticky rule and surface, applied to
    a `.button-row` so the actions keep wrapping at 200% zoom. Same positioning, same colours. */
-.workbench-actions { position: sticky; bottom: 1rem; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 28px var(--shadow); }
+.workbench-actions { position: sticky; bottom: calc(1rem + var(--status-strip)); padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 28px var(--shadow); }
 /* V2-UX-BOOK-001's Manuscript Visual Anchor, the overview's first card. A position reading can be a
    long structure title, so it wraps rather than widening the surface. */
 .manuscript-anchor dd { overflow-wrap: anywhere; }
@@ -1944,7 +1947,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
-.status-bar { position: fixed; z-index: 40; bottom: .65rem; left: calc(var(--sidebar-width) + .75rem); right: .75rem; width: fit-content; margin: 0 auto; padding: .4rem .85rem; box-shadow: 0 4px 20px var(--shadow); border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
+.status-bar { position: fixed; z-index: 40; bottom: .45rem; left: calc(var(--sidebar-width) + .75rem); right: .75rem; width: fit-content; max-height: 40dvh; margin: 0 auto; padding: .3rem .85rem; overflow-y: auto; box-shadow: 0 4px 20px var(--shadow); border: 1px solid var(--boundary); border-radius: 1rem; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
 .status-bar[data-tone="busy"] { color: var(--status-attention); }
 .status-bar[data-tone="success"] { color: var(--status-good); }
 .status-bar[data-tone="error"] { color: var(--status-blocked); }
@@ -2708,7 +2711,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-overview-more[open] { z-index:4; }
 .task-overview-more[open] > button { display:block; background:var(--surface); }
 .task-overview-more > button { white-space:nowrap; }
-.task-overview-confirm { position:sticky; bottom:0; background:var(--surface); border:1px solid var(--boundary); padding:12px; display:flex; gap:12px; align-items:center; z-index:6; }
+.task-overview-confirm { position:sticky; bottom:var(--status-strip); background:var(--surface); border:1px solid var(--boundary); padding:12px; display:flex; gap:12px; align-items:center; z-index:6; }
 .task-overview-confirm[hidden] { display:none; }
 .task-overview-sheet { width:min(760px, calc(100vw - 40px)); }
 .task-overview-sheet-books { display:grid; gap:10px; margin-bottom:18px; }

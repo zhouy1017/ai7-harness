@@ -328,7 +328,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       // What the preference holds is what every label and the dispatcher read from here on.
       onChanged(bindings);
       paint();
-      setStatus(KEYBOARD_STATUS_LINES.loaded, 'success');
+      setStatus(KEYBOARD_STATUS_LINES.loaded);
     } catch (error) {
       setStatus(errorMessage(error, KEYBOARD_STATUS_LINES.loadFailed), 'error');
     }

@@ -6,7 +6,7 @@ import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFa
 
 
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
-import { createStatusSurface } from './notifications.js';
+import { createStatusSurface, reportResult } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -115,7 +115,7 @@ window.addEventListener('pagehide', unmountSelectControls, { once: true });
 const unmountMenuControls = mountMenuControls(document.body);
 window.addEventListener('pagehide', unmountMenuControls, { once: true });
 const persistenceStatus = requiredElement('#persistence-status');
-const statusSurface = createStatusSurface(persistenceStatus);
+const statusSurface = createStatusSurface(persistenceStatus, requiredElement('#status-announcer'));
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 
@@ -311,7 +311,7 @@ async function startWholeBookTask(
       return { ref: taskIntentId, started: true };
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
-    setStatus(note);
+    reportResult(setStatus, note);
     return { ref: taskIntentId, note };
   } catch (error) {
     setStatus(rendererErrorMessage(error, TASK_PANEL_COMPOSE_STATUS.failed), 'error');
@@ -1022,8 +1022,8 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   const tab = content.dataset['knowledgeTab'] ?? content.dataset['qualityTab'] ?? place?.section ?? null;
   const object = content.dataset['documentId'] ?? content.dataset['manuscriptId'] ?? content.dataset['revisionId'] ?? content.dataset['seriesId'] ?? null;
   const conflict = content.dataset['conflictMarkId'] ?? null;
-  navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId);
-  statusSurface.clearError();
+  // An error is the reason for the page it was raised on: another destination ends it, a repaint of the same one does not.
+  if (navigation.commit(JSON.stringify([state, bookId, tab, object, conflict]), bookId)) statusSurface.clearError();
   if (state !== 'task-overview') overviewDrawerBookId = null;
   screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;
@@ -2140,7 +2140,7 @@ function renderImportRecovery(
         });
         if (result.status === 'cancelled') {
           renderImportRecovery(recovery, recoveryReturn);
-          setStatus('已取消文件重选');
+          reportResult(setStatus, '已取消文件重选');
           return;
         }
         renderContinuation(result.continuation, recoveryReturn);
@@ -3125,7 +3125,7 @@ function renderBookCreationForm(): void {
 function renderDiagnostics(): void {
   if (!technicalLayerVisible) {
     renderSettingsHub();
-    setStatus('该页在开发者模式下显示');
+    reportResult(setStatus, '该页在开发者模式下显示');
     return;
   }
   const content = panel();
@@ -3628,6 +3628,7 @@ const { renderBookOverview } = createBookOverviewScreen({
   acknowledgeCompletionAfterPaint: (...args) => acknowledgeCompletionAfterPaint(...args),
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },
+  get statusRevision() { return statusRevision; },
 });
 
 
