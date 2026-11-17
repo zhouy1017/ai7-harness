@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, statusBarClear } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -403,13 +403,7 @@ async function runSettingsPages(renderer, cancellation) {
   // than the window and without scrolling — and its appearance did not change the page's height. Both Gate-relevant window sizes.
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-    await waitFor(renderer, `(() => {
-      const bar = document.querySelector('#persistence-status'); const side = document.querySelector('#app-sidebar');
-      if (!(bar instanceof HTMLElement) || bar.hidden || !(side instanceof HTMLElement) || innerWidth !== ${width} || innerHeight !== ${height}) return false;
-      const box = bar.getBoundingClientRect(); const edge = side.getBoundingClientRect().right;
-      return getComputedStyle(bar).position === 'fixed' && scrollY === 0 && document.documentElement.scrollHeight > innerHeight &&
-        box.top >= 0 && box.bottom <= innerHeight && box.left >= edge - 0.5 && box.right <= innerWidth + 0.5 && box.width > 0;
-    })()`, `keyboard-error-fixed-${width}`);
+    await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && scrollY === 0 && document.documentElement.scrollHeight > innerHeight && ${statusBarClear()}`, `keyboard-error-fixed-${width}`);
   }
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
   // 全部恢复默认 for the whole section.
