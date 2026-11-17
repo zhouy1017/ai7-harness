@@ -78,6 +78,22 @@ async function assertCardFrames(renderer) {
   })()`, 'shell-card-frames-survive');
 }
 
+// #1521: 设置 stays inside the window with a Book open, whatever the window's height: at both sizes the guests (1164×781, 1280×800)
+// and the hosted Gate (1008×681) use, 设置 lies wholly inside innerWidth × innerHeight and is the element a click there would hit.
+async function checkSettingsPinned(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `(() => {
+      const bar=document.querySelector('#app-sidebar'), link=bar?.querySelector('[data-nav-settings]');
+      if(!(bar instanceof HTMLElement)||!(link instanceof HTMLElement)||innerWidth!==${width}||innerHeight!==${height}||bar.querySelector('.sidebar-book')?.hidden!==false) return false;
+      bar.scrollTop=0;
+      const box=link.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2, box.top+box.height/2);
+      return box.width>0 && box.top>=0 && box.left>=0 && box.bottom<=innerHeight && box.right<=innerWidth && hit instanceof Node && link.contains(hit);
+    })()`, `sidebar-settings-pinned-${width}x${height}`);
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
 // #1325: actual shell layout, shortcut dispatch and menu; shared selectors cover all other Journeys.
 async function checkSidebarPrototype(renderer) {
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
@@ -899,7 +915,8 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
     await assertRenderer(renderer, `(() => { const link=document.querySelector('[data-nav-book="${crossBookId}"]'); if(!(link instanceof HTMLAnchorElement))return false; link.click(); return true; })()`, 'book-row-open');
     await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-row-route');
-    await assertRenderer(renderer, `document.querySelector('[data-nav-book][aria-current="true"]')?.dataset.navBook===${JSON.stringify(crossBookId)}`, 'book-row-current');
+    // #1521: the open Book is the heading of its groups and has no row of its own.
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); return group?.hidden===false && group.dataset.bookId===${JSON.stringify(crossBookId)} && group.querySelector('.sidebar-current-book')?.textContent===document.querySelector('#context-title')?.textContent && !document.querySelector('[data-nav-book=${JSON.stringify(crossBookId)}], [data-nav-book][aria-current]'); })()`, 'book-row-current');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'book-row-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-row-library-route');
 
@@ -921,6 +938,8 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#context-title').dataset.contextBook==='false'`, 'shell-global-header-no-book');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'shell-frame-back-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-window')`, 'shell-frame-back-ready');
+    at('sidebar-settings-pinned');
+    await checkSettingsPinned(renderer);
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
     const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, outsideToolbar: details?.closest('.editor-toolbar')===null, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
