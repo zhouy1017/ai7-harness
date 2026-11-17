@@ -1336,6 +1336,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   async function walkPending(direction: 'next' | 'previous', from: PendingKey): Promise<void> {
     const forward = direction === 'next';
     let origin = from;
+    // One bound for the whole step: the pages read beyond the page, and the cards a model or keyword filter reads.
+    const budget = { pages: 0, cards: 0 };
+    const cardFilter = markFilter.selectedModels.size > 0 || markFilter.keyword.trim() !== '';
     for (let walk = 0; walk < MAX_PENDING_WALKS; walk++) {
       const start = editor.currentWindow();
       const moved = (): boolean => destroyed || editor.currentWindow().blocks[0]?.blockId !== start.blocks[0]?.blockId;
@@ -1351,7 +1354,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const places = book?.read();
       if (book !== undefined && places === undefined) { options.setStatus(COMMENTS_TRIAGE_WORDS.readingPlaces, 'busy'); return; }
       if (book === undefined || places === undefined || markFilter.status === 'handled') { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
-      const found = await searchBeyondPage(start, forward, places.places, book.windowAt, moved);
+      const found = await searchBeyondPage(start, forward, places.places, book.windowAt, moved, budget);
       if (found === 'moved') return;
       if (typeof found === 'number') { options.setStatus(pendingSearchStoppedLine(direction, found), 'success'); return; }
       if (found === null) { options.setStatus(noFurtherPendingLine(direction, filtering()), 'success'); return; }
@@ -1360,7 +1363,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       try { arrived = await book.go(found.mark.blockId); } finally { jumping -= 1; }
       if (!arrived || destroyed) return;
       const now = editor.currentWindow().marks.find((mark) => mark.markId === found.mark.markId);
-      if (now !== undefined && !markIsHandled(now) && passesFilter(now, found.card ?? cardCache.cards.get(now.markId))) { bringPending(now.markId); return; }
+      if (now !== undefined && !markIsHandled(now)) {
+        // A card's words may have changed while its page loaded: a model or keyword filter is judged on the card as it is now.
+        if (cardFilter && budget.cards === MAX_PENDING_CARDS) { options.setStatus(pendingSearchStoppedLine(direction, budget.pages), 'success'); return; }
+        const page = editor.currentWindow();
+        const card = cardFilter ? (budget.cards += 1, await api.getEditorialMarkCard({ manuscriptId: page.manuscriptId, branchId: page.branchId, markId: now.markId })) : undefined;
+        if (destroyed) return;
+        if (passesFilter(now, card)) { bringPending(now.markId); return; }
+      }
       origin = found.key;
     }
     options.setStatus(noFurtherPendingLine(direction, filtering()), 'success');
@@ -1371,7 +1381,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * the search stopped at its bound.
    */
   async function searchBeyondPage(start: ManuscriptWindowProjection, forward: boolean, places: ReadonlyArray<{ readonly blockId: string; readonly proportion: number }>,
-    windowAt: NonNullable<MountOptions['bookPending']>['windowAt'], moved: () => boolean,
+    windowAt: NonNullable<MountOptions['bookPending']>['windowAt'], moved: () => boolean, budget: { pages: number; cards: number },
   ): Promise<{ mark: EditorialMarkAnchorProjection; key: PendingKey; card: EditorialMarkCardProjection | undefined } | null | number | 'moved'> {
     const positions = start.blocks.map((block) => block.position);
     const first = Math.min(...positions), last = Math.max(...positions);
@@ -1379,19 +1389,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const ahead = forward ? places.filter((place) => place.proportion >= middle) : places.filter((place) => place.proportion <= middle).reverse();
     const seen = new Set(start.blocks.map((block) => block.blockId));
     const cardFilter = markFilter.selectedModels.size > 0 || markFilter.keyword.trim() !== '';
-    let pages = 0, cards = 0;
     for (const place of ahead) {
       if (seen.has(place.blockId)) continue;
-      if (pages === MAX_PENDING_PAGES) return pages;
-      pages += 1;
+      if (budget.pages === MAX_PENDING_PAGES) return budget.pages;
+      budget.pages += 1;
       const page = await windowAt(place.blockId);
       if (moved()) return 'moved';
       for (const block of page.blocks) seen.add(block.blockId);
       const beyond = pendingInReadingOrder(page).filter(({ key }) => forward ? key[0] > last : key[0] < first);
       for (const { mark, key } of forward ? beyond : beyond.reverse()) {
         // A model or a keyword is on the card, read as the pane reads it; a category or a status is on the mark itself.
-        if (cardFilter && cards === MAX_PENDING_CARDS) return pages;
-        const card = cardFilter ? (cards += 1, await api.getEditorialMarkCard({ manuscriptId: start.manuscriptId, branchId: start.branchId, markId: mark.markId })) : undefined;
+        if (cardFilter && budget.cards === MAX_PENDING_CARDS) return budget.pages;
+        const card = cardFilter ? (budget.cards += 1, await api.getEditorialMarkCard({ manuscriptId: start.manuscriptId, branchId: start.branchId, markId: mark.markId })) : undefined;
         if (moved()) return 'moved';
         if (passesFilter(mark, card)) return { mark, key, card };
       }

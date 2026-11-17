@@ -809,6 +809,23 @@ describe('comments command parity and refresh continuity', () => {
     expect(other.get.mock.calls.length - reads).toBe(60); expect(crowded.go).not.toHaveBeenCalled();
     expect(other.status).toHaveBeenLastCalledWith('按当前筛选，后面最近的 1 处待处理的位置都不匹配；没有移动。', 'success');
   });
+  it('judges a keyword on the card as it is once its page arrived, and walks on when its words changed meanwhile (#1523)', async () => {
+    const target = { ...card, markId: 'target', blockId: 'far-block', body: '公开合成跨页批注' };
+    const later = { ...card, markId: 'later', blockId: 'far-block', fromGrapheme: 4, toGrapheme: 6, body: '公开合成跨页批注' };
+    const pages = twoPages([anchor(target), anchor(later)]);
+    let edited = false;
+    pages.go.mockImplementation(async () => { edited = true; ui.setPage({ ...pages.far }); return true; });
+    const ui = mount(card, [target, later], { bookPending: pages.bookPending }); pages.bind(ui);
+    ui.get.mockImplementation(async (input: { markId: string }) => input.markId === 'target' ? (edited ? { ...target, body: '公开合成另一段批注' } : target) : input.markId === 'later' ? later : card);
+    const paragraph = document.createElement('p'); paragraph.dataset['blockId'] = 'far-block'; ui.host.append(paragraph);
+    ui.setPage({ ...atPage('block', 1, 0), marks: [anchor()] }); await paint();
+    const search = ui.pane.querySelector<HTMLInputElement>('[data-mark-search-input]')!;
+    search.value = '跨页'; (search as unknown as MiniElement).dispatchEvent({ type: 'input' }); await paint();
+    ui.pane.querySelector<HTMLButtonElement>('[data-pending-step="next"]')!.click();
+    for (let turn = 0; turn < 4; turn++) await paint();
+    expect(pages.go).toHaveBeenCalledTimes(1);
+    expect(selectedCard(ui.pane)).toBe('later'); expect(document.activeElement).toBe(row(ui.pane, 'later'));
+  });
   it('holds the selection across the jump: neither the arrival\'s caret nor a refused load takes it (#1523)', async () => {
     vi.stubGlobal('Element', MiniElement);
     const farCard = { ...card, markId: 'far', blockId: 'far-block' };
