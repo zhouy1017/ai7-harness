@@ -1,5 +1,13 @@
 # E2E journeys: what each admitted runner proves
 
+## #1529 synchronized deltas (0.7.3 first use)
+
+- J-12 retains the wide first-run stage and adds 1008×681 geometry: full-row card, columns at least 200 px, required buttons on steps ① and ②. Real pointer stages open model settings and import from those steps. The prior exact data-root proof moves to Settings › Data and storage in the same developer mode, through real clicks; skip persistence remains.
+- After importing the first sample Book, `first-book-review-wide` and `first-book-review-gate` return to the library, require the named Book and step ③ button, check geometry at both forms, and open and close the review sheet using real pointer input. Sample guidance and no-task-start checks continue afterward.
+- J-01 completion checks require no intake step strip; empty-Book first import uses a real CDP file drop while retaining the target, relationship and completion assertions. Library readiness accepts either enabled import entry. The #1521 record stages remain unchanged.
+- J-07 source-import acknowledgement and J-11 readers-report overview readiness wait for the deliverables/evaluation state marker as well as the immediate tile entry, preserving their prior post-read meaning.
+
+
 ## #1521 synchronized deltas (0.7.3 slice, `codex/integration-0.7.3`)
 
 The sidebar names and rows change: 全域智能体 is AI 助手, 书内 AI 协作 is AI 改稿 (the developer layer keeps Agent 工作区), 发现 is 待办汇总 in the 工作 group, and the 处理 group and the 历史与恢复 row are gone. The open Book has no row in the Book list: its heading carries its 置顶 star and menu. `e2e/controller.mjs` carries the new row names (`sidebarNavigate`, `SIDEBAR_LIBRARY_READY`, `sidebarBookCurrent`).

@@ -6,7 +6,7 @@ import { createSourceFile, forEachChild, isArrowFunction, isCallExpression, isFu
 import { describe, expect, it, vi } from 'vitest';
 import { miniDocument } from '../support/mini-dom.js';
 import { TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
-import { analysisRefusalView } from '../../src/renderer/overview-refusal-labels.js';
+import { analysisRefusalView, overviewAnalysisRefusalView } from '../../src/renderer/overview-refusal-labels.js';
 import { NavigationGeneration } from '../../src/renderer/navigation-generation.js';
 
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
@@ -22,7 +22,7 @@ function extract(node: Node): void {
     'element', 'button', 'rendererErrorData', 'rendererErrorCode', 'rendererErrorMessage',
   ].includes(node.name.text)) helpers.set(node.name.text, node.getText(parsed));
   if (isArrowFunction(node) && node.parameters[0]?.name.getText(parsed) === 'error' &&
-      /analysisRefusalView/u.test(node.body.getText(parsed))) refusals.push(node.getText(parsed));
+      /(?:analysisRefusalView|overviewAnalysisRefusalView)/u.test(node.body.getText(parsed))) refusals.push(node.getText(parsed));
   if (isVariableDeclaration(node) && node.name.getText(parsed) === 'inspectTaskAuthorization' &&
       node.initializer !== undefined && isArrowFunction(node.initializer)) taskInspections.push(node.initializer.getText(parsed));
   forEachChild(node, extract);
@@ -75,7 +75,7 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
     state: { modelSettings: navigate },
     bookId: 'book-1', bookTitle: '测试图书', overview: { book: { bookId: 'book-1' }, manuscriptState: { state: 'populated' } },
     error: { code, message: '原有拒绝说明。' },
-    analysisRefusalView, TASK_DRAWER_TITLE,
+    analysisRefusalView, overviewAnalysisRefusalView, technicalWords: (_service: string, editorial: string) => editorial, TASK_DRAWER_TITLE,
     researchUnavailableLine: (_code: string, message: string) => message,
     openBookSection: navigate,
   });
@@ -119,9 +119,16 @@ describe('工作概览 refusals (#992)', () => {
     expect(host.querySelector('[data-task-authorization-state="unavailable"]')).not.toBeNull();
   });
 
-  it('keeps the analysis entry while a failed state read offers model settings', async () => {
+  it.each(['ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE'])('summarizes %s only on the overview', code => {
+    expect(analysisRefusalView(code, '请到设置的模型服务页连接模型。')).toEqual({ text: '请到设置的模型服务页连接模型。', actionLabel: null });
+    const tile = overviewAnalysisRefusalView(code, '无法读取');
+    expect(tile.actionLabel).toBe('去设置');
+    expect(tile.text).toBe(code === 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED' ? '尚未连接模型服务' : '模型服务需要设置，请检查连接。');
+  });
+
+  it.each([false, true])('keeps the analysis entry and technical failure text (developer=%s)', async developer => {
     miniDocument.body.replaceChildren();
-    const context = createContext({ document: miniDocument, identityWords, analysisRefusalView,
+    const context = createContext({ document: miniDocument, identityWords, analysisRefusalView, overviewAnalysisRefusalView, technicalWords: (service: string, editorial: string) => developer ? service : editorial, researchUnavailableLine: (_code: string, text: string) => text,
       navigation: new NavigationGeneration(), overview: { book: { bookId: 'book-1', title: '图书' } },
       renderBookAnalysis: vi.fn(), rendererErrorCode: () => 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE',
       state: { modelSettings: vi.fn() }, error: { code: 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', message: 'internal' },
@@ -131,7 +138,7 @@ describe('工作概览 refusals (#992)', () => {
     runInContext(compile([...helpers.values(), init, 'document.body.append(analysisHost);',
       'const page = navigation.read(analysisHost);', `(${refusals.find(text => text.includes('analysisHost'))})(error);`].join('\n')), context);
     expect(miniDocument.body.textContent).toContain('打开分析');
-    expect(miniDocument.body.textContent).toContain('尚未连接模型服务');
+    expect(miniDocument.body.textContent).toContain(developer ? 'internal' : '模型服务需要设置');
     expect(miniDocument.body.textContent).toContain('去设置');
   });
 
@@ -173,4 +180,18 @@ describe('工作概览 refusals (#992)', () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(serviceRead).not.toHaveBeenCalled();
   });
+});
+
+it.each([false, true])('places only nonempty first-import actions directly below the empty Book title (actions=%s)', hasActions => {
+  miniDocument.body.replaceChildren();
+  const content = miniDocument.createElement('section'), title = miniDocument.createElement('h2');
+  const lede = miniDocument.createElement('p'), actions = miniDocument.createElement('div');
+  content.append(title, lede);
+  if (hasActions) { const button = miniDocument.createElement('button'); button.textContent = '导入首份稿件'; actions.append(button); }
+  const source = readFileSync(new URL('../../src/renderer/book-overview-screen.ts', import.meta.url), 'utf8');
+  const start = source.indexOf("  if (overview.manuscriptState.state === 'empty')");
+  const layout = source.slice(start, source.indexOf('  appendRecoveryReturnAction(content', start));
+  runInContext(compile(layout), createContext({ content, actions, overview: { manuscriptState: { state: 'empty' } } }));
+  expect(content.children[1]).toBe(hasActions ? actions : lede);
+  if (hasActions) expect(actions.textContent).toBe('导入首份稿件');
 });

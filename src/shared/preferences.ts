@@ -275,8 +275,8 @@ const isAnalysisLastViewed = (value: unknown): value is AnalysisLastViewed => is
 
 export type OnboardingState = null | 'skipped' | 'completed';
 
-export function showOnboardingCard(hasBooks: boolean, state: OnboardingState): boolean {
-  return !hasBooks && state === null;
+export function showOnboardingCard(bookCount: number, state: OnboardingState): boolean {
+  return bookCount <= 1 && state !== 'skipped';
 }
 
 export function showSampleGuidance(isSample: boolean, state: OnboardingState, hasBaseline: boolean): boolean {

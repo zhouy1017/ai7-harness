@@ -8,7 +8,7 @@ import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { mountBookSeries } from './series.js';
 import { EVALUATION_STATUS, EVALUATION_TITLE, evaluationOverviewLine } from './evaluation-labels.js';
 import { DELIVERABLES_ENTRY_LABEL, DELIVERABLES_UNAVAILABLE, PUBLICATION_ACTION_LABELS, deliverablesOverviewLine, publicationStateOf } from './deliverables-labels.js';
-import { analysisRefusalView } from './overview-refusal-labels.js';
+import { overviewAnalysisRefusalView } from './overview-refusal-labels.js';
 import { type ReviewFocus } from './review-workspace.js';
 import { TASK_DRAWER_TITLE } from './task-drawer-labels.js';
 import { REVIEW_ACTION_LABELS, REVIEW_CARD_HEADING, REVIEW_WORKSPACE_UNAVAILABLE, reviewOverviewLine } from './review-labels.js';
@@ -227,8 +227,8 @@ function renderBookOverview(
         if (!page.isCurrent() || !analysisHost.isConnected) return;
         analysisHost.dataset['analysisState'] = 'unavailable';
         const code = rendererErrorCode(error);
-        const refusal = analysisRefusalView(code, '暂时无法读取分析状态，请打开分析重试。');
-        analysisState.replaceChildren(element('p', 'attention-note', refusal.text));
+        const refusal = overviewAnalysisRefusalView(code, '暂时无法读取分析状态，请打开分析重试。');
+        analysisState.replaceChildren(element('p', 'attention-note', technicalWords(rendererErrorMessage(error, refusal.text), refusal.text)));
         if (refusal.actionLabel !== null) {
           analysisState.append(button('去设置', 'quiet', () => void state.modelSettings()));
         }
@@ -259,7 +259,7 @@ function renderBookOverview(
         if (!page.isCurrent() || !reviewHost.isConnected) return;
         reviewHost.dataset['reviewState'] = 'unavailable';
         reviewState.replaceChildren(
-          element('p', 'attention-note', REVIEW_WORKSPACE_UNAVAILABLE),
+          element('p', 'attention-note', technicalWords(rendererErrorMessage(error, REVIEW_WORKSPACE_UNAVAILABLE), REVIEW_WORKSPACE_UNAVAILABLE)),
         );
       },
     );
@@ -288,7 +288,7 @@ function renderBookOverview(
         if (!page.isCurrent() || !deliverablesHost.isConnected) return;
         deliverablesHost.dataset['deliverablesState'] = 'unavailable';
         deliverablesState.replaceChildren(
-          element('p', 'attention-note', DELIVERABLES_UNAVAILABLE),
+          element('p', 'attention-note', technicalWords(rendererErrorMessage(error, DELIVERABLES_UNAVAILABLE), DELIVERABLES_UNAVAILABLE)),
         );
       },
     );
@@ -314,7 +314,7 @@ function renderBookOverview(
         if (!page.isCurrent() || !evaluationHost.isConnected) return;
         evaluationHost.dataset['evaluationState'] = 'unavailable';
         evaluationState.replaceChildren(
-          element('p', 'attention-note', EVALUATION_STATUS.unavailable),
+          element('p', 'attention-note', technicalWords(rendererErrorMessage(error, EVALUATION_STATUS.unavailable), EVALUATION_STATUS.unavailable)),
         );
       },
     );
@@ -468,7 +468,9 @@ function renderBookOverview(
     const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '继续编辑稿件');
     if (open) actions.append(open);
   }
-  if (overview.manuscriptState.state === 'empty') content.querySelector('h2')?.after(actions);
+  if (overview.manuscriptState.state === 'empty') {
+    if (actions.children.length > 0) content.querySelector('h2')?.after(actions);
+  }
   else (content.querySelector('.manuscript-anchor') ?? content).append(actions);
 
   appendRecoveryReturnAction(content, recoveryReturn);
