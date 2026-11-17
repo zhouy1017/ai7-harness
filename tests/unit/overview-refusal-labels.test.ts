@@ -71,7 +71,8 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
   const context = createContext({ identityWords, api, navigation, page: navigation.read(host as unknown as HTMLElement),
     document: miniDocument, screen: miniDocument.body, performance,
     window: { setTimeout, ai7: api },
-    host, taskHost: host, analysisHost: host, first: true,
+    host, taskHost: host, analysisHost: host, analysisState: host, first: true,
+    state: { modelSettings: navigate },
     bookId: 'book-1', bookTitle: '测试图书', overview: { book: { bookId: 'book-1' }, manuscriptState: { state: 'populated' } },
     error: { code, message: '原有拒绝说明。' },
     analysisRefusalView, TASK_DRAWER_TITLE,
@@ -118,6 +119,22 @@ describe('工作概览 refusals (#992)', () => {
     expect(host.querySelector('[data-task-authorization-state="unavailable"]')).not.toBeNull();
   });
 
+  it('keeps the analysis entry while a failed state read offers model settings', async () => {
+    miniDocument.body.replaceChildren();
+    const context = createContext({ document: miniDocument, identityWords, analysisRefusalView,
+      navigation: new NavigationGeneration(), overview: { book: { bookId: 'book-1', title: '图书' } },
+      renderBookAnalysis: vi.fn(), rendererErrorCode: () => 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE',
+      state: { modelSettings: vi.fn() }, error: { code: 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', message: 'internal' },
+    });
+    const source = readFileSync(new URL('../../src/renderer/book-overview-screen.ts', import.meta.url), 'utf8');
+    const init = source.slice(source.indexOf("  const analysisHost ="), source.indexOf('  const inspectBaselineAnalysis ='));
+    runInContext(compile([...helpers.values(), init, 'document.body.append(analysisHost);',
+      'const page = navigation.read(analysisHost);', `(${refusals.find(text => text.includes('analysisHost'))})(error);`].join('\n')), context);
+    expect(miniDocument.body.textContent).toContain('打开分析');
+    expect(miniDocument.body.textContent).toContain('尚未连接模型服务');
+    expect(miniDocument.body.textContent).toContain('去设置');
+  });
+
   it('J-01 recognizes painted recovery with the development-ci task note (#992)', async () => {
     const { host } = await refusalHarness('task', 'TASK_LINEAGE_UNAVAILABLE');
     const imported = miniDocument.createElement('section');
@@ -151,7 +168,7 @@ describe('工作概览 refusals (#992)', () => {
 
   it.each(['overview', 'analysis'] as const)('keeps other refusal text without a next-step button on %s', async (surface) => {
     const { host, navigate, serviceRead } = await refusalHarness(surface, 'ANALYSIS_LINEAGE_UNAVAILABLE');
-    expect(host.textContent).toContain('原有拒绝说明。');
+    expect(host.textContent).toContain(surface === 'overview' ? '暂时无法读取分析状态，请打开分析重试。' : '原有拒绝说明。');
     expect(host.querySelector('button')).toBeNull();
     expect(navigate).not.toHaveBeenCalled();
     expect(serviceRead).not.toHaveBeenCalled();

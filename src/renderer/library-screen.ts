@@ -6,7 +6,7 @@ import { MAX_BOOK_SUMMARY_FILTER_CHARACTERS } from '../shared/protocol.js';
 import { MARK_KIND_LABELS } from './editorial-mark-labels.js';
 import { BOOK_FILTER_ACTIONS, BOOK_FILTER_FIELD_LABEL, BOOK_FILTER_FIELDS, BOOK_FILTER_LEGEND, BOOK_FILTER_NONE, BOOK_FILTER_STATUS_LINES, BOOK_FILTER_TEXT_LABEL, bookCardPeopleLine, bookCardRelatedLine, bookFilterLine } from './book-people-labels.js';
 import type { ProductionDocumentContext } from './production-document-lens.js';
-import { showOnboardingCard } from '../shared/preferences.js';
+import { appendFirstRunSteps } from './onboarding-steps.js';
 import { type ShellPlace } from './shell.js';
 import { FIRST_RUN_CARD_LABELS } from './onboarding-labels.js';
 import { SHELL_LABELS } from './shell-labels.js';
@@ -23,7 +23,7 @@ interface Options {
   renderBookCreationForm: () => void;
   renderTargetChoice: (staged: StagedImportProjection, selectedChoiceId: StagedImportProjection["targetChoices"][number]["id"] | null, recoveryNotice?: string, recoveryReturn?: RecoveryReturnContext, relationshipSelection?: ("first-manuscript" | "source-only" | "reimport") | null, reuseSourceVersionId?: string | null | undefined, reimportLineageChoice?: string | undefined) => void;
   renderError: (error: unknown, retry: () => void) => void;
-  renderDataAndStorage: () => Promise<void>;
+  startReview: (bookId: string, title: string) => void;
   renderModelServiceSettings: (focus?: "search") => Promise<void>;
   authorityInterrupted: boolean;
   leaveThen: (open: () => Promise<void>) => Promise<void>;
@@ -45,7 +45,7 @@ interface Options {
 }
 
 export function createLibraryScreen(state: Options) {
-  const { element, button, setStatus, api, rendererErrorMessage, panel, renderBookCreationForm, renderTargetChoice, renderError, renderDataAndStorage, renderModelServiceSettings, leaveThen, renderHelp, bookCardOpen, requestBookWorkbenchRoute, bookCardAction, bookIdentityDisclosure, returnToRecoveryComparison, appendRecoveryReturnAction, replaceScreen, screen, settleScreen, renderEditorWindow, acknowledgeCompletionAfterPaint, renderBookOverview, recordPresentation } = state;
+  const { element, button, setStatus, api, rendererErrorMessage, panel, renderBookCreationForm, renderTargetChoice, renderError, renderModelServiceSettings, leaveThen, renderHelp, bookCardOpen, requestBookWorkbenchRoute, bookCardAction, bookIdentityDisclosure, returnToRecoveryComparison, appendRecoveryReturnAction, replaceScreen, screen, settleScreen, renderEditorWindow, acknowledgeCompletionAfterPaint, renderBookOverview, recordPresentation } = state;
 
 
 /**
@@ -169,7 +169,7 @@ function renderLanding(
   copy.append(
     element('p', 'section-label', SHELL_LABELS.library),
     element('h2', undefined, SHELL_LABELS.libraryTitle),
-    element('p', 'lede', '新建一本空图书，或从本地 DOCX 导入稿件。'),
+    element('p', 'lede', '新建一本空图书，或从本地 DOCX 导入稿件。也可将 DOCX 拖到这里。'),
   );
   const createBook = button('新建图书', 'secondary', renderBookCreationForm);
   const importButton = button('导入稿件', 'primary', async () => {
@@ -197,41 +197,34 @@ function renderLanding(
   // The landing always paints first; this supporting card never replaces its normal actions.
   const onboarding = element('section', 'onboarding-card');
   content.append(onboarding);
-  if (filter === null && books.items.length === 0 && priorWork.length === 0) {
+  if (filter === null) {
     void Promise.all([api.getPreferences(), api.getProductDataLocation()]).then(([preferences, location]) => {
-      if (!onboarding.isConnected || !showOnboardingCard(books.items.length > 0, preferences.values['onboarding.state'])) return;
+      if (!onboarding.isConnected || preferences.values['onboarding.state'] === 'skipped') return;
       onboarding.dataset['onboardingCard'] = 'first-run';
       const labels = FIRST_RUN_CARD_LABELS;
       onboarding.append(element('h3', undefined, labels.title));
       const steps = element('ol', 'onboarding-steps');
-      const data = element('li');
-      data.append(element('strong', undefined, labels.dataStep), ...(technicalLayerVisible ? [element('p', 'onboarding-data-location', location.canonicalRoot)] : []),
-        button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
-      const warnings = [location.dataLocationException === null ? null : location.channelDescription, location.syncWarning].filter((line): line is string => line !== null);
-      if (warnings.length > 0) data.append(element('p', 'field-note', `${warnings.map((line) => line.replace(/。$/u, '')).join('；')}。`));
-      const model = element('li');
-      model.append(element('strong', undefined, labels.modelStep), element('p', undefined, labels.modelNote),
-        button(labels.modelOpen, 'secondary', () => void renderModelServiceSettings()));
-      const start = element('li');
-      start.append(element('strong', undefined, labels.startStep), element('p', undefined, labels.startNote));
-      if (location.runtimeForm === 'source-checkout') {
+      const reviewBook = books.items.find((book) => book.manuscriptState === 'populated');
+      appendFirstRunSteps(steps, element, button, {
+        model: () => void renderModelServiceSettings(),
+        import: () => importButton.click(),
+        review: reviewBook ? () => void requestBookWorkbenchRoute({ kind: 'book', bookId: reviewBook.bookId }, async () => {
+          state.startReview(reviewBook.bookId, reviewBook.title);
+        }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开审阅。'), 'error')) : null,
+      });
+      if (technicalLayerVisible && location.runtimeForm === 'source-checkout') {
         const sample = button(labels.sampleImport, 'secondary', async () => {
           sample.disabled = true;
-          setStatus(labels.sampleBusy, 'busy');
           try {
             const result = await api.importBundledSampleBook();
-            if (result.status === 'staged') {
-              setStatus(labels.sampleStaged, 'success');
-              renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
-            }
+            if (result.status === 'staged') renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
           } catch (error) {
             sample.disabled = false;
             setStatus(rendererErrorMessage(error, labels.sampleFailed), 'error');
           }
         });
-        start.append(sample);
-      } else start.append(element('p', undefined, labels.sampleUnavailable));
-      steps.append(data, model, start);
+        onboarding.append(sample);
+      }
       const skip = button(labels.skip, 'quiet', async () => {
         skip.disabled = true;
         try {
@@ -359,18 +352,23 @@ function renderLanding(
 function installDropHandlers(): void {
 let dropImportBusy = false;
 screen.addEventListener('dragover', (event) => {
-  if (['landing', 'editor'].includes(screen.dataset['screen'] ?? '') && event.dataTransfer?.types.includes('Files')) event.preventDefault();
+  if (['landing', 'editor', 'book-overview', 'imported'].includes(screen.dataset['screen'] ?? '') && event.dataTransfer?.types.includes('Files')) event.preventDefault();
 });
 screen.addEventListener('drop', (event) => {
   const file = event.dataTransfer?.files[0];
-  if (!file || !['landing', 'editor'].includes(screen.dataset['screen'] ?? '')) return;
+  if (!file || !['landing', 'editor', 'book-overview', 'imported'].includes(screen.dataset['screen'] ?? '')) return;
   event.preventDefault();
-  if (dropImportBusy || !/\.docx$/iu.test(file.name)) return;
+  if (dropImportBusy) return;
+  if (!/\.docx$/iu.test(file.name)) { setStatus('请拖入 DOCX 格式的稿件。', 'error'); return; }
   dropImportBusy = true;
   void (async () => {
     if (!await settleScreen()) return;
     const result = await api.stageDroppedManuscript(file);
-    if (result.status === 'staged') renderTargetChoice(result.staged, null);
+    if (result.status === 'staged') {
+      const bookId = screen.querySelector<HTMLElement>('.book-overview')?.dataset['bookId'];
+      const choice = result.staged.targetChoices.find((item) => item.kind === 'existing-book' && item.bookId === bookId);
+      renderTargetChoice(result.staged, choice?.id ?? null);
+    }
   })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法导入拖入的 DOCX。'), 'error')).finally(() => { dropImportBusy = false; });
 });
 

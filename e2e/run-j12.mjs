@@ -509,6 +509,13 @@ async function tabUntil(renderer, expression, name, maximumTabs = 12) {
   throw journeyCheckFailure('J-12', name);
 }
 
+async function firstRunClick(renderer, selector) {
+  const point = await renderer.evaluate(`(async () => { const node=document.querySelector(${JSON.stringify(selector)}); if(!node)return null; node.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); const b=node.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2}; })()`);
+  requireJourney(point !== null, 'first-run-pointer-target');
+  await renderer.send('Input.dispatchMouseEvent', { type:'mousePressed', ...point, button:'left', clickCount:1 });
+  await renderer.send('Input.dispatchMouseEvent', { type:'mouseReleased', ...point, button:'left', clickCount:1 });
+}
+
 async function click(renderer, label, name) {
   if (label === '向前浏览' || label === '向后浏览') await assertRenderer(renderer, manuscriptBoundary(label), name);
   if (label === '预览替换') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
@@ -908,7 +915,29 @@ async function main() {
     let onboardingManager = await launch(syntheticDocx, undefined, onboardingRoot);
     let [onboardingPage] = await waitForRendererCount(onboardingManager, 1, 'onboarding-initial-window');
     await waitFor(onboardingPage, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] [data-onboarding-card="first-run"]')`, 'first-run-card-visible');
-    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector('[data-onboarding-card]'); const labels=Array.from(document.querySelectorAll('button')).map(node=>node.textContent); return labels.includes('新建图书') && labels.includes('导入稿件') && card.textContent.includes('本地编辑与恢复不依赖模型服务') && card.querySelector('.onboarding-data-location')?.textContent===${JSON.stringify(onboardingRoot)}; })()`, 'first-run-actions-and-location');
+    await assertRenderer(onboardingPage, `(() => { const card=document.querySelector('[data-onboarding-card]'); const labels=Array.from(document.querySelectorAll('button')).map(node=>node.textContent); return labels.includes('新建图书') && labels.includes('导入稿件') && card.textContent.includes('AI 审阅需要') && !card.textContent.includes('① 数据位置') && !card.textContent.includes('示例书尚未提供'); })()`, 'first-run-actions');
+    for (const [width,height] of [[1280,800],[1008,681]]) {
+      at(width === 1280 ? 'first-run-card-wide' : 'first-run-card-gate');
+      await onboardingPage.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+      requireJourney(await onboardingPage.evaluate(`(async () => {
+        const card=document.querySelector('[data-onboarding-card]'); card.scrollIntoView({block:'center'});
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const b=card.getBoundingClientRect(), parent=card.parentElement.getBoundingClientRect();
+        return b.width >= parent.width-60 && b.left>=0 && b.right<=innerWidth && [...card.querySelectorAll('.onboarding-steps li')].every(step=> {
+          const r=step.getBoundingClientRect(); const button=step.querySelector('button'); const a=button?.getBoundingClientRect();
+          return r.width>=200 && (!button || (a.width>0 && a.top>=0 && a.bottom<=innerHeight && a.left>=r.left && a.right<=r.right));
+        });
+      })()`) === true, 'first-run-card-geometry');
+    }
+    await onboardingPage.send('Emulation.clearDeviceMetricsOverride');
+    at('first-run-data-location-settings');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="settings"]')`, 'first-run-settings-ready');
+    await firstRunClick(onboardingPage, '[data-settings-entry="data-storage"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="data-storage"]')`, 'first-run-data-storage-ready');
+    await assertRenderer(onboardingPage, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(onboardingRoot)}`, 'first-run-location-in-settings');
+    await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
+    await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-returned-library');
     at('first-run-skip-persists');
     await click(onboardingPage, '跳过引导', 'first-run-skip');
     await waitFor(onboardingPage, `!document.querySelector('[data-onboarding-card]')`, 'first-run-skip-hidden');

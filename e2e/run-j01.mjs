@@ -1573,12 +1573,12 @@ async function runJourney(
     at('landing-action-ready');
     await waitFor(
       renderer,
-      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); return actions.length === 1 && !actions[0].disabled; })()`,
+      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); return actions.length >= 1 && !actions[0].disabled; })()`,
       'landing-action-ready',
     );
     await assertRenderer(
       renderer,
-      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); if (actions.length !== 1 || actions[0].disabled) return false; actions[0].click(); return true; })()`,
+      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); if (actions.length < 1 || actions[0].disabled) return false; actions[0].click(); return true; })()`,
       'landing-action-ready',
     );
     at('landing-target-transition');
@@ -1744,7 +1744,7 @@ async function runJourney(
       'import-completion',
     ),
   );
-  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='继续编辑稿件' && !document.querySelector('.book-overview .success-note') && document.querySelectorAll('.import-steps [data-import-step]').length===4`, 'overview-anchor-first');
+  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='继续编辑稿件' && !document.querySelector('.book-overview .success-note') && !document.querySelector('.import-steps')`, 'overview-anchor-first');
   if (holdCompletionPaint) {
     await duringCompletion(
       'held-before-paint',
@@ -2087,7 +2087,8 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'empty-book-sidebar-overview-again');
   await waitFor(renderer, `${sidebarBookCurrent(bookId, 'overview')} && document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-overview-again-ready');
 
-  await clickExactButton(renderer, '导入首份稿件', 'empty-book-import-first');
+  const dropPoint = await renderer.evaluate(`(() => { const b=document.querySelector('.book-overview').getBoundingClientRect(); return {x:Math.min(innerWidth-20,b.left+b.width/2),y:Math.min(innerHeight-20,b.top+50)}; })()`);
+  for (const type of ['dragEnter','dragOver','drop']) await renderer.send('Input.dispatchDragEvent', {type,...dropPoint,data:{items:[],files:[SAMPLE1_PATH],dragOperationsMask:1}});
   await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-book-target-selected');
   await assertRenderer(
     renderer,
