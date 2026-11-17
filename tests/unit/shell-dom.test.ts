@@ -149,6 +149,31 @@ describe('sidebar book entries', () => {
     expect(openDestination).toHaveBeenCalledWith('library');
   });
 
+  it('pins and unpins the open Book from its heading with the list star write, and keeps focus there (#1521)', async () => {
+    const { sidebar, preferences, surface } = mounted();
+    await preferences.load();
+    const pin = () => sidebar.querySelector<HTMLButtonElement>('.sidebar-current-book-row [data-nav-current-pin]')!;
+    expect(pin().hidden).toBe(true);
+    surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
+    await vi.waitFor(() => expect(preferences.current['shell.recentBooks'][0]?.bookId).toBe('book-a'));
+    expect(pin().hidden).toBe(false);
+    expect([pin().getAttribute('aria-pressed'), pin().getAttribute('aria-label'), pin().textContent]).toEqual(['false', '置顶《甲书》', '☆']);
+    pin().focus();
+    const element = pin();
+    element.click();
+    await vi.waitFor(() => expect(preferences.current['shell.pinnedBooks'].map((entry) => entry.bookId)).toEqual(['book-a']));
+    // The same element, painted anew: it keeps the focus the keyboard put there; the Book still has no list row.
+    expect(pin()).toBe(element);
+    expect(document.activeElement).toBe(element);
+    expect([element.getAttribute('aria-pressed'), element.getAttribute('aria-label'), element.textContent]).toEqual(['true', '取消置顶《甲书》', '★']);
+    expect(sidebar.querySelector('[data-nav-book="book-a"]')).toBeNull();
+    element.click();
+    await vi.waitFor(() => expect(preferences.current['shell.pinnedBooks']).toEqual([]));
+    expect([element.getAttribute('aria-pressed'), document.activeElement === element]).toEqual(['false', true]);
+    surface.leaveBook();
+    expect(pin().hidden).toBe(true);
+  });
+
   it('hides the Book list while the open Book is the only one known, and says so when no Book is open (#1521)', async () => {
     const { sidebar, preferences, surface } = mounted();
     await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });

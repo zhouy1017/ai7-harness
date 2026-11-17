@@ -494,6 +494,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'reimport-commit',
     'reimport-landed',
     'reimport-history',
+    // Issue #1521: a populated Book's records through 工作概览 by real input, once the 历史与恢复 row is gone.
+    'book-records-reachable',
     // The source-only intake of a PDF: identified from its bytes, refused as editable, retained.
     'synthetic-pdf-identity',
     'source-only-pdf-landing',
@@ -928,6 +930,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'keyboard-restore-default',
     'editorial-book-switcher',
     'sidebar-settings-pinned',
+    'sidebar-long-book-list',
+    'sidebar-current-book-pin',
     'editorial-disclosure-motion',
     'acknowledged-edit',
     'j14-ime-focus',
