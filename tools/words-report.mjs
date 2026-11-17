@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BANNED, BY_HAND, STAYS } from './words-table.mjs';
@@ -9,8 +9,11 @@ import { BANNED, BY_HAND, STAYS } from './words-table.mjs';
 // editor-facing sentences of src/shared/report-wording.ts. #1531 turns the same scan into a failing test.
 //
 // A line-level scan, not a TypeScript parser. It keeps only the text of string and template literals, drops comments and
-// regular expressions, and drops the first argument of `technicalWords(…)` (developer-mode text). What still reports
-// falsely: developer-only screens, identifiers and data keys spelled as strings, and sentences that quote a banned word.
+// regular expressions, and drops the first argument of `technicalWords(…)` (developer-mode text).
+// What it cannot see: a term split by concatenation ('待' + '处理'), by an interpolation or by a line break inside a template.
+// What it reports falsely: a longer word that contains a term (「连续行走」 holds 续行), developer-only screens and branches,
+// identifiers and data keys spelled as strings, and sentences that quote a banned word.
+// An unreadable file or folder is named with its error code and skipped: nothing the scan meets changes the exit code.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEFAULT_TARGETS = ['src/renderer', 'src/shared/report-wording.ts'];
 const CODE = new Set(['.ts', '.mts', '.js', '.mjs']);
@@ -92,8 +95,9 @@ export function maskSource(source) {
 }
 
 // A term that begins or ends with an ASCII letter or digit must not sit inside a longer ASCII name (`maxTokens`, `tokens-row`).
+// A space inside a term matches blanks on the same line only, so a hit is always one line.
 function pattern(term) {
-  const body = term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/ +/gu, '\\s*');
+  const body = term.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/ +/gu, '[ \\t]*');
   const before = /^[A-Za-z0-9]/u.test(term) ? '(?<![A-Za-z0-9_-])' : '';
   const after = /[A-Za-z0-9]$/u.test(term) ? '(?![A-Za-z0-9_-])' : '';
   return `${before}${body}${after}`;
@@ -136,39 +140,50 @@ export function scanSource(source, extension = '.ts', table) {
   let offset = 0;
   for (const span of findTerms(masked.text, table)) {
     for (; offset < span.start; offset += 1) if (masked.text.charCodeAt(offset) === 10) line += 1;
-    if (span.kind === 'banned') result.banned.push({ line, term: span.found, use: span.row.use });
+    if (span.kind === 'banned') result.banned.push({ line, term: span.found.replace(/\s+/g, ' '), use: span.row.use });
     else result.hand.push({ from: span.row.from, line });
   }
   return result;
 }
 
-function expand(target, found) {
-  const path = resolve(ROOT, target);
-  if (!existsSync(path)) { found.missing.push(target); return; }
-  if (!statSync(path).isDirectory()) { found.files.add(path); return; }
-  for (const name of readdirSync(path).sort()) {
-    const child = resolve(path, name);
-    if (statSync(child).isDirectory()) expand(relative(ROOT, child), found);
-    else if (CODE.has(extname(name)) || TEXT.has(extname(name))) found.files.add(child);
+const shown = (path) => relative(ROOT, path).split(sep).join('/');
+const failure = (error) => (typeof error?.code === 'string' ? error.code : 'ERROR');
+
+// `target` is the path as the caller gave it, set for a top-level target only; a failure anywhere is recorded, never thrown.
+function expand(path, found, target) {
+  try {
+    if (!statSync(path).isDirectory()) {
+      if (target !== undefined || CODE.has(extname(path)) || TEXT.has(extname(path))) found.files.add(path);
+      return;
+    }
+    for (const name of readdirSync(path).sort()) expand(resolve(path, name), found, undefined);
+  } catch (error) {
+    if (target !== undefined && failure(error) === 'ENOENT') found.missing.push(target);
+    else found.unreadable.push(`${shown(path)} (${failure(error)})`);
   }
 }
 
-/** Scan files or folders (relative to the repository root); the per-file results come back in path order. */
-export function scanTargets(targets = DEFAULT_TARGETS) {
-  const found = { files: new Set(), missing: [] };
-  for (const target of targets) expand(target, found);
+/**
+ * Scan files or folders (relative to the repository root); the per-file results come back in path order. Targets that do not
+ * exist are `missing`; anything that cannot be read is `unreadable` with its error code; the rest is still scanned.
+ */
+export function scanTargets(targets = DEFAULT_TARGETS, { read = (path) => readFileSync(path, 'utf8') } = {}) {
+  const found = { files: new Set(), missing: [], unreadable: [] };
+  for (const target of targets) expand(resolve(ROOT, target), found, target);
   const results = [];
   let skipped = 0;
   for (const path of [...found.files].sort()) {
     const extension = extname(path);
     if (!CODE.has(extension) && !TEXT.has(extension)) { skipped += 1; continue; }
-    results.push({ file: relative(ROOT, path).split(sep).join('/'), ...scanSource(readFileSync(path, 'utf8'), extension) });
+    let source;
+    try { source = read(path); } catch (error) { found.unreadable.push(`${shown(path)} (${failure(error)})`); continue; }
+    results.push({ file: shown(path), ...scanSource(source, extension) });
   }
-  return { results, skipped, missing: found.missing };
+  return { results, skipped, missing: found.missing, unreadable: found.unreadable.sort() };
 }
 
 /** The report text: short and stable — the banned term, its line and its replacement; no sentence of the product. */
-export function formatReport({ results, skipped, missing }) {
+export function formatReport({ results, skipped, missing, unreadable = [] }) {
   const out = [];
   let total = 0;
   for (const result of results) {
@@ -180,6 +195,7 @@ export function formatReport({ results, skipped, missing }) {
   const files = results.filter((result) => result.banned.length > 0).length;
   out.push(`${total} banned term${total === 1 ? '' : 's'} in ${files} of ${results.length} file${results.length === 1 ? '' : 's'}${skipped > 0 ? ` (${skipped} skipped: not .ts or .html)` : ''}`);
   for (const target of missing) out.push(`not found: ${target}`);
+  for (const entry of unreadable) out.push(`unreadable: ${entry}`);
   out.push('', 'Check by hand (only the sentence decides; these lines are candidates, not findings):');
   for (const row of BY_HAND) {
     out.push(`  ${row.from} -> ${row.use}`);
@@ -194,6 +210,12 @@ export function formatReport({ results, skipped, missing }) {
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const targets = process.argv.slice(2).filter((argument) => argument !== '--');
-  process.stdout.write(`${formatReport(scanTargets(targets.length > 0 ? targets : undefined))}\n`);
+  process.stdout.on('error', () => undefined); // a closed pipe (`| head`) is not a failure of the report
+  try {
+    const targets = process.argv.slice(2).filter((argument) => argument !== '--');
+    process.stdout.write(`${formatReport(scanTargets(targets.length > 0 ? targets : undefined))}\n`);
+  } catch (error) {
+    process.stdout.write(`words:report could not finish (${failure(error)})\n`);
+  }
+  process.exitCode = 0;
 }
