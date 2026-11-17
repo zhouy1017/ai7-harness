@@ -14,11 +14,11 @@ export function appendFirstRunSteps(
   steps: HTMLElement,
   element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K],
   button: (label: string, style: 'primary' | 'secondary' | 'quiet', action: () => void) => HTMLButtonElement,
-  actions: { model: (() => void) | null; import: () => void; review: (() => void) | null; bookTitle?: string },
+  actions: { model: (() => void) | null; import: (() => void) | null; review: (() => void) | null; bookTitle?: string },
 ): void {
   for (const [title, note, label, action] of [
     [actions.model ? labels.modelStep : `${labels.modelStep} · 已连接`, labels.modelNote, labels.modelOpen, actions.model],
-    [labels.importStep, '选择本机 DOCX 稿件。', '导入稿件', actions.import],
+    [actions.import ? labels.importStep : `${labels.importStep} · 已导入`, '选择本机 DOCX 稿件。', '导入稿件', actions.import],
     [labels.startStep, actions.bookTitle ? `审阅《${actions.bookTitle}》。` : labels.startNote, '新建审阅', actions.review],
   ] as const) {
     const step = element('li');

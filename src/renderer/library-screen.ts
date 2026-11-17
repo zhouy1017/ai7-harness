@@ -221,7 +221,7 @@ async function renderLanding(
     appendFirstRunSteps(steps, element, button, {
       model: modelSettings !== null && firstRunModelConnected(modelSettings.roles) ? null : () => void renderModelServiceSettings(),
       ...(reviewBook ? { bookTitle: reviewBook.title } : {}),
-      import: () => importButton.click(),
+      import: reviewBook ? null : () => importButton.click(),
       review: reviewBook ? () => void requestBookWorkbenchRoute({ kind: 'book', bookId: reviewBook.bookId }, async () => {
         state.startReview(reviewBook.bookId, reviewBook.title);
       }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法打开审阅。'), 'error')) : null,

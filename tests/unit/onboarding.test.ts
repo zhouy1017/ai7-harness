@@ -98,17 +98,17 @@ it('offers review only with a manuscript, and every active step runs its own act
     const model = vi.fn(), intake = vi.fn(), review = vi.fn();
     for (const ready of [false, true]) {
       const steps = element('ol');
-      appendFirstRunSteps(steps, element, button, { model, import: intake, review: ready ? review : null, ...(ready ? { bookTitle: '第一本' } : {}) });
-      if (ready) expect(steps.textContent).toContain('审阅《第一本》');
+      appendFirstRunSteps(steps, element, button, { model, import: ready ? null : intake, review: ready ? review : null, ...(ready ? { bookTitle: '第一本' } : {}) });
+      if (ready) { expect(steps.textContent).toContain('审阅《第一本》'); expect(steps.textContent).toContain('已导入'); }
       const buttons = [...steps.querySelectorAll('button')];
-      expect(buttons.map(node => node.textContent)).toEqual(ready ? ['设置模型服务', '导入稿件', '新建审阅'] : ['设置模型服务', '导入稿件']);
+      expect(buttons.map(node => node.textContent)).toEqual(ready ? ['设置模型服务', '新建审阅'] : ['设置模型服务', '导入稿件']);
       buttons.forEach(node => node.click());
     }
     const done = element('ol');
     appendFirstRunSteps(done, element, button, { model: null, import: intake, review: null });
     expect(done.textContent).toContain('已连接');
     expect([...done.querySelectorAll('button')].map(node => node.textContent)).toEqual(['导入稿件']);
-    expect(model).toHaveBeenCalledTimes(2); expect(intake).toHaveBeenCalledTimes(2); expect(review).toHaveBeenCalledOnce();
+    expect(model).toHaveBeenCalledTimes(2); expect(intake).toHaveBeenCalledOnce(); expect(review).toHaveBeenCalledOnce();
   } finally { restore(); }
 });
 

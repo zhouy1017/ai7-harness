@@ -518,7 +518,7 @@ async function assertFirstRunGeometry(renderer, reviewExpected) {
     const steps=[...card.querySelectorAll('.onboarding-steps li')];
     return steps.length===3 && Math.abs(b.width-available)<=2 && b.left>=0 && b.right<=innerWidth && steps.every((step,index)=> {
       const r=step.getBoundingClientRect(); const button=step.querySelector('button'); const a=button?.getBoundingClientRect();
-      const required=index<2 || ${reviewExpected};
+      const required=index===0 || (${reviewExpected} ? index===2 : index===1);
       return r.width>=200 && (required ? !!button : !button) && (!button || (a.width>0 && a.top>=0 && a.bottom<=innerHeight && a.left>=r.left && a.right<=r.right && a.right<=innerWidth));
     });
   })()`) === true, 'first-run-card-geometry');
