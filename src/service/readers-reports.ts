@@ -3,6 +3,20 @@ import { launchedRevisionModelLabels } from './editorial-mark-source.js';
 import { launchedTaskPlan, type TaskLaunchContext, type TaskPlanCreator } from './task-plan-creation.js';
 import { procedureBasePromptDigest } from './procedures/execution.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import type { BookPeople } from './book-people.js';
+import { BOOK_DELIVERY_PACKAGE_WORDS, type PackageReadersReportReading } from './book-delivery-packages.js';
+import { readExemplarBook, type ExemplarSources } from './exemplars.js';
+import { ImportedExemplarError, type ImportedExemplars } from './imported-exemplars.js';
+import { learningMaterialDigest, type LearningEligibilityLedger, type LearningMaterialCandidate } from './learning-eligibility.js';
+import { MAX_EXEMPLAR_GRAPHEMES, MAX_READERS_REPORT_EXEMPLARS } from './evaluation/readers-report-contract.js';
+import type { PublicationVersionStore } from './publication-versions.js';
+import { readWritingExemplarWords } from './writing-tasks.js';
+import { asNumber } from './store-records.js';
+import type {
+  AdmitReadersReportExemplarInput,
+  ExemplarBookProjection,
+  ReadersReportExemplarProjection,
+} from '../shared/protocol/knowledge-base.js';
 import { clarificationPromptContractDigest } from './provider/clarification-contract.js';
 import {
   READERS_REPORT_KIND,
@@ -512,6 +526,7 @@ export interface ReadersReportStoreHost {
   analysisCall<T>(operation: () => T): T;
   assertAvailable(): void;
   readonly authority: DatabaseSync;
+  readonly bookPeople: BookPeople;
   readonly baselineAnalysis: BaselineAnalysisStore;
   readonly boundedAuthority: BoundedManuscriptStore;
   boundedCall<T>(operation: () => T): T;
@@ -519,14 +534,22 @@ export interface ReadersReportStoreHost {
   documentCall<T>(operation: () => T): T;
   readonly documentWorkflow: ProductionDocumentWorkflow;
   evaluationCall<T>(operation: () => T): T;
+  evaluationBookTitle(bookId: string): string;
   evaluationLiveRefused(kind: typeof INITIAL_EVALUATION_KIND | typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND): boolean;
   evaluationMaterialPlan(taskIntentId: string): { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null;
   evaluationRecordOrdinal(recordId: string): number;
   readonly evaluations: EvaluationRecords;
   inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection;
+  exemplarSources(): ExemplarSources;
+  importedCall<T>(operation: () => T): T;
+  readonly importedExemplars: ImportedExemplars;
+  learningCall<T>(operation: () => T): T;
+  readonly learningEligibility: LearningEligibilityLedger;
   ledgerTaskOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore;
   prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource>;
   readonly productionDocuments: ProductionDocuments;
+  publicationCall<T>(operation: () => T): T;
+  readonly publicationVersions: PublicationVersionStore;
   readersReportCall<T>(operation: () => T): T;
   readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] };
   readonly readersReportLedgers: RecentCache<BaselineAnalysisStore>;
@@ -890,4 +913,193 @@ export function createReadersReportDraft(host: ReadersReportStoreHost, bookId: s
     });
   })));
   return host.inspectEvaluation(bookId, null);
+}
+
+/** The material key of one template's 审稿意见 offered into 范例 (Issue #429): the Learning Eligibility ledger names its material by this prefix and the template. */
+export const READERS_REPORT_EXEMPLAR_KEY_PREFIX = 'readers-report-exemplar:';
+
+/** The opening of `value` within `max` graphemes (Issue #429): what a 审稿意见 范例 hands a contract when it is longer than the contract takes. */
+export function boundedGraphemes(value: string, max: number): string {
+  let count = 0;
+  let opening = '';
+  for (const { segment } of new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(value)) {
+    if (count === max) break;
+    opening += segment;
+    count += 1;
+  }
+  return opening;
+}
+
+// ---- 审稿意见 in 图书交付包 and 范例 (Issue #429, S81c remainder; BUNDLE-001, KB-006; moved from store.ts by Issue #1534) -----------------
+
+/**
+ * Each template's 审稿意见 draft at the version 图书交付包 and 范例 pin: the latest version saved by the designation's instant
+ * (`设为发稿版本时的最新一版`), or, for a draft that came after it — or while the Book has no 发稿版本 in force — the latest saved
+ * now. A read of the drafts' records and the documents' version ledger; nothing is written.
+ */
+export function readersReportPins(host: ReadersReportStoreHost, bookId: string, designatedAt: string | null): PackageReadersReportReading[] {
+  const drafts = host.readersReportCall(() => host.readersReports.drafts(bookId));
+  return READERS_REPORT_TEMPLATES.flatMap((template): PackageReadersReportReading[] => {
+    const stored = drafts.find((draft) => draft.template === template);
+    if (stored === undefined) return [];
+    const row = host.documentCall(() => host.productionDocuments.documentById(bookId, stored.documentId));
+    if (row === undefined) return [];
+    const versions = host.documentCall(() => host.productionDocuments.versionsOf(row));
+    const byDesignation = designatedAt === null ? undefined : versions.find((version) => version.recordedAt <= designatedAt);
+    const pinned = byDesignation ?? versions[0];
+    if (pinned === undefined) return [];
+    const typeId = readersReportDocumentTypeId(template);
+    return [{
+      template,
+      typeId,
+      typeLabel: readersReportDocumentType(typeId)!.label,
+      documentId: row.documentId,
+      version: pinned.version,
+      revisionId: pinned.revisionId,
+      revisionDigest: pinned.revisionDigest,
+      savedAt: pinned.recordedAt,
+      pin: byDesignation === undefined ? 'later' : 'designation',
+      laterVersions: versions[0] !== pinned,
+    }];
+  });
+}
+
+/** The Learning Material one pinned 审稿意见 is on the ledger of S26b: its key names the template, its content the exact version. */
+function readersReportExemplarCandidate(host: ReadersReportStoreHost, pin: PackageReadersReportReading): LearningMaterialCandidate {
+  return {
+    source: { kind: 'readers-report-exemplar', documentId: pin.documentId, revisionId: pin.revisionId },
+    materialKey: `${READERS_REPORT_EXEMPLAR_KEY_PREFIX}${pin.template}`,
+    kind: 'readers-report-exemplar',
+    originLabel: `${pin.typeLabel} · 版本 ${pin.version}`,
+    recordedAt: pin.savedAt,
+    orderedAt: pin.savedAt,
+    content: { documentId: pin.documentId, revisionId: pin.revisionId, revisionDigest: pin.revisionDigest, version: pin.version },
+    excerpt: [],
+    rationale: BOOK_DELIVERY_PACKAGE_WORDS.readersReportPinned,
+  };
+}
+
+/** The Book's 审稿意见 as 范例 offers them: each pinned against the designation given, with where the editor's admission stands. */
+export function readersReportExemplarsOf(host: ReadersReportStoreHost, bookId: string, designation: { readonly createdAt: string; readonly withdrawnAt: string | null }): ReadersReportExemplarProjection[] {
+  return readersReportPins(host, bookId, designation.withdrawnAt === null ? designation.createdAt : null).map((pin) => {
+    const candidate = readersReportExemplarCandidate(host, pin);
+    const latest = host.learningCall(() => host.learningEligibility.history(bookId, candidate.materialKey)).at(-1) ?? null;
+    const admitted = latest !== null && latest.choice === 'house' && latest.materialDigest === learningMaterialDigest(candidate);
+    return {
+      template: pin.template,
+      typeId: pin.typeId,
+      typeLabel: pin.typeLabel,
+      documentId: pin.documentId,
+      version: pin.version,
+      revisionId: pin.revisionId,
+      revisionDigest: pin.revisionDigest,
+      savedAt: pin.savedAt,
+      pin: pin.pin,
+      eligibility: 'house-only',
+      admission: {
+        state: latest === null ? 'offered' : admitted ? 'admitted' : 'superseded',
+        admittedAt: admitted ? latest.recordedAt : null,
+        decisions: latest?.ordinal ?? 0,
+      },
+    };
+  });
+}
+
+/**
+ * 知识库 › 范例 › 归入范例 (Issue #429; KB-006): the editor admits one Book's 审稿意见, at exactly the version offered, under 仅本社 —
+ * a Learning Eligibility decision (`house`) on the material that names that version, attributed to the Book's people as every
+ * decision is (S26b). Refused for a Book without a 发稿版本 in force, for a version no longer the one offered, or against
+ * admissions the editor has not seen. It changes no draft and no package; the answer is the Book as 范例 reads it now.
+ */
+export function admitReadersReportExemplar(host: ReadersReportStoreHost, input: AdmitReadersReportExemplarInput): ExemplarBookProjection {
+  requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+  requireStore(READERS_REPORT_TEMPLATES.includes(input.template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
+  const title = host.evaluationBookTitle(input.bookId);
+  const current = host.publicationCall(() => host.publicationVersions.current(input.bookId));
+  requireStore(current !== null && !current.withdrawn, 'EXEMPLAR_NEEDS_PUBLICATION', '这本书没有在用的发稿版本，审稿意见还不能归入范例。');
+  const pin = readersReportPins(host, input.bookId, current.projection.createdAt).find((entry) => entry.template === input.template);
+  requireStore(pin !== undefined, 'EXEMPLAR_READERS_REPORT_NOT_FOUND', '这本书没有这一模板的审稿意见。');
+  requireStore(pin.revisionDigest === input.revisionDigest, 'EXEMPLAR_READERS_REPORT_CHANGED', '要归入的审稿意见已不是现在的这一版；请看过现在的再定。');
+  const candidate = readersReportExemplarCandidate(host, pin);
+  host.learningCall(() => {
+    host.transaction(host.authority, () => {
+      const people = host.bookPeople.current(input.bookId);
+      host.learningEligibility.decide({
+        bookId: input.bookId,
+        candidate,
+        expectedDecisions: input.expectedDecisions,
+        choice: 'house',
+        note: null,
+        attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
+      });
+    });
+  });
+  return host.documentCall(() => host.publicationCall(() => readExemplarBook(host.exemplarSources(), { bookId: input.bookId, title })));
+}
+export function evaluationRecordOrdinal(host: ReadersReportStoreHost, recordId: string): number {
+  const row = host.authority.prepare('SELECT ordinal FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow | undefined;
+  requireStore(row !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
+  return asNumber(row.ordinal);
+}
+/**
+ * The house's 审稿意见 among its 范例 that seed a draft (EVAL-013): those the editor admitted into 范例 (Issue #429,
+ * `admitReadersReportExemplar`) of other Books — each still at the version admitted, its Book's 发稿版本 still in force — by
+ * Book title, at most `MAX_READERS_REPORT_EXEMPLARS`; each is its Book's title with the template, and the pinned version's own
+ * words, their opening when longer than the contract takes. A Book's own 审稿意见 never seeds its own draft. Before any
+ * admission every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written without one.
+ *
+ * A damaged record is named rather than raised (Issue #778): the item is listed in `damaged` as it would be listed if it
+ * read, and every other exemplar — and the rest of 评估 — still reads. An imported version whose decision ledger alone will
+ * not read is listed in `ledgerDamaged` instead, under its own plain reason (Issue #792).
+ */
+export function readersReportExemplars(host: ReadersReportStoreHost, bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] } {
+  const rows = host.authority.prepare(
+    `SELECT DISTINCT d.book_id, d.material_key, b.title FROM learning_eligibility_decisions d JOIN books b ON b.book_id = d.book_id
+     WHERE d.material_key LIKE ? AND d.book_id <> ? ORDER BY b.title COLLATE BINARY, d.book_id, d.material_key`,
+  ).all(`${READERS_REPORT_EXEMPLAR_KEY_PREFIX}%`, bookId) as SqlRow[];
+  const exemplars: ReadersReportExemplarInput[] = [];
+  const damaged: string[] = [];
+  const ledgerDamaged: string[] = [];
+  for (const row of rows) {
+    if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
+    const otherBookId = asString(row.book_id);
+    const template = asString(row.material_key).slice(READERS_REPORT_EXEMPLAR_KEY_PREFIX.length) as ReadersReportTemplate;
+    if (!READERS_REPORT_TEMPLATES.includes(template)) continue;
+    // Named as 范例 lists it, so a damaged record is still named by its Book and template.
+    const title = boundedGraphemes(`${asString(row.title)} · ${readersReportDocumentType(readersReportDocumentTypeId(template))!.label}`, 200);
+    try {
+      const current = host.publicationCall(() => host.publicationVersions.current(otherBookId));
+      if (current === null || current.withdrawn) continue;
+      const pin = readersReportPins(host, otherBookId, current.projection.createdAt).find((entry) => entry.template === template);
+      if (pin === undefined) continue;
+      const candidate = readersReportExemplarCandidate(host, pin);
+      const latest = host.learningCall(() => host.learningEligibility.history(otherBookId, candidate.materialKey)).at(-1);
+      if (latest === undefined || latest.choice !== 'house' || latest.materialDigest !== learningMaterialDigest(candidate)) continue;
+      const words = (host.authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(pin.revisionId) as SqlRow[])
+        .map((block) => asString(block.text).replace(/\r\n?/gu, '\n').replace(/[\t\f\v]/gu, ' ').trim()).filter((line) => line.length > 0).join('\n');
+      if (words.length === 0) continue;
+      exemplars.push({ title, text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      damaged.push(title);
+    }
+  }
+  // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, one item at a
+  // time and only while the cap has room (Issue #792), so a damaged record leaves out only itself (Issue #778).
+  for (const item of host.importedCall(() => host.importedExemplars.readersReportExemplarCandidates(MAX_READERS_REPORT_EXEMPLARS - exemplars.length))) {
+    if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
+    const title = boundedGraphemes(item.title, 200);
+    if (item.revisionId === null) {
+      (item.reason === 'ledger' ? ledgerDamaged : damaged).push(title);
+      continue;
+    }
+    try {
+      const words = readWritingExemplarWords(host.authority, item.revisionId);
+      if (words !== null) exemplars.push({ title, text: words.text });
+    } catch (error) {
+      if (!(error instanceof ImportedExemplarError)) throw error;
+      damaged.push(title);
+    }
+  }
+  return { exemplars, damaged, ledgerDamaged };
 }

@@ -249,11 +249,15 @@ import type {
   BaselineAnalysisUpdateRequest,
 } from './protocol/analysis-plan.js';
 import type {
+  EvaluationCalibrationProjection,
   EvaluationContent,
   EvaluationProfilesProjection,
   EvaluationRewriteDecision,
   EvaluationWorkspaceProjection,
+  InspectEvaluationCalibrationInput,
+  RecordPublicationActualsInput,
   SaveEvaluationProfileInput,
+  SetEvaluationPreferencesInput,
   StartEvaluationInput,
 } from './protocol/evaluation.js';
 import type {
@@ -4309,106 +4313,6 @@ export interface LearningRemediationOutcomeProjection {
   readonly bookId: string;
   readonly recorded: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string }>;
   readonly leftOut: LearningRemediationPreviewProjection['leftOut'];
-}
-
-// ---- 设置 › 评估校准与预测 (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014) --------------------------------------
-
-/** One published Book's 定价与首印 as the editor entered them for one 发稿版本. */
-export interface PublicationActualsProjection {
-  readonly priceFen: number;
-  readonly firstPrint: number;
-  /** The 发稿版本 they were entered for: 第 N 次. */
-  readonly publicationOrdinal: number;
-  readonly recordedAt: string;
-}
-
-/** One Book with a 发稿版本, as the central entry lists it. */
-export interface EvaluationCalibrationBookProjection {
-  readonly bookId: string;
-  readonly title: string;
-  readonly publicationVersionId: string;
-  readonly publicationOrdinal: number;
-  readonly designatedAt: string;
-  /** The newest actuals, and whether they are for the current 发稿版本; `null` while none were entered. */
-  readonly actuals: (PublicationActualsProjection & { readonly current: boolean }) | null;
-  /** How many entries the Book holds: the count the next one names. */
-  readonly entries: number;
-}
-
-/**
- * 设置 › 评估校准与预测 (EVAL-014): calibration's progress toward its threshold and whether it applies, the prediction switch
- * and what it waits for, and every Book with a 发稿版本 with its actuals.
- */
-export const MAX_EVALUATION_CALIBRATION_BOOKS = 20;
-
-export interface EvaluationCalibrationCursor { readonly title: string; readonly bookId: string }
-
-export interface InspectEvaluationCalibrationInput {
-  readonly after: EvaluationCalibrationCursor | null;
-  readonly focusBookId: string | null;
-}
-
-export interface EvaluationCalibrationProjection {
-  readonly calibration: {
-    /**
-     * The editor's adjustments of AI7's starting scores, counted per Book (§8.6 「10 本调分记录」; Issue #429, S81b1): a Book counts
-     * once when one of its 定稿 versions began from AI7's 初评 and changed at least one of its scores.
-     */
-    readonly adjustments: number;
-    /** The Books left out of `adjustments` because a version of theirs begun from AI7's 初评 cannot be read (Issue #702 review). */
-    readonly unreadableBooks: number;
-    /**
-     * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): since S81b1 it does. Before then the page
-     * said so, whatever the count.
-     */
-    readonly initialScoresConnected: boolean;
-    readonly threshold: number;
-    readonly enabled: boolean;
-    /** Whether the house offset applies to AI7's starting scores now: past the gate, with calibration not turned off. */
-    readonly active: boolean;
-    /**
-     * The house offset as computed now (EVAL-011; Issue #429, EVAL-011a), recomputed at every read and never stored: `null`
-     * below the gate. Past it, the Books whose latest 定稿 version begun from AI7's 初评 gives the basis — one value per
-     * Book — and each profile item's offset to the half point, `null` for an item no Book scored both ways. The offset is
-     * computed while the switch is off too, so turning it back on applies what the house's evaluations say now.
-     */
-    readonly offset: null | {
-      readonly basisBooks: number;
-      /**
-       * Of `adjustments`, the Books that give the basis nothing: a version of theirs begun from AI7's 初评 cannot be read, so
-       * which of their 定稿 is the latest is unknown. Said on the page beside the basis, so the two counts never disagree unexplained.
-       */
-      readonly booksWithoutBasis: number;
-      readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number; readonly offset: number | null; readonly books: number }>;
-    };
-  };
-  readonly prediction: {
-    readonly booksWithActuals: number;
-    readonly threshold: number;
-    readonly enabled: boolean;
-    readonly available: boolean;
-  };
-  /** How many changes of the two switches the house holds: the count the next one names. */
-  readonly preferenceEntries: number;
-  readonly books: ReadonlyArray<EvaluationCalibrationBookProjection>;
-  readonly nextCursor: EvaluationCalibrationCursor | null;
-  /** One exact Book opened from Deliverables or still being edited, independent of the bounded list page. */
-  readonly focusedBook: EvaluationCalibrationBookProjection | null;
-}
-
-export interface RecordPublicationActualsInput {
-  readonly bookId: string;
-  /** The 发稿版本 the page listed: one designated since refuses the save, so numbers never land on a version nobody saw. */
-  readonly publicationVersionId: string;
-  readonly expectedEntries: number;
-  readonly priceFen: number;
-  readonly firstPrint: number;
-}
-
-export interface SetEvaluationPreferencesInput {
-  readonly expectedEntries: number;
-  readonly predictionEnabled: boolean;
-  readonly calibrationEnabled: boolean;
 }
 
 // ---- 待我处理 · Global Attention (Issue #424, plan slice S78; editor-surfaces §8.1) ------------------------
