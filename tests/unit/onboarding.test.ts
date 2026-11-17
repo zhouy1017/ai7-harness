@@ -31,7 +31,7 @@ describe('first-run guidance', () => {
   it('names the model service requirement and links the four existing surfaces in order', () => {
     expect(FIRST_RUN_CARD_LABELS.modelStep).toBe('① 连接模型服务');
     expect(FIRST_RUN_CARD_LABELS.modelNote).toBe('AI 审阅需要');
-    
+
     expect(SAMPLE_GUIDANCE_LABELS.steps.map((step) => `${step.label}:${step.section}`))
       .toEqual(['分析:analysis', '审阅:review', '标记:manuscript', '导出:deliverables']);
   });
