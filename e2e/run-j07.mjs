@@ -437,7 +437,7 @@ async function click(renderer, label, name) {
 }
 /** Press the enabled button or native disclosure a selector names. */
 async function clickSelector(renderer, selector, name) {
-  if (selector.includes('export')) { await pointerClick(renderer, waitFor, selector, name); return; }
+  if (selector.includes('[data-export-') || selector.includes('export-menu') || selector.includes('deliverables-export-slot')) { await pointerClick(renderer, waitFor, selector, name); return; }
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLElement) || !button.matches('button, summary') || button.matches(':disabled')) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
