@@ -3001,7 +3001,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     interrupt() {
       interrupted = true;
-      disposeLaunchBar();
+      launchBar?.interrupt();
       ticket += 1;
       clearPoll();
       panel.stop();
