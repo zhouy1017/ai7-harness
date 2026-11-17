@@ -871,7 +871,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (preparedRedoRef === next.ref) { const optionsPanel = bar.querySelector<HTMLDetailsElement>('.task-launch-options'); if (optionsPanel !== null) optionsPanel.open = true; }
       editOnOpen = null;
       if (mode !== 'full') setMode('full', false);
-      (root.querySelector<HTMLElement>(target) ?? body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)'))?.focus();
+      (root.querySelector<HTMLElement>(target) ?? (preparedRedoRef === next.ref ? bar.querySelector<HTMLElement>('[data-task-drawer-control="start"]:not(:disabled)') : body.querySelector<HTMLElement>('[data-task-plan-edit]:not(:disabled)')) ?? title).focus();
     }
     // The Run the editor redoes has stopped and reads 已取消: the new Task is prepared now.
     if (redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelled-after-start' && next.redo !== null &&
@@ -1385,7 +1385,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       actions.prepend(timing);
     }
     if (next.ref === preparedRedoRef && next.edit.editable && next.edit.budget !== null) {
-      const ceiling = shownCeiling(next);
+      const ceiling = budgetBuffers.get(editKey(next)) ?? next.edit.budget.ceiling;
       const budget = launchBudgetControl(ceiling === 'unset' ? null : ceiling.maxTotalTokens);
       budget.disabled = !next.edit.budget.settable || working || interrupted;
       budget.addEventListener('change', () => {
@@ -1394,6 +1394,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         else budgetBuffers.set(editKey(next), value);
       });
       const row = el('label', undefined, '本次用量'); row.append(budget, el('small', undefined, '达到上限后暂停，可调整后重新开始。'));
+      if (!next.edit.budget.settable && next.edit.budget.reason !== null) row.append(el('p', 'task-launch-budget-reason', technicalWords(next.edit.budget.reason, next.edit.budget.reason.replace('开发者实时启动参数', '启动设置').replaceAll('预算上限', '用量上限'))));
       const begin = control('开始任务', 'primary', 'start');
       begin.disabled = working || interrupted || !['ready', 'offline', 'record-only', 'no-route'].includes(next.start.readiness);
       begin.addEventListener('click', () => { if (pendingEdits(next) > 0) void updatePlan(true); else void start(); });

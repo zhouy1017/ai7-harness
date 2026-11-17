@@ -400,7 +400,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
     const reportBar = el('div', 'evaluation-readers-report-launch');
     let templateChoice = report.templates[0]?.template;
-    if (templateChoice !== undefined) options.openLaunch({ bookId: page.bookId, operation: 'launchReadersReport', title: '审稿意见', mount: reportBar,
+    if (templateChoice !== undefined) options.openLaunch({ bookId: page.bookId, operation: 'launchReadersReport', title: '审稿意见', mount: reportBar, inputEvents: root,
       input: { template: templateChoice }, readInput: () => ({ template: templateChoice! }) });
     section.append(reportBar);
     const startTemplate = (template: ReadersReportTemplate): void => {
@@ -551,7 +551,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     preview.classList.add('text-link');
     start.disabled = preview.disabled = busy || !canStart;
     if (canStart) {
-      options.openLaunch({ bookId: page.bookId, operation: 'launchInitialEvaluation', title: '初评', mount: row, startLabel: latest === null ? EVALUATION_GENERATE : EVALUATION_REGENERATE, input: {} });
+      options.openLaunch({ bookId: page.bookId, operation: 'launchInitialEvaluation', title: '初评', mount: row, inputEvents: root, startLabel: latest === null ? EVALUATION_GENERATE : EVALUATION_REGENERATE, input: {} });
       row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'start-initial');
       row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'prepare-initial');
     } else row.append(start, preview);
@@ -798,7 +798,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
     if (rewrite.prepare.allowed || task?.state === 'prepared') {
-      options.openLaunch({ bookId: page.bookId, operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', mount: row,
+      options.openLaunch({ bookId: page.bookId, operation: 'launchEvaluationRewrite', title: '按我的修改重新生成', mount: row, inputEvents: root, startLabel: EVALUATION_REWRITE_ACTIONS.prepare,
         input: { recordId: record.recordId }, beforeLaunch: async () => !unsaved() || await save(record, false) });
       row.querySelector<HTMLElement>('[data-task-drawer-control="launch"]')?.setAttribute('data-evaluation-action', 'prepare-rewrite');
       row.querySelector<HTMLElement>('.task-launch-estimate summary button')?.setAttribute('data-evaluation-action', 'preview-rewrite');

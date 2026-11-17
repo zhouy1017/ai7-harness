@@ -1536,6 +1536,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #429 (S81b1): AI7 初评 from ②C through the Task Drawer, a version begun from its draft, an adjustment with its reason,
     // 定稿, and 设置 › 评估校准与预测 counting the Book once.
     'initial-evaluation-start',
+    'launch-reference-preview',
     'initial-evaluation-draft',
     // Issue #429 (S81b2): the market section of the version begun from the 初评 — AI7's words, no comparable, 预测 · 低确定性.
     'evaluation-market',

@@ -43,7 +43,7 @@ function launchApi(operation: LedgerTaskLaunchOperation, options: { values?: Rec
 }
 
 async function mount(api: unknown, request: unknown) {
-  const callbacks = { errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn() };
+  const callbacks = { errorMessage: (_error: unknown, fallback: string) => fallback, setStatus: vi.fn(), settle: async () => true, onRecorded: vi.fn(), openRun: vi.fn(), openSettings: vi.fn() };
   const bar = mountLaunchBar({ api: api as never, request: request as never, ...callbacks, interrupted: false });
   mounted.push(bar);
   document.body.append(...bar.body, ...bar.bar);
@@ -206,4 +206,14 @@ it('reads the baseline-only options 先问我, no sampling and 联网后开始 i
   expect(miniDocument.querySelector('[data-task-launch-option="sampling"]')!.checked).toBe(false);
   expect(miniDocument.querySelector('[data-task-launch-option="budget"]')!.value).toBe('500');
   expect(miniDocument.querySelector('[data-task-start-when]')!.value).toBe('when-online');
+});
+
+it('keeps 去设置 available beside a missing model after a refused start', async () => {
+  const { api } = launchApi('launchBaselineAnalysis', { launch: async () => { throw new Error('missing model'); } });
+  const { bar, openSettings } = await mount(api, { operation: 'launchBaselineAnalysis', bookId: 'book', title: '分析', input: inputFor('launchBaselineAnalysis') });
+  await bar.start();
+  const settings = miniDocument.querySelector('[data-task-drawer-control="launch-settings"]')!;
+  expect(settings.hidden).toBe(false); settings.click();
+  expect(openSettings).toHaveBeenCalledOnce();
+  expect(miniDocument.querySelector('[data-task-drawer-control="launch"]')!.disabled).toBe(false);
 });

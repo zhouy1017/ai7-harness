@@ -2221,6 +2221,7 @@ async function main() {
     // 按我的修改重新生成 is one click (Issue #1407): it prepares and starts at once over the saved changes, the manuscript, AI7's report
     // and the house's active editorial memory; the plan stays one disclosure away — the version and the save it follows, its two
     // steps, and that it moves no score and writes nothing into the version by itself. It runs on the J-04 adapter's fixture.
+    requireJourney(await renderer.evaluate(`document.querySelectorAll('.evaluation [data-task-launch-kind]').length===3`)===true, 'evaluation-three-launch-bars');
     await clickSelector(renderer, '[data-evaluation-action="preview-rewrite"]', 'evaluation-rewrite-prepare');
     await launchTaskFromBar(renderer, waitFor, 'evaluation-rewrite');
     const endedRewrite = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.rewrite?.state), 'evaluation-rewrite-ended');
@@ -3700,6 +3701,39 @@ async function main() {
     requireJourney(wordRestoredAfter.items === c0BeforeWord.items &&
       JSON.stringify(wordRestoredAfter.words) === JSON.stringify([[wordSignal.signalId, 'house']]) &&
       JSON.stringify(wordRestoredAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-restore-no-new-capture-or-downstream');
+
+    at('launch-reference-preview');
+    await close(); await launch({ pickerPath: SAMPLE1_PATH });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'launch-reference-ready');
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'launch-reference-knowledge');
+    await pointerClick(renderer, waitFor, 'button[data-knowledge-tab="library"]', 'launch-reference-library');
+    await pointerClick(renderer, waitFor, '[data-library-action="add"]', 'launch-reference-add');
+    await waitFor(renderer, `document.querySelector('article.library-material [data-library-action="attribute"]')?.disabled===false`, 'launch-reference-added');
+    const launchReferenceId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then(page=>page.materials[0].materialId)`);
+    await pointerClick(renderer, waitFor, '[data-library-action="attribute"]', 'launch-reference-attribute');
+    await pointerClick(renderer, waitFor, '.library-attribution-chooser [data-library-choice="house"]', 'launch-reference-house');
+    await pointerClick(renderer, waitFor, '[data-library-action="confirm-attribution"]', 'launch-reference-attributed');
+    await pointerClick(renderer, waitFor, '[data-library-action="eligibility"]', 'launch-reference-eligibility');
+    await pointerClick(renderer, waitFor, '.library-eligibility-chooser [data-library-choice="excluded"]', 'launch-reference-excluded');
+    await pointerClick(renderer, waitFor, '[data-library-action="confirm-eligibility"]', 'launch-reference-confirmed');
+    await waitFor(renderer, `window.ai7.inspectLibraryMaterial({materialId:${JSON.stringify(launchReferenceId)}}).then(page=>page.index.state==='complete'&&page.reference.state==='available')`, 'launch-reference-indexed', 60_000);
+    await pointerClick(renderer, waitFor, SIDEBAR.destination('library'), 'launch-reference-books');
+    await pointerClick(renderer, waitFor, `button[data-book-id="${thirdId}"]`, 'launch-reference-book');
+    await pointerClick(renderer, waitFor, SIDEBAR.section('evaluation'), 'launch-reference-evaluation');
+    const initialBar = '[data-task-launch-kind="initial-evaluation"]';
+    await pointerClick(renderer, waitFor, `${initialBar} .task-launch-options > summary`, 'launch-reference-options');
+    await pointerClick(renderer, waitFor, `${initialBar} [data-evaluation-material="${launchReferenceId}"]`, 'launch-reference-select');
+    const initialBeforeReference = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>page.initial.task?.taskIntentId??null)`);
+    try {
+      for (const [width,height] of [[1280,800],[1008,681]]) {
+        await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+        await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-${width}`);
+        await waitFor(renderer, `document.querySelector('${initialBar} .task-launch-estimate')?.textContent.includes('sample1')===true`, `launch-reference-plan-current-${width}`);
+        requireJourney(await renderer.evaluate(`(() => {const r=document.querySelector('${initialBar} .task-launch-estimate .task-launch-popover').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.documentElement.scrollWidth<=innerWidth;})()`)===true,'launch-reference-plan-reachable');
+        await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-close-${width}`);
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    requireJourney(await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>(page.initial.task?.taskIntentId??null)===${JSON.stringify(initialBeforeReference)})`)===true,'launch-reference-preview-creates-no-task');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

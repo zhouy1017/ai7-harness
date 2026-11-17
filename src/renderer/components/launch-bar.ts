@@ -238,6 +238,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
     return true;
   };
   const openPlan = async (): Promise<void> => {
+    if (request.beforeLaunch !== undefined && !await request.beforeLaunch()) return;
     estimate.open = true;
     const version = previewVersion;
     if (stopped || refreshPreview.disabled || !applyOptions() || !(await settle()) || version !== previewVersion) return;
@@ -307,7 +308,7 @@ export function mountLaunchBar(options: MountLaunchBarOptions): LaunchBar {
   presentation.append(settingsLink);
   const onDocumentInput = (event: Event): void => {
     const scope = request.inputEvents ?? request.mount?.closest('form') ?? presentation;
-    if (!disposed && event.target instanceof HTMLElement && scope.contains(event.target)) invalidatePreview();
+    if (!disposed && event.target instanceof HTMLElement && scope.contains(event.target)) { commandId = crypto.randomUUID(); invalidatePreview(); }
   };
   document.addEventListener('input', onDocumentInput);
   document.addEventListener('change', onDocumentInput);

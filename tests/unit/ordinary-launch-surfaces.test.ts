@@ -1,8 +1,10 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { cp } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { BaselineAnalysisExecutionOwner, driveLaunchedLedgerRun, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { modelServiceChannels, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -14,7 +16,7 @@ import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../../
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, sample1Path } from '../support/sample1-baseline.js';
 import { beginRewriteAsJ11, EVALUATION_REWRITE_FIXTURE_IDENTITY } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { CUSTOM_DIMENSION_TITLE, CUSTOM_DIMENSION_TEMPLATE } from '../support/custom-analysis.js';
@@ -44,9 +46,17 @@ async function seed(operation: LedgerTaskLaunchOperation) {
       if (operation === 'launchEvaluationRewrite') recordId = beginRewriteAsJ11(store, book.bookId).recordId;
     }
     const dimensionId = operation === 'launchCustomAnalysis' ? store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE }).dimensions[0]!.dimensionId : '';
+    let materialIds: string[] = [];
+    if (operation === 'launchInitialEvaluation' || operation === 'launchReadersReport') {
+      const preview = await store.previewLibraryMaterial(sample1Path(roots.codeRoot));
+      const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: 'sample1 任务参考', kind: 'document' });
+      setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: book.bookId } } });
+      setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      store.startMaterialIndexing(); await store.settleMaterialIndexing(); materialIds = [material.materialId];
+    }
     const input = operation === 'launchBaselineAnalysis' ? { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null }
       : operation === 'launchCustomAnalysis' ? { dimensionId, update: null } : operation === 'launchWritingTask' ? WRITING_REQUEST
-        : operation === 'launchReadersReport' ? { template: 'author' } : operation === 'launchEvaluationRewrite' ? { recordId } : {};
+        : operation === 'launchReadersReport' ? { template: 'author', materialIds } : operation === 'launchEvaluationRewrite' ? { recordId } : { materialIds };
     return { roots, bookId: book.bookId, input };
   } catch (error) { await roots.dispose(); throw error; }
   finally { await owner.dispose(); governor.close(); await governor.whenIdle(); store.markCleanShutdown(); store.close(); }
@@ -128,7 +138,8 @@ async function ordinaryRedo() {
   expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: launched.taskIntentId }).state.key).toBe('budget-reached');
   hold = true;
   const uninstall = installMiniDom(); setTechnicalLayerVisible(false);
-  vi.stubGlobal('window', { setTimeout, clearTimeout, localStorage: { getItem: () => 'full', setItem: vi.fn() } });
+  const timers: Array<ReturnType<typeof setInterval>> = [];
+  vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval: (callback: () => void, delay: number) => { const timer = setInterval(callback, delay); timers.push(timer); return timer; }, clearInterval, localStorage: { getItem: () => 'full', setItem: vi.fn() } });
   const api = {
     inspectTaskPlan: async (input: Parameters<RendererApi['inspectTaskPlan']>[0]) => store.inspectTaskPlan({ ...input, bookId }),
     prepareBaselineAnalysis: vi.fn(async (input: Parameters<RendererApi['prepareBaselineAnalysis']>[0]) => {
@@ -142,10 +153,10 @@ async function ordinaryRedo() {
       if (result.dispatchRunRecordId !== null) capture.owner.admitAndDispatch(result.dispatchRunRecordId, result.ledger);
       return result.projection;
     }),
-    controlTaskRun: async (input: Parameters<RendererApi['controlTaskRun']>[0]) => {
-      const control = store.requestTaskRunControl({ ...input, bookId });
-      if (control.runRecordId !== null) capture.owner.cancelRun(control.runRecordId, control.ledger);
-      await capture.owner.whenIdle(); return store.inspectTaskPlan({ ...input, bookId });
+    cancelBaselineAnalysisRun: async (input: Parameters<RendererApi['cancelBaselineAnalysisRun']>[0]) => {
+      const runRecordId = store.requestBaselineAnalysisCancel(bookId, input.taskIntentId);
+      if (runRecordId !== null) capture.owner.cancelRun(runRecordId, store.executionLedgerForRun(runRecordId));
+      await capture.owner.whenIdle(); return store.inspectAnalysisTask(bookId, input.taskIntentId);
     },
   };
   const root = document.createElement('aside'); document.body.append(root);
@@ -153,32 +164,69 @@ async function ordinaryRedo() {
     errorCode: () => null, errorMessage: (_error: unknown, fallback: string) => fallback, technicalDetails: () => document.createElement('details'),
     awaitServiceJob: async (initial: unknown) => initial } as never);
   drawer.open({ bookId, kind: 'baseline-analysis', ref: launched.taskIntentId }, () => null);
-  const close = async () => { drawer.close(false); await capture.owner.dispose(); governor.close(); await governor.whenIdle(); capture.assertMatched(); store.close(); uninstall(); await roots.dispose(); };
+  const close = async () => { drawer.close(false); timers.forEach(clearInterval); await capture.owner.dispose(); governor.close(); await governor.whenIdle(); capture.assertMatched(); store.close(); uninstall(); await roots.dispose(); };
   return { root, api, capture, bookId, close };
 }
 
-it('uses existing revise and authorize frames in ordinary mode and can cancel a redo then start another', async () => {
+it('shows the ordinary baseline redo budget lock with its reason and starts with the retained budget', async () => {
   const view = await ordinaryRedo();
   const button = (name: string) => miniDocument.querySelector(`[data-task-drawer-control="${name}"]`);
   try {
-    for (const [index, tier] of ['100000', '200000'].entries()) {
-      await vi.waitFor(() => expect(button('redo')).not.toBeNull()); button('redo')!.click();
-      await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-launch-option="budget"]')?.disabled).toBe(false));
+    for (let iteration = 0; iteration < 2; iteration += 1) {
+      await vi.waitFor(() => expect(button('redo')?.disabled).toBe(false)); button('redo')!.click();
+      await vi.waitFor(() => expect(miniDocument.querySelector('[data-task-launch-option="budget"]')).not.toBeNull());
       const budget = miniDocument.querySelector('[data-task-launch-option="budget"]')!;
-      budget.value = tier; budget.dispatchEvent({ type: 'change', bubbles: true });
+      // #1526 / #1573: flip to editable/new-budget execution when the service projection companion fix joins this lane.
+      expect(budget.disabled).toBe(true); expect(budget.value).toBe('50000');
+      expect(view.root.querySelector('.task-launch-budget-reason')?.textContent).toContain('启动设置');
+      expect(miniDocument.activeElement).not.toBe(budget); expect(button('start')!.disabled).toBe(false);
       const before = view.capture.wireRequests.length; button('start')!.click();
       await vi.waitFor(() => expect(view.capture.wireRequests.length).toBeGreaterThan(before));
-      expect(view.api.editBaselineAnalysisPlan).toHaveBeenCalledTimes(index + 1);
-      const revise = view.api.editBaselineAnalysisPlan.mock.calls[index]![0], authorize = view.api.authorizeBaselineAnalysis.mock.calls[index]![0];
-      expect(revise.runBudgetCeiling?.maxTotalTokens).toBe(Number(tier));
-      for (const [op, input] of [['editBaselineAnalysisPlan', revise], ['authorizeBaselineAnalysis', authorize]] as const) {
-        const frame = { id: randomUUID(), op, input: { ...input, bookId: view.bookId } };
-        expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
-      }
+      expect(view.api.editBaselineAnalysisPlan).not.toHaveBeenCalled();
+      const input = view.api.authorizeBaselineAnalysis.mock.calls[iteration]![0];
+      const frame = { id: randomUUID(), op: 'authorizeBaselineAnalysis', input: { ...input, bookId: view.bookId } };
+      expect(decodeRequest(new TextEncoder().encode(JSON.stringify(frame)))).toEqual(frame);
       await vi.waitFor(() => expect(button('cancel-run')?.disabled).toBe(false));
       button('cancel-run')!.click(); button('confirm-cancel-run')!.click();
       await vi.waitFor(() => expect(button('redo')?.disabled).toBe(false));
     }
-    expect(view.api.authorizeBaselineAnalysis).toHaveBeenCalledTimes(2);
+
   } finally { await view.close(); }
+}, 60_000);
+
+it.each(Object.keys(LEDGER_TASK_LAUNCH_KINDS) as LedgerTaskLaunchOperation[])('%s exposes its actual ordinary redo budget capability', async operation => {
+  const state = await seed(operation), { roots, bookId, input } = state;
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot), governor = new ModelRequestGovernor(), jobs = new CooperativeJobOwner(store);
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, governor, () => undefined,
+    { transportHold: async (_request, _message, signal) => { if (!signal.aborted) await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); } });
+  try {
+    const launch = { operation, input: { ...input, clientCommandId: randomUUID(), planEdits: { removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 50000 } } } } as TaskLaunchPreviewInput['launch'];
+    const started = commit(store, launch, bookId, capture.policy); driveLaunchedLedgerRun(capture.owner, started);
+    await vi.waitFor(() => expect(capture.wireRequests.length).toBeGreaterThan(0));
+    const kind = operation === 'launchCustomAnalysis' ? 'baseline-analysis' : LEDGER_TASK_LAUNCH_KINDS[operation];
+    const target = { bookId, kind, ref: started.taskIntentId };
+    const cancel = kind === 'baseline-analysis' ? { runRecordId: store.requestBaselineAnalysisCancel(bookId, started.taskIntentId), ledger: started.ledger } : store.requestTaskRunControl({ ...target, kind, action: 'cancel' });
+    capture.owner.cancelRun(cancel.runRecordId!, cancel.ledger); await capture.owner.whenIdle();
+    const plan = store.inspectTaskPlan(target); expect(plan.redo).not.toBeNull();
+    let ref: string;
+    if (operation === 'launchCustomAnalysis') {
+      ref = store.prepareCustomAnalysis({ bookId, dimensionId: plan.custom!.dimensionId, update: !('kind' in plan.redo!.prepare) ? plan.redo!.prepare.update : null, from: { taskIntentId: started.taskIntentId, purpose: 'redo' } }, capture.policy).taskIntentId;
+    } else if (operation === 'launchBaselineAnalysis' && !('kind' in plan.redo!.prepare)) {
+      const request = plan.redo!.prepare;
+      let progress = store.createBaselineAnalysisPreparationWork(bookId, request.goal, request.update, capture.policy, false, request.redoOf);
+      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+      ref = progress.projection!.taskIntent!.taskIntentId;
+    } else {
+      if (kind === 'baseline-analysis') throw new Error('expected a ledger redo kind');
+      let job = jobs.startTaskRedo({ ...target, kind }, capture.policy);
+      await vi.waitFor(() => { if (!['completed', 'failed', 'cancelled'].includes(job.state)) job = jobs.poll(job.jobId); expect(job.state).toBe('completed'); });
+      ref = store.inspectTaskPlan({ ...target, ref: null }).ref;
+    }
+    const redo = store.inspectTaskPlan({ ...target, ref });
+    // #1526 / #1573: baseline and custom ordinary projections currently report the remote route as a budget lock.
+    expect(redo.edit.budget?.settable).toBe(operation !== 'launchBaselineAnalysis' && operation !== 'launchCustomAnalysis');
+    if (!redo.edit.budget?.settable) expect(redo.edit.budget?.reason).toContain('开发者实时启动参数');
+  } finally { await jobs.dispose(); await capture.owner.dispose(); governor.close(); await governor.whenIdle(); capture.assertMatched(); store.close(); await roots.dispose(); }
 }, 60_000);
