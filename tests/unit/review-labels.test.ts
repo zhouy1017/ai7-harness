@@ -119,6 +119,7 @@ describe('the words of the 审阅 destination', () => {
       continue: '继续审阅',
       'go-to-text': '回到原文',
       'accept-apply': '接受并应用',
+      reject: '拒绝',
       'mark-handled': '标记为已处理',
       'convert-to-suggestion': '转为修改建议',
       'convert-confirm': '转为修改建议',

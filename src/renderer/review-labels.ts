@@ -83,6 +83,7 @@ export const REVIEW_ACTION_LABELS = {
   continue: '继续审阅',
   'go-to-text': '回到原文',
   'accept-apply': '接受并应用',
+  reject: '拒绝',
   'mark-handled': '标记为已处理',
   'convert-to-suggestion': '转为修改建议',
   'convert-confirm': '转为修改建议',
@@ -610,8 +611,8 @@ export function reviewBatchReadyLine(count: number): string {
 export const REVIEW_IGNORE_DEFAULT_REASON = '编辑决定忽略';
 export const REVIEW_BATCH_UNDO_FAILED = '未能撤销本批应用。';
 /** 撤销本批应用's outcome: all reversed, or how far it came before one could not be. */
-export function reviewBatchUndoneLine(undone: number, total: number): string {
-  return undone === total ? `已撤销本批应用的 ${total} 条修改建议，原文已写回稿件。` : `已撤销 ${undone} 条；其余 ${total - undone} 条的文字已经变过，不能直接撤销，可在稿件中逐条处理。`;
+export function reviewBatchUndoneLine(total: number): string {
+  return `已撤销 ${total} 条。`;
 }
 
 export function reviewBatchAppliedLine(count: number, recovered: boolean): string {

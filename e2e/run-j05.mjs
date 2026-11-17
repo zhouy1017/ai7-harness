@@ -208,6 +208,12 @@ async function settle(renderer, expression, timeout = 15_000) {
   }
   return state;
 }
+async function triageClick(renderer, selector) {
+  const point = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!node||node.disabled)return null; node.scrollIntoView({block:'center'}); const r=node.getBoundingClientRect(); return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight?{x:r.x+r.width/2,y:r.y+r.height/2}:null; })()`);
+  requireJourney(point !== null, 'review-triage-control-in-window');
+  await renderer.send('Input.dispatchMouseEvent', {type:'mousePressed',button:'left',clickCount:1,...point});
+  await renderer.send('Input.dispatchMouseEvent', {type:'mouseReleased',button:'left',clickCount:1,...point});
+}
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
@@ -1149,6 +1155,17 @@ async function main() {
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
     await waitFor(renderer, `!document.querySelector('[data-review-action="batch-confirm"]') && document.querySelector('section.review-batch-applied[data-review-batch-state="applied"] [data-review-action="batch-undo"]') !== null`, 'local-batch-dom-ready');
     requireJourney(await renderer.evaluate(`(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`), 'local-batch-committed');
+    try {
+      for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
+        at(viewport.width===1280?'review-batch-undo-wide':'review-batch-undo-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
+        await triageClick(renderer,'[data-review-action="batch-undo"]');
+        await waitFor(renderer, `!document.querySelector('.review-batch-applied') && document.querySelector('[data-review-action="batch-prepare"]')?.disabled===false`, 'review-batch-undone');
+        await assertRenderer(renderer, `(async()=>{const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run;return run.findings.filter(f=>f.categoryId==='local-text-check').every(f=>f.status==='pending');})()`, 'review-batch-all-pending');
+        await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
+        await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')?.disabled===false`, 'review-batch-reapplied');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     await waitFor(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-return-to-mark');
     // The finding retains the same suggestion and Apply lineage; its reverse action restores the tester edit.
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.mark('change-suggestion', window.__j05LocalBlock).length===1`, 'local-batch-suggestion-on-text');
@@ -1159,6 +1176,39 @@ async function main() {
     await waitFor(renderer, `window.__j05.text(window.__j05LocalBlock)===window.__j05LocalOriginal && window.__j05.card()?.querySelector('[data-mark-state]')?.textContent==='待你处理'`, 'local-reversal-restores-text');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
     await settled(renderer, 'local-workflow-settled');
+
+    // #1525: a fresh local review supplies real findings for keyboard triage and the return route.
+    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。');})()`, 'review-triage-tester-edit');
+    await settled(renderer, 'review-triage-edit-saved');
+    try {
+      for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
+        at(viewport.width===1280?'review-keyboard-wide':'review-keyboard-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
+        await triageClick(renderer,'[data-nav-book-section="review"]');
+        await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'review-triage-ready');
+        await triageClick(renderer,'[data-review-action="new-local-check"]');
+        await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] [data-review-action="start"]')?.disabled===false`, 'review-triage-start-ready');
+        await triageClick(renderer,'dialog.review-sheet [data-review-action="start"]');
+        await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3`, 'review-triage-findings');
+        await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
+        await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
+        await press(renderer,'N',10);
+        for (const key of ['r','a','r']) {
+          const id=await renderer.evaluate(`document.activeElement?.closest('article.review-finding')?.dataset.findingId??null`);
+          requireJourney(id!==null,'review-keyboard-focused');
+          await press(renderer,key);
+          await waitFor(renderer, `document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(id)})+']')?.dataset.status==='handled'`, 'review-keyboard-decided');
+        }
+        const id=await renderer.evaluate(`document.activeElement?.dataset.findingId??null`);
+        requireJourney(id!==null,'review-return-finding-focused');
+        await press(renderer,'Enter');
+        await waitFor(renderer, `document.querySelector('[data-review-return]')!==null`, 'review-return-chip-ready');
+        await triageClick(renderer,'[data-review-return]');
+        await waitFor(renderer, `document.activeElement?.dataset.findingId===${JSON.stringify(id)} && document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-return-same-filter-and-finding');
+        await press(renderer,'Enter');
+        await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
 
     await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
 

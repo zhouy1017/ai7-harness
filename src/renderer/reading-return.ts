@@ -1,3 +1,5 @@
+import type { RendererApi } from '../shared/protocol.js';
+import { returnChipPlace } from './task-panel-labels.js';
 /** Navigation hints only: manuscript identity and content remain the service's authority. */
 export interface ReadingPlace {
   readonly manuscriptId: string;
@@ -93,4 +95,18 @@ export async function preserveReturnPlace(place: ReadingPlace): Promise<ReadingP
 /** Consume only the target just reached; another target is never silently removed. */
 export function consumeReturnPlace(place: ReadingPlace): Promise<ReadingPlace | null> {
   return access(place.manuscriptId, place.branchId, (current) => current?.blockId === place.blockId ? null : current);
+}
+
+export async function preserveReadingReturn(api: Pick<RendererApi, 'getBookOverview' | 'getManuscriptWindowAt'>, known: ReadingPlace | null, bookId: string, manuscriptId: string, branchId: string): Promise<void> {
+  if (await readReturnPlace(manuscriptId, branchId) !== null) return;
+  if (known?.manuscriptId === manuscriptId && known.branchId === branchId) {
+    await preserveReturnPlace(known);
+    return;
+  }
+  const overview = await api.getBookOverview({ bookId, historyCursor: null });
+  const anchor = overview.manuscriptAnchor;
+  if (anchor?.manuscriptId !== manuscriptId || anchor.branchId !== branchId || anchor.entry === null) return;
+  const remembered = await api.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId: anchor.entry.blockId } });
+  const block = remembered.blocks.find((item) => item.blockId === anchor.entry?.blockId);
+  if (block !== undefined) await preserveReturnPlace({ manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) });
 }

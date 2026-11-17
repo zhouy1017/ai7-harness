@@ -16,6 +16,7 @@ export const COMMAND_CONTEXT_NAMES = {
   application: '整个应用',
   book: '图书工作台',
   manuscript: '稿件编辑',
+  review: '审阅',
 } as const;
 
 export const COMMAND_GROUP_NAMES = {

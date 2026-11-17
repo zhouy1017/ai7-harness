@@ -299,6 +299,9 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       item.append(`${entry.name} · `, label);
       list.append(item);
     }
+    const reviewReturn = el('li');
+    reviewReturn.append('回到原文（审阅卡片有焦点时） · ', el('kbd', undefined, 'Enter'));
+    list.append(reviewReturn);
     fixed.append(list);
     table.replaceChildren(grid, fixed);
     resetAll.disabled = Object.keys(bindings).length === 0;
