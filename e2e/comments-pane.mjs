@@ -1,3 +1,4 @@
+import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, sidebarNavigate } from './controller.mjs';
 
 // All async service operations are evaluated directly and awaited; waitFor receives synchronous DOM predicates only.
@@ -243,8 +244,13 @@ async function commentsInsideSelection(renderer,check,waitFor) {
   const id=await renderer.evaluate('__comments.ids[11]'),selector='.editor-window [data-mark-id="'+id+'"]';
   const point=()=>renderer.evaluate(`(() => {const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,hit:words.contains(document.elementFromPoint(x,y)),inside:getSelection().containsNode(words,true)};})()`);
   for(const pane of [true,false]) {
-    if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('[data-edge-entry="comments"]').click();return document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-close-pane');
+    if(!pane) {
+      await pointerClick(renderer,waitFor,'[data-edge-entry="comments"]','comments-existing-range-close-pane');
+      await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden && document.documentElement.dataset.rightColumn==='none'`, 'comments-existing-range-pane-layout-closed');
+    }
     await commentsRangeInside(renderer,check,waitFor,selector);
+    await renderer.evaluate('globalThis.__commentsInkPrevious=null');
+    await waitFor(renderer, `(() => { const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2; const before=globalThis.__commentsInkPrevious;globalThis.__commentsInkPrevious={x,y};return words.contains(document.elementFromPoint(x,y))&&getSelection().containsNode(words,true)&&before?.x===x&&before?.y===y;})()`, 'comments-existing-range-inside-stable');
     const before=await point();check(before.hit&&before.inside,'comments-existing-range-inside-hit',before);
     check((await commentsNativeClick(renderer,before)).real,'comments-existing-range-inside-real-click');
     await waitFor(renderer,pane?`document.querySelector('[data-comment-card="'+${JSON.stringify(id)}+'"]').dataset.selected==='true'`:`document.querySelector('.editorial-mark-layer [data-mark-card="'+${JSON.stringify(id)}+'"]')`,pane?'comments-existing-range-inside-pane-selected':'comments-existing-range-inside-floating-open');
@@ -307,7 +313,13 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
       if(y<p.top||y>p.bottom)return 'outside-pane';if(!node.contains(document.elementFromPoint(x,y)))return 'covered';return 'moving';
     })()`);
     const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving'};
-    check(false,names[reason]??'comments-card-hit-ready');
+    const detail=await renderer.evaluate(`(() => {
+      const describe=${pointerElementDescription.toString()},node=document.querySelector('[data-comment-card="'+${id}+'"]'),r=node?.getBoundingClientRect(),x=r?r.left+12:null,y=r?r.top+10:null,hit=r?document.elementFromPoint(x,y):null,coveringAncestors=[];
+      for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}
+      return {viewport:[innerWidth,innerHeight],target:describe(node),frames:[{rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!node&&node.contains(hit)}],coveringAncestors};
+    })()`);
+    try { check(false,names[reason]??'comments-card-hit-ready'); }
+    catch(error) { if(error&&typeof error==='object')Object.defineProperty(error,'pointerFailure',{value:pointerFailureDetail(detail),configurable:true});throw error; }
   }
   const point=await renderer.evaluate(`__commentsPoint`);
   if(requireCompact)check(point.expanded==='false'&&point.selected!=='true','comments-card-compact-before-click',point);
