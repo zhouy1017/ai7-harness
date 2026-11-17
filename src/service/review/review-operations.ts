@@ -1,4 +1,4 @@
-import type { BoundedManuscriptStore } from '../bounded-manuscript.js';
+import type { CheckpointOwner } from '../analysis/baseline-analysis-types.js';
 import type { FactualVerificationLedger } from '../factual-verification.js';
 import type { EditorialMemoryFacade } from '../learning/memory-facade.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -34,7 +34,7 @@ import type { LaunchChoice } from '../task-launch-snapshots.js';
 /** Live dependencies owned by EditorialStore; this module owns no connections or caches. */
 export interface ReviewOperationsHost extends ReviewEvidenceReader {
   readonly authority: DatabaseSync;
-  readonly boundedAuthority: BoundedManuscriptStore;
+  readonly boundedAuthority: CheckpointOwner;
   readonly baselineAnalysis: BaselineAnalysisStore;
   readonly factualReview: BaselineAnalysisStore;
   readonly control: StoreControl;
@@ -63,6 +63,20 @@ export interface ReviewOperationsHost extends ReviewEvidenceReader {
   inspectTaskPlanWithConnection(input: InspectTaskPlanInput, credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>, connectivity: TaskPlanConnectivity, progress?: ProgressReader): Promise<TaskPlanProjection>;
 }
 
+/**
+ * The append-only ledger of one Review Category: the same ledger class over the same Book database,
+ * constructed with that category's kind definition. A category is configuration, so its definition
+ * is built by the caller (`reviewCategoryKindDefinition`) and its ledger is made when first asked
+ * for rather than at open. It is kept per kind *and* frozen category contract: a ledger holds the
+ * preparations in flight, so the same definition must keep finding the same ledger, and a category
+ * whose clauses changed is a different contract that must not inherit them. Only the
+ * `REVIEW_CATEGORY_CACHE_CAPACITY` most recently used are kept besides those with a preparation in
+ * flight (Issue #649); everything else a ledger knows is in the Book database, so one made afresh
+ * reads exactly what the one let go would have.
+ *
+ * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
+ * freezes names the binding this launch actually bound — which the one execution owner then checks.
+ */
 export function reviewCategoryLedger(host: ReviewOperationsHost, definition: AnalysisKindDefinition, cached = true): BaselineAnalysisStore {
   host.assertAvailable();
   requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
@@ -75,6 +89,7 @@ export function reviewCategoryLedger(host: ReviewOperationsHost, definition: Ana
   return cached ? host.reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}\n${definition.structuredInputKey ?? ''}\n${canonicalJson(definition.inheritedBudgetCeiling ?? null)}`, make) : make();
 }
 
+/** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
 export function inspectReviewCategory(host: ReviewOperationsHost,
     bookId: string,
     definition: AnalysisKindDefinition,
@@ -85,6 +100,12 @@ export function inspectReviewCategory(host: ReviewOperationsHost,
   return host.analysisCall(() => ledger.inspect(bookId, progress, revisionId)) as ReviewCategoryProjection;
 }
 
+/**
+ * Prepare one category's Task in the requested mode. The goal is the definition's own fixed text for
+ * that mode, so a caller names what it wants reviewed and never restates the sentence. `review-first`
+ * is the whole first review; every other mode is named to the ledger, the range-bound first mode
+ * included.
+ */
 export function createReviewCategoryPreparationWork(host: ReviewOperationsHost,
     bookId: string,
     definition: AnalysisKindDefinition,
@@ -116,6 +137,7 @@ export function cancelReviewCategoryPreparationWork(host: ReviewOperationsHost, 
   return true;
 }
 
+/** Records the standard-direct authorization and the Run; the caller hands the Run and this category's ledger to the execution owner. */
 export function authorizeReviewCategory(host: ReviewOperationsHost,
     bookId: string,
     definition: AnalysisKindDefinition,
@@ -244,6 +266,10 @@ export function inspectReviewWorkspace(host: ReviewOperationsHost, bookId: strin
   });
 }
 
+/**
+ * Prepare a Review Run as one cooperative job (B1): each selected Task-backed category's Task on its
+ * own ledger, one per step, then the Run itself. The projection is the workspace with the new Run open.
+ */
 export function createReviewRunPreparationWork(host: ReviewOperationsHost,
     bookId: string,
     categoryIds: ReadonlyArray<string>,
@@ -349,6 +375,11 @@ export function reviewPreparation(host: ReviewOperationsHost, body: () => Review
   });
 }
 
+/**
+ * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
+ * Task-backed category (B1). The caller then hands the Run to the drive loop. An approval is recorded even while other
+ * Runs hold every place of the governor; the drive loop waits for one (#1080, ADR 0095 §2). `_slotBusy` is no longer read.
+ */
 export function authorizeReviewRun(host: ReviewOperationsHost,
     bookId: string,
     reviewRunId: string,
@@ -361,6 +392,11 @@ export function authorizeReviewRun(host: ReviewOperationsHost,
   });
 }
 
+/**
+ * 忽略并说明: the disposition, its Quality Signal, and the finding's mark set aside, in one transaction
+ * (REV-004). A finished category is actionable while the Run goes on (REV-008), so the answer takes the
+ * owner's `progress` reader exactly as the inspection does.
+ */
 export function recordReviewFindingDisposition(host: ReviewOperationsHost,
     bookId: string,
     reviewRunId: string,
@@ -377,6 +413,7 @@ export function recordReviewFindingDisposition(host: ReviewOperationsHost,
   });
 }
 
+/** The next version of the Run's 审阅报告 (REV-009). */
 export function generateReviewReport(host: ReviewOperationsHost, bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
   return host.reviewCall(() => {
     host.reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(host, bookId, reviewRunId),
@@ -385,14 +422,23 @@ export function generateReviewReport(host: ReviewOperationsHost, bookId: string,
   });
 }
 
+/** The Review Run and finding a produced mark belongs to, for the Mark Card's `查看任务`; `null` for any other mark. */
 export function reviewFindingOfMark(host: ReviewOperationsHost, markId: string): { bookId: string; reviewRunId: string; findingId: string } | null {
   return host.reviewCall(() => host.reviewRuns.findingOfMark(markId));
 }
 
+/**
+ * Refuses a Review Run that is not this Book's. The drive loop is service-internal and knows no Book,
+ * so an operation that hands it a Run the renderer named — 继续审阅 — asks this first.
+ */
 export function requireReviewRunOfBook(host: ReviewOperationsHost, bookId: string, reviewRunId: string): void {
   host.reviewCall(() => host.reviewRuns.requireRunOfBook(bookId, reviewRunId));
 }
 
+/**
+ * The drive loop's steps (B2); service-internal. Each is one call into the Review Run ledger with the
+ * store's own error handling, so a fatal store error poisons the store exactly as any other call does.
+ */
 export function reviewRunDriveSteps(host: ReviewOperationsHost): ReviewRunDriveSteps {
   const runs = host.reviewRuns;
   return {
@@ -430,6 +476,7 @@ export function finishCancelledReviewRun(host: ReviewOperationsHost, runRecordId
   }
 }
 
+/** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
 export function reconcileStoppedReviewCategoryRuns(host: ReviewOperationsHost): { settled: number } {
   host.assertAvailable();
   const settled = host.reviewCall(() => host.analysisCall(() => host.reviewRuns.reconcileStoppedCategoryRuns()));
@@ -452,6 +499,7 @@ export function reconcileStoppedReviewCategoryRuns(host: ReviewOperationsHost): 
   return { settled };
 }
 
+/** A Review Run approved 「空闲时处理」 begins at the first quiet, after the same preflight 联网后开始任务 makes (OFF-008). */
 export function admitIdleReview(host: ReviewOperationsHost, reviewRunId: string, drive: () => void): void {
   host.reviewCall(() => {
     if (!host.reviewRuns.waitsForIdle(reviewRunId)) return;
@@ -461,6 +509,7 @@ export function admitIdleReview(host: ReviewOperationsHost, reviewRunId: string,
   });
 }
 
+/** Reconnect Preflight starts a waiting Review Run (Issue #760): `drive` hands it to the drive loop, which may take it now. */
 export function admitWaitingReviewRun(host: ReviewOperationsHost, reviewRunId: string, drive: () => void): void {
   host.assertAvailable();
   host.reviewCall(() => host.reviewRuns.admitWaiting(reviewRunId, drive));
@@ -535,6 +584,10 @@ export async function quickStartReviewRun(host: ReviewOperationsHost, input: { b
   return { outcome: 'started', reasons: [], dispatch: true };
 }
 
+/**
+ * 取消任务 of a Review Run an exclusion stopped (SER-024): it then reads 已取消 and offers nothing more; what it put on the
+ * manuscript stays as it is. The answer is the Book's 审阅 with the Run open.
+ */
 export function cancelReviewRun(host: ReviewOperationsHost, bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
   return host.reviewCall(() => {
     host.reviewRuns.cancelStoppedRun(bookId, reviewRunId);
@@ -542,6 +595,11 @@ export function cancelReviewRun(host: ReviewOperationsHost, bookId: string, revi
   });
 }
 
+/**
+ * The Export Fidelity Review of one exact version (V2-UX-EXP-007). `available` is the launch's verified
+ * External Export Policy: without it nothing about an export proceeds. A current revision with unsaved edits
+ * is saved as a revision for the export first.
+ */
 export async function reviewManuscriptExport(host: ReviewOperationsHost, input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
   // 导出审阅报告（DOCX） (Issue #1430): the report is compiled first, then reviewed as any recorded version is. Issue #1446:
   // an unchanged report is its latest recorded version; a changed one is recorded only by the preparation of its destination.

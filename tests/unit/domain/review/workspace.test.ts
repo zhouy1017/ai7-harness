@@ -1,14 +1,9 @@
-import { reviewCategoryKindDefinition } from '../../../../src/service/review/review-category-kind.js';
-import { reviewCategoryContractInput } from '../../../../src/service/review/category-configuration.js';
-import { factualReviewKindDefinition } from '../../../../src/service/analysis/kind-definition.js';
 import { MAX_SELECTION_BLOCKS, SELECTION_UNAVAILABLE_REASON, SELECTION_GONE_REASON, SELECTION_TOO_LONG_REASON } from '../../../../src/service/review/review-scope.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, beforeEach, afterEach, expect, it } from 'vitest';
-import { reviewDatabase } from '../../../support/domain/review.js';
-import { ReviewRunStore } from '../../../../src/service/review/review-runs.js';
-import { EditorialMarkStore } from '../../../../src/service/editorial-marks.js';
-import { BaselineAnalysisStore } from '../../../../src/service/analysis/baseline-analysis-store.js';
+import { reviewDatabase, reviewHost } from '../../../support/domain/review.js';
+import { inspectReviewWorkspace, createReviewRunPreparationWork } from '../../../../src/service/review/review-operations.js';
 import { ReviewRunError } from '../../../../src/service/review/review-runs.js';
 
 let db: DatabaseSync;
@@ -20,17 +15,15 @@ const storeCode = (operation: () => unknown) => { try { operation(); return null
 it('reads a Book without a manuscript as having nothing to review, and names why', () => {
   const bookId = randomUUID();
   db.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, randomUUID(), '空图书', '2026-11-17T00:00:00Z');
-  const baseline = new BaselineAnalysisStore(db, { createManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); }, advanceManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); }, finalizeManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); }, cancelManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); } }, null);
-  const runs = new ReviewRunStore(db, new EditorialMarkStore(db), { baseline: () => baseline,
-    ledgerOf: () => baseline, memoryFacade: () => { throw new Error('This domain case reads no memory.'); } });
-  const empty = runs.workspace(bookId, null);
+  const host = reviewHost(db);
+  const empty = inspectReviewWorkspace(host, bookId, null);
   expect(empty).toMatchObject({ bookId, manuscript: null, newReview: { available: false }, runs: [], run: null });
   expect(empty.categories.every((category) => !category.available)).toBe(true);
   expect(empty.coverage.every((row) => row.state === 'unavailable')).toBe(true);
   expect(empty.scopeOptions.whole.available).toBe(false);
   // No launch policy is read before this domain refusal.
-  expect(storeCode(() => runs.prepare({ phase: 'start', bookId, categoryIds: ['typos-and-usage'], scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, launchPolicy: baseline.launch.policy! }))).toBe('REVIEW_MANUSCRIPT_ABSENT');
-  expect(storeCode(() => runs.workspace(randomUUID(), null))).toBe('REVIEW_BOOK_NOT_FOUND');
+  expect(storeCode(() => createReviewRunPreparationWork(host, bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, host.baselineAnalysis.launch.policy!))).toBe('REVIEW_MANUSCRIPT_ABSENT');
+  expect(storeCode(() => inspectReviewWorkspace(host, randomUUID(), null))).toBe('REVIEW_BOOK_NOT_FOUND');
 });
 
 it('refuses updates and deletion of recorded review ledger relations', () => {
@@ -67,24 +60,12 @@ function reviewSession(blockCount: number) {
     db.prepare('INSERT INTO working_blocks VALUES (?, ?, ?, ?, NULL, ?, ?, 0)').run(branchId, block.blockId, block.position, 'paragraph', '', digest);
   }
   db.prepare('INSERT INTO model_service_connections VALUES (?, ?, ?)').run('main-editorial-deepseek-v4-pro', randomUUID(), 'missing');
-  const checkpointOwner = { createManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); }, advanceManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); }, finalizeManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); }, cancelManuscriptCheckpointWork: () => { throw new Error('No checkpoint on a refusal'); } };
-  const baseline = new BaselineAnalysisStore(db, checkpointOwner, null);
-  const ledgers = new Map<string, BaselineAnalysisStore>();
-  const runs = new ReviewRunStore(db, new EditorialMarkStore(db), { baseline: () => baseline, memoryFacade: () => { throw new Error('No memory on a refusal'); },
-    ledgerOf: entry => {
-      let ledger = ledgers.get(entry.categoryId);
-      if (ledger === undefined) {
-        const definition = entry.executor === 'factual-review-kind' ? factualReviewKindDefinition() : reviewCategoryKindDefinition(reviewCategoryContractInput(entry));
-        ledger = new BaselineAnalysisStore(db, checkpointOwner, null, definition); ledgers.set(entry.categoryId, ledger);
-      }
-      return ledger;
-    } });
-  return { bookId, runs, baseline, blocks };
+  return { bookId, host: reviewHost(db), blocks };
 }
 
 it('offers the available review categories and scope before the first Run', () => {
-  const { runs, bookId } = reviewSession(1);
-  const before = runs.workspace(bookId, null);
+  const { host, bookId } = reviewSession(1);
+  const before = inspectReviewWorkspace(host, bookId, null);
   expect(before.categories.map((category) => category.categoryId)).toEqual([
     'typos-and-usage', 'style-and-format', 'plot-consistency', 'factual-review', 'academic-integrity', 'publication-risk',
     'literary-expression', 'series-consistency', 'cross-deliverable-consistency',
@@ -100,16 +81,16 @@ it('offers the available review categories and scope before the first Run', () =
 });
 
 it('refuses unavailable or invalid selection scopes before preparing a Run (#423)', () => {
-  const { runs, bookId, baseline, blocks } = reviewSession(MAX_SELECTION_BLOCKS + 1);
+  const { host, bookId, blocks } = reviewSession(MAX_SELECTION_BLOCKS + 1);
   const at = (position: number) => blocks[position - 1]!;
   const on = (from: string, to: string) => ({ kind: 'selection' as const, fromChapterBlockId: from, toChapterBlockId: to });
-  const prepare = (scope: ReturnType<typeof on>) => runs.prepare({ phase: 'start', bookId, categoryIds: ['typos-and-usage'], scope, launchPolicy: baseline.launch.policy! });
+  const prepare = (scope: ReturnType<typeof on>) => createReviewRunPreparationWork(host, bookId, ['typos-and-usage'], scope, host.baselineAnalysis.launch.policy!);
   const message = (operation: () => unknown) => { try { operation(); return null; } catch (error) { if (error instanceof ReviewRunError) return error.message; throw error; } };
   const twenty = at(20), twentyOne = at(21);
-  const facts = runs.workspace(bookId, null).categories.find((category) => category.categoryId === 'factual-review')!;
+  const facts = inspectReviewWorkspace(host, bookId, null).categories.find((category) => category.categoryId === 'factual-review')!;
   expect(facts.scopes.selection).toEqual({ available: true, unavailableReason: null });
   expect(message(() => prepare(on('blk_' + '0'.repeat(24), twenty.blockId)))).toBe(SELECTION_GONE_REASON);
   expect(storeCode(() => prepare(on(twentyOne.blockId, twenty.blockId)))).toBe('REVIEW_SCOPE_INVALID');
   expect(message(() => prepare(on(at(1).blockId, at(MAX_SELECTION_BLOCKS + 1).blockId)))).toBe(SELECTION_TOO_LONG_REASON);
-  expect(runs.workspace(bookId, null).runs).toEqual([]);
+  expect(inspectReviewWorkspace(host, bookId, null).runs).toEqual([]);
 });

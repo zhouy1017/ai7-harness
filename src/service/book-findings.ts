@@ -64,6 +64,7 @@ export interface BookFindingsHost {
   inspectEvaluation(bookId: string, recordId: string | null): EvaluationWorkspaceProjection;
 }
 
+/** Read-only aggregation: the source owners derive dispositions on every read. */
 export function inspectBookFindings(host: BookFindingsHost, bookId: string, offset = 0): BookFindingsProjection {
   requireStore(Number.isSafeInteger(offset) && offset >= 0, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
   host.evaluationBookTitle(bookId);
