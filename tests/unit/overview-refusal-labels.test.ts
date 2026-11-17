@@ -13,7 +13,7 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 
 // Execute the actual refusal handlers and navigation helpers with the existing renderer mini-DOM pattern
 // (imported-exemplars.test.ts). Source matching alone cannot establish what the editor sees or a click does.
-const parsed = createSourceFile('index.ts', RENDERER, ScriptTarget.ES2022, true);
+const parsed = createSourceFile('renderer.ts', RENDERER + readFileSync(new URL('../../src/renderer/book-overview-screen.ts', import.meta.url), 'utf8'), ScriptTarget.ES2022, true);
 const helpers = new Map<string, string>();
 const refusals: string[] = [];
 const taskInspections: string[] = [];
