@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, it } from 'vitest';
-import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { EditorialLearningLedger } from '../../../../src/service/learning/ledger.js';
+import { canonicalRecord } from '../../../../src/service/analysis/canonical.js';
 
 it('pages rule adoption without loss and compares actual decisions independently for each Book/version', () => {
   const db = new DatabaseSync(':memory:');
