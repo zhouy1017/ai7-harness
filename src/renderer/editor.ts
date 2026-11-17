@@ -1022,14 +1022,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           ownershipBlocked = error instanceof BookOwnershipFailure;
           // The journal did not acknowledge: Editing Protection Mode (DUR-001). A moved target stops replay (DUR-007).
           enterProtection(interrupted ? 'service-stopped' : classifyJournalFailure(error) === 'drift' ? 'drift' : 'journal-unavailable');
-          options.onAnnouncement(
-            interrupted
-              ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
-              : error instanceof Error
-                ? `本地写入中断；未确认修改仍保留。${error.message}`
-                : '本地写入中断；未确认修改仍保留，请重试。',
-            'error',
-          );
+          // The persistent protection banner owns this failure; action refusals still announce their reason.
           break;
         }
       }
@@ -1039,18 +1032,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       if (lastCompletion && !retryRequired && changedBlocks(view.state.doc).length === 0) {
         options.onAnnouncement(technicalWords(lastCompletion, '已保存'), 'success');
       }
-    })().catch((error: unknown) => {
+    })().catch(() => {
       saving = false;
       retryRequired = true;
       // Nothing the editor can bind exactly: input pauses, and the content stays for 复制受影响内容 (DUR-007).
       enterProtection(interrupted ? 'service-stopped' : 'drift');
       announceState();
-      options.onAnnouncement(
-        error instanceof Error
-          ? `本地写入中断；未确认修改仍保留。${error.message}`
-          : '本地写入中断；未确认修改仍保留，请重试。',
-        'error',
-      );
     }).finally(() => {
       flushPromise = undefined;
     });

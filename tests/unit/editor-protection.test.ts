@@ -130,8 +130,8 @@ describe('a refused journal write', () => {
 
 describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', () => {
   it('replaces every saved implication with the exact headline and one direct action', () => {
-    expect(PROTECTION_HEADLINE).toBe('本地写入中断 · 当前更改尚未持久保存');
-    expect(PROTECTION_OPTIONS_ACTION).toBe('查看保护选项');
+    expect(PROTECTION_HEADLINE).toBe('更改尚未保存');
+    expect(PROTECTION_OPTIONS_ACTION).toBe('处理…');
     expect(PROTECTION_RETRY_ACTION).toBe('重试写入');
     expect(PROTECTION_COPY_ACTION).toBe('复制受影响内容');
     expect(PROTECTION_CLEARED).toBe('已写入修订日志');

@@ -6,10 +6,10 @@ import { technicalWords } from './technical-layer.js';
  */
 
 /** The persistent header line that replaces the saved styling (ED-055, DUR-003). */
-export const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
-export const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
+export const PROTECTION_HEADLINE = '更改尚未保存';
+export const PROTECTION_READ_ONLY_HEADLINE = '已暂停编辑，更改尚未保存';
 /** The one direct action of the header (DUR-003). */
-export const PROTECTION_OPTIONS_ACTION = '查看保护选项';
+export const PROTECTION_OPTIONS_ACTION = '处理…';
 export const PROTECTION_OPTIONS_TITLE = '编辑保护选项';
 export const PROTECTION_RETRY_ACTION = '重试写入';
 export const PROTECTION_COPY_ACTION = '复制受影响内容';

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+import { transpileModule } from 'typescript';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { enhanceSelect, menuDestinations, mountMenuControls, mountSelectControls } from '../../src/renderer/components/controls.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
@@ -33,4 +36,20 @@ it('navigates visible disclosure summaries and skips enabled controls in closed 
   expect(menuDestinations(panel).map((node) => node.textContent)).toEqual(['保存为里程碑版本', '保存里程碑版本', '导出稿件']);
   save.disabled = true;
   expect(menuDestinations(panel).map((node) => node.textContent)).toEqual(['保存为里程碑版本', '导出稿件']);
+});
+
+it('Space chooses the active option in an open select and preserves spaces in its filter', () => {
+  const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
+  const handler = source.slice(source.indexOf('const keydown = (event: KeyboardEvent)'), source.indexOf('  function destroy()'));
+  const filter = {};
+  let chosen = -1;
+  const keydown = runInNewContext(transpileModule(`${handler}; keydown;`, {}).outputText, {
+    composing: false, open: true, filter, active: 2, choose: (index: number) => { chosen = index; },
+  });
+  let prevented = false;
+  keydown({ key: ' ', target: {}, preventDefault: () => { prevented = true; }, stopPropagation: () => {} });
+  expect(chosen).toBe(2); expect(prevented).toBe(true);
+  chosen = -1; prevented = false;
+  keydown({ key: ' ', target: filter, preventDefault: () => { prevented = true; }, stopPropagation: () => {} });
+  expect(chosen).toBe(-1); expect(prevented).toBe(false);
 });

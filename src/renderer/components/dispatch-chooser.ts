@@ -76,6 +76,7 @@ export function createDispatchChooser(options: { role: 'main-editorial' | 'fast-
     const index = choices.findIndex(choice => choice.config.modelConnectionId === defaultChoice.modelConnectionId && choice.config.modelId === defaultChoice.modelId);
     models.selectedIndex = index; paint(defaultChoice.reasoningEffort); options.changed({});
   });
+  element.addEventListener('focusout', event => { if (!element.contains(event.relatedTarget as Node | null)) dismiss(); });
   element.addEventListener('keydown', event => { if (event.key === 'Escape') { dismiss(); summary.focus(); } });
   return {
     element,

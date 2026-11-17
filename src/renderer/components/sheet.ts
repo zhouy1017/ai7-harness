@@ -4,12 +4,43 @@ export function createSheet(className: string): HTMLDialogElement {
   sheet.className = `sheet ${className}`;
   sheet.dataset['sheet'] = '';
   sheet.setAttribute('aria-modal', 'false');
-  sheet.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || event.isComposing) return;
+  let opener: HTMLElement | null = null;
+  let contentObserver: MutationObserver | undefined;
+  sheet.tabIndex = -1;
+  const show = sheet.show.bind(sheet);
+  const close = sheet.close.bind(sheet);
+  const escape = (event: KeyboardEvent): void => {
+    if (!sheet.open || event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
     event.preventDefault();
     const cancel = new Event('cancel', { cancelable: true });
     if (sheet.dispatchEvent(cancel)) sheet.close();
-  });
+  };
+  sheet.show = () => {
+    if (sheet.open) return;
+    opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    show();
+    document.addEventListener('keydown', escape);
+    // Some callers load the controls asynchronously after show().
+    const focusFirst = (): void => {
+      if (!sheet.open) return;
+      const first = Array.from(sheet.querySelectorAll<HTMLElement>('button, input, select, textarea, summary, [tabindex]'))
+        .find(node => !node.matches(':disabled, [tabindex="-1"]') && !node.closest('[hidden], [inert]') && (typeof node.getClientRects !== 'function' || node.getClientRects().length > 0));
+      if (first) { first.focus({ preventScroll: true }); contentObserver?.disconnect(); }
+      else sheet.focus({ preventScroll: true });
+    };
+    if (typeof MutationObserver === 'function') {
+      contentObserver = new MutationObserver(focusFirst);
+      contentObserver.observe(sheet, { childList: true, subtree: true });
+    }
+    queueMicrotask(focusFirst);
+  };
+  sheet.close = (value?: string) => {
+    contentObserver?.disconnect();
+    close(value);
+    document.removeEventListener('keydown', escape);
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    opener = null;
+  };
   return sheet;
 }
 

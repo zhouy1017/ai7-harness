@@ -1678,6 +1678,11 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
     await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet?.open && sheet.contains(document.activeElement) && document.activeElement!==sheet; })()`, 'overview-sheet-focus');
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
+    await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet-reopen');
     const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
     await selectOverviewBooks(overviewBooks.slice(0, 2));
     await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-two');
