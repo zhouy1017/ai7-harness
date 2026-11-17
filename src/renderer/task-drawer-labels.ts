@@ -1183,18 +1183,24 @@ export function taskStatusDuration(elapsedMs: number): string {
 }
 
 /**
- * What the card reads beside the plan, from the Task's row in the 任务总览: the Task's frozen model and thinking effort, how long a Task
- * that ended worked, and what it formed. `outcome` is `null` until that row was read.
+ * What the card reads beside the plan, from the Task's row in the 任务总览: the Task's frozen model and thinking effort, when the state it
+ * is running in began, the processing time its Run Report measured once it ended, and what it formed. `outcome` is `null` until that row
+ * was read.
  */
 export interface TaskStatusFacts {
   readonly modelLabel: string | null;
-  readonly workedMs: number | null;
+  /** The instant the row says the Task's running state began; `null` unless the row says it is running. */
+  readonly runningSince: string | null;
+  /** The Run Report's processing time of a Task that ended; `null` when the Task has no report. */
+  readonly processedMs: number | null;
   readonly outcome: null | { readonly kind: 'result'; readonly what: string } | { readonly kind: 'none'; readonly reason: string | null };
 }
 
 /** The Task's row as the drawer is handed it, or reads it: the overview's own row, or what the Book's 任务 panel holds of it. */
 export interface TaskStatusRow {
   readonly state: 'running' | 'queued' | 'waiting' | 'paused' | 'completed' | 'cancelled' | 'stopped';
+  /** When the state the row names began (the completion instant, once it ended). */
+  readonly at: string;
   readonly result: BookTaskItemProjection['result'];
   readonly usage: { readonly calls: number; readonly elapsed: number } | null;
   readonly attention: GlobalAttentionItemProjection;
@@ -1228,7 +1234,7 @@ export interface TaskStatusLines {
   readonly sentence: string | null;
   /** LIVE-003's warning, present only while the step in flight has run longer than this Run's own steps did. */
   readonly stale: string | null;
-  /** The stage while the Run is under way; how long a Task that ended worked once it did. */
+  /** The stage and how long the Run has been running while it is under way; the processing time of a Task that ended. */
   readonly line: string | null;
   /** What the Run Budget Ceiling does, when the plan froze one and the Run is not over. */
   readonly ceiling: string | null;
@@ -1239,12 +1245,24 @@ export interface TaskStatusLines {
 }
 
 /**
- * 用时, said one way (Issue #1527): the time a Task that ended spent on its model work, from its Run Report. The figure is shown once
- * and never while the Run is under way — nothing the plan or the 任务总览 carries measures the time a Run has actually worked, and one
- * that counts a pause, a closed application or a queue would grow while nothing runs and then drop at the end.
+ * 本次已运行, the running card's time (Issue #1527): how long the Task has been in the running state it is in now — now minus the instant
+ * its row says that state began. It restarts when the Run resumes, and the label says so. Shown only while the Run is actually executing: not
+ * queued, waiting, paused, stopped or waiting for an answer, so nothing ticks while nothing runs; and not before its row has been read —
+ * the stage stands alone then, never "now minus the first time it executed", which would count a pause or a closed application.
  */
-export function taskStatusWorked(ended: boolean, facts: TaskStatusFacts): string | null {
-  return ended && facts.workedMs !== null ? `用时 ${taskStatusDuration(facts.workedMs)}` : null;
+export function taskStatusRunning(plan: TaskPlanProjection, facts: TaskStatusFacts, nowMs: number): string | null {
+  const executing = plan.state.key === 'running' && plan.runControl !== null && plan.runControl.activity !== null && plan.runControl.executingSince !== null;
+  return executing && facts.runningSince !== null ? `本次已运行 ${taskStatusDuration(nowMs - Date.parse(facts.runningSince))}` : null;
+}
+
+/**
+ * 处理用时, the finished card's time (Issue #1527): the processing time the Run Report measured — the sum of its stages' wall time. It is
+ * not elapsed time: work done in parallel counts more than once and gaps between steps are left out, so the label says 处理用时 and not
+ * 用时. A Task without a report shows no figure. One measure of working time for both states needs the projection to carry accumulated
+ * working time — round #1539.
+ */
+export function taskStatusProcessed(ended: boolean, facts: TaskStatusFacts): string | null {
+  return ended && facts.processedMs !== null ? `处理用时 ${taskStatusDuration(facts.processedMs)}` : null;
 }
 
 /** The one sentence of a Task that ended: what it formed when its row says, otherwise only that it ended. */
@@ -1278,7 +1296,8 @@ export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts
     return {
       progress: { settled: activity.unitsSettled, total: activity.unitsTotal, text: activity.stage === 'units' ? share(activity.unitsSettled, activity.unitsTotal) : '正在整理结果' },
       sentence: null, stale: taskPlanActivityIsStale(activity, nowMs) ? TASK_PLAN_ACTIVITY_STALE : null,
-      line: RUN_LIVENESS_STAGE_LABELS[activity.stage], ceiling, model, resultReady: false,
+      line: [RUN_LIVENESS_STAGE_LABELS[activity.stage], taskStatusRunning(plan, facts, nowMs)].filter((part) => part !== null).join(' · '),
+      ceiling, model, resultReady: false,
     };
   }
   const kept = control?.continuation ?? plan.budgetStop;
@@ -1290,7 +1309,7 @@ export function taskStatusLines(plan: TaskPlanProjection, facts: TaskStatusFacts
   }
   const ended = taskStatusEnded(plan);
   return {
-    progress, sentence: taskStatusSentence(plan, facts), stale: null, line: taskStatusWorked(ended, facts), ceiling: ended ? null : ceiling, model,
+    progress, sentence: taskStatusSentence(plan, facts), stale: null, line: taskStatusProcessed(ended, facts), ceiling: ended ? null : ceiling, model,
     resultReady: ended && facts.outcome?.kind === 'result',
   };
 }

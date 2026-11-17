@@ -43,7 +43,7 @@ const finishedPlan = (overrides: Partial<TaskPlanProjection> = {}) => taskPlanFi
 
 /** One Task of the Book as the 任务总览 reads it: its model and thinking effort, how long its Run worked, and the result 查看结果 opens. */
 const row = (state: 'running' | 'completed', overrides: Record<string, unknown> = {}) => ({
-  bookId: 'book', plan: { kind: 'baseline-analysis', ref: 'task' }, state, result: state === 'completed' ? { kind: 'analysis-revision', revisionId: 'revision' } : null,
+  bookId: 'book', at: state === 'running' ? '2026-11-17T08:00:00.000Z' : '2026-11-17T08:02:00.000Z', plan: { kind: 'baseline-analysis', ref: 'task' }, state, result: state === 'completed' ? { kind: 'analysis-revision', revisionId: 'revision' } : null,
   usage: state === 'completed' ? { calls: 9, elapsed: 192_000 } : null, attention: { modelLabel: 'synthetic-model@high', object: { kind: 'analysis' }, facts: {} }, ...overrides,
 });
 const overviewOf = (...items: unknown[]) => ({ groups: [{ key: 'recent', items, total: items.length }] });
@@ -77,14 +77,14 @@ const controls = (root: MiniElement): string[] => root.querySelectorAll('[data-t
 const model = (root: MiniElement) => vi.waitFor(() => expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high'));
 
 describe('the status card of a started Task in ordinary mode', () => {
-  it('shows a running Task in at most eight lines: its name, state, progress, stage, model, and its actions', async () => {
+  it('shows a running Task in at most eight lines: its name, state, progress, stage and running time, model, and its actions', async () => {
     const { root } = await openDrawer(runningPlan());
     await model(root);
     expect(text(root, '.task-drawer-title')).toBe('基线分析');
     expect(text(root, '.task-drawer-pill')).toBe('运行中');
     expect(Array.from(root.querySelectorAll('.task-drawer-mode'), (node) => node.textContent)).toEqual(['运行', '计划']);
     expect(root.querySelector('.task-status-progress')?.getAttribute('aria-valuetext')).toBe('已完成约 25%');
-    expect(text(root, '.task-status-line')).toBe('正在分析');
+    expect(text(root, '.task-status-line')).toBe('正在分析 · 本次已运行 3 分 12 秒');
     expect(lines(root).length).toBeLessThanOrEqual(8);
     expect(controls(root)).toEqual(expect.arrayContaining(['full-link', 'pause', 'cancel-run', 'run-link']));
   });
@@ -117,11 +117,11 @@ describe('the status card of a started Task in ordinary mode', () => {
     expect(root.querySelector('.task-plan-stage-chain')).toBeNull();
   });
 
-  it('shows a finished task as what it came to, how long it worked, its model and 查看结果, which opens the result', async () => {
+  it('shows a finished task as what it came to, its processing time, its model and 查看结果, which opens the result', async () => {
     const { root, openTaskResult } = await openDrawer(finishedPlan());
     await model(root);
     expect(text(root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。');
-    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
     expect(lines(root).length).toBeLessThanOrEqual(8);
     root.querySelector('[data-task-drawer-control="view-result"]')!.click();
     expect(openTaskResult).toHaveBeenCalledOnce();
@@ -136,12 +136,6 @@ describe('the status card of a started Task in ordinary mode', () => {
     const why = (await openDrawer(finishedPlan(), none({ completion: { gaps: 8, total: 8, reason: '没有读成任何一部分。' } }))).root;
     await vi.waitFor(() => expect(text(why, '.task-status-sentence')).toBe('已完成，没有可以查看的结果：没有读成任何一部分。'));
     expect(controls(why)).not.toContain('view-result');
-  });
-
-  it('counts 用时 once, for a task that ended: a running task shows none, so no figure grows while nothing runs and then drops at the end', async () => {
-    const { root } = await openDrawer(runningPlan());
-    await model(root);
-    expect(root.textContent).not.toContain('用时');
   });
 
   const WAITS: ReadonlyArray<readonly [string, Partial<TaskPlanProjection>, string]> = [
@@ -186,11 +180,68 @@ describe('the status card of a started Task in ordinary mode', () => {
   });
 });
 
+describe('the two times of the status card', () => {
+  const at = (minutes: number) => new Date(Date.parse(NOW) + minutes * 60_000).toISOString();
+  const runningSince = (lastTransitionAt: string) => runningPlan({}, running({}, { lastTransitionAt }));
+  const line = (root: MiniElement) => text(root, '.task-status-line');
+  const refresh = async (opened: Awaited<ReturnType<typeof openDrawer>>, plan: TaskPlanProjection, key: string) => {
+    opened.inspectTaskPlan.mockImplementation(async () => plan);
+    opened.drawer.refresh('baseline-analysis');
+    await vi.waitFor(() => expect(opened.root.dataset['taskPlanState']).toBe(key));
+  };
+
+  it('shows the stage alone until the Task\'s row was read, then 本次已运行 from the instant its running state began', async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    const { root } = await openDrawer(runningPlan(), { overview: () => new Promise((resolve) => { answer = resolve; }) });
+    expect(line(root)).toBe('正在分析');
+    answer(overviewOf(row('running')));
+    await vi.waitFor(() => expect(line(root)).toBe('正在分析 · 本次已运行 3 分 12 秒'));
+  });
+
+  it('counts no queue wait: a queued Task, a waiting one and a Run admitted but not yet executing show no running time', async () => {
+    for (const plan of [taskPlanFixture({ start: STARTED, state: { key: 'queued', label: '等待运行名额' } }), taskPlanFixture({ start: STARTED, state: { key: 'waiting', label: '等待网络' } }),
+      runningPlan({}, running({ executingSince: null }))]) {
+      const { root } = await openDrawer(plan, { overview: async () => overviewOf(row('running')) });
+      await vi.waitFor(() => expect(text(root, '.task-status-model')).toBeDefined());
+      expect(root.textContent).not.toContain('本次已运行');
+    }
+  });
+
+  const STOPS: ReadonlyArray<readonly [string, TaskPlanProjection, string]> = [
+    ['paused', taskPlanFixture({ start: STARTED, state: { key: 'paused', label: '已暂停' }, runControl: paused() }), 'paused'],
+    ['stopped by a restart', taskPlanFixture({ start: STARTED, state: { key: 'resumable', label: '任务已中断 · 可续行' }, runControl: paused() }), 'resumable'],
+  ];
+  it.each(STOPS)('restarts the running time when a Task that was %s runs again, and ticks nothing while it is stopped', async (_name, stopped, key) => {
+    const opened = await openDrawer(runningSince(at(0)), { how: { view: 'run', row: row('running', { at: at(-3) }) as never } });
+    expect(line(opened.root)).toBe('正在分析 · 本次已运行 3 分 0 秒');
+    await refresh(opened, stopped, key);
+    expect(opened.root.textContent).not.toContain('本次已运行');
+    vi.setSystemTime(new Date(at(10)));
+    opened.drawer.refresh('baseline-analysis');
+    expect(opened.root.textContent).not.toContain('本次已运行');
+    opened.inspectTaskOverview.mockImplementation(async () => overviewOf(row('running', { at: at(10) })));
+    await refresh(opened, runningSince(at(10)), 'running');
+    await vi.waitFor(() => expect(line(opened.root)).toBe('正在分析 · 本次已运行 0 秒'));
+  });
+
+  it('on completion drops the running time and shows 处理用时 from the Run Report — and no figure for a Task without one', async () => {
+    const opened = await openDrawer(runningSince(at(0)), { how: { view: 'run', row: row('running', { at: at(-3) }) as never } });
+    expect(line(opened.root)).toContain('本次已运行');
+    opened.inspectTaskOverview.mockImplementation(async () => overviewOf(row('completed')));
+    await refresh(opened, finishedPlan(), 'settled');
+    await vi.waitFor(() => expect(line(opened.root)).toBe('处理用时 3 分 12 秒'));
+    expect(opened.root.textContent).not.toContain('本次已运行');
+    const bare = await openDrawer(finishedPlan(), { overview: async () => overviewOf(row('completed', { usage: null })) });
+    await vi.waitFor(() => expect(text(bare.root, '.task-status-sentence')).toBe('已完成，得到一份基线分析。'));
+    expect(line(bare.root)).toBeUndefined();
+  });
+});
+
 describe('where the card gets the Task\'s model, duration and result', () => {
   it('uses the row its opener handed in and asks for no other', async () => {
     const { root, inspectTaskOverview } = await openDrawer(finishedPlan(), { how: { view: 'run', row: row('completed') as never } });
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).not.toHaveBeenCalled();
   });
@@ -212,7 +263,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     drawer.refresh('baseline-analysis');
     await vi.waitFor(() => expect(root.dataset['taskPlanState']).toBe('settled'));
     expect(text(root, '.task-status-model')).toBe('模型 synthetic-model@high');
-    await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒'));
+    await vi.waitFor(() => expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒'));
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });
 
@@ -225,7 +276,7 @@ describe('where the card gets the Task\'s model, duration and result', () => {
     drawer.close(false);
     await open();
     await model(root);
-    expect(text(root, '.task-status-line')).toBe('用时 3 分 12 秒');
+    expect(text(root, '.task-status-line')).toBe('处理用时 3 分 12 秒');
     expect(controls(root)).toContain('view-result');
     expect(inspectTaskOverview).toHaveBeenCalledTimes(2);
   });

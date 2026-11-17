@@ -1751,6 +1751,24 @@ async function main() {
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
+    // 状态卡 of a task that finished (Issue #1527): its result in one sentence, its 处理用时 from the Run Report, 查看结果 — opened from the
+    // overview card's 更多 menu by pointer, at the wide window and at the Gate's.
+    at('task-status-finished-overview');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='recent').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)} && i.state==='completed'))()`, 'task-status-finished-recorded', 60000);
+    const finishedCard = `.task-overview-card[data-task-item="${fourth.itemId}"]`;
+    for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
+      await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
+      await pointerClick(renderer, waitFor, `${finishedCard} [data-task-action="run"]`, `task-status-finished-open-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="full-link"]', `task-status-finished-plan-${statusWidth}`);
+      await waitFor(renderer, planViewExpression({ running: false }), `task-status-finished-plan-view-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-mode="compact"]', `task-status-finished-back-to-run-${statusWidth}`);
+      await waitFor(renderer, statusCardExpression({ ended: true, processed: true }), `task-status-finished-card-again-${statusWidth}`, 30_000);
+      await pointerClick(renderer, waitFor, '#task-drawer [data-task-drawer-control="close"]', `task-status-finished-close-${statusWidth}`);
+      await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `task-status-finished-closed-${statusWidth}`);
+    }
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');

@@ -844,6 +844,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // Ordinary mode shows a started Task's 运行 view as one status card and its plan behind 查看计划; the title names the Task (Issue #1527).
     const card = statusViewOf(next);
     if (!technicalLayerVisible) title.textContent = taskStatusName(next);
+    adoptHandedRow(next);
     if (card) {
       statusCard ??= createTaskStatusCard({ viewPlan: () => setMode('full', true) });
       readStatusFacts(next);
@@ -921,8 +922,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return !technicalLayerVisible && mode === 'compact' && next.start.readiness === 'started';
   }
 
+  /** One Task in one state — and, while a Run executes, in one stretch of it: a resume or a restart is another, which restarts 本次已运行. */
   function statusKey(next: TaskPlanProjection): string {
-    return `${next.kind}:${next.ref}:${next.state.key}`;
+    return `${next.kind}:${next.ref}:${next.state.key}:${next.runControl?.activity?.lastTransitionAt ?? ''}`;
   }
 
   /** The row read for this Task: in the state it is in now, or — for what its state does not change, the model — in any state of it. */
@@ -934,23 +936,20 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const row = statusRow(next, false);
     return {
       modelLabel: statusRow(next, true)?.attention.modelLabel ?? null,
-      workedMs: row?.usage?.elapsed ?? null,
+      runningSince: row !== null && row.state === 'running' ? row.at : null,
+      processedMs: row !== null && taskStatusRowEnded(row) ? row.usage?.elapsed ?? null : null,
       outcome: row === null || !taskStatusRowEnded(row) ? null : taskStatusOutcome(row, next.kind),
     };
   }
 
   /**
-   * The Task's row, for its model, how long it worked and what it formed. The opener's own row first — only while it says what the plan
-   * says, that the Task ended or did not; otherwise one read of the 任务总览 for each state a Task is in, never one per poll. A read that
-   * failed is not asked again until the drawer is opened again or the Task is in another state; one that settles after either is dropped.
+   * The Task's row, for its model, when its running state began, how long it processed and what it formed: one read of the 任务总览 for
+   * each state a Task is in, never one per poll. A read that failed is not asked again until the drawer is opened again or the Task is in
+   * another state; one that settles after either is dropped.
    */
   function readStatusFacts(next: TaskPlanProjection): void {
     const key = statusKey(next);
     if (statusFacts?.key === key) return;
-    if (handedRow !== null && handedRow.kind === next.kind && handedRow.ref === next.ref && taskStatusRowEnded(handedRow.row) === taskStatusEnded(next)) {
-      statusFacts = { key, row: handedRow.row };
-      return;
-    }
     if (statusRead?.generation === statusGeneration && statusRead.key === key) return;
     const mine = { generation: statusGeneration, key };
     statusRead = mine;
@@ -983,6 +982,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       // Closing the result brings the drawer back on the same Task, as 任务 does for a card.
       options.openTaskResult({ item: row.attention, result: row.result }, () => { if (!interrupted) surface.open(asked, finder, undefined, { view: 'run', row }); });
     };
+  }
+
+  /**
+   * The opener's own row serves the state the drawer was opened in — while it says what the plan says — and no later one: a Task that
+   * paused or resumed since is another state, whose row is read.
+   */
+  function adoptHandedRow(next: TaskPlanProjection): void {
+    const handed = handedRow;
+    handedRow = null;
+    if (handed === null || handed.kind !== next.kind || handed.ref !== next.ref || taskStatusRowEnded(handed.row) !== taskStatusEnded(next) ||
+        (next.state.key === 'running') !== (handed.row.state === 'running')) return;
+    statusFacts = { key: statusKey(next), row: handed.row };
   }
 
   function paintStatus(): void {
