@@ -457,7 +457,7 @@ const READ_EVALUATION = `(() => {
         task: section.querySelector('.evaluation-initial-task')?.firstChild?.textContent ?? null,
         none: section.querySelector('.evaluation-initial-none')?.textContent ?? null,
         latest: section.querySelector('.evaluation-initial-latest')?.firstChild?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button:not([data-evaluation-action="close-initial-sheet"])'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button[data-evaluation-action]:not([data-evaluation-action="close-initial-sheet"])'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         reason: section.querySelector('.evaluation-initial-reason')?.textContent ?? null,
       };
     })(),
@@ -531,7 +531,7 @@ const READ_EVALUATION = `(() => {
         state: section.dataset.rewriteState ?? null,
         task: section.querySelector('.evaluation-rewrite-task')?.textContent ?? null,
         reason: section.querySelector('.evaluation-rewrite-reason')?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button[data-evaluation-action]'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
           line: card.querySelector('.evaluation-rewrite-proposal-line')?.firstChild?.textContent ?? null,
@@ -1925,6 +1925,7 @@ async function main() {
     at('initial-evaluation-start');
     // ②C offers AI7's 初评 before there is one; 准备 AI7 初评 opens its plan in the Task Drawer, whose bar starts it, and ②C follows
     // the Run to its end on the J-04 adapter's authored fixture.
+    await waitFor(renderer, `document.querySelector('[data-evaluation-action="start-initial"]')?.disabled===false`, 'initial-evaluation-model-ready');
     const beforeInitial = await readEvaluation(renderer, (page) => page.initial !== null, 'initial-evaluation-offered');
     requireJourney(beforeInitial.initial.state === 'none' && beforeInitial.initial.none === '还没有评估报告：生成后，AI7 通读全稿，给出逐项评分与评语、原文依据、优缺点、下一步建议和市场分析。' &&
       JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['start-initial', '生成评估报告', false], ['prepare-initial', '先看计划', false]]) && beforeInitial.editReport === null && beforeInitial.view === 'record',
@@ -2212,6 +2213,7 @@ async function main() {
     await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', 'evaluation-rewrite-market');
     await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="adjustment-reason"][value="insufficient-basis"]`, 'evaluation-rewrite-market-reason');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-rewrite-save');
+    await waitFor(renderer, `document.querySelector('[data-evaluation-action="prepare-rewrite"]')?.disabled===false`, 'evaluation-rewrite-model-ready');
     const rewriteOffered = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.rewrite?.actions.length === 2, 'evaluation-rewrite-offered-read');
     requireJourney(JSON.stringify(rewriteOffered.rewrite.actions) === JSON.stringify([['prepare-rewrite', '按我的修改重新生成', false], ['preview-rewrite', '先看计划', false]]) && rewriteOffered.rewrite.reason === null &&
       JSON.stringify(rewriteOffered.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']), 'evaluation-rewrite-offered-words', rewriteOffered.rewrite);
@@ -3703,7 +3705,9 @@ async function main() {
       JSON.stringify(wordRestoredAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-restore-no-new-capture-or-downstream');
 
     at('launch-reference-preview');
-    await close(); await launch({ pickerPath: SAMPLE1_PATH });
+    const launchReferencePath = resolve(runRoot, 'sample1-launch-reference.txt');
+    await writeFile(launchReferencePath, await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 9, from: 0, to: 5 }), 'utf8');
+    await close(); await launch({ pickerPath: launchReferencePath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'launch-reference-ready');
     await pointerClick(renderer, waitFor, SIDEBAR.destination('knowledge'), 'launch-reference-knowledge');
     await pointerClick(renderer, waitFor, 'button[data-knowledge-tab="library"]', 'launch-reference-library');

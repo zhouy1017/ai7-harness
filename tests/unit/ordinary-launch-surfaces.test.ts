@@ -1,5 +1,5 @@
 import { setLibraryDecision } from '../support/library-materials.js';
-import { cp } from 'node:fs/promises';
+import { cp, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ import { LEDGER_TASK_LAUNCH_KINDS, type LedgerTaskLaunchOperation } from '../../
 import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, sample1Path } from '../support/sample1-baseline.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { beginRewriteAsJ11, EVALUATION_REWRITE_FIXTURE_IDENTITY } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { CUSTOM_DIMENSION_TITLE, CUSTOM_DIMENSION_TEMPLATE } from '../support/custom-analysis.js';
@@ -48,7 +48,9 @@ async function seed(operation: LedgerTaskLaunchOperation) {
     const dimensionId = operation === 'launchCustomAnalysis' ? store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE }).dimensions[0]!.dimensionId : '';
     let materialIds: string[] = [];
     if (operation === 'launchInitialEvaluation' || operation === 'launchReadersReport') {
-      const preview = await store.previewLibraryMaterial(sample1Path(roots.codeRoot));
+      const referencePath = join(roots.inputRoot, 'sample1-launch-reference.txt');
+      await writeFile(referencePath, store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).filter(block => block.kind === 'paragraph').slice(0, 2).map(block => block.text).join('\n\n'));
+      const preview = await store.previewLibraryMaterial(referencePath);
       const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: 'sample1 任务参考', kind: 'document' });
       setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: book.bookId } } });
       setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
