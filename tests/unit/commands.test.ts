@@ -24,6 +24,8 @@ import {
 import { IME_DEFERRED_ANNOUNCEMENT } from '../../src/renderer/commands-labels.js';
 import { SHELL_BOOK_SECTIONS } from '../../src/shared/preferences.js';
 import { BOOK_SECTION_COMMANDS } from '../../src/renderer/commands.js';
+import { mountKeyboardSettings } from '../../src/renderer/keyboard-settings.js';
+import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 
 // Unit suite for the command registry (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-004, KEY-006, KEY-011).
 
@@ -379,5 +381,25 @@ describe('dispatch', () => {
     dispatcher.register({ 'nav.library': ran });
     dispatcher.handle({ ...press('win32', 'Digit2', { alt: true }), repeat: true });
     expect(ran).not.toHaveBeenCalled();
+  });
+});
+
+describe('设置 › 键盘 and the 批注栏 (Issue #1523)', () => {
+  it('lists 上一条 / 下一条待处理 as rebindable commands and the card keys A and R as fixed keys of a focused card', async () => {
+    const uninstall = installMiniDom();
+    try {
+      vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows' });
+      vi.stubGlobal('window', { localStorage: { getItem: () => null }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+      const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+      mountKeyboardSettings({
+        root: root as unknown as HTMLElement,
+        api: { getPreferences: async () => ({ values: { 'keyboard.bindings': {} } }), savePreference: vi.fn() } as unknown as Parameters<typeof mountKeyboardSettings>[0]['api'],
+        setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, onChanged: vi.fn(),
+      });
+      for (let turn = 0; turn < 4; turn++) await Promise.resolve();
+      expect(root.querySelectorAll('[data-triage-key]').map((item) => item.textContent)).toEqual(['接受（卡片有焦点时） · A', '拒绝（卡片有焦点时） · R']);
+      for (const id of ['view.previousPending', 'view.nextPending']) expect(root.querySelector(`[data-keyboard-command="${id}"]`)).not.toBeNull();
+      expect(effectiveSequence('view.nextPending', {}, 'win32')).toBe('Alt+ArrowDown');
+    } finally { vi.unstubAllGlobals(); uninstall(); }
   });
 });

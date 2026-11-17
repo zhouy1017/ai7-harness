@@ -33,6 +33,7 @@ export const COMMAND_NAMES = {
   'nav.settings': '设置', 'nav.book.findings': '发现', 'nav.book.history': '历史与恢复', 'view.toggleSidebar': '切换侧栏',
   'nav.back': '返回', 'search.find': '查找', 'search.next': '下一组查找结果', 'search.previous': '上一组查找结果',
   'view.focusManuscript': '聚焦稿件', 'view.openTasks': '查看任务', 'view.focusMode': '专注模式', 'view.comments': '批注栏',
+  'view.previousPending': '上一条待处理', 'view.nextPending': '下一条待处理',
   'edit.save': '保存', 'edit.undo': '撤销', 'edit.redo': '重做', 'edit.replace': '替换', 'edit.previousWindow': '上一页', 'edit.nextWindow': '下一页',
 } as const;
 

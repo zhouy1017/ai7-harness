@@ -24,7 +24,7 @@ const children = vi.hoisted(() => ({
   destroyed: [] as string[],
   editors: [] as unknown[],
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
-  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn> }>,
+  marks: [] as Array<{ recordAndApplyEditorRevision: ReturnType<typeof vi.fn>; bookPendingChanged: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   writingStates: [] as Array<(state: { underWay: boolean; drafted: number }) => void>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
@@ -71,6 +71,7 @@ vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
       selectionSpan: vi.fn(), composeProcedures: vi.fn(), openMark: vi.fn(async () => undefined), holdsFloating: () => false,
       ownsScroll: () => false, refreshComments: vi.fn(), reanchor: vi.fn(), destroy: () => children.destroyed.push('marks'),
       quickRevise: vi.fn(() => false), revealRevision: vi.fn(async () => undefined), recordAndApplyEditorRevision: vi.fn(async () => 'mark-applied'),
+      stepPending: vi.fn(async () => undefined), bookPendingChanged: vi.fn(),
     };
     children.marks.push(surface);
     return surface;
@@ -482,6 +483,25 @@ describe('the Manuscript screen lifecycle', () => {
     resize();
     expect([...app.screen.querySelectorAll<HTMLButtonElement>('.window-actions button')].map((item) => [item.hidden, item.disabled]))
       .toEqual([[false, false], [false, false]]);
+    app.showing?.destroy();
+  });
+
+  it('badges 批注 with the Book\'s pending marks from the rail, 2000+ once the list stops there, and never before it was read (#1523)', async () => {
+    const app = shell();
+    app.open(windowOf('book-one'));
+    const badge = app.screen.querySelector<HTMLElement>('[data-edge-entry="comments"] .edge-badge')!;
+    expect(badge.hidden).toBe(true);
+    const rail = (count: number, marksTruncated: boolean): ManuscriptRailProjection => ({ manuscriptId: 'm', branchId: 'b', revisionId: 'r', journalSequence: 1,
+      totalCharacters: 100, chapters: [], chaptersTruncated: false, uncovered: null, marksTruncated,
+      marks: Array.from({ length: count }, (_, index) => ({ kind: 'annotation' as const, blockId: `blk_${index}`, proportion: index / 100 })) });
+    children.rails.at(-1)!.onRead!(rail(3, false));
+    expect([badge.hidden, badge.dataset['count']]).toEqual([false, '3']);
+    expect(children.marks.at(-1)!.bookPendingChanged).toHaveBeenCalled();
+    children.rails.at(-1)!.onRead!(rail(2000, true));
+    expect(badge.dataset['count']).toBe('2000+');
+    expect(app.screen.querySelector('[data-edge-entry="comments"]')!.getAttribute('aria-label')).toBe('批注 · 2000+');
+    children.rails.at(-1)!.onRead!(rail(0, false));
+    expect(badge.hidden).toBe(true);
     app.showing?.destroy();
   });
 
