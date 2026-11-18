@@ -2,7 +2,7 @@ import type { NavigationCheckpoint } from './navigation-generation.js';
 import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection, TaskOverviewItemProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
-import { ATTENTION_NOTICE_WORDS, attentionKind, attentionLabel, attentionManyLabel, awaySummaryLabel, completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
+import { ATTENTION_NOTICE_WORDS, attentionKind, attentionLabel, attentionManyLabel, awaySummaryLabel, completionLabel, isCompletion, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
 export const QUIET_NOTICE_MS = 2_500;
 /** The key of 设置 › 通知's 「正在看本书时自动显示结果」: the editor's own switch on this device, on unless turned off. */
@@ -161,7 +161,8 @@ export function createNotificationObserver(options: {
       void options.api.notify({ bookId: item.book.bookId, eventId: item.itemId }).catch(() => {
         // Notifications are optional; durable attention and the authoritative record remain available.
       });
-      const kind = item.group === 'recent' ? 'completed' : attentionKind(item) === null ? null : 'attention';
+      // A failed dialogue stays among the tasks that need the editor; a cancelled task is no completion to say.
+      const kind = attentionKind(item) !== null ? 'attention' : isCompletion(item) ? 'completed' : null;
       if (kind === null) continue;
       if (!options.focused()) options.away?.(item, kind);
       else if (kind === 'completed') options.completed(item);
@@ -189,6 +190,8 @@ export function mountAttentionNotice(open: (items: ReadonlyArray<GlobalAttention
   const needing = new Map<string, GlobalAttentionItemProjection>();
   let finished: ReadonlyArray<GlobalAttentionItemProjection> = [];
   let summary = false;
+  /** What the return summary counts: only the tasks that stopped while the window was away. */
+  let summaryIds = new Set<string>();
   const host = document.createElement('aside');
   host.className = 'attention-toast';
   host.dataset['attentionToast'] = '';
@@ -208,6 +211,8 @@ export function mountAttentionNotice(open: (items: ReadonlyArray<GlobalAttention
   close.title = ATTENTION_NOTICE_WORDS.close;
   close.textContent = '×';
   host.append(text, go, close);
+  // A press on its buttons must not take the focus from the page: the caret stays where the editor left it.
+  host.addEventListener('mousedown', (event) => event.preventDefault());
   const write = (node: HTMLElement, value: string): void => { if (node.textContent !== value) node.textContent = value; };
   const entries = (): GlobalAttentionItemProjection[] => [...finished, ...needing.values()];
   const clear = (): void => { needing.clear(); finished = []; summary = false; paint(); };
@@ -215,8 +220,9 @@ export function mountAttentionNotice(open: (items: ReadonlyArray<GlobalAttention
     const waiting = [...needing.values()];
     if (waiting.length + finished.length === 0) { host.hidden = true; return; }
     if (!host.isConnected) document.body.append(host);
-    if (summary) {
-      write(text, awaySummaryLabel(finished.length, waiting.length));
+    const counted = waiting.filter((item) => summaryIds.has(item.itemId)).length;
+    if (summary && finished.length + counted > 0) {
+      write(text, awaySummaryLabel(finished.length, counted));
       write(go, waiting.length > 0 ? ATTENTION_NOTICE_WORDS.go : finished.length === 1 ? QUIET_NOTICE_WORDS.view : ATTENTION_NOTICE_WORDS.view);
     } else {
       write(text, waiting.length === 1 ? attentionLabel(waiting[0]!) : attentionManyLabel(waiting.length));
@@ -228,8 +234,9 @@ export function mountAttentionNotice(open: (items: ReadonlyArray<GlobalAttention
   go.addEventListener('click', () => { const items = entries(); clear(); open(items); });
   close.addEventListener('click', clear);
   return {
-    raise(item) { needing.set(item.itemId, item); paint(); },
+    raise(item) { needing.set(item.itemId, item); summary = false; paint(); },
     summarize(done, waiting) {
+      summaryIds = new Set(waiting.map((item) => item.itemId));
       for (const item of waiting) needing.set(item.itemId, item);
       finished = [...finished, ...done];
       summary = true;

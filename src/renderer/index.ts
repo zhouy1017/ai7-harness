@@ -33,6 +33,7 @@ import { hasErrorCode, rendererErrorCode, rendererErrorData, rendererErrorMessag
 import { preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type { AgentWorkspacePromotionProjection, BaselineAnalysisGoal, BaselineAnalysisWireProjection as BaselineAnalysisProjection, BookTaskItemProjection, DefaultExecutionRuleReference, QuickStartBaselineAnalysisWireResult as QuickStartBaselineAnalysisResult, BaselineAnalysisUpdateRequest, BookManuscriptAnchorProjection, BookRecordPresentation, BookSummaryPageProjection, BookWorkbenchRoute, BookWorkOverviewProjection, ContinueImportProjection, ForegroundExecutionBoundaryProjection, GlobalAttentionItemProjection, ImportCommitProjection, ManuscriptReimportCommitProjection, ImportDraftRecoveryProjection, ImportStartupProjection, HistoricalRevisionProjection, ManuscriptWindowProjection, PriorWorkItemProjection, RecoveryComparisonProjection, RecoveryRestorationProjection, RecoverySelection, RecoveryWindowProjection, ResolvedBookWorkbenchRoute, ReviewBeforeImportProjection, ReviewBeforeSourceImportProjection, ServiceWireJobProjection as ServiceJobProjection, StagedImportProjection, StartupProjection, TaskAuthorizationProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import { mountTaskNotices } from './task-notices.js';
+import { finishedResultRoute } from './result-destination.js';
 
 import { J03_TASK_GOAL } from '../shared/protocol.js';
 
@@ -165,7 +166,11 @@ const taskDrawer = mountTaskDrawer({
   openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
-  openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
+  openTaskResult: (entry, backToPanel) => {
+    const route = finishedResultRoute({ result: entry.result, attention: entry.item }, 'panel');
+    if (route.via === 'page') void leaveThen(() => openGlobalAttentionTarget(route.target));
+    else openTaskResult(entry, backToPanel);
+  },
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
   // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
@@ -692,7 +697,7 @@ commandDispatcher.register({
 const commandPalette = createCommandPalette({
   api: api, execute: (id) => commandDispatcher.execute(id),
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
-  openResult: (item) => void leaveThen(() => openResult(item)),
+  openResult: (item) => void leaveThen(() => openResult(item, 'palette')),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
   openHelp: () => { if (!authorityInterrupted) void leaveThen(async () => renderHelp()); },
   beforeStart: settleScreen,

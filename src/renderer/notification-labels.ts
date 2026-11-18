@@ -66,12 +66,12 @@ export function completionLabel(item: GlobalAttentionItemProjection): string {
 export type AttentionKind = 'failed' | 'budget' | 'quota' | 'question' | 'unconfirmed';
 const ATTENTION_KINDS: Partial<Record<GlobalAttentionStateKey, AttentionKind>> = {
   'analysis-failed': 'failed', 'analysis-interrupted': 'failed', 'analysis-blocked': 'failed', 'analysis-orphaned': 'failed',
-  'review-failed': 'failed', 'review-stopped': 'failed',
+  'review-failed': 'failed', 'review-stopped': 'failed', 'dialogue-failed': 'failed', 'dialogue-interrupted': 'failed',
   'analysis-budget-reached': 'budget', 'analysis-account-limit': 'quota', 'analysis-clarification': 'question',
   'analysis-outcome-unknown': 'unconfirmed', 'analysis-outcome-unconfirmed': 'unconfirmed',
 };
 export function attentionKind(item: GlobalAttentionItemProjection): AttentionKind | null {
-  if (item.book.bookId === null || (item.group !== 'exceptions' && item.group !== 'decisions')) return null;
+  if (item.book.bookId === null || item.group === 'active') return null;
   return ATTENTION_KINDS[item.state] ?? null;
 }
 
@@ -138,6 +138,12 @@ function recordKey(target: GlobalAttentionTarget): string {
 }
 
 /** A Task Outcome can stand alongside unresolved external effects; that is still actionable, not an ordinary completion. */
+/** A task the editor cancelled or stopped is in 最近完成 as it is in the 任务 panel, but it is not a completion to say. */
+const NOT_COMPLETIONS: ReadonlySet<GlobalAttentionStateKey> = new Set(['analysis-cancelled', 'dialogue-stopped']);
+export function isCompletion(item: GlobalAttentionItemProjection): boolean {
+  return item.group === 'recent' && attentionKind(item) === null && !NOT_COMPLETIONS.has(item.state);
+}
+
 export function isOrdinaryOutcome(item: GlobalAttentionItemProjection, projection: GlobalAttentionProjection): boolean {
   return item.group === 'recent' && !projection.groups.some((group) =>
     (group.key === 'exceptions' || group.key === 'decisions') && group.items.some((attention) =>

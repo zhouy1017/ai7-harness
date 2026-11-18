@@ -667,3 +667,72 @@ describe('the notices of tasks as the window leaves and returns (#1528)', () => 
     } finally { page.done(); }
   });
 });
+
+describe('review round 1 of #1528', () => {
+  it('a failed or interrupted dialogue is a task that needs the editor, never a completion; a cancelled one says nothing', () => {
+    const completed = vi.fn(); const attention = vi.fn();
+    const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed, attention, startedAt: START });
+    const dialogue = (state: GlobalAttentionItemProjection['state'], itemId: string) => item({ itemId, group: 'recent', state, object: { kind: 'dialogue', question: null },
+      target: { kind: 'dialogue', bookId: 'synthetic-book', dialogueId: itemId } });
+    const failed = dialogue('dialogue-failed', 'd1'); const interrupted = dialogue('dialogue-interrupted', 'd2');
+    observe(projection([failed, interrupted, dialogue('dialogue-stopped', 'd3'), item({ itemId: 'cancelled', group: 'recent', state: 'analysis-cancelled', object: { kind: 'task', taskKind: 'initial-evaluation' },
+      target: { kind: 'task-plan', bookId: 'synthetic-book', taskKind: 'initial-evaluation', ref: 'cancelled' } })]));
+    expect(attention.mock.calls.map(([entry]) => entry.itemId)).toEqual(['d1', 'd2']);
+    expect(completed).not.toHaveBeenCalled();
+    expect(attentionLabel(failed)).toBe('《Synthetic private title》对话没有完成');
+  });
+
+  it('a press on the notice takes no focus from the page', () => {
+    const restore = installMiniDom();
+    try {
+      const notice = mountAttentionNotice(vi.fn());
+      notice.raise(item());
+      const press = { type: 'mousedown', defaultPrevented: false };
+      miniDocument.body.querySelector('[data-attention-toast]')!.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+    } finally { restore(); }
+  });
+
+  it('the return summary counts only the tasks that stopped while the window was away', () => {
+    const restore = installMiniDom();
+    try {
+      const notice = mountAttentionNotice(vi.fn());
+      notice.raise(item({ itemId: 'before' }));
+      notice.summarize([], [item({ itemId: 'away', group: 'exceptions', state: 'analysis-failed' })]);
+      const host = miniDocument.body.querySelector('[data-attention-toast]')!;
+      expect(host.children[0]?.textContent).toBe('你不在时，有 1 项任务需要你处理');
+      notice.raise(item({ itemId: 'after' }));
+      expect(host.children[0]?.textContent).toBe('有 3 项任务需要你处理');
+    } finally { restore(); }
+  });
+});
+
+describe('the first reading after the window returns (#1528)', () => {
+  it('says a completion that arrives in it in the one summary, not as a second notice or an automatic window', () => {
+    const restore = installMiniDom();
+    let focused = false;
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal('window', { addEventListener: (name: string, run: () => void) => { listeners.set(name, run); } });
+    vi.stubGlobal('localStorage', { getItem: () => null });
+    Object.assign(miniDocument, { hasFocus: () => focused });
+    let reading: (value: { kind: 'projection'; projection: GlobalAttentionProjection }) => void = () => {};
+    const openWindow = vi.fn();
+    try {
+      mountTaskNotices({
+        api: { notify: vi.fn(async () => {}), inspectTaskOverview: vi.fn(async () => composeTaskOverview(projection([]), 2, () => null)) },
+        reader: { subscribe: (next: typeof reading) => { reading = next; return () => {}; } } as never,
+        screen: miniDocument.createElement('main') as unknown as HTMLElement, drawerView: () => null,
+        openResult: vi.fn(), openAttention: vi.fn(), openList: vi.fn(), openWindow,
+      });
+      const later = (change: Partial<GlobalAttentionItemProjection>) => item({ at: new Date(Date.now() + 60_000).toISOString(), ...change });
+      const failed = later({ itemId: 'failed', state: 'analysis-failed', group: 'exceptions' });
+      reading({ kind: 'projection', projection: projection([failed]) });
+      focused = true; listeners.get('focus')?.();
+      const done = later({ itemId: 'done', group: 'recent', state: 'analysis-completed', target: { kind: 'analysis', bookId: 'synthetic-book', taskIntentId: 'another-task' } });
+      reading({ kind: 'projection', projection: projection([failed, done]) });
+      expect(miniDocument.body.querySelector('[data-attention-toast]')?.children[0]?.textContent).toBe('你不在时，1 项任务已完成，1 项需要你处理');
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(openWindow).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); delete (miniDocument as unknown as Record<string, unknown>)['hasFocus']; restore(); }
+  });
+});

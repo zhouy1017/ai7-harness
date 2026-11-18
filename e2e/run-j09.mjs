@@ -1,6 +1,6 @@
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
-import { attentionNoticeHolds, READ_CARET } from './attention-notice.mjs';
+import { attentionNoticeClearsMenu, attentionNoticeHolds, pressQuietResult, READ_CARET } from './attention-notice.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -1655,7 +1655,7 @@ async function main() {
     try {
       await renderer.evaluate(`(() => { window.__j09Screens = []; const screen = document.querySelector('#screen'); new MutationObserver(() => { const now = screen.dataset.screen; if (now !== window.__j09Screens.at(-1)) window.__j09Screens.push(now); }).observe(screen, { attributes: true, attributeFilter: ['data-screen'] }); return true; })()`);
       await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
-      await waitFor(renderer, `(() => { const toast = document.querySelector('[data-toast]'); const view = toast?.querySelector('button'); if (!(toast instanceof HTMLElement) || toast.hidden || toast.dataset.tone !== 'analysis-completed' || !(view instanceof HTMLButtonElement) || view.textContent !== '查看结果') return false; view.click(); return true; })()`, 'idle-result-notice', 180_000);
+      await pressQuietResult(renderer, waitFor, 'idle-result-notice');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'idle-result-opened', 60_000);
       const visited = await renderer.evaluate('window.__j09Screens');
       requireJourney(Array.isArray(visited) && !visited.includes('task-overview') && !visited.includes('global-attention') && visited.at(-1) === 'book-analysis', 'idle-result-in-place', visited);
@@ -1784,25 +1784,34 @@ async function main() {
     try {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'model-question-manuscript-entry');
       await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'model-question-manuscript');
-      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'model-question-caret');
-      const caret = await renderer.evaluate(READ_CARET);
-      requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-placed', caret);
-      // Returning to the window says once what the earlier stages left; the editor closes that summary, so the next notice is the question's.
+      // The editor returned to the window: a summary of what the earlier stages left may be showing. It is closed first, so that
+      // the next notice is the question's, and so that the caret below is read after everything that could move it.
       if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
         await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'model-question-summary-close');
-        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'model-question-summary-closed');
       }
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden !== false`, 'model-question-no-summary');
+      const place = () => pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'model-question-caret');
+      await place();
+      let caret = await renderer.evaluate(READ_CARET);
+      requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-placed', caret);
       await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
       await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'model-question-asked', 120_000);
       const asked = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.flatMap((group) => group.items).find((entry) => entry.book.bookId === ${JSON.stringify(questionBook)} && entry.state === 'analysis-clarification')?.book.title ?? null)`);
       requireJourney(typeof asked === 'string', 'model-question-asked-item');
       await attentionNoticeHolds(renderer, waitFor, requireJourney, 'model-question-notice', `《${asked}》分析在等你回答`, caret);
-      // 去处理 opens the question where it is answered, and the notice goes with it.
-      await pointerClick(renderer, waitFor, '[data-attention-toast-action]', 'model-question-notice-go');
-      await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question') && document.querySelector('[data-attention-toast]')?.hidden===true`, 'model-question-notice-opened', 30_000);
+      // Over an open menu at 1008 px the notice covers none of its controls (it stands below menus and sheets).
+      await attentionNoticeClearsMenu(renderer, waitFor, requireJourney, 'model-question-notice-menu');
+      await place();
+      caret = await renderer.evaluate(READ_CARET);
+      requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-replaced', caret);
+      // Closing it with the mouse takes nothing from the page: the caret and the focus stay.
+      await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'model-question-notice-close');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'model-question-notice-closed');
+      requireJourney(JSON.stringify(await renderer.evaluate(READ_CARET)) === JSON.stringify(caret), 'model-question-notice-close-keeps-caret');
     } finally {
       await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
     }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'model-question-analysis-return');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='awaiting-clarification'`, 'model-question-waits', 120_000);
     const questionRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
     const questionTask = questionRun.taskIntent.taskIntentId;

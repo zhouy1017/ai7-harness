@@ -21,6 +21,7 @@ import { type AnalysisTabId } from './baseline-analysis-card.js';
 import { type RecoveryReturnContext } from './import-review.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { taskOverviewApi } from './task-overview-api.js';
+import { finishedResultRoute, type ResultEntrance } from './result-destination.js';
 import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
 
 interface Options {
@@ -167,19 +168,13 @@ async function openResultWindow(item: TaskOverviewItemProjection): Promise<void>
   else openOverviewTask(item, 'run');
 }
 /**
- * 查看结果 (#1528, plan #1516 §5): the result itself, in its Book — the review at that run, the analysis at that revision, the
- * answer, the evaluation, the writing's manuscript — never by way of the global 任务 page, and in place while the editor is already
- * in that Book. A task whose result has no page of its own is read in the result window.
+ * 查看结果 (#1528, plan #1516 §5): the result itself, in its Book, never by way of the global 任务 page, and in place while the
+ * editor is already in that Book. Which page, and when the result window still stands in for it, is `finishedResultRoute`'s.
  */
-async function openResult(item: TaskOverviewItemProjection): Promise<void> {
-  const bookId = item.bookId;
-  const { result } = item;
-  if (!bookId) return;
-  if (result?.kind === 'analysis-revision') await openGlobalAttentionTarget({ kind: 'analysis', bookId, taskIntentId: item.plan?.ref ?? item.itemId }, result.revisionId);
-  else if (result?.kind === 'review-run') await openGlobalAttentionTarget({ kind: 'review', bookId, reviewRunId: result.reviewRunId });
-  else if (result?.kind === 'dialogue') await openGlobalAttentionTarget({ kind: 'dialogue', bookId, dialogueId: result.dialogueId });
-  else if (item.attention.object.kind === 'task' && item.plan && item.plan.kind !== 'fixed-task') await openGlobalAttentionTarget({ kind: 'task-plan', bookId, taskKind: item.plan.kind, ref: null });
-  else await openResultWindow(item);
+async function openResult(item: TaskOverviewItemProjection, from: ResultEntrance = 'toast'): Promise<void> {
+  const route = finishedResultRoute(item, from);
+  if (route.via === 'page') await openGlobalAttentionTarget(route.target, route.analysisRevisionId);
+  else if (route.via === 'window') await openResultWindow(item);
 }
 function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
@@ -190,7 +185,7 @@ function renderTaskOverview(focusItemId?: string): void {
     openTarget: openOverviewTask,
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
-    openResult: (item) => void openResult(item), closeDrawer: () => taskDrawer.close(true),
+    openResult: (item) => void openResult(item, 'overview'), closeDrawer: () => taskDrawer.close(true),
     configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
       const current = navigation.route();
       if (kind === 'review') renderBookReview(bookId, route.bookTitle);
@@ -219,7 +214,7 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
     const tasks = await api.inspectTaskOverview();
     if (!navigationRoute.isCurrent()) return;
     const task = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
-    if (task) { if (task.state === 'completed') await openResultWindow(task); else openOverviewTask(task); return; }
+    if (task) { if (task.state === 'completed') await openResult(task, 'attention'); else openOverviewTask(task); return; }
   }
   await openGlobalAttentionTarget(item.target);
 }

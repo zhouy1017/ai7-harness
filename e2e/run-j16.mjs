@@ -1026,6 +1026,12 @@ async function main() {
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
 
+    // The in-Book 发起任务 sheet still opens and closes; it no longer carries the result-window switch (#1528: it is in 设置 › 通知).
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-overview-start]')?.disabled===false`, 'panel-sheet-ready');
+    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('#task-drawer .task-overview-sheet'); return sheet instanceof HTMLDialogElement && sheet.open && sheet.querySelector('[data-task-overview-auto-result]') === null; })()`, 'panel-sheet-without-result-switch');
+    await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
+
     at('panel-prepare');
     // The primary action prepares and starts in the panel, with no plan drawer.
     await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-direct-start');
