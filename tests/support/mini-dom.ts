@@ -236,6 +236,10 @@ export class MiniElement {
   }
   focus(): void { miniDocument.activeElement = this; }
   scrollIntoView(): void { /* nothing lays out */ }
+  /** Nothing lays out: every box is empty at the origin unless a test gives it a place. */
+  getBoundingClientRect(): { top: number; bottom: number; left: number; right: number; width: number; height: number } {
+    return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
+  }
 }
 
 export class MiniButton extends MiniElement {}

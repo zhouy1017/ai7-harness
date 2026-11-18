@@ -2944,7 +2944,11 @@ async function main() {
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===false`, `review-synthesis-${viewport}-access-reset-closed`);
         const citedFinding = reviewed.run.findings.find(finding => finding.findingId === synthesisEvidence.findingId);
         const hiddenSeverity = citedFinding?.severity === 'note' ? 'must' : 'note';
-        await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        // 审阅 keeps its filters for the Book across the sidebar return (#1525), so the second form may find the pill already pressed;
+        // pressing it again would only re-read the page under the steps that follow.
+        if (await renderer.evaluate(`document.querySelector('[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]')?.getAttribute('aria-pressed')!=='true'`)) {
+          await pointerClick(renderer, waitFor, `[data-review-filter="severity"] [data-filter-value="${hiddenSeverity}"]`, `review-synthesis-${viewport}-filter-away`);
+        }
         await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${synthesisEvidence.findingId}"]')===null`, `review-synthesis-${viewport}-filtered-citation`);
         await pointerClick(renderer, waitFor, 'details.review-synthesis > summary', `review-synthesis-${viewport}-expand`);
         await waitFor(renderer, `document.querySelector('details.review-synthesis').open===true`, `review-synthesis-${viewport}-expanded`);
@@ -3121,7 +3125,9 @@ async function main() {
           await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
           await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
         } else {
-          const menuReach = await renderer.evaluate(`(() => {const button=document.querySelector('.review-header-export [data-export-format-action="markdown"]'),r=button.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2),panel=button.closest('.export-menu-body')?.getBoundingClientRect(),summary=document.querySelector('.review-header-export > summary').getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollY,left:r.left,top:r.top,right:r.right,bottom:r.bottom,hit:hit?.tagName+'.'+hit?.className,contains:button.contains(hit),disabled:button.disabled,panel:panel&&{left:panel.left,top:panel.top,right:panel.right,bottom:panel.bottom},summary:{left:summary.left,top:summary.top,right:summary.right,bottom:summary.bottom}};})()`);
+          // The menu controls place the panel in the toggle task after the click: measure once it has settled, as pointerClick does.
+          await renderer.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+          const menuReach = await renderer.evaluate(`(() => {const button=document.querySelector('.review-header-export [data-export-format-action="markdown"]'),r=button.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2),panel=button.closest('.export-menu-body')?.getBoundingClientRect(),summary=document.querySelector('.review-header-export > summary').getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollY,left:r.left,top:r.top,right:r.right,bottom:r.bottom,hit:hit?.tagName+'.'+hit?.className,contains:button.contains(hit),disabled:button.disabled,panel:panel&&{left:panel.left,top:panel.top,right:panel.right,bottom:panel.bottom},summary:{left:summary.left,top:summary.top,right:summary.right,bottom:summary.bottom},details:(box=>({left:box.left,right:box.right,width:box.width,display:getComputedStyle(document.querySelector('.review-header-export')).display}))(document.querySelector('.review-header-export').getBoundingClientRect()),heading:(box=>({left:box.left,right:box.right,width:box.width}))(document.querySelector('.review-run-heading').getBoundingClientRect()),root:{scrollWidth:document.documentElement.scrollWidth},style:(panel=>{const c=getComputedStyle(panel),op=panel.offsetParent?.getBoundingClientRect();return {position:c.position,left:c.left,right:c.right,top:c.top,transform:c.transform,width:c.width,parent:panel.offsetParent?.className,parentRect:op&&{left:op.left,right:op.right},animations:panel.getAnimations().length,className:panel.className,tag:panel.parentElement.tagName};})(document.querySelector('.review-header-export .export-menu-body, .review-header-export .ui-menu-panel'))};})()`);
           requireJourney(menuReach.width > 0 && menuReach.left >= 0 && menuReach.top >= 0 && menuReach.right <= menuReach.width && menuReach.bottom <= menuReach.height && menuReach.contains && !menuReach.disabled, `report-export-menu-reachable-${form}`, menuReach);
           await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-close-${form}`);
           await waitFor(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
@@ -3262,6 +3268,63 @@ async function main() {
     // The store commits before the renderer finishes its Apply refresh. As in J-05, wait for the
     // reopened suggestion before closing this browser, so the transition cannot race an active write.
     await waitFor(renderer, `document.querySelector('${overlapCard} [data-mark-state]')?.textContent==='待你处理' && document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${overlapFinding.markId}"]')?.dataset.markStatus==='open'`, 'overlap-reversal-renderer-settled');
+
+    // #1506: 生成统合总结 on the overlap Book, whose summary its fixture leaves 暂缺. The offer row is clicked for real at both
+    // sizes; the one summary-only request is the stage's own bytes, so this fixture answers it as it answered the stage
+    // (FIXTURE_MISMATCH): the Run reads 暂缺 again, its findings unchanged and the offer back. Completion, the summary's model
+    // mark and its travel through export and merge are proven by tests/service/review-synthesis-only.test.ts.
+    at('review-synthesis-only');
+    await openReviewDestination(renderer, 'synthesis-only-review');
+    if (await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open'`))
+      await pointerClick(renderer, waitFor, '[data-task-drawer-control="close"]', 'synthesis-only-close-drawer');
+    await waitFor(renderer, `document.querySelector('details.review-synthesis')?.dataset.synthesisState==='missing' && document.querySelector('.review-synthesis-generate [data-review-action="generate-synthesis"]')!==null`, 'synthesis-only-offered');
+    const synthesisOnlyBefore = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(synthesisOnlyBefore.reviewRunId === overlapReviewed.run.reviewRunId && synthesisOnlyBefore.synthesis?.canGenerate === true &&
+      synthesisOnlyBefore.synthesis.summary === null && synthesisOnlyBefore.findings.length === 1, 'synthesis-only-eligible', { synthesis: synthesisOnlyBefore.synthesis?.state });
+    const synthesisOnlyRequests = () => {
+      const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const row = db.prepare("SELECT json_extract(summary_json, '$.attempt.category.task.taskIntentId') task FROM review_run_synthesis WHERE review_run_id=?").get(overlapReviewed.run.reviewRunId);
+        if (typeof row?.task !== 'string') return { task: null, runs: 0, sent: null, events: [] };
+        // The fixture route records no request admission; the Run's own outcome counts every request it made.
+        const runs = db.prepare('SELECT count(*) n FROM analysis_run_records WHERE task_intent_id=?').get(row.task).n;
+        const outcome = db.prepare('SELECT canonical_json FROM analysis_task_outcomes WHERE task_intent_id=?').get(row.task);
+        const stages = typeof outcome?.canonical_json === 'string' ? JSON.parse(outcome.canonical_json).report?.usagePerStage : undefined;
+        const sent = stages === undefined || stages === null ? null : Object.values(stages).reduce((sum, stage) => sum + (typeof stage?.requests === 'number' ? stage.requests : 0), 0);
+        const events = db.prepare(`SELECT state FROM review_run_category_events WHERE review_run_id=? AND category_id='run-synthesis'
+          AND json_extract(canonical_json, '$.synthesisAttempt')=? ORDER BY sequence`).all(overlapReviewed.run.reviewRunId, row.task).map(entry => entry.state);
+        return { task: row.task, runs: Number(runs), sent, events };
+      } finally { db.close(); }
+    };
+    requireJourney(synthesisOnlyRequests().task === null, 'synthesis-only-none-before');
+    const synthesisOnlyViewport = await renderer.evaluate(`({width: innerWidth, height: innerHeight})`);
+    try {
+      for (const [width, height, viewport] of [[1280, 800, 'wide'], [1008, 681, 'gate']]) {
+        at(`review-synthesis-only-${viewport}`);
+        await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height}`, `synthesis-only-${viewport}-viewport`);
+        await pointerClick(renderer, waitFor, '.review-synthesis-generate details.dispatch-chooser > summary', `synthesis-only-${viewport}-chooser-open`);
+        await waitFor(renderer, `document.querySelector('.review-synthesis-generate details.dispatch-chooser')?.open===true`, `synthesis-only-${viewport}-chooser-opened`);
+        await assertRenderer(renderer, `(() => {const panel=document.querySelector('.review-synthesis-generate .dispatch-chooser-panel');if(panel.hidden)return true;const r=panel.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`, `synthesis-only-${viewport}-chooser-in-window`);
+        await pointerClick(renderer, waitFor, '.review-synthesis-generate details.dispatch-chooser > summary', `synthesis-only-${viewport}-chooser-close`);
+        await waitFor(renderer, `document.querySelector('.review-synthesis-generate details.dispatch-chooser')?.open===false`, `synthesis-only-${viewport}-chooser-closed`);
+        await assertRenderer(renderer, `(() => {const row=document.querySelector('.review-synthesis-generate'),r=row.getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=innerWidth&&!/rvf_|blk_|[0-9a-f]{8}-[0-9a-f]{4}-/u.test(row.textContent);})()`, `synthesis-only-${viewport}-row-fits`);
+      }
+      // The one request, at the gate size the hosted runner uses.
+      await pointerClick(renderer, waitFor, '.review-synthesis-generate [data-review-action="generate-synthesis"]', 'synthesis-only-generate');
+      await waitFor(renderer, `(() => {const state=document.querySelector('details.review-synthesis')?.dataset.synthesisState;return state==='missing' && document.querySelector('.review-synthesis-generate [data-review-action="generate-synthesis"]')?.disabled===false;})()`, 'synthesis-only-settled', 120_000);
+      await waitFor(renderer, `(async () => (await window.ai7.inspectReviewWorkspace()).run?.state==='settled')()`, 'synthesis-only-run-settled', 60_000);
+    } finally {
+      await renderer.send('Emulation.clearDeviceMetricsOverride');
+      await waitFor(renderer, `innerWidth===${synthesisOnlyViewport.width} && innerHeight===${synthesisOnlyViewport.height}`, 'synthesis-only-native-viewport');
+    }
+    const synthesisOnlySent = synthesisOnlyRequests();
+    const synthesisOnlyAfter = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(synthesisOnlySent.task !== null && synthesisOnlySent.runs === 1 && synthesisOnlySent.sent === 1 &&
+      synthesisOnlySent.events.filter(state => state === 'dispatched').length === 1 && ['materialized', 'failed'].includes(synthesisOnlySent.events.at(-1)),
+      'synthesis-only-sent-once', synthesisOnlySent);
+    requireJourney(synthesisOnlyAfter.synthesis?.state === 'missing' && synthesisOnlyAfter.synthesis.canGenerate === true && synthesisOnlyAfter.state === 'settled' &&
+      JSON.stringify(synthesisOnlyAfter.findings) === JSON.stringify(synthesisOnlyBefore.findings), 'synthesis-only-findings-unchanged', { synthesis: synthesisOnlyAfter.synthesis?.state, state: synthesisOnlyAfter.state });
 
     at('review-report-docx-one-step');
     // Issue #1430: 导出审阅报告（DOCX） in 审阅's header is one click — the Book's report is recorded, this launch's Save

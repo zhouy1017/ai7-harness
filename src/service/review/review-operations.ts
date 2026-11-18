@@ -353,6 +353,29 @@ export function launchReviewRun(host: ReviewOperationsHost, input: import('../..
   }
 }
 
+/**
+ * 生成统合总结 (Issue #1506): the summary alone for a settled Run, under the model and 思考强度 chosen now — the role's default
+ * when none is chosen. A repeated command answers as the first did and sends nothing again.
+ */
+export function launchReviewSynthesis(host: ReviewOperationsHost, input: import('../../shared/protocol.js').ServiceOperationMap['generateReviewSynthesis']['input'],
+  launchPolicy: LaunchPolicyProjection, startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
+  try {
+    const { clientCommandId, executionConfig = {}, rememberedChoice, ...request } = input;
+    const launched = launchFromSnapshot(host.authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig, synthesisOnly: true } },
+      () => host.launchChoice('main-editorial', executionConfig, rememberedChoice), (choice, snapshotId) => {
+        const policy = choice.binding !== null && host.baselineAnalysis.launch.operationalScope === 'ordinary-production'
+          ? resolveSourceCheckoutLaunchPolicySync(host.codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
+        const run = host.reviewRuns.launchSynthesis(input.bookId, input.reviewRunId, snapshotId, choice.binding, policy, startWhen);
+        // The command's own record names the request, never the Run: a Run may be asked for its summary more than once.
+        return { runId: host.reviewRuns.synthesisRequestOf(run.reviewRunId), manuscript: run.manuscript };
+      });
+    return { projection: { ...host.reviewRuns.workspace(input.bookId, input.reviewRunId), ...(launched.notice === undefined ? {} : { launchNotice: launched.notice }) }, repeated: launched.repeated };
+  } catch (error) {
+    if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
+    return host.reviewCall(() => { throw error; });
+  }
+}
+
 export function advanceReviewRunPreparationWork(host: ReviewOperationsHost, workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {
   return reviewPreparation(host, () => host.reviewRuns.prepare({ phase: 'advance', workId }));
 }

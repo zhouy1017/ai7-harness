@@ -7,7 +7,7 @@ import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_DEFAULT_LEVEL, EVIDENCE_A
   EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, type EvidenceAssuranceLevel } from '../shared/protocol/factual-verification.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
 import { reviewReportExportButton } from './review-report-export.js';
-import { reviewSynthesisNode } from './review-synthesis.js';
+import { reviewSynthesisGenerateRow, reviewSynthesisNode } from './review-synthesis.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -259,7 +259,7 @@ type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWo
   RendererApi,
   'getModelServiceSettings' | 'launchReviewRun' | 'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
   'getTaskPlanPage' | 'searchReferableMaterials' |
-  'generateReviewReport' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
+  'generateReviewReport' | 'generateReviewSynthesis' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'recordChangeSuggestionDecision' | 'updateEditorialMark' | 'getEditorialMarkCard' | 'reverseAppliedChangeSuggestion' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
@@ -522,7 +522,9 @@ function focusKeyOf(node: HTMLElement): string {
 
 // Session navigation hints, scoped by Book; never persisted as editorial authority.
 type ReviewPlace = { runId: string | null; filters: Filters; pages: number; collapsed: string[];
-  history: boolean; excluded: boolean; excludedPages: number; scroll: number; findingId: string | null };
+  history: boolean; excluded: boolean; excludedPages: number; scroll: number; findingId: string | null;
+  /** The finding card the editor left from and where it stood in the window then; the way back puts it there again. */
+  anchor: { findingId: string; top: number } | null };
 const reviewSessions = new WeakMap<Document, Map<string, ReviewPlace>>();
 
 export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): ReviewWorkspaceSurface {
@@ -543,6 +545,44 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let card: HTMLElement | undefined;
   let focusFindingId: string | null = options.focus?.findingId ?? retained?.findingId ?? null;
   let restoreScroll = retained?.scroll;
+  /**
+   * Where the page stood when 回到原文 was pressed: what the way back returns to. Read then, since by the time 审阅 is left the
+   * manuscript is already being drawn and the page may have moved.
+   */
+  let leaveScroll: number | undefined;
+  let leaveAnchor: ReviewPlace['anchor'] = null;
+  const scroller = (): Element | null => document.scrollingElement ?? options.root.parentElement;
+  const pageScroll = (): number => scroller()?.scrollTop ?? 0;
+  const cardOf = (findingId: string): HTMLElement | null => card?.querySelector<HTMLElement>(`article.review-finding[data-finding-id="${findingId}"]`) ?? null;
+  /** Remembers where the page and the finding's card stand as a jump to the manuscript begins. */
+  const rememberLeave = (findingId: string | null): void => {
+    leaveScroll = pageScroll();
+    const left = findingId === null ? null : cardOf(findingId);
+    leaveAnchor = findingId === null || left === null ? null : { findingId, top: left.getBoundingClientRect().top };
+  };
+  /**
+   * Back where the editor was (Issue #1525): the card they left at the place on screen it had then. Held while the return settles —
+   * every paint and every change of the page's size puts it back — and let go at the editor's first scroll, click or key.
+   */
+  let anchor: ReviewPlace['anchor'] = retained?.anchor ?? null;
+  const holdAnchor = (): boolean => {
+    const held = anchor === null ? null : cardOf(anchor.findingId);
+    const page = scroller();
+    if (anchor === null || held === null || page === null) return false;
+    const drift = held.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(drift) >= 1) page.scrollTop += drift;
+    return true;
+  };
+  const releaseAnchor = (): void => {
+    anchor = null;
+    anchorWatch?.disconnect();
+    for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) document.removeEventListener(type, releaseAnchor, true);
+  };
+  let anchorWatch: ResizeObserver | undefined;
+  if (anchor !== null) {
+    for (const type of ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const) document.addEventListener(type, releaseAnchor, true);
+    anchorWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { holdAnchor(); }) : undefined;
+  }
   let focusPages = 0;
   let focusRunHeading = false;
   let pendingProcedureId: string | null = options.procedureId ?? null;
@@ -557,6 +597,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let exportMenuOpen = false;
   /** Whether 切换历史记录 / 查看覆盖矩阵 is open; kept across redraws (Issue #1413 cluster 6). */
   let historyOpen = retained?.history ?? false;
+  /** Whether 历史 is open: as the fold on screen shows it, or as last kept while none is drawn. */
+  const historyShown = (): boolean => card?.querySelector<HTMLDetailsElement>('details.review-history-fold')?.open ?? historyOpen;
   const ui: { ignore: IgnoreForm | null; convert: ConvertForm | null; batch: BatchStrip | null; capabilityFindingId: string | null;
     applied?: { categoryId: string; markIds: string[]; blockIds: string[]; skipped: number } | null; } = {
     ignore: null,
@@ -718,6 +760,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let excludedPages = retained?.excludedPages ?? 1;
   let excludedOpen = retained?.excluded ?? false;
   let synthesisDisclosure: { runId: string; open: boolean } | null = null;
+  // 生成统合总结 (Issue #1506): one chooser per Run across redraws, and the command a retry repeats until it is answered.
+  let synthesisGenerate: { runId: string; row: HTMLElement } | null = null;
+  let synthesisCommand: { runId: string; input: string; id: string } | null = null;
   const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput(), ...(sheetState?.executionConfig === undefined ? {} : { executionConfig: sheetState.executionConfig }) });
     if (first.bookId !== bookId) {
@@ -960,9 +1005,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       reportResult(options.setStatus, REVIEW_PART_REREAD);
     }
     followFocus(next);
+    if (anchor !== null && card !== undefined) {
+      // The card the editor left, where it stood; failing that (gone from these pages), the page's own position.
+      anchorWatch?.disconnect();
+      anchorWatch?.observe(card);
+      if (holdAnchor()) restoreScroll = undefined;
+    }
     if (restoreScroll !== undefined) {
-      const scroller = document.scrollingElement ?? options.root.parentElement;
-      if (scroller) scroller.scrollTop = restoreScroll;
+      const page = scroller();
+      if (page) page.scrollTop = restoreScroll;
       restoreScroll = undefined;
     }
 
@@ -1304,6 +1355,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         history.push(renderCoverage(next, reasonId));
       }
       history.push(renderRuns(next));
+      // What the fold on screen shows is what is kept: a toggle event that never reached its listener cannot lose it.
+      historyOpen = historyShown();
       const fold = el('details', 'review-history-fold');
       fold.open = historyOpen;
       fold.addEventListener('toggle', () => { historyOpen = fold.open; });
@@ -1314,7 +1367,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     heading.append(renderHeaderExport(run, hasFindings));
     section.append(heading);
     if (run.synthesis !== undefined) {
-      const summary = reviewSynthesisNode(run.synthesis, run.modelLabel, (evidence) => {
+      const summary = reviewSynthesisNode(run.synthesis, run.synthesis.modelLabel ?? run.modelLabel, (evidence) => {
         if (destroyed || evidence.blockId === null) return;
         const origin = navigation.read(host);
         let current = navigation.begin();
@@ -1333,6 +1386,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
               after = next;
             }
             if (finding !== undefined) focusFindingId = finding.findingId;
+            rememberLeave(finding?.findingId ?? null);
             const jumping = options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId,
               blockId: evidence.blockId!, markId: finding?.markId != null && finding.markStatus !== null && LIVE_MARK_STATUSES.has(finding.markStatus) ? finding.markId : null });
             current = navigation.route();
@@ -1344,6 +1398,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       summary.open = synthesisDisclosure?.runId === run.reviewRunId && synthesisDisclosure.open;
       summary.addEventListener('toggle', () => { synthesisDisclosure = { runId: run.reviewRunId, open: summary.open }; });
       section.append(summary);
+      if (run.synthesis.canGenerate === true) {
+        const runId = run.reviewRunId;
+        if (synthesisGenerate?.runId !== runId) synthesisGenerate = { runId, row: reviewSynthesisGenerateRow(run.synthesis.runChoice, async () => {
+          const [settings, preferences] = await Promise.allSettled([api.getModelServiceSettings(), rendererApi.getPreferences()]);
+          return settings.status !== 'fulfilled' ? null : { settings: settings.value, favourites: preferences.status === 'fulfilled' ? preferences.value.values['model.favourites'] : {} };
+        }, (config) => void generateSynthesis(runId, config)) };
+        // The row is kept across redraws, so it takes the page's current working state each time it is put back.
+        const generate = synthesisGenerate.row.querySelector<HTMLButtonElement>('[data-review-action="generate-synthesis"]');
+        if (generate !== null) generate.disabled = working;
+        section.append(synthesisGenerate.row);
+      }
     }
     const leading = runHasResults(run);
     if (leading) section.append(renderResults(next, run));
@@ -1789,6 +1854,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // From a row, the way back names the row's finding, as 回到原文 on its card does; a row with none offers no numbered return.
     const factJump = (finding: ReviewFindingProjection | undefined, target: { blockId: string; markId: string | null }): Promise<void> => {
       if (finding !== undefined) focusFindingId = finding.findingId;
+      rememberLeave(finding?.findingId ?? null);
       return options.goToText({ ordinal: finding?.ordinal, manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, ...target });
     };
     const row = el('li', 'fact-lens-row');
@@ -2368,7 +2434,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
       ...(record.run.usage === undefined ? [] : [el('p', 'review-report-usage', `本次共进行了 ${record.run.usage.requests} 次模型调用。`)]),
-      ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.run.modelLabel)]),
+      ...(record.synthesis === undefined ? [] : [reviewSynthesisNode(record.synthesis, record.synthesis.modelLabel ?? record.run.modelLabel)]),
       overview,
       paged(part('must-items', record.mustItems.title, must), REPORT_PAGE_PATHS.mustItems, record.mustItems.title),
       ...derived,
@@ -2546,6 +2612,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     options.setStatus(REVIEW_STATUS_LINES.openingText, 'busy');
     try {
       focusFindingId = finding.findingId;
+      rememberLeave(finding.findingId);
       await options.goToText({
         ordinal: finding.ordinal,
         manuscriptId: run.manuscript.manuscriptId,
@@ -2555,6 +2622,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
     } catch (error) {
       if (focusFindingId === finding.findingId) focusFindingId = null;
+      leaveScroll = undefined;
+      leaveAnchor = null;
       options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.openTextFailed), 'error');
     }
   }
@@ -2830,6 +2899,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       await api.cancelReviewRun({ reviewRunId: run.reviewRunId });
       scopeCancel = null;
       options.setStatus(REVIEW_STATUS_LINES.cancelled, 'success');
+    });
+  }
+
+  /** 生成统合总结 (Issue #1506): a repeated click after a failure repeats the same command, which sends nothing twice. */
+  async function generateSynthesis(reviewRunId: string, config: RuntimeExecutionConfig): Promise<void> {
+    const input = JSON.stringify(config);
+    if (synthesisCommand?.runId !== reviewRunId || synthesisCommand.input !== input) synthesisCommand = { runId: reviewRunId, input, id: crypto.randomUUID() };
+    const clientCommandId = synthesisCommand.id;
+    await act(REVIEW_STATUS_LINES.synthesizing, REVIEW_STATUS_LINES.synthesisFailed, async () => {
+      const answer = await api.generateReviewSynthesis({ reviewRunId, clientCommandId, ...(Object.keys(config).length === 0 ? {} : { executionConfig: config }) });
+      synthesisCommand = null; synthesisGenerate = null;
+      options.setStatus(answer.launchNotice ?? (answer.run?.state === 'waiting' ? REVIEW_STATUS_LINES.synthesisWaiting : REVIEW_STATUS_LINES.synthesisStarted), 'success');
     });
   }
 
@@ -3582,8 +3663,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     refresh: () => refresh(true),
     destroy: () => {
       reviewPlaces.set(bookId, { runId: projection?.run?.reviewRunId ?? query.reviewRunId, filters: { ...query.filters }, pages: query.pages,
-        collapsed: [...collapsedGroups], history: historyOpen, excluded: excludedOpen, excludedPages,
-        scroll: document.scrollingElement?.scrollTop ?? options.root.parentElement?.scrollTop ?? 0, findingId: focusFindingId });
+        collapsed: [...collapsedGroups], history: historyShown(), excluded: excludedOpen, excludedPages,
+        scroll: leaveScroll ?? pageScroll(), findingId: focusFindingId, anchor: leaveAnchor });
+      releaseAnchor();
       destroyed = true;
       if (toastShown) hideToast();
       unregisterCommands?.();
