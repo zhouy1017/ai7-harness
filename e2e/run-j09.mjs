@@ -1841,6 +1841,40 @@ async function main() {
     const answeredAttention = await readSettledAttention(renderer);
     requireJourney(!answeredAttention.groups.find((group) => group.key === 'decisions').items.some((item) => item.itemId === questionItem.itemId), 'model-question-item-removed');
 
+    at('model-question-second-notice');
+    // #1528: a second raise — another Book's question while the editor types in its manuscript — is closed with × by the real
+    // pointer: the notice goes and the caret and the focus stay in the manuscript.
+    await closeOwnedBrowser();
+    await writeFile(holdPath, '0', 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'second-question-ready');
+    const secondQuestionBook = await importSample1(renderer, '模型提问旅程乙', true, 'second-question-import');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'second-question-library');
+    await openAnalysisOf(renderer, secondQuestionBook, 'second-question-analysis');
+    await startFirstBaseline(renderer, 'ready', 'second-question-baseline');
+    await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    try {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'second-question-manuscript-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, 'second-question-manuscript');
+      if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
+        await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-summary-close');
+        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-summary-closed');
+      }
+      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'second-question-caret');
+      const secondCaret = await renderer.evaluate(READ_CARET);
+      requireJourney(secondCaret.focused === true && secondCaret.block !== null, 'second-question-caret-placed', secondCaret);
+      await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'second-question-asked', 120_000);
+      const secondAsked = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => projection.groups.flatMap((group) => group.items).find((entry) => entry.book.bookId === ${JSON.stringify(secondQuestionBook)} && entry.state === 'analysis-clarification')?.book.title ?? null)`);
+      requireJourney(typeof secondAsked === 'string', 'second-question-asked-item');
+      await attentionNoticeHolds(renderer, waitFor, requireJourney, 'second-question-notice', `《${secondAsked}》分析在等你回答`, secondCaret);
+      await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'second-question-notice-close');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'second-question-notice-closed');
+      requireJourney(JSON.stringify(await renderer.evaluate(READ_CARET)) === JSON.stringify(secondCaret), 'second-question-close-keeps-caret', secondCaret);
+    } finally {
+      await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+    }
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 

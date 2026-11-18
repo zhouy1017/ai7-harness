@@ -1411,6 +1411,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'model-question-notice',
     'model-question-decision-item',
     'model-question-answer-turn',
+    'model-question-second-notice',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
