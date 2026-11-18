@@ -544,7 +544,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
-  it('accepts the seven 审阅 operations with their exact inputs', () => {
+  it('accepts the eight 审阅 operations with their exact inputs', () => {
     const bookId = randomUUID();
     const reviewRunId = randomUUID();
     const inputs: ReadonlyArray<AcceptedInput> = [
@@ -575,10 +575,11 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'continueReviewRun', input: { bookId, reviewRunId } },
       { op: 'recordReviewFindingDisposition', input: { bookId, reviewRunId, findingId: FINDING_ID, disposition: 'ignored', reason: '与本书体例一致' } },
       { op: 'generateReviewReport', input: { bookId, reviewRunId } },
+      { op: 'generateReviewSynthesis', input: { bookId, reviewRunId, clientCommandId: randomUUID(), executionConfig: { modelId: 'deepseek-v4-flash', reasoningEffort: 'high' } } },
       { op: 'inspectReviewFindingOfMark', input: { bookId, markId: randomUUID() } },
     ];
     expectAcceptedInputs(inputs);
-    expect(new Set(inputs.map((entry) => entry.op)).size).toBe(7);
+    expect(new Set(inputs.map((entry) => entry.op)).size).toBe(8);
   });
 
   it('accepts a milestone save with a frozen purpose and no words, and with 自行输入 and the editor\'s words', () => {
@@ -1204,6 +1205,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'continueReviewRun', input: { reviewRunId: randomUUID() } },
       { op: 'generateReviewReport', input: { bookId, reviewRunId: null } },
       { op: 'generateReviewReport', input: { bookId, reviewRunId: randomUUID(), version: 2 } },
+      // 生成统合总结 (Issue #1506) is a launch: it names its command, and its choice is a dispatch choice.
+      { op: 'generateReviewSynthesis', input: { bookId, reviewRunId: randomUUID() } },
+      { op: 'generateReviewSynthesis', input: { bookId, reviewRunId: randomUUID(), clientCommandId: randomUUID(), executionConfig: { provider: 'x' } } },
       { op: 'inspectReviewFindingOfMark', input: { bookId, markId: 'not-a-uuid' } },
       // The service is asked within the Book only; the manuscript capability is the main process's to check.
       { op: 'inspectReviewFindingOfMark', input: { bookId, markId: randomUUID(), manuscriptId: randomUUID() } },

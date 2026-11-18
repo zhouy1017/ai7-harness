@@ -418,7 +418,8 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
     archivedId = archived.bookId;
     const original = session.store.inspectReviewWorkspace(archived.bookId, null).run!;
     archivedRunId = original.reviewRunId; archivedDigest = original.report!.digest;
-    expect(original.synthesis).toBeUndefined(); expect(original.categories).toHaveLength(1);
+    // No member and no request; an eligible 0.7.1 Run offers 生成统合总结 (Issue #1506).
+    expect(original.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(original.categories).toHaveLength(1);
     expect(canonicalRecord(original.report!.record).digest).toBe(original.report!.digest);
     const contentDigest = reportContentDigest(original.report!.record);
     const repeated = session.store.generateReviewReport(archived.bookId, original.reviewRunId).run!.report!;
@@ -432,7 +433,7 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
     expect(pending.canContinue).toBe(true); expect(pending.synthesis).toBeUndefined();
     await session.driver.continue(pending.reviewRunId);
     const completed = session.store.inspectReviewWorkspace(paused.bookId, pending.reviewRunId).run!;
-    expect(completed.state).toBe('settled'); expect(completed.synthesis).toBeUndefined();
+    expect(completed.state).toBe('settled'); expect(completed.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true });
     expect(completed.categories).toHaveLength(1);
     expect(session.capture.requests.every(request => request.stage !== 'cross-unit-reduction')).toBe(true);
   } finally { await closeCapturedSession(session); }
@@ -443,7 +444,7 @@ it('opens an exact 0.7.1 run and report, verifies the archived digest, resumes a
   target = await EditorialStore.open(mergedRoot, roots.codeRoot);
   try {
     const merged = target.inspectReviewWorkspace(archivedId, archivedRunId).run!;
-    expect(merged.synthesis).toBeUndefined(); expect(merged.report!.digest).toBe(archivedDigest);
+    expect(merged.synthesis).toMatchObject({ state: 'missing', summary: null, canGenerate: true }); expect(merged.report!.digest).toBe(archivedDigest);
     expect(canonicalRecord(merged.report!.record).digest).toBe(archivedDigest);
   } finally { target.markCleanShutdown(); target.close(); }
 });
