@@ -1031,7 +1031,7 @@ async function panelGeometry(renderer, selector, width, height, facts = false) {
     const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
     if (box.width <= 0 || box.height <= 0) return 'unrendered';
     if (${facts} && nodes.length !== 3) return 'facts';
-    if (!(box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight)) return 'outside-L' + Math.round(box.left) + '-R' + Math.round(box.right) + '-T' + Math.round(box.top) + '-B' + Math.round(box.bottom) + '-W' + innerWidth + '-H' + innerHeight + '-Y' + Math.round(scrollY);
+    if (!(box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight)) return 'outside-L' + Math.round(box.left) + '-R' + Math.round(box.right) + '-T' + Math.round(box.top) + '-B' + Math.round(box.bottom) + '-W' + innerWidth + '-H' + innerHeight + '-Y' + Math.round(scrollY) + '-N' + document.querySelectorAll(${JSON.stringify(selector)}).length + '-' + (() => { const c = panel.parentElement.getBoundingClientRect(); const odd = []; for (let n = panel.parentElement; n; n = n.parentElement) { const t = getComputedStyle(n).transform; if (n.scrollLeft !== 0 || t !== 'none') odd.push((n.id || n.className || n.tagName).toString().split(' ')[0] + ':' + n.scrollLeft + ':' + t); } return 'C' + Math.round(c.left) + '_' + Math.round(c.right) + '_' + Math.round(c.top) + '_' + Math.round(c.bottom) + '-M' + panel.querySelector('.milestone-section')?.open + '-' + odd.join('|'); })();
     if (panel.scrollWidth > panel.clientWidth + 1) return 'overflow';
     if (!nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0)) return 'fact-empty';
     return 'fits';
