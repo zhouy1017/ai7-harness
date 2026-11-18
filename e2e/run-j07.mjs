@@ -3151,14 +3151,22 @@ async function main() {
     };
     /** One of the form's four ways, pressed on its own radio; the form stays until a way is chosen. */
     const chooseCreateMode = async (mode, name) => {
-      await pointerClick(renderer, waitFor, `${managementForm} .derivative-modes input[value="${mode}"]`, `${name}-mode`);
+      const radio = `${managementForm} .derivative-modes input[value="${mode}"]`;
+      // 空白新建 is what the form opens on: nothing is pressed for it, and it is read.
+      if (mode === 'blank') {
+        await assertRenderer(renderer, `document.querySelector(${JSON.stringify(radio)})?.checked === true`, `${name}-mode-default`);
+        return;
+      }
+      await pointerClick(renderer, waitFor, radio, `${name}-mode`);
       if (mode === 'writing') return;
-      await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementForm} .derivative-modes input[value="${mode}"]`)})?.checked === true`, `${name}-mode-chosen`, 30_000);
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(radio)})?.checked === true`, `${name}-mode-chosen`, 30_000);
     };
     /** Text written into one field as a hand writes it: the field is pressed, its text selected, then typed. */
     const typeInto = async (selector, text, name) => {
       await pointerClick(renderer, waitFor, selector, `${name}-field`);
-      await renderer.evaluate(`document.querySelector(${JSON.stringify(selector)})?.select?.()`);
+      const selectAll = { key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 2 };
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...selectAll, commands: ['selectAll'] });
+      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...selectAll });
       await renderer.send('Input.insertText', { text });
       await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(text)}`, `${name}-text`, 30_000);
     };
@@ -3198,24 +3206,28 @@ async function main() {
     const renamedTitle = `${managementBlankTitle} 改名`;
     await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-open');
     await waitFor(renderer, `document.activeElement === document.querySelector('.derivatives-item-title-input') && document.querySelector('.derivatives-item-title-input').value === ${JSON.stringify(managementBlankTitle)}`, 'management-rename-input');
-    await renderer.evaluate(`document.querySelector('.derivatives-item-title-input')?.select?.()`);
     await renderer.send('Input.insertText', { text: renamedTitle });
     await pressEnter(renderer);
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)}`, 'management-renamed', 60_000);
     await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(renamedTitle)}) === true`, 'management-renamed-recorded');
     await doubleClick(`${renamedRow} .derivatives-item-title-text`, 'management-rename-double');
-    await renderer.evaluate(`document.querySelector('.derivatives-item-title-input')?.select?.()`);
     await renderer.send('Input.insertText', { text: `${renamedTitle} 不要` });
     await pressEscape();
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${renamedRow} .derivatives-item-title-text`)})?.textContent === ${JSON.stringify(renamedTitle)} && document.activeElement?.textContent === '改名'`, 'management-rename-escaped', 30_000);
     const blurredTitle = `${renamedTitle} 2`;
     await pointerClick(renderer, waitFor, `${renamedRow} [data-derivative-action="rename"]`, 'management-rename-again');
-    await renderer.evaluate(`document.querySelector('.derivatives-item-title-input')?.select?.()`);
     await renderer.send('Input.insertText', { text: blurredTitle });
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-filters input[type="search"]`, 'management-rename-blur');
     await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)}) === true`, 'management-renamed-on-blur', 60_000);
     at('derivatives-management-import');
-    // 导入文件 in the same form: the file names the document unless the editor wrote a title.
+    // 导入文件 in the same form: the file names the document unless the editor wrote a title. The launch's scripted picker
+    // answers once and the stage 'multi-import' used it, so the product is launched again with the file as its answer
+    // and the Book is opened from the landing screen; the stage then starts on 稿件.
+    await close();
+    renderer = await launch({ picker: libraryPath, adapter: WRITING_FIXTURE });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]')`, 'management-product-ready');
+    await pointerClick(renderer, waitFor, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'management-book-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'management-book-ready', 120_000);
     await openManagement('management-import');
     await openCreateForm('management-import');
     await chooseCreateType('promotion-article', 'management-import');
@@ -3275,15 +3287,18 @@ async function main() {
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
     at('derivatives-management-category');
-    // 删除类别 asks in an app strip that names the category and how many documents it holds; the service's refusal for a
-    // category still in use is said there, and 取消 returns to the row it was asked from.
-    await openManagement('management-category');
+    // 删除类别 asks in an app strip that names the category and how many documents it holds; 确认删除 on a category still in
+    // use is refused by the service and the refusal is said in the strip, and 取消 returns to the row it was asked from.
+    // The menus stage leaves the management page showing, so this stage starts on it.
     await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-action="categories"]`, 'management-category-open');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${managementPage} [data-derivative-type="promotion-article"]`)}) !== null`, 'management-category-rows');
     const promotionCount = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then(page=>page.types.find(type=>type.typeId==='promotion-article')?.documents.length ?? -1)`);
     requireJourney(Number.isSafeInteger(promotionCount) && promotionCount > 0, 'management-category-count', promotionCount);
     await pointerClick(renderer, waitFor, `${managementPage} [data-derivative-type="promotion-article"] [data-derivative-action="delete-type"]`, 'management-category-ask');
     await assertRenderer(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); return strip instanceof HTMLElement && strip.textContent.includes('宣传文章') && strip.textContent.includes(${JSON.stringify(`${promotionCount} 篇衍生稿件`)}); })()`, 'management-category-strip');
+    await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="yes"]`, 'management-category-refuse');
+    await waitFor(renderer, `(() => { const strip=document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}); const problem=strip?.querySelector('.derivatives-confirm-problem'); return strip instanceof HTMLElement && problem instanceof HTMLElement && (problem.textContent ?? '').trim().length > 0 && strip.textContent.includes('宣传文章'); })()`, 'management-category-refusal', 60_000);
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.some(type=>type.typeId==='promotion-article' && type.documents.length === ${promotionCount})) === true`, 'management-category-kept');
     await pointerClick(renderer, waitFor, `${managementPage} .derivatives-confirm [data-derivative-confirm="no"]`, 'management-category-cancel');
     await assertRenderer(renderer, `document.querySelector(${JSON.stringify(`${managementPage} .derivatives-confirm`)}) === null && document.activeElement?.textContent === '删除类别'`, 'management-category-cancelled');
     await typeInto(`${managementPage} .derivatives-category-editor [aria-label="新类别名称"]`, '校样', 'management-category-name');

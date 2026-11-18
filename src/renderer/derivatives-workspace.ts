@@ -319,15 +319,20 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     }
   }
 
+  /** The rows the filters show, newest first. */
+  function visibleRows(shown: ProductionDocumentsProjection): Array<{ type: ProductionDocumentsProjection['types'][number]; document: ProductionDocumentProjection }> {
+    const query = keyword.normalize('NFC').trim().toLocaleLowerCase();
+    return shown.types.flatMap((type) => type.documents.map((document) => ({ type, document })))
+      .filter(({ type, document }) => (!category || type.typeId === category) && (!status || (document.finalized ? 'final' : 'draft') === status) &&
+        (!query || `${document.title} ${document.preview ?? ''}`.normalize('NFC').toLocaleLowerCase().includes(query)))
+      .sort((a, b) => (b.document.updatedAt ?? b.document.createdAt).localeCompare(a.document.updatedAt ?? a.document.createdAt));
+  }
+
   /** One row: its 稿件题目 as text until 改名 or a double-click edits it, then its category and its two menus. */
   function paintList(): void {
     if (projection === null || stopped) return;
     list.replaceChildren();
-    const query = keyword.normalize('NFC').trim().toLocaleLowerCase();
-    const rows = projection.types.flatMap((type) => type.documents.map((document) => ({ type, document })))
-      .filter(({ type, document }) => (!category || type.typeId === category) && (!status || (document.finalized ? 'final' : 'draft') === status) &&
-        (!query || `${document.title} ${document.preview ?? ''}`.normalize('NFC').toLocaleLowerCase().includes(query)))
-      .sort((a, b) => (b.document.updatedAt ?? b.document.createdAt).localeCompare(a.document.updatedAt ?? a.document.createdAt));
+    const rows = visibleRows(projection);
     resultCount.textContent = `显示 ${rows.length} 篇`;
     if (!rows.length) list.append(el('li', projection.unavailableReason ?? '暂无符合条件的衍生稿件。', 'derivatives-empty'));
     for (const { type, document: doc } of rows) {
@@ -337,7 +342,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       const timeNode = el('time', localInstantLabel(doc.updatedAt ?? doc.createdAt));
       let moreSummary: HTMLElement | null = null;
       /**
-       * A saved title changes the row's time and place, so the list is read again. Only a key's save repaints it (and
+       * A saved title changes the row's time and place, so the list is read again. Only a key's save moves the rows (and
        * gives 改名 its focus back); a save by leaving the field may be the first half of a press on another row, so it
        * only refreshes this row's time, and a row being edited elsewhere keeps its field.
        */
@@ -351,8 +356,12 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
           const fresh = next.types.flatMap((entry) => entry.documents).find((entry) => entry.documentId === doc.documentId);
           if (fresh !== undefined) timeNode.textContent = localInstantLabel(fresh.updatedAt ?? fresh.createdAt);
           if (!byKey || list.querySelector('.derivatives-item-title-input') !== null) return;
-          paintList();
-          if (hadFocus) list.querySelector<HTMLElement>(`[data-derivative-document="${doc.documentId}"] [data-derivative-action="rename"]`)?.focus();
+          // The rows are moved, not rebuilt, so nothing a hand is aimed at is replaced.
+          const order = visibleRows(next).map(({ document: shown }) => shown.documentId);
+          const nodes = new Map(Array.from(list.children, (node) => [(node as HTMLElement).dataset['derivativeDocument'], node]));
+          if (order.every((id, index) => list.children[index] === nodes.get(id))) return;
+          for (const id of order) { const node = nodes.get(id); if (node !== undefined) list.append(node); }
+          if (hadFocus) rename.focus();
         } catch (error) {
           if (!stopped) options.setStatus(options.errorMessage(error, '无法读取衍生稿件。'), 'error');
         }
