@@ -1655,7 +1655,14 @@ async function main() {
     try {
       await renderer.evaluate(`(() => { window.__j09Screens = []; const screen = document.querySelector('#screen'); new MutationObserver(() => { const now = screen.dataset.screen; if (now !== window.__j09Screens.at(-1)) window.__j09Screens.push(now); }).observe(screen, { attributes: true, attributeFilter: ['data-screen'] }); return true; })()`);
       await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
-      await pressQuietResult(renderer, waitFor, 'idle-result-notice');
+      try {
+        await pressQuietResult(renderer, waitFor, 'idle-result-notice');
+      } catch (error) {
+        // Say whether the Run finished: a missing toast is then the notice's, not the Run's.
+        if (!String(error?.message ?? error).includes('idle-result-notice-raised')) throw error;
+        const finished = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((reading)=>reading.run?.runRecordId===${JSON.stringify(idleRunId)} && reading.state==='settled')`).catch(() => false);
+        requireJourney(false, finished ? 'idle-result-run-finished-without-toast' : 'idle-result-run-not-finished');
+      }
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'idle-result-opened', 60_000);
       const visited = await renderer.evaluate('window.__j09Screens');
       requireJourney(Array.isArray(visited) && !visited.includes('task-overview') && !visited.includes('global-attention') && visited.at(-1) === 'book-analysis', 'idle-result-in-place', visited);

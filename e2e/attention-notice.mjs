@@ -38,11 +38,14 @@ export async function attentionNoticeHolds(renderer, waitFor, requireJourney, na
  */
 export async function pressQuietResult(renderer, waitFor, name) {
   const BUTTON = '[data-toast] button';
-  const centre = `(() => { const toast = document.querySelector('[data-toast]'); const view = toast?.querySelector('button'); if (!(toast instanceof HTMLElement) || toast.hidden || toast.dataset.tone !== 'analysis-completed' || !(view instanceof HTMLButtonElement) || view.textContent !== '查看结果') return null; const box = view.getBoundingClientRect(); const x = box.left + box.width / 2; const y = box.top + box.height / 2; return box.width > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight && view.contains(document.elementFromPoint(x, y)) ? { x, y } : null; })()`;
+  const centre = `(() => { const toast = document.querySelector('[data-toast]'); const view = toast?.querySelector('button'); if (!(toast instanceof HTMLElement) || toast.hidden || !String(toast.dataset.tone).startsWith('analysis-completed') || !(view instanceof HTMLButtonElement) || view.textContent !== '查看结果') return null; const box = view.getBoundingClientRect(); const x = box.left + box.width / 2; const y = box.top + box.height / 2; return box.width > 0 && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight && view.contains(document.elementFromPoint(x, y)) ? { x, y } : null; })()`;
   try {
     let first = true;
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
-      if (first) await waitFor(renderer, `${centre} !== null`, `${name}-shown`, 180_000);
+      if (first) {
+        await waitFor(renderer, `(() => { const toast = document.querySelector('[data-toast]'); return toast instanceof HTMLElement && !toast.hidden && String(toast.dataset.tone).startsWith('analysis-completed'); })()`, `${name}-raised`, 180_000);
+        await waitFor(renderer, `${centre} !== null`, `${name}-shown`, 10_000);
+      }
       first = false;
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${centre} !== null`, `${name}-reachable-${width}`, 10_000);
