@@ -540,7 +540,7 @@ _中文_: 智能体数据根目录
 _Avoid_: Run Source Scope, a general filesystem grant, a proven whole-process OS sandbox, a repository working tree
 
 **Data Version**:
-The identifier of AI7's stored data format, frozen at each release and changed only when necessary, separate from the software version, written into every store and export package, and governing upgrade backup, disclosure and rollback ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+The identifier of AI7's stored data format, frozen at each release and changed only when necessary, separate from the software version, written into every store and export package, and governing upgrade backup, disclosure and rollback ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)). 0.8.0 raises it to Data Version 2 at schema revision 117; a Data Version 1 store reaches it only through the in-app upgrade tool ([ADR 0105](../../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md)).
 _中文_: 数据版本
 _Avoid_: the software version, a migration script, a Manuscript Revision, the Product Data Location
 

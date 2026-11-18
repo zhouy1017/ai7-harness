@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { editorialMemoryDatabase } from '../../../support/domain/editorial-memory.js';
+import { initializeMemorySourceProjections } from '../../../support/domain/memory-projections.js';
 import { describe, expect, it } from 'vitest';
-import { HouseReviewPreferenceLedger, withdrawalOf, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, preferenceLines, type HousePreferenceSource } from '../../../../src/service/house-review-preference.js';
-import { LEARNING_ELIGIBILITY_POLICY_BASIS, LEARNING_ELIGIBILITY_SCHEMA_SQL, LOCAL_LEARNING_POLICY_BASIS } from '../../../../src/service/learning-eligibility.js';
+import { HouseReviewPreferenceLedger, withdrawalOf, preferenceLines, type HousePreferenceSource } from '../../../../src/service/house-review-preference.js';
+import { LEARNING_ELIGIBILITY_POLICY_BASIS } from '../../../../src/service/learning-eligibility.js';
 import { canonicalRecord } from '../../../../src/service/analysis/canonical.js';
 
 
@@ -13,27 +15,16 @@ function source(overrides: Partial<HousePreferenceSource> = {}): HousePreference
     quality: { applied: 0, surviving: 0, editVolume: 0, lineageDigest: 'b'.repeat(64) }, ...overrides };
 }
 
-/** The decision ledger the consumption guard reads (Issue #912), without the Books it names. */
-function withEligibility(db: DatabaseSync): void {
-  db.exec(LEARNING_ELIGIBILITY_SCHEMA_SQL.learning_eligibility_decisions.replace('REFERENCES books(book_id)', ''));
-}
-
-function ledgerOf(): { db: DatabaseSync; ledger: HouseReviewPreferenceLedger } {
-  const db = new DatabaseSync(':memory:');
-  for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
-  for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
-  withEligibility(db);
+function ledgerOf(mutableEligibility = false): { db: DatabaseSync; ledger: HouseReviewPreferenceLedger } {
+  const db = editorialMemoryDatabase({ mutableEligibility });
+  initializeMemorySourceProjections(db);
   return { db, ledger: new HouseReviewPreferenceLedger(db) };
 }
 
 describe('house review preference ledger', () => {
   it('isolates production and development, bounds text, preserves attribution and appends immutable successors only on change', () => {
-    const db = new DatabaseSync(':memory:');
+    const { db, ledger } = ledgerOf();
     try {
-      for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
-      withEligibility(db);
-      const ledger = new HouseReviewPreferenceLedger(db);
       const production = source();
       const development = source({ operationalScope: 'developer-live', materialDigest: 'c'.repeat(64) });
       const fixture = source({ operationalScope: 'development-ci', materialDigest: 'd'.repeat(64) });
@@ -61,20 +52,15 @@ describe('house review preference ledger', () => {
   });
 
   it('keeps Book-only feedback in its exact Book and records an idempotent, by-value Run pin', () => {
-    const db = new DatabaseSync(':memory:');
+    const { db, ledger } = ledgerOf();
     try {
-      for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL)) db.exec(sql);
-      for (const sql of Object.values(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL)) db.exec(sql);
-      withEligibility(db);
-      const ledger = new HouseReviewPreferenceLedger(db);
       const material = source({ eligibility: 'book' });
       ledger.rebuild('ordinary-production', [material]);
       expect(ledger.use('ordinary-production', randomUUID(), material.categoryId)).toBeNull();
       expect(ledger.use('ordinary-production', material.bookId, 'style-and-format')).toBeNull();
       const use = ledger.use('ordinary-production', material.bookId, material.categoryId)!;
       const run = randomUUID(); const task = randomUUID(); const digest = 'e'.repeat(64);
-      db.exec('CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY); CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY);');
-      db.prepare('INSERT INTO review_runs VALUES (?)').run(run); db.prepare('INSERT INTO analysis_task_intents VALUES (?)').run(task);
+      db.prepare('INSERT INTO review_runs(review_run_id, book_id) VALUES (?, ?)').run(run, material.bookId); db.prepare('INSERT INTO analysis_task_intents(task_intent_id, book_id, kind) VALUES (?, ?, ?)').run(task, material.bookId, 'editorial-review/typos-and-usage');
       ledger.pin(run, task, digest, use); ledger.pin(run, task, digest, use);
       expect(db.prepare('SELECT count(*) AS n FROM review_run_preference_pins').get()!.n).toBe(1);
       expect(ledger.pinned(task)).toEqual(use);
@@ -123,19 +109,19 @@ describe('house review preference ledger', () => {
       const other = source({ categoryId: 'plot-consistency', categoryLabel: '合成同名类别', reason: '相同的编辑规则' });
       ledger.rebuild('ordinary-production', [first, other]);
       const run = randomUUID(); const task = randomUUID();
-      db.exec('CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY); CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY, book_id TEXT, kind TEXT);');
-      db.prepare('INSERT INTO review_runs VALUES (?)').run(run);
-      db.prepare('INSERT INTO analysis_task_intents VALUES (?, ?, ?)').run(task, first.bookId, 'editorial-review/typos-and-usage');
+      db.prepare('INSERT INTO review_runs(review_run_id, book_id) VALUES (?, ?)').run(run, first.bookId);
+      db.prepare('INSERT INTO analysis_task_intents(task_intent_id, book_id, kind) VALUES (?, ?, ?)').run(task, first.bookId, 'editorial-review/typos-and-usage');
       ledger.pin(run, task, 'e'.repeat(64), ledger.use('ordinary-production', first.bookId, first.categoryId)!);
       expect(ledger.pinnedInfluence(task)!.sources.map((entry) => entry.eligibilityDecisionId)).toEqual([first.eligibilityDecisionId]);
     } finally { db.close(); }
   });
 
   it('composes no block from a version whose material was withdrawn after its admission, and a re-inclusion restores none of it (#912)', () => {
-    const { db, ledger } = ledgerOf();
+    const { db, ledger } = ledgerOf(true);
     try {
       const material = source();
       const bookId = material.bookId;
+      db.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, `book:${bookId}`, '合成反馈图书', '2026-10-17T00:00:00.000Z');
       const decide = (decisionId: string, ordinal: number, choice: string, supersedes: string | null, recordedAt: string) => {
         const record = canonicalRecord({ schema: 'ai7.learning-eligibility-decision/1', decisionId, bookId, materialKey: 'review-disposition:x',
           materialDigest: material.materialDigest, ordinal, choice, supersedes, recordedAt, actor: '本机编辑', basis: LEARNING_ELIGIBILITY_POLICY_BASIS, note: null });

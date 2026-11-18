@@ -438,6 +438,42 @@ it('previews a real automatic source without inventing a human decision and reco
     .toMatchObject([{ reason: 'not-included' }]);
 });
 
+it('stops a prepared /2 pin of legacy lines at learning-off or Book exclusion, exactly as a /1 pin stops', async () => {
+  const { subject, book, signals, make, create, accept, govern, current, prepare } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '冻结后只留旧版偏好。')));
+  govern([current(memory.itemId)], 'supervise', '冻结这条合成记忆。', 'freeze');
+  const published = subject.inspectHouseReviewPreference().current!;
+  expect(published.schema).toBe('ai7.house-review-preference/2');
+  expect(published.lines.length).toBeGreaterThan(0);
+  expect(published.lines.every((line) => line.owner?.kind === 'legacy-preference')).toBe(true);
+  const task = prepare().categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const ledger = new HouseReviewPreferenceLedger(db);
+    expect(ledger.pinned(task)!.versionId).toBe(published.versionId);
+    expect(ledger.governanceChanged(task, () => [])).toBe(false);
+    subject.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+    expect(ledger.governanceChanged(task, () => [])).toBe(true);
+    // A legacy line's own basis is its admitting decision: as for the #1116 /1 regression, re-enabling makes it usable again.
+    subject.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
+    expect(ledger.governanceChanged(task, () => [])).toBe(false);
+    subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 2 });
+    expect(ledger.governanceChanged(task, () => [])).toBe(true);
+  } finally { db.close(); }
+});
+
+it('reads one scope\'s preference influence only, never another scope\'s local pins', async () => {
+  const { signals, make, create, accept, prepare } = await sourceDecisions();
+  accept(make(create([signals[0]!.signalId], '只属于本范围的合成记忆。')));
+  prepare();
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    expect(new HousePreferenceInfluence(db, 'ordinary-production').pins.length).toBeGreaterThan(0);
+    expect(new HousePreferenceInfluence(db, 'developer-live').pins).toEqual([]);
+    expect(new HousePreferenceInfluence(db, 'development-ci').pins).toEqual([]);
+  } finally { db.close(); }
+});
+
 it('marks a completed Task withdrawn only by the lines it actually read', async () => {
   const { subject, book, signals, explicit, make, accept, prepare } = await sourceDecisions();
   const unread = accept(make({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [explicit.signalId],
