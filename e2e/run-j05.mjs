@@ -1231,7 +1231,13 @@ async function main() {
           decided.push(state.id);
           // Decided in place; focus moves to the next pending card — the one not wholly in view before — and it is now wholly inside
           // the window, so the next key decides what is seen.
-          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; if(${JSON.stringify(state.next)}!==null && next.dataset.findingId!==${JSON.stringify(state.next)})return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.bottom<=innerHeight; })()`, 'review-keyboard-decided-next-in-view');
+          // (1 px for subpixel layout: a card scrolled to the nearest edge can end a fraction past it.)
+          const landed=`(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; if(${JSON.stringify(state.next)}!==null && next.dataset.findingId!==${JSON.stringify(state.next)})return false; const r=next.getBoundingClientRect(); return r.top>=-1 && r.bottom<=innerHeight+1; })()`;
+          try {
+            await waitFor(renderer, landed, 'review-keyboard-decided-next-in-view', 15_000);
+          } catch {
+            requireJourney(false, 'review-keyboard-decided-next-in-view', {state, index, now: await renderer.evaluate(`(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; const r=next?.getBoundingClientRect(); return {decided:card?.dataset.status??null, decidedOutput:card?.dataset.output??null, active:document.activeElement?.tagName+'.'+(document.activeElement?.className??''), focused:next?.dataset.findingId??null, top:r?.top??null, bottom:r?.bottom??null, innerHeight}; })()`)});
+          }
         }
         // What the service recorded for every decided finding, not the card's own words.
         await waitFor(renderer, `(async () => { const runId=document.querySelector('.review-workspace-card')?.dataset.reviewRunId; const ids=${JSON.stringify(decided)}; let after=null; const found=new Map(); for (let page=0; page<8 && found.size<ids.length; page+=1) { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:runId, findingsAfterOrdinal:after, categoryId:null, severity:null, status:null, chapterBlockId:null})).run; for (const item of run.findings) if (ids.includes(item.findingId)) found.set(item.findingId,item.status); if(!run.findingsTruncated)break; after=run.findings.at(-1).ordinal; } return ids.every((id)=>found.get(id)==='handled'); })()`, 'review-keyboard-service-statuses');
