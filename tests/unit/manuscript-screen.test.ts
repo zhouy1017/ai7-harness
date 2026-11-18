@@ -8,6 +8,8 @@ import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer
 import { NavigationGeneration, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
 import { readReturnPlace } from '../../src/renderer/reading-return.js';
+import { mountTaskDrawer, type MountTaskDrawerOptions } from '../../src/renderer/task-drawer.js';
+import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
 
@@ -21,6 +23,7 @@ type EditorState = Parameters<EditorOptions['onStateChange']>[0];
 
 const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
+  realParagraphAnalysis: false,
   destroyed: [] as string[],
   editors: [] as unknown[],
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn>; setInputMode: ReturnType<typeof vi.fn>; selectedRange: ReturnType<typeof vi.fn> }>,
@@ -53,10 +56,14 @@ vi.mock('../../src/renderer/save-menu.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/save-menu.js')>(),
   createSaveMenu: () => ({ element: document.createElement('details'), update: vi.fn(), destroy: () => children.destroyed.push('save-menu') }),
 }));
-vi.mock('../../src/renderer/paragraph-analysis.js', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../src/renderer/paragraph-analysis.js')>(),
-  mountParagraphAnalysis: () => ({ refresh: vi.fn(), close: vi.fn(), toggle: vi.fn(), destroy: () => children.destroyed.push('paragraph-analysis') }),
-}));
+vi.mock('../../src/renderer/paragraph-analysis.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/renderer/paragraph-analysis.js')>();
+  return {
+    ...original,
+    mountParagraphAnalysis: (options: Parameters<typeof original.mountParagraphAnalysis>[0]) => children.realParagraphAnalysis ? original.mountParagraphAnalysis(options)
+      : { refresh: vi.fn(), close: vi.fn(), toggle: vi.fn(), destroy: () => children.destroyed.push('paragraph-analysis') },
+  };
+});
 vi.mock('../../src/renderer/position-rail.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/position-rail.js')>(),
   mountPositionRail: (options: { onRead?: (rail: ManuscriptRailProjection) => void }) => {
@@ -195,6 +202,7 @@ beforeEach(() => {
     createTextNode: (text: string) => { const node = new MiniElement('#text'); node.textContent = text; return node; },
   }));
   children.failAt = null;
+  children.realParagraphAnalysis = false;
   children.destroyed.length = 0;
   children.editors.length = 0;
   children.editorSurfaces.length = 0;
@@ -660,30 +668,142 @@ vi.mock('../../src/renderer/right-column.js', async (importOriginal) => ({
   mountColumnMeasure: () => ({ destroy: vi.fn() }),
 }));
 
-it('restores comments after navigation and the drawer without saving a temporary close', () => {
-  const setItem = vi.fn();
-  vi.stubGlobal('localStorage', { getItem: () => 'true', setItem });
-  let commands: Record<string, () => void> = {};
-  const app = shell(); app.open(windowOf('book-one'), {
-    commandDispatcher: { register: (handlers: typeof commands) => { commands = handlers; return () => {}; } } as unknown as ScreenOptions['commandDispatcher'],
+/** The shell around the screen with the real drawer, wired as `index.ts` wires them, and in `replaceScreen`'s order. */
+function columnShell() {
+  vi.stubGlobal('window', { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval, getSelection: () => null });
+  const app = shell();
+  let showing: ManuscriptScreen | null = null;
+  const drawerRoot = document.createElement('aside');
+  document.body.append(drawerRoot);
+  const drawer = mountTaskDrawer({
+    root: drawerRoot, shell: document.body, api, technicalDetails: () => document.createElement('div'),
+    errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), settle: async () => true,
+    resumeDraft: (_bookId: string, resume: () => void) => resume(), onRecorded: vi.fn(),
+    onOpen: () => showing?.closeSupportingPanel(), onClose: () => showing?.restoreSupportingPanel(),
+  } as unknown as MountTaskDrawerOptions);
+  const open = (initialWindow: ManuscriptWindowProjection, extra: Partial<ScreenOptions> = {}): void => app.open(initialWindow, {
+    taskDrawer: drawer,
+    // replaceScreen: the departing screen is destroyed and the handle cleared, the drawer follows, then the handle is installed.
+    attach: (content, surface) => {
+      showing?.destroy(); showing = null;
+      app.screen.replaceChildren(content);
+      drawer.followScreen('editor', content.dataset['bookId'] ?? null);
+      showing = surface;
+    },
+    ...extra,
   });
-  const pane = app.screen.querySelector<HTMLElement>('.manuscript-comments-pane')!;
-  for (const entry of ['navigation']) {
-    const control = app.screen.querySelector<HTMLButtonElement>(`[data-edge-entry="${entry}"]`)!;
-    control.click(); expect(pane.hidden).toBe(true);
-    control.click(); expect(pane.hidden).toBe(false);
-  }
-  {
-    app.showing!.closeSupportingPanel(); expect(pane.hidden).toBe(true);
-    app.showing!.restoreSupportingPanel(); expect(pane.hidden).toBe(false);
-  }
-  for (const key of ['search.find', 'edit.replace']) {
-    commands[key]!(); expect(pane.hidden).toBe(true);
-    app.screen.querySelector<HTMLButtonElement>('[data-edge-entry="navigation"]')!.click();
-    expect(pane.hidden).toBe(false);
-  }
-  expect(setItem).not.toHaveBeenCalled();
-  app.screen.querySelector<HTMLButtonElement>('[aria-label="关闭批注栏"]')!.click();
-  expect(setItem).toHaveBeenCalledWith('ai7.comments-pane.book-one', 'false');
-  app.showing!.destroy();
+  const pane = (): HTMLElement => app.screen.querySelector<HTMLElement>('.manuscript-comments-pane')!;
+  const entry = (name: string): HTMLButtonElement => app.screen.querySelector<HTMLButtonElement>(`[data-edge-entry="${name}"]`)!;
+  return { ...app, open, drawer, drawerRoot, pane, entry, get showing(): ManuscriptScreen | null { return showing; } };
+}
+
+describe('the one right-hand column (#1542)', () => {
+  let setItem: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    setItem = vi.fn();
+    vi.stubGlobal('localStorage', { getItem: () => 'true', setItem });
+  });
+
+  it('lets 分析, the 任务 panel and every drawer view replace the 批注栏 and give it back, without a preference write', () => {
+    children.realParagraphAnalysis = true;
+    let commands: Record<string, () => void> = {};
+    const app = columnShell();
+    app.open(windowOf('book-one'), {
+      commandDispatcher: { register: (handlers: typeof commands) => { commands = handlers; return () => {}; } } as unknown as ScreenOptions['commandDispatcher'],
+    });
+    const analysis = app.screen.querySelector<HTMLElement>('.paragraph-analysis-panel')!;
+    const marks = children.marks.at(-1)!;
+    const shows = (): boolean[] => [app.pane().hidden, analysis.hidden, app.drawerRoot.hidden];
+    expect(shows()).toEqual([false, true, true]);
+    app.entry('analysis').click();
+    expect(shows()).toEqual([true, false, true]);
+    // The pane is replaced, so its edge entry does not say it is open.
+    expect(app.entry('comments').getAttribute('aria-expanded')).toBe('false');
+    marks.refreshComments.mockClear();
+    analysis.dispatchEvent({ type: 'keydown', key: 'Escape' } as never);
+    expect(shows()).toEqual([false, true, true]);
+    expect(marks.refreshComments).toHaveBeenCalled();
+    app.entry('analysis').click(); app.entry('analysis').click();
+    expect(shows()).toEqual([false, true, true]);
+
+    app.entry('tasks').click();
+    expect(shows()).toEqual([true, true, false]);
+    app.entry('tasks').click();
+    expect(shows()).toEqual([false, true, true]);
+    const views: Array<[string, () => void]> = [
+      ['plan', () => app.drawer.open({ bookId: 'book-one', kind: 'baseline-analysis', ref: 'plan' }, () => null)],
+      ['run', () => app.drawer.open({ bookId: 'book-one', kind: 'baseline-analysis', ref: 'plan' }, () => null, undefined, { view: 'run' })],
+      ['dialogue', () => app.drawer.openDialogue('book-one', 'dialogue-1', () => null)],
+      ['composer', () => app.drawer.openComposer({ bookId: 'book-one', bookTitle: '合成书', origin: 'composer-book', manuscript: null, ranges: [] }, () => null)],
+      ['launch', () => app.drawer.openLaunch({ operation: 'launchBaselineAnalysis', bookId: 'book-one', title: '分析', input: { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } }, () => null)],
+    ];
+    for (const [view, openView] of views) {
+      openView();
+      expect([view, ...shows()]).toEqual([view, true, true, false]);
+      app.drawer.close(false);
+      expect([view, ...shows()]).toEqual([view, false, true, true]);
+    }
+
+    // Nested: 导航 over the drawer suspends it, closing 导航 brings the drawer back, closing that brings the pane back.
+    app.entry('tasks').click();
+    app.entry('navigation').click();
+    const outline = app.screen.querySelector<HTMLElement>('.manuscript-navigator:not(.paragraph-analysis-panel)')!;
+    expect([app.pane().hidden, app.drawerRoot.hidden, outline.hidden]).toEqual([true, true, false]);
+    app.entry('navigation').click();
+    expect(shows()).toEqual([true, true, false]);
+    app.drawer.close(false);
+    for (const key of ['search.find', 'edit.replace']) {
+      commands[key]!(); expect(app.pane().hidden).toBe(true);
+      app.entry('navigation').click(); expect(app.pane().hidden).toBe(false);
+    }
+    expect(setItem).not.toHaveBeenCalled();
+    app.screen.querySelector<HTMLButtonElement>('[aria-label="关闭批注栏"]')!.click();
+    expect(setItem).toHaveBeenCalledWith('ai7.comments-pane.book-one', 'false');
+    app.showing!.destroy();
+  });
+
+  it('reads the cards again when the pane comes back: after arriving with the drawer open, and after a marks change while replaced', () => {
+    const app = columnShell();
+    app.open(windowOf('book-one'));
+    app.drawer.openPanel('book-one', () => null);
+    app.open(windowOf('book-one'));
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([true, false]);
+    const arrived = children.marks.at(-1)!;
+    arrived.refreshComments.mockClear();
+    app.drawer.close(false);
+    expect(app.pane().hidden).toBe(false);
+    expect(arrived.refreshComments).toHaveBeenCalled();
+
+    app.entry('navigation').click();
+    app.showing!.refreshMarks();
+    arrived.refreshComments.mockClear();
+    app.entry('navigation').click();
+    expect(app.pane().hidden).toBe(false);
+    expect(arrived.refreshComments).toHaveBeenCalled();
+    app.showing!.destroy();
+  });
+
+  it('shows the next Book its own pane when the drawer closes for it', () => {
+    const app = columnShell();
+    app.open(windowOf('book-a'));
+    app.drawer.openPanel('book-a', () => null);
+    expect(app.pane().hidden).toBe(true);
+    app.open(windowOf('book-b'));
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([false, true]);
+    app.showing!.destroy();
+  });
+
+  it('never shows the pane beside the drawer when the same Book mounts again under a suspended drawer', () => {
+    const app = columnShell();
+    app.open(windowOf('book-a'));
+    app.drawer.openPanel('book-a', () => null);
+    app.entry('navigation').click();
+    expect(app.drawerRoot.hidden).toBe(true);
+    app.open(windowOf('book-a'));
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([true, false]);
+    app.drawer.close(false);
+    expect([app.pane().hidden, app.drawerRoot.hidden]).toEqual([false, true]);
+    expect(setItem).not.toHaveBeenCalled();
+    app.showing!.destroy();
+  });
 });

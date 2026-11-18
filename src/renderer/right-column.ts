@@ -12,6 +12,8 @@ export interface RightColumn {
   state(): RightColumnState;
   /** Whether the 批注栏 is on screen now: explicitly open and not temporarily replaced. */
   commentsVisible(): boolean;
+  /** `replacer` is open but a later column temporarily replaced it in turn. */
+  suspended(replacer: RightColumnReplacer): boolean;
   /** The editor opens or closes the pane themself: the one path that changes the stored preference. */
   setCommentsOpen(open: boolean): void;
   /** Another column opens and temporarily replaces the pane. No preference is written. */
@@ -26,6 +28,7 @@ export function createRightColumn(commentsOpenInitially: boolean): RightColumn {
   return {
     state: () => ({ commentsOpen: open, commentsReplacedBy: stack.at(-1) ?? null }),
     commentsVisible: () => open && stack.length === 0,
+    suspended: (replacer) => stack.includes(replacer) && stack.at(-1) !== replacer,
     setCommentsOpen(next) {
       open = next;
       stack = [];
@@ -64,7 +67,8 @@ export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement):
   const resize = new ResizeObserver(update);
   resize.observe(workspace); resize.observe(editor);
   const mutation = new MutationObserver(update);
-  mutation.observe(workspace, { subtree: true, attributes: true, attributeFilter: ['hidden'] });
+  // Only the columns' own `hidden` matters; a subtree watch would also fire on every scroll and card relayout.
+  for (const column of workspace.querySelectorAll(':scope > :is(.manuscript-comments-pane, .manuscript-navigator)')) mutation.observe(column, { attributes: true, attributeFilter: ['hidden'] });
   mutation.observe(document.body, { attributes: true, attributeFilter: ['data-task-drawer', 'style'] });
   mutation.observe(root, { attributes: true, attributeFilter: ['style'] });
   window.addEventListener('resize', update);

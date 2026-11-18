@@ -835,17 +835,16 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   commentsPane.setAttribute('aria-label', '批注栏');
   const commentsKey = `ai7.comments-pane.${initialWindow.bookId}`;
   const rightColumn = createRightColumn(globalThis.localStorage?.getItem(commentsKey) === 'true');
-  if (taskDrawer.isOpen()) rightColumn.replaceComments('drawer');
   const applyCommentsState = (): void => {
-    const open = rightColumn.state().commentsOpen;
-    commentsPane.hidden = !rightColumn.commentsVisible();
+    const open = rightColumn.commentsVisible();
+    commentsPane.hidden = !open;
     const active = rightColumn.state().commentsReplacedBy;
     navigator.hidden = active !== 'navigation';
     analysisPanel.hidden = active !== 'analysis';
     navigationEntry.setAttribute('aria-expanded', String(active === 'navigation'));
     analysisEntry.setAttribute('aria-expanded', String(active === 'analysis'));
     workspace.dataset['navigation'] = active === 'navigation' ? 'open' : 'closed';
-    taskDrawer.setColumnVisible(active === 'drawer');
+    taskDrawer.setColumnVisible(!rightColumn.suspended('drawer'));
     commentsEntry.setAttribute('aria-expanded', String(open));
     options.contextView.querySelector('[data-view-command="toggle-comments"]')?.setAttribute('aria-pressed', String(open));
   };
@@ -868,18 +867,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   function setCommentsOpen(open: boolean, savePreference = true): void {
     rightColumn.setCommentsOpen(open);
     if (savePreference) globalThis.localStorage?.setItem(commentsKey, String(open));
-    if (open) { setNavigationOpen(false); localParagraphPanel?.close(); taskDrawer.close(false); }
+    if (open) { taskDrawer.close(false); localParagraphPanel?.close(); setNavigationOpen(false); }
     applyCommentsState();
     editorialMarks?.refreshComments(open);
   }
-  function replaceComments(replacer: RightColumnReplacer): void {
-    rightColumn.replaceComments(replacer);
+  // A pane that comes back reads its cards again: they were not read, or were cleared by a marks change, while it was replaced.
+  function switchColumn(change: () => void): void {
+    const visible = rightColumn.commentsVisible();
+    change();
     applyCommentsState();
+    if (rightColumn.commentsVisible() !== visible) editorialMarks?.refreshComments();
   }
-  function restoreComments(replacer: RightColumnReplacer): void {
-    rightColumn.restoreComments(replacer);
-    applyCommentsState();
-  }
+  function replaceComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.replaceComments(replacer)); }
+  function restoreComments(replacer: RightColumnReplacer): void { switchColumn(() => rightColumn.restoreComments(replacer)); }
   const edgeEntries = element('div', 'edge-entries');
   for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task'], [commentsEntry, 'i-comment']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
@@ -1010,6 +1010,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   // The shell captures/destroys the departing screen and installs this handle before DOM-dependent mounting and focus.
   options.attach(content, surface);
+  // Only now has the shell decided whether the drawer stays beside this screen (it closes for another Book).
+  if (taskDrawer.isOpen()) replaceComments('drawer'); else restoreComments('drawer');
   // 专注 and 视图 in the context header, and the protection surface first beside them (Issue #951; ED-004, DUR-003, VIEW-012).
   editorModes = mountEditorModes({
     host: options.contextView,
@@ -1017,8 +1019,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     focus: focusMode,
     rail: true,
     openNavigation: () => setNavigationOpen(true),
-    ...(isDocument ? { toggleComments: () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); }, commentsOpen: () => rightColumn.state().commentsOpen }
-      : { openTasks: () => { taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); }, commentsOpen: () => rightColumn.state().commentsOpen }),
+    ...(isDocument ? { toggleComments: () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); }, commentsOpen: () => rightColumn.commentsVisible() }
+      : { openTasks: () => { taskDrawer.openPanel(initialWindow.bookId, () => tasksEntry); }, toggleComments: () => { focusMode.leave(); setCommentsOpen(!rightColumn.commentsVisible()); }, commentsOpen: () => rightColumn.commentsVisible() }),
     appliedMarks: {
       shown: () => appliedMarksShown,
       toggle: () => {

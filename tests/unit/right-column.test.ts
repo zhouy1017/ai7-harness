@@ -7,6 +7,7 @@ it('restores the previous column in reverse opening order and keeps the explicit
   column.replaceComments('analysis');
   column.replaceComments('drawer');
   expect(column.commentsVisible()).toBe(false);
+  expect([column.suspended('navigation'), column.suspended('drawer')]).toEqual([true, false]);
   column.restoreComments('drawer');
   expect(column.state()).toEqual({ commentsOpen: true, commentsReplacedBy: 'analysis' });
   column.restoreComments('analysis');
@@ -26,7 +27,7 @@ function measuredColumn(paneVisible: boolean): string {
   const pane = { classList: { contains: () => false }, getBoundingClientRect: () => ({ width: 303 }) };
   // The permanent rail is also an aside; a broad tag query must see it even with the pane closed.
   const edge = { classList: { contains: () => false }, getBoundingClientRect: () => ({ width: 76 }) };
-  const workspace = { querySelector: (selector: string) => selector === '.editor-edge' ? edge
+  const workspace = { querySelectorAll: () => [], querySelector: (selector: string) => selector === '.editor-edge' ? edge
     : paneVisible ? pane : selector.includes('aside') ? edge : null,
     getBoundingClientRect: () => ({ width: 888 }) };
   const values: Record<string, string> = { '--sidebar-full-width': '14rem', '--sidebar-icons-width': '56px', '--manuscript-min-measure': '28' };
