@@ -20,12 +20,14 @@ it('restores the previous column in reverse opening order and keeps the explicit
 
 afterEach(() => vi.unstubAllGlobals());
 
-it('includes the screen gutters when deciding whether the full sidebar leaves the reading measure', () => {
+function measuredColumn(paneVisible: boolean): string {
   const root = { dataset: { rightColumn: 'wide' } }, body = { dataset: {} }, prose = {};
   const editor = { querySelector: () => prose };
   const pane = { classList: { contains: () => false }, getBoundingClientRect: () => ({ width: 303 }) };
-  const edge = { getBoundingClientRect: () => ({ width: 76 }) };
-  const workspace = { querySelector: (selector: string) => selector.includes('aside') ? pane : edge,
+  // The permanent rail is also an aside; a broad tag query must see it even with the pane closed.
+  const edge = { classList: { contains: () => false }, getBoundingClientRect: () => ({ width: 76 }) };
+  const workspace = { querySelector: (selector: string) => selector === '.editor-edge' ? edge
+    : paneVisible ? pane : selector.includes('aside') ? edge : null,
     getBoundingClientRect: () => ({ width: 888 }) };
   const values: Record<string, string> = { '--sidebar-full-width': '14rem', '--sidebar-icons-width': '56px', '--manuscript-min-measure': '28' };
   vi.stubGlobal('innerWidth', 1164);
@@ -40,5 +42,13 @@ it('includes the screen gutters when deciding whether the full sidebar leaves th
   const measure = mountColumnMeasure(workspace as unknown as HTMLElement, editor as unknown as HTMLElement);
   const mode = root.dataset.rightColumn;
   measure.destroy();
-  expect(mode).toBe('icons');
+  return mode;
+}
+
+it('includes the screen gutters when deciding whether the full sidebar leaves the reading measure', () => {
+  expect(measuredColumn(true)).toBe('icons');
+});
+
+it('releases the automatic layout when only the permanent edge rail remains', () => {
+  expect(measuredColumn(false)).toBe('none');
 });

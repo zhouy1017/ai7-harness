@@ -46,7 +46,7 @@ export function mountColumnMeasure(workspace: HTMLElement, editor: HTMLElement):
   const update = (): void => {
     const style = getComputedStyle(root), rem = parseFloat(style.fontSize);
     const drawer = document.body.dataset['taskDrawer'] === 'open';
-    const panel = workspace.querySelector<HTMLElement>(':scope > aside:not([hidden])');
+    const panel = workspace.querySelector<HTMLElement>(':scope > .manuscript-comments-pane:not([hidden]), :scope > .manuscript-navigator:not([hidden])');
     if (!drawer && !panel) { root.dataset['rightColumn'] = 'none'; return; }
     const padding = getComputedStyle(editor);
     const minimum = parseFloat(style.getPropertyValue('--manuscript-min-measure')) * parseFloat(getComputedStyle(editor.querySelector('.ProseMirror') ?? editor).fontSize)
