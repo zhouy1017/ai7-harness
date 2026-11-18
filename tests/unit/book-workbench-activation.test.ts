@@ -4,11 +4,12 @@ import ts from 'typescript';
 import { expect, it, vi } from 'vitest';
 import { IPC_CHANNELS, isNonActivatingBookOpen } from '../../src/shared/protocol.js';
 import { decodeRequest } from '../../src/service/request-frames.js';
+import { NavigationGeneration, reconcileBookWorkbenchApi } from '../../src/renderer/navigation-generation.js';
 
 const source=ts.createSourceFile('application.ts',readFileSync(new URL('../../src/main/application.ts',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
 const declarations:string[]=[];let handler='',closed='';const parkingLeaves:string[]=[];
 function collect(node:ts.Node):void {
-  if(ts.isVariableDeclaration(node)&&['assignRoute','applyBookWorkbench','requestBookWorkbench','parkedBookResources','unparkWindow','leaveBookWorkbench'].includes(node.name.getText(source)))declarations.push('const '+node.getText(source)+';');
+  if(ts.isVariableDeclaration(node)&&['assignRoute','applyBookWorkbench','requestBookWorkbench','parkedBookResources','unparkWindow','leaveBookWorkbench','requireCurrentBookRoute','resourceCapabilityKey','requireEditorResource'].includes(node.name.getText(source)))declarations.push('const '+node.getText(source)+';');
   if(ts.isCallExpression(node)&&node.expression.getText(source)==='ipcMain.handle'&&node.arguments[0]?.getText(source)==='IPC_CHANNELS.openBookWorkbench')handler=node.arguments[1]!.getText(source);
   if(ts.isCallExpression(node)&&node.expression.getText(source)==='window.on'&&node.arguments[0]?.getText(source)==="'closed'")closed=node.arguments[1]!.getText(source);
   if(ts.isCallExpression(node)&&node.expression.getText(source)==='leaveBookWorkbench'&&node.arguments.length>1) {
@@ -35,7 +36,8 @@ function main(){
   open:(requester:ReturnType<typeof owner>,nonActivating?:boolean,book=bookId)=>{context['requester']=requester;return runInContext(`requestBookWorkbench(requester,{kind:'book',bookId:${JSON.stringify(book)}},${String(nonActivating)})`,context) as Promise<{target:string}>;},
   leave:(owned:ReturnType<typeof owner>,park?:boolean)=>{context['owned']=owned;runInContext(`leaveBookWorkbench(owned,${String(park)})`,context);},
   close:(owned:ReturnType<typeof owner>)=>{context['owned']=owned;runInContext('closedFor(owned,1)()',context);},
-  parked:()=>runInContext('[...parkedBookResources.keys()]',context) as string[]};
+  parked:()=>runInContext('[...parkedBookResources.keys()]',context) as string[],
+  requireJob:(owned:ReturnType<typeof owner>,jobId:string)=>{context['owned']=owned;context['jobId']=jobId;runInContext(`requireEditorResource(owned,'job',jobId)`,context);}};
 }
 it('non-activating open acquires a free Book only for the requesting window without focusing or revoking',async()=>{
  const app=main(),requester=owner();const manuscripts=[...requester.manuscriptCapabilities],resources=[...requester.editorResourceCapabilities];
@@ -124,6 +126,19 @@ it('(f) a leave main decides parks nothing and discards what was parked; only th
  const again=holding(app,bookB);app.leave(again,true);app.leave(again);expect(app.parked()).toEqual([]);
  await app.open(again,true,bookB);expect(again.editorResourceCapabilities.size).toBe(0);
  expect(parkingLeaves).toEqual(['IPC_CHANNELS.leaveBookWorkbench']);
+});
+
+it('through the real ownership boundary, a superseded leave re-acquires the Book and the page\'s job poll still reaches main',async()=>{
+ const app=main(),window=holding(app),shown=new NavigationGeneration();shown.commit('editor',bookId);
+ const raw={
+  leaveBookWorkbench:async()=>{app.leave(window,true);return {state:'library'};},
+  openBookWorkbench:(input:{bookId:string;activation?:string})=>app.open(window,input.activation==='non-activating',input.bookId),
+  pollServiceJob:async(input:{jobId:string})=>{app.requireJob(window,input.jobId);return {jobId:input.jobId};},
+ };
+ const failed=vi.fn(),api=reconcileBookWorkbenchApi(raw as never,{bookOnScreen:()=>shown.bookId,left:vi.fn(),failed},shown);
+ const leaving=api.leaveBookWorkbench();shown.begin();await leaving;
+ expect(app.bookWindows.get(bookId)).toBe(window);expect(failed).not.toHaveBeenCalled();
+ await expect(api.pollServiceJob({jobId:'job-1'})).resolves.toEqual({jobId:'job-1'});
 });
 
 const preload=ts.createSourceFile('preload.ts',readFileSync(new URL('../../src/main/preload.ts',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
