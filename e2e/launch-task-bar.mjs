@@ -80,8 +80,10 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
     if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');
     else await renderer.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
   }
+  // A page bar leaves the drawer on whatever it showed (another Book's started Run, say): the launch is the drawer moving to a new ref.
+  const before = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? null`);
   await pointerClick(renderer, waitFor, startSelector ?? `${root} [data-task-drawer-control="launch"]`, `${name}-start`);
-  await waitFor(renderer, `(document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef) || !!document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent`, `${name}-launched`, 120_000);
+  await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskPlanStart==='started' && !!drawer.dataset.taskPlanRef && drawer.dataset.taskPlanRef!==${JSON.stringify(before)}; })() || !!document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent`, `${name}-launched`, 120_000);
   const refusal = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' ? '' : document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent??''`);
   if (refusal) await failCheck(renderer, waitFor, `${name}-launch-refused`);
   return renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);

@@ -421,6 +421,8 @@ async function openAnalysisDestination(renderer, name) {
  */
 async function startUpdate(renderer, mode, label, name, launch = true) {
   void label;
+  // The previous Run's 查看结果 window may have opened over the page when it finished; the editor closes it first.
+  if (await renderer.evaluate(`!!document.querySelector('.task-result-window')`)) await pointerClick(renderer, waitFor, '.task-result-window [data-task-result-action="close"]', `${name}-result-close`);
   await pointerClick(renderer, waitFor, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history-tab`);
   const choice = `.baseline-analysis-card [data-analysis-action="${mode}"]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(choice)})?.disabled===false`, `${name}-selected-plan-ready`);
