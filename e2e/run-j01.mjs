@@ -6,6 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { pointerClick } from './dispatch-chooser.mjs';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -2084,9 +2085,9 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-reopened-from-summary');
   await waitFor(renderer, sidebarBookCurrent(bookId, 'overview'), 'empty-book-reopened-sidebar-overview');
-  // The Book's own sections through the sidebar: 历史与恢复 is 工作概览's records, its heading taken into focus; 工作概览 again.
-  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('history')), 'empty-book-sidebar-history');
-  await waitFor(renderer, `${sidebarBookCurrent(bookId, 'history')} && document.activeElement === document.querySelector('[data-screen="book-overview"] .record-navigation h3')`, 'empty-book-sidebar-history-records');
+  // The Book's records are 工作概览's 导入记录 (#1521): the sidebar has no 历史与恢复 row, and the Book with no manuscript yet shows the
+  // records section open under its own name (精确记录 in the developer layer); 工作概览 again through the sidebar.
+  await assertRenderer(renderer, `(() => { const names = Array.from(document.querySelectorAll('#app-sidebar .sidebar-book .nav-label'), (node) => node.textContent); const records = document.querySelector('[data-screen="book-overview"] .book-overview-history'); const name = document.documentElement.dataset.technicalLayerVisible === 'true' ? '精确记录' : '导入记录'; return !document.querySelector('#app-sidebar [data-nav-book-section="history"]') && !names.includes('历史与恢复') && records instanceof HTMLDetailsElement && records.open && records.querySelector(':scope > summary')?.textContent === name && records.querySelector('.record-navigation') instanceof HTMLElement; })()`, 'empty-book-sidebar-no-history-row');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'empty-book-sidebar-overview-again');
   await waitFor(renderer, `${sidebarBookCurrent(bookId, 'overview')} && document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-overview-again-ready');
 
@@ -2886,6 +2887,30 @@ async function main() {
       populatedBefore.length === 6 && /^[0-9a-f-]{36}$/i.test(populatedSourceVersionId ?? ''),
       'populated-book-before-source-records',
     );
+    // #1521: with the 历史与恢复 row gone, a populated Book's records are reached through 工作概览 by real input: the fold is closed on
+    // arrival, its summary opens it, a record opens in place, and leaving the overview and coming back finds the same way again.
+    const recordsStageReturn = diagnosticLocation;
+    at('book-records-reachable');
+    const recordsFold = '[data-screen="book-overview"] .book-overview-history';
+    const recordProvenance = `(() => { const labels = Array.from(document.querySelectorAll('${recordsFold} .record-detail dt')); return labels.find((item) => item.textContent === '来源记录 ID')?.nextElementSibling?.textContent ?? false; })()`;
+    let shownProvenance;
+    for (const visit of ['first', 'again']) {
+      if (visit === 'again') {
+        await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="review"]', 'book-records-leave');
+        await waitFor(renderer, `document.querySelector('[data-screen="book-review"]')`, 'book-records-left');
+        await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="overview"]', 'book-records-return');
+        await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(populatedBookId)}]')`, 'book-records-returned');
+      }
+      await waitFor(renderer, `document.querySelector('${recordsFold}')?.open === false`, `book-records-folded-${visit}`);
+      await pointerClick(renderer, waitFor, `${recordsFold} > summary`, `book-records-summary-${visit}`);
+      await waitFor(renderer, `document.querySelector('${recordsFold}')?.open === true`, `book-records-opened-${visit}`);
+      await pointerClick(renderer, waitFor, `${recordsFold} [data-record-kind="source"]`, `book-records-record-${visit}`);
+      await waitFor(renderer, recordProvenance, `book-records-detail-${visit}`);
+      const provenance = await renderer.evaluate(recordProvenance);
+      requireJourney(visit === 'first' ? typeof provenance === 'string' && provenance.length > 0 : provenance === shownProvenance, `book-records-same-${visit}`);
+      shownProvenance = provenance;
+    }
+    at(recordsStageReturn);
     await assertRenderer(
       renderer,
       `(() => { const source = document.querySelector('[data-record-kind="source"]'); if (!source) return false; source.click(); return true; })()`,

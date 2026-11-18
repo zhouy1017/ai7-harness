@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, statusBarClear } from './controller.mjs';
+import { pointerClick } from './dispatch-chooser.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -76,6 +77,97 @@ async function assertCardFrames(renderer) {
       return s.borderTopWidth==='0px' && s.paddingTop==='0px' && s.backgroundColor==='rgba(0, 0, 0, 0)' && JSON.stringify(frame(cards[2]))===JSON.stringify(before[2]);
     } finally { host.remove(); }
   })()`, 'shell-card-frames-survive');
+}
+
+// #1521: 设置 stays inside the window with a Book open, whatever the window's height. At the sizes the guests (1280×800) and the hosted
+// Gate (1008×681) use, in the expanded and in the icon form of the sidebar, 设置 lies wholly inside innerWidth × innerHeight without any
+// scripted scrolling, is the element a hit test at its centre returns, and a real pointer press on it opens the settings page.
+const settingsInView = (width, height, form) => `(() => {
+  const bar=document.querySelector('#app-sidebar'), link=bar?.querySelector('[data-nav-settings]');
+  if(!(bar instanceof HTMLElement)||!(link instanceof HTMLElement)||innerWidth!==${width}||innerHeight!==${height}||document.documentElement.dataset.sidebar!==${JSON.stringify(form)}||bar.querySelector('.sidebar-book')?.hidden!==false) return false;
+  const box=link.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2, box.top+box.height/2);
+  return box.width>0 && box.height>0 && box.top>=0 && box.left>=0 && box.bottom<=innerHeight && box.right<=innerWidth && hit instanceof Node && link.contains(hit);
+})()`;
+
+async function checkSettingsPinned(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    for (const form of ['full', 'icons']) {
+      const name = `${width}x${height}-${form}`;
+      if (form === 'icons') {
+        await pointerClick(renderer, waitFor, '#sidebar-toggle', `sidebar-settings-collapse-${width}`);
+        await waitFor(renderer, `document.documentElement.dataset.sidebar==='icons'`, `sidebar-settings-icons-${width}`);
+      }
+      await waitFor(renderer, settingsInView(width, height, form), `sidebar-settings-in-view-${name}`);
+      await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-settings]', `sidebar-settings-press-${name}`);
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `sidebar-settings-opened-${name}`);
+      await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="manuscript"]', `sidebar-settings-return-${name}`);
+      await waitFor(renderer, `document.querySelector('.editor-window')`, `sidebar-settings-returned-${name}`);
+      if (form === 'icons') {
+        await pointerClick(renderer, waitFor, '#sidebar-toggle', `sidebar-settings-expand-${width}`);
+        await waitFor(renderer, `document.documentElement.dataset.sidebar==='full' && document.documentElement.dataset.sidebarCollapsed==='false'`, `sidebar-settings-full-${width}`);
+      }
+    }
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
+/** Real wheel input at a point until the scroller is at its end or stops moving. */
+async function wheelToEnd(renderer, scroller, pointExpression) {
+  const read = () => renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(scroller)}); const point=(${pointExpression})(); return { top: node.scrollTop, end: node.scrollHeight-node.clientHeight, point }; })()`);
+  for (let step = 0; step < 80; step += 1) {
+    const before = await read();
+    if (before.end <= 1 || before.top >= before.end - 1) return;
+    await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: before.point.x, y: before.point.y, deltaX: 0, deltaY: 240 });
+    const deadline = Date.now() + 400;
+    while (Date.now() < deadline && (await read()).top === before.top) await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    if ((await read()).top === before.top) return;
+  }
+}
+
+// #1521: a long Book list, at the same two sizes with the rows present (synthesized rows, as checkSidebarPrototype does): the list
+// scrolls under real wheel input, its last row ends above the pinned foot and is the element a hit test there returns, and 设置 stays
+// inside the viewport. The sidebar's own scroll is reached by wheeling over its left margin, never by a script.
+async function checkLongBookList(renderer) {
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `innerWidth===${width} && innerHeight===${height} && document.documentElement.dataset.sidebar==='full'`, `sidebar-long-list-size-${width}`);
+    await assertRenderer(renderer, `(() => { const books=document.querySelector('#app-sidebar .sidebar-books > div'); const row=books?.querySelector('.sidebar-book-row'); if(!row) return false; for(let i=0;i<28;i++){ const copy=row.cloneNode(true); copy.dataset.syntheticRow='true'; books.append(copy); } return books.scrollHeight>books.clientHeight+1; })()`, `sidebar-long-list-rows-${width}`);
+    try {
+      await wheelToEnd(renderer, '#app-sidebar', `() => ({ x: 3, y: innerHeight / 2 })`);
+      await wheelToEnd(renderer, '#app-sidebar .sidebar-books > div', `() => { const r=document.querySelector('#app-sidebar .sidebar-books > div').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }`);
+      await assertRenderer(renderer, `(() => {
+        const bar=document.querySelector('#app-sidebar'), books=bar.querySelector('.sidebar-books > div'), foot=bar.querySelector('.sidebar-foot'), settings=foot.querySelector('[data-nav-settings]');
+        const last=[...books.querySelectorAll('.sidebar-book-row')].at(-1)?.querySelector('a.sidebar-link');
+        if(!(last instanceof HTMLElement)||innerWidth!==${width}||innerHeight!==${height}) return false;
+        const list=books.getBoundingClientRect(), box=last.getBoundingClientRect(), footBox=foot.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2, box.top+box.height/2);
+        const settingsBox=settings.getBoundingClientRect(), settingsHit=document.elementFromPoint(settingsBox.left+settingsBox.width/2, settingsBox.top+settingsBox.height/2);
+        return books.scrollTop>0 && books.scrollTop>=books.scrollHeight-books.clientHeight-1 && box.top>=Math.max(0,list.top-1) && box.bottom<=list.bottom+1 && box.bottom<=footBox.top+1 && last.contains(hit)
+          && settingsBox.top>=0 && settingsBox.bottom<=innerHeight && settingsBox.right<=innerWidth && settings.contains(settingsHit);
+      })()`, `sidebar-long-list-reachable-${width}`);
+    } finally {
+      await renderer.evaluate(`(() => { document.querySelectorAll('#app-sidebar [data-synthetic-row]').forEach((row) => row.remove()); document.querySelector('#app-sidebar').scrollTop = 0; return true; })()`).catch(() => undefined);
+    }
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
+// #1521: the open Book has no row in the list, so its star lives on its heading: shown on hover, pressed with the pointer, then pressed
+// again from the keyboard (which restores its state); the Book stays out of the list, and the star keeps the focus through both writes.
+async function checkCurrentBookPin(renderer) {
+  const row = '#app-sidebar .sidebar-current-book-row', pin = `${row} [data-nav-current-pin]`;
+  const state = (pressed) => `(() => { const star=document.querySelector(${JSON.stringify(pin)}); const id=document.querySelector('#app-sidebar .sidebar-book')?.dataset.bookId; return star instanceof HTMLButtonElement && !star.hidden && star.getAttribute('aria-pressed')===${JSON.stringify(pressed)} && typeof id==='string' && !document.querySelector('#app-sidebar [data-nav-book="'+id+'"]'); })()`;
+  const initial = await renderer.evaluate(`document.querySelector(${JSON.stringify(pin)})?.getAttribute('aria-pressed')`);
+  requireJourney(initial === 'true' || initial === 'false', 'current-book-pin-initial');
+  const flipped = initial === 'true' ? 'false' : 'true';
+  await waitFor(renderer, state(initial), 'current-book-pin-state');
+  const center = await renderer.evaluate(`(() => { const r=document.querySelector(${JSON.stringify(row)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...center });
+  await pointerClick(renderer, waitFor, pin, 'current-book-pin-press');
+  await waitFor(renderer, state(flipped), 'current-book-pin-flipped');
+  await assertRenderer(renderer, `(() => { const star=document.querySelector(${JSON.stringify(pin)}); star.focus(); return document.activeElement===star; })()`, 'current-book-pin-focus');
+  await pressKey(renderer, ENTER_KEY);
+  await waitFor(renderer, `${state(initial)} && document.activeElement===document.querySelector(${JSON.stringify(pin)})`, 'current-book-pin-restored-focus-kept');
 }
 
 // #1325: actual shell layout, shortcut dispatch and menu; shared selectors cover all other Journeys.
@@ -902,9 +994,10 @@ async function main() {
     await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-row-pin');
     await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-row-pinned');
     await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
-    await assertRenderer(renderer, `(() => { const link=document.querySelector('[data-nav-book="${crossBookId}"]'); if(!(link instanceof HTMLAnchorElement))return false; link.click(); return true; })()`, 'book-row-open');
+    await pointerClick(renderer, waitFor, `[data-nav-book="${crossBookId}"]`, 'book-row-open');
     await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-row-route');
-    await assertRenderer(renderer, `document.querySelector('[data-nav-book][aria-current="true"]')?.dataset.navBook===${JSON.stringify(crossBookId)}`, 'book-row-current');
+    // #1521: the open Book is the heading of its groups and has no row of its own.
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('#app-sidebar .sidebar-book'); return group?.hidden===false && group.dataset.bookId===${JSON.stringify(crossBookId)} && group.querySelector('.sidebar-current-book')?.textContent===document.querySelector('#context-title')?.textContent && !document.querySelector('[data-nav-book=${JSON.stringify(crossBookId)}], [data-nav-book][aria-current]'); })()`, 'book-row-current');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'book-row-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-row-library-route');
 
@@ -926,6 +1019,12 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#context-title').dataset.contextBook==='false'`, 'shell-global-header-no-book');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'shell-frame-back-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-window')`, 'shell-frame-back-ready');
+    at('sidebar-settings-pinned');
+    await checkSettingsPinned(renderer);
+    at('sidebar-long-book-list');
+    await checkLongBookList(renderer);
+    at('sidebar-current-book-pin');
+    await checkCurrentBookPin(renderer);
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
     const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, outsideToolbar: details?.closest('.editor-toolbar')===null, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);

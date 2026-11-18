@@ -850,6 +850,8 @@ async function main() {
       await clickSelector(renderer, '[data-knowledge-category="memory"]', 'ordinary-house-entry');
       // #1408: the ordinary rule editor is the one form here; no engineering form joins it.
       await waitFor(renderer, `document.querySelector('[data-editorial-memory] [data-learning-enabled]') && Array.from(document.querySelectorAll('form')).every(form=>form.matches('[data-editorial-memory] form.preference-editor[data-preference-editor]')) && document.querySelectorAll('[data-editorial-memory] form[data-preference-editor="new"]').length===1`, 'ordinary-house-same-owner');
+      // #1521: the 知识库 category and 质量与学习's first tab are one component under one name.
+      await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] h2')?.textContent==='审阅偏好' && document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开'`, 'ordinary-house-same-name');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'ordinary-quality-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'ordinary-quality-library-ready');

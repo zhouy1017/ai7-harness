@@ -997,11 +997,13 @@ async function main() {
     // that worked (#1519): its success clears that error, so the following page exposes its own ordinary status.
     await waitFor(primary, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('代理不可达')`, 'ordinary-proxy-probe-error-cleared');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
-    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===4 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、本社审阅偏好、范例、资料库'`, 'ordinary-knowledge-four-categories');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===4 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、审阅偏好、范例、资料库'`, 'ordinary-knowledge-four-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
     await waitFor(primary, `Array.from(document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]'), node=>node.textContent).join('|')==='审阅偏好|反馈记录' && document.querySelector('#quality-tab-preferences')?.getAttribute('aria-selected')==='true'`, 'ordinary-quality-two-views');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='审阅偏好已打开' && document.querySelector('[data-learning-enabled]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
+    // #1521: AI 助手 is in the sidebar, so the page's footer button to it is gone in ordinary mode.
+    await assertRenderer(primary, `!Array.from(document.querySelectorAll('[data-screen="quality-learning"] button'), (node) => node.textContent).includes('全域对话历史')`, 'ordinary-quality-no-global-history-button');
     // #1408: an editor's own rule is an active rule the moment it is saved. Ordinary mode, public synthetic text; the rule is
     // created, edited as the same rule, then stopped, so this stage leaves no active preference behind.
     const preferenceText = 'J12 合成偏好：保留有意使用的短句。';
@@ -1093,8 +1095,8 @@ async function main() {
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
-    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`), 'global-agent-entry-no-work');
-    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
+    await requireJourney(await primary.evaluate(`(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === ${directivesAfterPreference} && document.querySelector('#context-title')?.textContent === 'AI 助手'; })()`), 'global-agent-entry-no-work');
+    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='AI 助手' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });

@@ -28,8 +28,8 @@ import {
 } from './shell-labels.js';
 
 // The shell around every screen (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076, ADR 0092):
-// a two-level sidebar — the six global destinations, 置顶 and 最近打开 Books,
-// the current Book's three groups and 设置 — and a context header naming where the window is. The screens stay their own
+// a two-level sidebar — the seven global destinations, 置顶 and 最近打开 Books,
+// the current Book's two groups and 设置 — and a context header naming where the window is. The screens stay their own
 // owners: they still replace `#screen`, and they tell the shell which Book and section they show through `follow`. The
 // shell owns no record: pinning, recency and the collapsed state are preferences, written through the main process's file and nothing else.
 
@@ -130,23 +130,25 @@ export interface SidebarBookRow {
   readonly title: string;
   readonly state: string;
   readonly pinned: boolean;
-  readonly current: boolean;
 }
 
-/** The sidebar's Book rows: pinned first, in pin order, then up to eight recent ones not pinned (IA-009). */
+/**
+ * The sidebar's Book rows: pinned first, in pin order, then up to eight recent ones not pinned (IA-009). The open Book is the
+ * heading of its own groups, so neither list repeats it (#1521).
+ */
 export function sidebarBookRows(
   pinned: ReadonlyArray<ShellBookEntry>,
   recent: ReadonlyArray<ShellRecentBookEntry>,
   currentBookId: string | null,
 ): { pinned: ReadonlyArray<SidebarBookRow>; recent: ReadonlyArray<SidebarBookRow> } {
   const seen = new Map(recent.map((entry) => [entry.bookId, entry]));
-  const pinnedRows = pinned.map((entry) => {
+  const pinnedRows = pinned.filter((entry) => entry.bookId !== currentBookId).map((entry) => {
     const visit = seen.get(entry.bookId);
-    return { bookId: entry.bookId, title: visit?.title ?? entry.title, state: visit ? shellRecentStateLine(visit.section) : SHELL_LABELS.pinned, pinned: true, current: entry.bookId === currentBookId };
+    return { bookId: entry.bookId, title: visit?.title ?? entry.title, state: visit ? shellRecentStateLine(visit.section) : SHELL_LABELS.pinned, pinned: true };
   });
   const pinnedIds = new Set(pinned.map((entry) => entry.bookId));
-  const recentRows = recent.filter((entry) => !pinnedIds.has(entry.bookId)).slice(0, MAX_RECENT_BOOKS).map((entry) => ({
-    bookId: entry.bookId, title: entry.title, state: shellRecentStateLine(entry.section), pinned: false, current: entry.bookId === currentBookId,
+  const recentRows = recent.filter((entry) => !pinnedIds.has(entry.bookId) && entry.bookId !== currentBookId).slice(0, MAX_RECENT_BOOKS).map((entry) => ({
+    bookId: entry.bookId, title: entry.title, state: shellRecentStateLine(entry.section), pinned: false,
   }));
   return { pinned: pinnedRows, recent: recentRows };
 }
@@ -241,8 +243,6 @@ export class ShellPreferences {
 export interface ShellSurface {
   /** A screen is on `#screen`: mark it, and when it belongs to a Book, make that Book current and recent. */
   follow(state: string, place: ShellPlace | null): void;
-  /** The screen on `#screen` is shown for another section of its Book than its own (历史与恢复 on 工作概览). */
-  markSection(section: ShellBookSection): void;
   /** The window left its Book (书库, 待我处理): the current-Book groups go. */
   leaveBook(): void;
   /** The Book whose groups show, if any. */
@@ -349,7 +349,14 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   bookGroup.setAttribute('aria-label', SHELL_LABELS.currentBook);
   bookGroup.hidden = true;
   const bookHeading = el('p', 'sidebar-current-book sidebar-group-label');
-  bookGroup.append(bookHeading);
+  // The open Book has no row in the list below, so its 置顶 star and menu live on its heading (#1521).
+  const bookHeadingRow = el('div', 'sidebar-book-row sidebar-current-book-row');
+  const currentPin = el('button', 'sidebar-pin', '☆');
+  currentPin.type = 'button';
+  currentPin.dataset['navCurrentPin'] = '';
+  currentPin.hidden = true;
+  bookHeadingRow.append(bookHeading, currentPin);
+  bookGroup.append(bookHeadingRow);
   const sectionLinks = new Map<ShellBookSection, HTMLAnchorElement>();
   let agentWorkspaceLink: HTMLAnchorElement | null = null;
   for (const group of SHELL_BOOK_GROUPS) {
@@ -397,6 +404,35 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   bookMenu.setAttribute('aria-label', '图书操作');
   let bookMenuOpen = false;
   bookMenu.addEventListener('toggle', (event) => { bookMenuOpen = (event as ToggleEvent).newState === 'open'; });
+  /** One pin write for the list's star, the heading's star and the menu: the same preference, the same failure line. */
+  const togglePinOf = (bookId: string, title: string): void => {
+    if (interrupted) return;
+    void preferences.togglePin({ bookId, title }, options.pinLimit).catch((error: unknown) => {
+      options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
+    });
+  };
+  /** The right-click menu of a Book (a list row or the open Book's heading): its one action presses that Book's star. */
+  const openPinMenu = (event: MouseEvent, pin: HTMLButtonElement): void => {
+    event.preventDefault();
+    if (interrupted) return;
+    const action = el('button', 'quiet', pin.title);
+    action.type = 'button';
+    action.setAttribute('role', 'menuitem');
+    action.addEventListener('click', () => {
+      bookMenu.hidePopover();
+      bookMenuOpen = false;
+      pin.focus();
+      pin.click();
+    });
+    bookMenu.replaceChildren(action);
+    bookMenu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 240))}px`;
+    bookMenu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 48))}px`;
+    bookMenu.showPopover();
+    bookMenuOpen = true;
+    action.focus();
+  };
+  currentPin.addEventListener('click', () => { if (book !== null) togglePinOf(book.bookId, book.title); });
+  bookHeadingRow.addEventListener('contextmenu', (event) => { if (book !== null) openPinMenu(event, currentPin); });
   // With a Book open its own groups lead the sidebar (Issue #1413 cluster 5); without one the group is hidden.
   sidebar.replaceChildren(bookGroup, destinations, books, foot, bookMenu);
 
@@ -415,6 +451,14 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     const focusBook = focused?.dataset[focusKind];
     options.preferenceNotice.textContent = preferences.notice ?? '';
     options.preferenceNotice.hidden = preferences.notice === null;
+    // The open Book's star keeps its element (and so its focus) across a pin or unpin; only its state is painted.
+    const heldPinned = book !== null && values['shell.pinnedBooks'].some((entry) => entry.bookId === book!.bookId);
+    const pinName = book === null ? '' : heldPinned ? SHELL_LABELS.unpin(book.title) : SHELL_LABELS.pin(book.title);
+    currentPin.hidden = book === null;
+    currentPin.textContent = heldPinned ? '★' : '☆';
+    currentPin.setAttribute('aria-pressed', String(heldPinned));
+    currentPin.setAttribute('aria-label', pinName);
+    currentPin.title = pinName;
     const rows = sidebarBookRows(values['shell.pinnedBooks'], values['shell.recentBooks'], book?.bookId ?? null);
     const list = (heading: string, entries: ReadonlyArray<SidebarBookRow>, kind: 'pinned' | 'recent'): HTMLElement | null => {
       if (entries.length === 0) return null;
@@ -430,40 +474,15 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         initial.setAttribute('aria-hidden', 'true');
         link.replaceChildren(initial, el('span', 'nav-label', row.title));
         link.dataset['navBook'] = row.bookId;
-        link.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.current ? '当前' : row.state));
-        if (row.current) link.append(el('span', 'nav-state', '当前'));
-        if (row.current) link.setAttribute('aria-current', 'true');
+        link.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.state));
         const pin = el('button', 'sidebar-pin', row.pinned ? '★' : '☆');
         pin.type = 'button';
         pin.dataset['navPin'] = row.bookId;
         pin.setAttribute('aria-pressed', String(row.pinned));
         pin.setAttribute('aria-label', row.pinned ? SHELL_LABELS.unpin(row.title) : SHELL_LABELS.pin(row.title));
         pin.title = pin.getAttribute('aria-label') ?? '';
-        pin.addEventListener('click', () => {
-          if (interrupted) return;
-          void preferences.togglePin({ bookId: row.bookId, title: row.title }, options.pinLimit).catch((error: unknown) => {
-            options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
-          });
-        });
-        item.addEventListener('contextmenu', (event) => {
-          event.preventDefault();
-          if (interrupted) return;
-          const action = el('button', 'quiet', pin.title);
-          action.type = 'button';
-          action.setAttribute('role', 'menuitem');
-          action.addEventListener('click', () => {
-            bookMenu.hidePopover();
-            bookMenuOpen = false;
-            pin.focus();
-            pin.click();
-          });
-          bookMenu.replaceChildren(action);
-          bookMenu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 240))}px`;
-          bookMenu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 48))}px`;
-          bookMenu.showPopover();
-          bookMenuOpen = true;
-          action.focus();
-        });
+        pin.addEventListener('click', () => togglePinOf(row.bookId, row.title));
+        item.addEventListener('contextmenu', (event) => openPinMenu(event, pin));
         item.append(link, pin);
         items.append(item);
       }
@@ -486,7 +505,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       more.append(summary, ...[list(SHELL_LABELS.pinnedHeading, restPinned, 'pinned'), list(SHELL_LABELS.recentHeading, restRecent, 'recent')].filter((node): node is HTMLElement => node !== null));
       blocks.push(more);
     }
-    if (blocks.length === 0) blocks.push(el('p', 'sidebar-empty field-note', SHELL_LABELS.noBooks));
+    if (blocks.length === 0 && book === null) blocks.push(el('p', 'sidebar-empty field-note', SHELL_LABELS.noBooks));
+    books.hidden = blocks.length === 0;
     bookRows.replaceChildren(...blocks);
     applyMode();
     // Pin/unpin moves the row between lists. Keep keyboard focus on that same control after painting it.
@@ -577,12 +597,6 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       paintActive();
       paintBooks(preferences.current);
       if (place !== null) visit(place);
-    },
-    markSection: (section) => {
-      if (book === null) return;
-      active = { kind: 'section', section };
-      paintActive();
-      visit({ ...book, section });
     },
     leaveBook: () => {
       book = null;
