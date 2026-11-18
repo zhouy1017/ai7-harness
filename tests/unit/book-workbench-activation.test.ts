@@ -101,6 +101,18 @@ it('(b) another window acquiring and releasing the Book in between restores noth
  expect(app.parked()).toEqual([]);app.leave(other,true);
  expect(await app.open(window,true)).toMatchObject({target:'requesting-window'});expect(window.editorResourceCapabilities.size).toBe(0);
 });
+it('(b2) another window holding the Book through an explicit open in between restores nothing',async()=>{
+ const app=main(),window=holding(app),other=owner();other.closeRisk=false;
+ app.leave(window,true);expect(await app.open(other,false)).toMatchObject({target:'requesting-window'});
+ expect(app.bookWindows.get(bookId)).toBe(other);app.leave(other,true);
+ expect(await app.open(window,true)).toMatchObject({target:'requesting-window'});expect(window.editorResourceCapabilities.size).toBe(0);
+});
+it('(b3) a Bookless second window whose route generation equals the parked one receives nothing and ends the entry',async()=>{
+ const app=main(),window=holding(app),other=owner();
+ app.leave(window,true);other.routeGeneration=window.routeGeneration;other.editorResourceCapabilities=new Map() as never;
+ expect(await app.open(other,true)).toMatchObject({target:'requesting-window'});
+ expect(other.editorResourceCapabilities.size).toBe(0);expect(app.parked()).toEqual([]);
+});
 it('(c) an explicit open of another Book in between restores nothing for either Book',async()=>{
  const app=main(),window=holding(app);
  app.leave(window,true);expect(await app.open(window,false,bookB)).toMatchObject({target:'requesting-window'});

@@ -7,6 +7,7 @@ import ts from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad } from '../../src/renderer/navigation-generation.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
+import { mountTaskDrawer } from '../../src/renderer/task-drawer.js';
 
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
@@ -558,8 +559,10 @@ it('a superseded explicit open of another Book keeps the remaining page paused u
  // The task poll of the page on screen pauses on the failure until its Book is held again.
  const paused=await page.run('api.inspectBookTasks()').then(()=>null,(error:unknown)=>error as BookOwnershipFailure);
  expect(paused).toBeInstanceOf(BookOwnershipFailure);let resumed=false;void paused!.recovered.then(()=>{resumed=true;});
+ // A failed retry keeps the same recovery the poll waits on.
+ await page.actions.get('重试连接当前图书')!();expect(open).toHaveBeenCalledTimes(2);expect(resumed).toBe(false);
  // An explicit open of Book B is answered "this window" after a later click superseded its page.
- const opening=page.run("openBookSection({bookId:'book-b',title:'乙'},'overview')");await vi.waitFor(()=>expect(open).toHaveBeenCalledTimes(2));
+ const opening=page.run("openBookSection({bookId:'book-b',title:'乙'},'overview')");await vi.waitFor(()=>expect(open).toHaveBeenCalledTimes(3));
  await page.run('leaveThen(() => renderGlobalAgent())');
  answerB.resolve({target:'requesting-window',route:{kind:'book',bookId:'book-b',bookTitle:'乙'}});await opening;
  expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).not.toBeNull();
@@ -570,27 +573,59 @@ it('a superseded explicit open of another Book keeps the remaining page paused u
  expect(resumed).toBe(true);expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
 });
 
-it.each<readonly [string, () => HTMLElement | null]>([
- ['the Task Drawer', () => { const node = document.createElement('aside'); node.dataset['taskDrawer'] = 'open'; return node; }],
- ['the command palette', () => { const node = document.createElement('dialog'); node.dataset['sheet'] = ''; node.show(); return node; }],
- ['a dialog', () => { const node = document.createElement('section'); node.setAttribute('role', 'dialog'); return node; }],
- ['no overlay', () => null],
-])('a late 修订记录 answer leaves focus inside %s and otherwise takes it (#1504 item 5)', async (_name, overlay) => {
- const overview = Promise.withResolvers<object>();
- const page = harness({ getBookWorkbenchRoute: async () => ({ kind: 'book', bookId: 'book-a', bookTitle: '甲' }), getBookOverview: () => overview.promise });
- page.shell['markSection' as 'follow'] = vi.fn();
- const heading = document.createElement('h3');
- page.context['renderBookOverview'] = () => {
-  const content = document.createElement('section'), folded = document.createElement('details'), records = document.createElement('div');
-  content.dataset['bookId'] = 'book-a'; records.className = 'record-navigation'; records.append(heading); folded.append(records); content.append(folded);
-  page.replaceScreen('book-overview', content);
- };
- const host = overlay(), working = document.createElement('button');
- if (host !== null) { host.append(working); miniDocument.body.append(host as unknown as MiniElement); MiniElement.prototype.focus.call(working); }
- const opening = page.run("openBookSection({bookId:'book-a',title:'甲'},'history')");
- overview.resolve({ book: { bookId: 'book-a' }, manuscriptAnchor: null }); await opening;
- expect(page.screen.querySelector('.record-navigation h3')).toBe(heading);
- expect(miniDocument.activeElement).toBe(host === null ? heading : working);
+it('when the opened Book\'s page does arrive, a later recovery there never resumes the old Book\'s paused reader (#1504 item 13)', async () => {
+ const leave=Promise.withResolvers<void>(),again=Promise.withResolvers<void>();let elsewhere=true;
+ const leaving=vi.fn().mockReturnValueOnce(leave.promise).mockReturnValueOnce(again.promise).mockResolvedValue({state:'library'});
+ const open=vi.fn(async(input:{bookId:string;activation?:string})=>input.activation===undefined?{target:'requesting-window',route:{kind:'book',bookId:input.bookId,bookTitle:'乙'}}
+  :elsewhere?{target:'held-elsewhere'}:{target:'requesting-window',route:{kind:'book',bookId:input.bookId,bookTitle:'乙'}});
+ const page=harness({leaveBookWorkbench:leaving,openBookWorkbench:open,inspectBookTasks:async()=>({groups:[]})});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ let pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const paused=await page.run('api.inspectBookTasks()').then(()=>null,(error:unknown)=>error as BookOwnershipFailure);
+ let resumed=false;void paused!.recovered.then(()=>{resumed=true;});
+ // The explicit open of B is answered for this window and B's page arrives.
+ await page.run("api.openBookWorkbench({kind:'book',bookId:'book-b'})");
+ const shown=document.createElement('section');shown.dataset['bookId']='book-b';page.replaceScreen('book-overview',shown);
+ // A superseded leave on B re-acquires B: B's recovery, not A's.
+ elsewhere=false;pending=page.run('renderGlobalAgent()');
+ await page.run('leaveThen(() => renderGlobalAgent())');again.resolve();await pending;await Promise.resolve();
+ expect(open).toHaveBeenLastCalledWith({kind:'book',bookId:'book-b',activation:'non-activating'});
+ expect(page.screen.firstElementChild).toBe(shown);expect(resumed).toBe(false);
+});
+
+// The real drawer, mounted as the shell mounts it: it marks the shell (document.body) as well as its own root.
+type Drawer = ReturnType<typeof mountTaskDrawer>;
+const inside = (host: HTMLElement): HTMLElement => { const control = document.createElement('button'); host.append(control); return control; };
+it.each<readonly [string, (drawer: Drawer, root: HTMLElement) => { working: HTMLElement; kept: boolean }]>([
+ ['the open Task Drawer', (drawer, root) => { drawer.openPanel('book-a', () => null); return { working: inside(root), kept: true }; }],
+ ['the open command palette', () => { const sheet = document.createElement('dialog'); sheet.dataset['sheet'] = ''; miniDocument.body.append(sheet as unknown as MiniElement); sheet.show(); return { working: inside(sheet), kept: true }; }],
+ ['a dialog', () => { const dialog = document.createElement('section'); dialog.setAttribute('role', 'dialog'); miniDocument.body.append(dialog as unknown as MiniElement); return { working: inside(dialog), kept: true }; }],
+ ['no overlay (the closed drawer still marks the shell)', () => ({ working: inside(document.body), kept: false })],
+])('a late 修订记录 answer keeps focus in %s only while it is open (#1504 item 5)', async (_name, overlay) => {
+ vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => undefined, getSelection: () => null });
+ try {
+  const root = document.createElement('aside'); miniDocument.body.append(root as unknown as MiniElement);
+  const never = new Proxy({}, { get: () => () => new Promise(() => undefined) });
+  const drawer = mountTaskDrawer({ root, shell: document.body, api: never, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
+   onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
+  expect(document.body.dataset['taskDrawer']).toBeDefined();
+  const overview = Promise.withResolvers<object>();
+  const page = harness({ getBookWorkbenchRoute: async () => ({ kind: 'book', bookId: 'book-a', bookTitle: '甲' }), getBookOverview: () => overview.promise });
+  page.shell['markSection' as 'follow'] = vi.fn();
+  const heading = document.createElement('h3');
+  page.context['renderBookOverview'] = () => {
+   const content = document.createElement('section'), folded = document.createElement('details'), records = document.createElement('div');
+   content.dataset['bookId'] = 'book-a'; records.className = 'record-navigation'; records.append(heading); folded.append(records); content.append(folded);
+   page.replaceScreen('book-overview', content);
+  };
+  const { working, kept } = overlay(drawer, root);
+  MiniElement.prototype.focus.call(working);
+  const opening = page.run("openBookSection({bookId:'book-a',title:'甲'},'history')");
+  overview.resolve({ book: { bookId: 'book-a' }, manuscriptAnchor: null }); await opening;
+  expect(page.screen.querySelector('.record-navigation h3')).toBe(heading);
+  expect(miniDocument.activeElement).toBe(kept ? working : heading);
+ } finally { vi.unstubAllGlobals(); }
 });
 
 it('five background Book reads after failed reconciliation send no retry and keep the existing notice', async () => {

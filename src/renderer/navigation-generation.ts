@@ -54,8 +54,11 @@ export const navigation = new NavigationGeneration();
  * the command palette, or a dialog. The page still paints; the editor keeps working where they are. */
 export function focusAfterLoad(target: HTMLElement, options?: FocusOptions): void {
   const active = document.activeElement;
-  if (active instanceof HTMLElement && active !== target && active.closest('dialog, [role="dialog"], [data-task-drawer]') !== null) return;
-  target.focus(options);
+  const overlay = active instanceof HTMLElement && active !== target ? active.closest<HTMLElement>('dialog, [role="dialog"], .task-drawer') : null;
+  // The drawer also marks the shell; only its own root, while open, is an overlay.
+  const open = overlay !== null && (overlay.tagName === 'DIALOG' ? (overlay as HTMLDialogElement).open
+    : !overlay.matches('.task-drawer') || overlay.dataset['taskDrawer'] === 'open');
+  if (!open) target.focus(options);
 }
 
 export class BookHeldElsewhereError extends Error {
@@ -200,7 +203,7 @@ export function reconcileBookWorkbenchApi<Api extends RendererApi>(raw: Api, she
     // its paused readers and its notice wait for the recovery that page reaches next.
     if (paused !== null && paused === onScreen && held !== onScreen) return;
     // An old Book's paused readers must not resume against a different Book.
-    if (held === onScreen) recovered.resolve();
+    if (held === onScreen && (paused === null || paused === onScreen)) recovered.resolve();
     recovered = Promise.withResolvers<void>();
     paused = null;
     shell.recovered?.();
