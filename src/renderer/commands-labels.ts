@@ -30,7 +30,7 @@ export const COMMAND_NAMES = {
   'nav.book.derivatives': '打开衍生稿件',
   'nav.book.manuscript': '稿件', 'nav.book.review': '审阅', 'nav.book.evaluation': '评估', 'nav.book.deliverables': '交付物',
   'nav.book.analysis': '分析', 'nav.book.sources': '来源与证据', 'nav.book.overview': '工作概览',
-  'nav.settings': '设置', 'nav.book.findings': '发现', 'nav.book.history': '历史与恢复', 'view.toggleSidebar': '切换侧栏',
+  'nav.settings': '设置', 'nav.book.findings': '待办汇总', 'view.toggleSidebar': '切换侧栏',
   'nav.back': '返回', 'search.find': '查找', 'search.next': '下一组查找结果', 'search.previous': '上一组查找结果',
   'view.focusManuscript': '聚焦稿件', 'view.openTasks': '查看任务', 'view.focusMode': '专注模式', 'view.comments': '批注栏',
   'edit.save': '保存', 'edit.undo': '撤销', 'edit.redo': '重做', 'edit.replace': '替换', 'edit.previousWindow': '上一页', 'edit.nextWindow': '下一页',

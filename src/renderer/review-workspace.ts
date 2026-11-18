@@ -2897,7 +2897,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     syncLaunchModelSettings(primaryActions);
     const estimatePanel = primaryActions.querySelector<HTMLDetailsElement>('.task-launch-estimate')!;
     estimatePanel.addEventListener('toggle', () => { if (estimatePanel.open) void startOrEstimateRun(state); });
-    actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
+    actions.append(procedureField, primaryActions, el('small', 'review-management-note', technicalWords('规范文件与工序在知识库里管理；这里只选用', '规范文件在知识库里管理；这里只选用')));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
     form.append(categories, localOptions, assurance, scopes, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
