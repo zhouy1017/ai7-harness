@@ -131,7 +131,7 @@ describe('工作概览 refusals (#992)', () => {
     miniDocument.body.replaceChildren();
     const context = createContext({ document: miniDocument, identityWords, analysisRefusalView, overviewAnalysisRefusalView, technicalWords: (service: string, editorial: string) => developer ? service : editorial, researchUnavailableLine: (_code: string, text: string) => text,
       navigation: new NavigationGeneration(), overview: { book: { bookId: 'book-1', title: '图书' } },
-      renderBookAnalysis: vi.fn(), rendererErrorCode: () => 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE',
+      renderBookAnalysis: vi.fn(), rendererErrorCode: () => 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', rendererErrorData, rendererErrorMessage,
       state: { modelSettings: vi.fn() }, error: { code: 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', message: 'internal' },
     });
     const source = readFileSync(new URL('../../src/renderer/book-overview-screen.ts', import.meta.url), 'utf8');
