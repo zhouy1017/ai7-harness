@@ -369,6 +369,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-update-action h5 { margin: 0; font-size: .95rem; }
 .analysis-update-action p { margin: .45rem 0 0; overflow-wrap: anywhere; }
 .analysis-update-action[data-update-available="false"] { opacity: .85; }
+/* The mode the bar's start will run is the pressed one (#1526). */
+.analysis-update-action button[aria-pressed="true"] { color: var(--selection-text); background: var(--selection); border-color: var(--selection-boundary); font-weight: 800; opacity: 1; }
 .analysis-update-expected { font-weight: 800; }
 .analysis-range-options { margin: .6rem 0 0; padding: .6rem .8rem; border: 1px solid var(--boundary); border-radius: 9px; min-width: 0; }
 .analysis-range-options legend { font-weight: 800; padding: 0 .3rem; }
