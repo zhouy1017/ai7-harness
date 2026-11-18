@@ -3726,9 +3726,15 @@ async function main() {
     const launchReferenceId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then(page=>page.materials[0].materialId)`);
     // Press the buttons of the item just added, not the first of the kind on the page.
     const launchReferenceItem = `article.library-material[data-material-id="${launchReferenceId}"]`;
+    // Its decisions sit inside its 查看资料, which the editor opens first (the page keeps it open across repaints).
+    const openLaunchReference = async (name) => {
+      if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(`${launchReferenceItem} > details.knowledge-file-more`)})?.open===true`))) await pointerClick(renderer, waitFor, `${launchReferenceItem} > details.knowledge-file-more > summary`, name);
+    };
+    await openLaunchReference('launch-reference-more');
     await pointerClick(renderer, waitFor, `${launchReferenceItem} [data-library-action="attribute"]`, 'launch-reference-attribute');
     await pointerClick(renderer, waitFor, '.library-attribution-chooser [data-library-choice="house"]', 'launch-reference-house');
     await pointerClick(renderer, waitFor, '[data-library-action="confirm-attribution"]', 'launch-reference-attributed');
+    await openLaunchReference('launch-reference-more-again');
     await pointerClick(renderer, waitFor, `${launchReferenceItem} [data-library-action="eligibility"]`, 'launch-reference-eligibility');
     await pointerClick(renderer, waitFor, '.library-eligibility-chooser [data-library-choice="excluded"]', 'launch-reference-excluded');
     await pointerClick(renderer, waitFor, '[data-library-action="confirm-eligibility"]', 'launch-reference-confirmed');
