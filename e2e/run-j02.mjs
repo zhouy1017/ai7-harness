@@ -1021,17 +1021,22 @@ async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
 }
 
 async function panelGeometry(renderer, selector, width, height, facts = false) {
-  const fits = await renderer.evaluate(`(async () => {
+  // The result names the first clause that failed, so a failing guest run says which bound was broken.
+  const verdict = await renderer.evaluate(`(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const panel = document.querySelector(${JSON.stringify(selector)});
-    if (!(panel instanceof HTMLElement) || panel.hidden || innerWidth !== ${width} || innerHeight !== ${height}) return false;
+    if (!(panel instanceof HTMLElement) || panel.hidden) return 'absent';
+    if (innerWidth !== ${width} || innerHeight !== ${height}) return 'viewport';
     const box = panel.getBoundingClientRect();
     const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
-    return box.width > 0 && box.height > 0 && (${facts} ? nodes.length === 3 : true) && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
-      && panel.scrollWidth <= panel.clientWidth + 1
-      && nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0);
+    if (box.width <= 0 || box.height <= 0) return 'unrendered';
+    if (${facts} && nodes.length !== 3) return 'facts';
+    if (!(box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight)) return 'outside';
+    if (panel.scrollWidth > panel.clientWidth + 1) return 'overflow';
+    if (!nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0)) return 'fact-empty';
+    return 'fits';
   })()`);
-  requireJourney(fits === true, 'shared-panel-geometry');
+  requireJourney(verdict === 'fits', `shared-panel-geometry-${typeof verdict === 'string' ? verdict : 'unknown'}`);
 }
 
 async function milestoneGeometry(renderer) {
