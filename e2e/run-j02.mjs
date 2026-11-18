@@ -646,6 +646,7 @@ async function clickVisibleControl(renderer, selector, name) {
   requireJourney(point !== null, name);
   await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
   await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+  return point;
 }
 
 async function assertSupportingOverlays(renderer) {
@@ -1043,7 +1044,9 @@ async function milestoneGeometry(renderer) {
   for (const [width, height] of [[1280, 800], [1008, 681]]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-menu');
-    await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
+    const point = await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form');
+    const after = await renderer.evaluate(`(() => { const hit = document.elementFromPoint(${point.x}, ${point.y}); const open = (selector) => document.querySelector(selector)?.open; return 'x' + Math.round(${point.x}) + 'y' + Math.round(${point.y}) + '-save' + open('details.editor-save-menu') + '-form' + open('.milestone-section') + '-derived' + open('details.derivative-menu') + '-hit' + (hit?.tagName ?? 'none') + '.' + String(hit?.className ?? '').split(' ')[0]; })()`);
+    requireJourney(/-savetrue-formtrue-/.test(after), `milestone-geometry-form-opened-${width}-${after}`);
     await panelGeometry(renderer, '.editor-save-menu-body', width, height);
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form-close');
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-close');
