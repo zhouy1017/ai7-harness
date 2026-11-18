@@ -106,6 +106,8 @@ pnpm run check
 
 This checks inline links, image links, reference definitions and HTML destinations, with exact path case. External URLs and heading fragments require review; the command does not certify semantic accuracy or implement a complete Markdown renderer. The existing L0 includes this check; there is no additional hosted Gate.
 
+[words-table.mjs](../../tools/words-table.mjs) holds the ordinary-mode vocabulary table ([editor-surfaces §10.2](../ui-ux-v2/editor-surfaces.md)) as data, and [words-report.mjs](../../tools/words-report.mjs) scans with it. `pnpm run words:report` (or `pnpm run words:report -- <file>…`) prints, per renderer file, each banned term in the text an editor reads with its line and replacement, then the rows only the sentence can judge; it skips the first argument of `technicalWords(…)`, is a line-level scan rather than a parser, and always exits 0. It is a report for the author of a change, not a gate.
+
 ## Boundaries for later cleanup
 
 The review at `dev@f3199a2d` found concentrated ownership in `src/service/store.ts`, `src/shared/protocol.ts`, `src/renderer/index.ts` and `src/main/application.ts`. Size alone does not justify a replacement. Future work should extract one existing responsibility with its direct callers and tests:
