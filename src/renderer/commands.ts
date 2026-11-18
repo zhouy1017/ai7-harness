@@ -36,7 +36,10 @@ export interface CommandDefinition {
 
 const both = (chord: string): Readonly<Record<CommandPlatform, string>> => ({ win32: chord, darwin: chord });
 
-/** The Book sections a Book's window can move between; the order is the order of their default digits. */
+/**
+ * The Book sections a Book's window can move between; the order is the order of their default digits, which a change of the
+ * sidebar's row order leaves as it was. 历史与恢复 had the last digit; its records are 工作概览's 导入记录 now (#1521).
+ */
 export const BOOK_SECTION_COMMANDS = [
   ['nav.book.manuscript', COMMAND_NAMES['nav.book.manuscript'], 'manuscript'],
   ['nav.book.derivatives', COMMAND_NAMES['nav.book.derivatives'], 'derivatives'],
@@ -47,7 +50,6 @@ export const BOOK_SECTION_COMMANDS = [
   ['nav.book.analysis', COMMAND_NAMES['nav.book.analysis'], 'analysis'],
   ['nav.book.sources', COMMAND_NAMES['nav.book.sources'], 'sources'],
   ['nav.book.overview', COMMAND_NAMES['nav.book.overview'], 'overview'],
-  ['nav.book.history', COMMAND_NAMES['nav.book.history'], 'history'],
 ] as const;
 
 /** The remappable commands, in the order the settings table lists them. */
