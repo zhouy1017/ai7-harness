@@ -1013,6 +1013,8 @@ describe('the round trip through 回到原文 (#1525)', () => {
       expect(first.root.querySelector('article[data-finding-id="rvf_n4"]')).not.toBeNull();
       const typos = first.root.querySelector('section.review-group[data-review-category="typos-and-usage"] details.review-category-fold')!;
       typos.open = false; typos.dispatchEvent({ type: 'toggle' });
+      const history = first.root.querySelector('details.review-history-fold')!;
+      history.open = true; history.dispatchEvent({ type: 'toggle' });
       scroller.scrollTop = 420;
       first.root.querySelector('article[data-finding-id="rvf_n3"] [data-review-action="go-to-text"]')!.click(); await flush();
       expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 3 }));
@@ -1031,6 +1033,7 @@ describe('the round trip through 回到原文 (#1525)', () => {
       expect(back.root.querySelectorAll('details.review-card-more').filter((node) => node.open)).toHaveLength(0);
       expect(miniDocument.activeElement).toBe(back.root.querySelector('article[data-finding-id="rvf_n3"]'));
       expect(scroller.scrollTop).toBe(420);
+      expect(back.root.querySelector('details.review-history-fold')!.open).toBe(true);
     } finally { Reflect.deleteProperty(miniDocument, 'scrollingElement'); }
   });
 });
