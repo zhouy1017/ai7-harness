@@ -345,7 +345,9 @@ async function loadSample1Owners() {
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
         "export { withModelClarification, withAmbiguousClarificationValidation, buildClarificationAnswerMessage } from './src/service/provider/clarification-contract.ts';",
-        "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
+        "export { reviewCategoryKindDefinition, historicalReviewCategoryDefinitions } from './src/service/review/review-category-kind.ts';",
+        "export { runSynthesisKind } from './src/service/review/run-synthesis-kind.ts';",
+        "export { RUN_SYNTHESIS_PROMPT_DIGEST } from './src/service/review/run-synthesis-contract.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
         "export { reviewDeliverables } from './src/service/production-documents.ts';",
@@ -534,29 +536,38 @@ export async function verifySample1Capture(request, selection, parsed) {
       const category = categories[0];
       if (category.executor !== 'review-category-contract' || category.entry.searchEngine ||
           category.entry.seriesKnowledge !== undefined || category.task.planEnvelopeDigest !== sha256Hex(canonicalJson(envelope))) fail();
-      const input = owners.reviewCategoryContractInput(category.entry);
-      if (input.deliverables !== undefined) {
-        // #813: prove each read-only participant from S66's records and the admitted sample1 source, not caller text.
-        const current = owners.reviewDeliverables(database, manifest.manuscript.bookId);
-        if (category.entry.categoryId !== 'cross-deliverable-consistency' || current.unavailableReason !== null ||
-            canonicalJson(current.participants) !== canonicalJson(input.deliverables) ||
-            input.deliverables.some((document) => document.sourceDigest !== SAMPLE1_SOURCE_SHA256)) fail();
-        // A manuscript-only content key would also answer a Run comparing different deliverable words. Keep only the exact
-        // request key, which pins every participant; fresh-import regression replays this response through controlled transport.
-        parsed.contentDigest = null;
-        parsed.exactParticipantsOnly = true;
-        parsed.participantContentDigest = sha256Hex(canonicalJson(input.deliverables.map(({ typeId, title, paragraphs }) => ({
-          typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
-        }))));
+      if (category.entry.synthesisKey !== undefined) {
+        const saved = database.prepare('SELECT synthesis_key FROM review_run_synthesis WHERE review_run_id = ?').get(snapshot.reviewRunId);
+        if (saved?.synthesis_key !== category.entry.synthesisKey || snapshot.bookId !== manifest.manuscript.bookId) fail();
+        definition = owners.runSynthesisKind(database, category.entry.synthesisKey, category.entry.synthesisSource);
+        if (category.task.kind !== definition.kind) fail();
+        definition = wrapMaterials(definition);
+        contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
+      } else {
+        const input = owners.reviewCategoryContractInput(category.entry);
+        if (input.deliverables !== undefined) {
+          // #813: prove each read-only participant from S66's records and the admitted sample1 source, not caller text.
+          const current = owners.reviewDeliverables(database, manifest.manuscript.bookId);
+          if (category.entry.categoryId !== 'cross-deliverable-consistency' || current.unavailableReason !== null ||
+              canonicalJson(current.participants) !== canonicalJson(input.deliverables) ||
+              input.deliverables.some((document) => document.sourceDigest !== SAMPLE1_SOURCE_SHA256)) fail();
+          // A manuscript-only content key would also answer a Run comparing different deliverable words. Keep only the exact
+          // request key, which pins every participant; fresh-import regression replays this response through controlled transport.
+          parsed.contentDigest = null;
+          parsed.exactParticipantsOnly = true;
+          parsed.participantContentDigest = sha256Hex(canonicalJson(input.deliverables.map(({ typeId, title, paragraphs }) => ({
+            typeId, title, paragraphs: paragraphs.map(({ position, text, truncated }) => ({ position, text, truncated })),
+          }))));
+        }
+        const contractVersion = database.prepare('SELECT contract_version FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.contract_version;
+        const version = contractVersion === 'ai7.editorial-review/1' ? 1 : 2;
+        const candidates = owners.historicalReviewCategoryDefinitions(input, version).map(wrapMaterials);
+        definition = candidates.find(candidate => candidate.promptContractDigest === selection.taskPromptContractDigest ||
+          owners.withModelClarification(candidate).promptContractDigest === selection.taskPromptContractDigest);
+        if (definition === undefined) fail();
+        if (category.task.kind !== definition.kind) fail();
+        contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
       }
-      const contractVersion = database.prepare('SELECT contract_version FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.contract_version;
-      const version = contractVersion === 'ai7.editorial-review/1' ? 1 : 2;
-      const prompt = owners.reviewCategoryContract(input, version);
-      contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
-      definition = owners.reviewCategoryKindDefinition(input, version);
-      if (category.task.kind !== definition.kind) fail();
-      definition = wrapMaterials(definition);
-      contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     } else definition = owners.baselineAnalysisKindDefinition(contract.selection);
     const wrapped = owners.withModelClarification(definition);
     const variant = owners.withAmbiguousClarificationValidation(definition);
@@ -597,6 +608,10 @@ export async function verifySample1Capture(request, selection, parsed) {
         if (answer.requestSha256 !== questionRow.sha256 || answer.requestId !== question.requestId) fail();
         expected = owners.buildClarificationAnswerMessage(expected, { ...question, answer });
       }
+    } else if (parsed.subject === 'task-synthesis' && definition.structuredOnly === true) {
+      if (selection.promptContractDigest !== definition.crossUnit.promptContractDigest) fail();
+      expected = definition.crossUnit.step.buildMessage([], manifest.units.length);
+      if (definition.crossUnit.step.requestDigest([]) !== parsed.requestDigest) fail();
     } else if (parsed.subject === 'task-synthesis' && (evaluation !== null || writingTask !== undefined)) {
       // The kind's book-level synthesis over the closed units the revision kept, read back by the kind's own record reader.
       const rows = database.prepare("SELECT canonical_json, sha256, unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
@@ -945,7 +960,7 @@ function chatMessageText(content) {
  * which a reduction, a sampling turn or the reflection names as its `stageContractDigest` for the caller to prove against the
  * capture. Any other request shape refuses rather than being guessed at.
  */
-export function parseCachedRequest(requestBody, promptContractDigest) {
+export function parseCachedRequest(requestBody, promptContractDigest, structuredStageContractDigest) {
   let body;
   try {
     body = JSON.parse(requestBody);
@@ -976,6 +991,12 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   // Everything the request carried but its frozen system prompt — user input, earlier model results, tool results and selected
   // dialogue text — participates in sanitization. The exact request remains only in the external cache.
   carriedBlockTexts.push(...carriedMessages);
+  // The product's own stage identity selects its structured builder; its wire format is never duplicated here.
+  if (structuredStageContractDigest !== undefined && promptContractDigest === structuredStageContractDigest) {
+    return { subject: 'task-synthesis', stageContractDigest: structuredStageContractDigest, unitMessage, header: null,
+      ownBlockTexts: [], carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages,
+      unitOrdinal: 0, contentDigest: null, identities: [], requestDigest: sha256Hex(unitMessage) };
+  }
   const task = parseTaskHeader(unitMessage, promptContractDigest);
   const header = parseUnitMessageHeader(unitMessage) ?? task?.header ?? null;
   if (header !== null) {
@@ -1387,7 +1408,16 @@ function requireStageContract(selection, parsed) {
 export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
-  let parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
+  let parsed;
+  try { parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest); }
+  catch (error) {
+    if (!(error instanceof FixtureGenerationError) || error.code !== 'FIXTURE_GEN/unit-message-unrecognized') throw error;
+    const owners = await loadSample1Owners();
+    if (selection.promptContractDigest !== owners.RUN_SYNTHESIS_PROMPT_DIGEST) throw error;
+    refuse(request.sample1Store !== undefined && request.sample1Task !== undefined,
+      'FIXTURE_GEN/sample1-source-unproved', 'structured-stage');
+    parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest, owners.RUN_SYNTHESIS_PROMPT_DIGEST);
+  }
   if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
     parsed.contentDigest = null;
     parsed.exactParticipantsOnly = true;
