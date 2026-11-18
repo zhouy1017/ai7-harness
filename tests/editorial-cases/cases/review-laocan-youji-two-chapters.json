@@ -1,0 +1,60 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "review-laocan-youji-two-chapters",
+  "kind": "review",
+  "title": "错别字与规范用语 · 《老残游记》前两章（原文，计分专用）",
+  "manuscript": {
+    "source": "public-samplebook",
+    "file": "liue-laocan-youji.docx"
+  },
+  "bookTitle": "老残游记",
+  "input": {
+    "categories": [
+      "typos-and-usage"
+    ],
+    "scope": {
+      "chapters": {
+        "from": 2,
+        "to": 3
+      }
+    },
+    "chapterTitles": [
+      "第一回　土不制水历年成患　风能鼓浪到处可危",
+      "第二回　历山山下古帝遗踪　明湖湖边美人绝调"
+    ],
+    "conversionResidue": {
+      "from": "著",
+      "to": "着"
+    }
+  },
+  "fixture": null,
+  "measuredPass": "review",
+  "replay": {
+    "route": "score-only"
+  },
+  "expectedConcerns": [],
+  "falsePositiveChecks": [
+    {
+      "id": "lc-name-penglaige",
+      "paragraph": 10,
+      "words": "蓬莱阁",
+      "reason": "地名（登州名胜），不是用字错误"
+    },
+    {
+      "id": "lc-period-nali",
+      "paragraph": 25,
+      "words": "那里有几营",
+      "reason": "“那里”作疑问（反问）词是原作时代的写法（今作“哪里”，本范围内出现 0 次）；重印本保留原貌，不应改动"
+    },
+    {
+      "id": "lc-period-ba",
+      "paragraph": 16,
+      "words": "动身罢",
+      "reason": "句末“罢”是原作时代的写法（今作“吧”）；重印本保留原貌，不应改动"
+    }
+  ],
+  "observations": {
+    "acceptance": "规则（#1074，测量前写定）：四部公版书按钉住的原文审阅，不植入任何缺陷；原文即参照。定位率=已定位÷列出；三处误报陷阱为人名地名，或作者时代的写法且其现代写法在本范围内出现 0 次（因此不存在可辩护的“前后不一致”批注）；其余每条已定位意见都在改动或标注原文，计为“改动原文”——误报的上限，比现代稿件的编辑标准更严。修改建议若只把“著”改为“着”（本范围内“着”出现 0 次），单列为繁简转换残留（可能有用），仍计入改动原文。",
+    "rework": "若意见把陷阱处的人名地名或时代写法当作错误改动或标注，即为误报；本案例不计有用率和关切召回率。"
+  }
+}
