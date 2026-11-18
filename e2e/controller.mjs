@@ -245,6 +245,24 @@ export function statusBarClear(selectors = []) {
   })()`;
 }
 
+/** What `statusBarClear` saw, for a failure's detail: the bar's box and every listed element it lies over (#1519). */
+export function statusBarOverlaps(selectors = []) {
+  return `(() => {
+    const bar = document.querySelector('#persistence-status');
+    if (!(bar instanceof HTMLElement)) return { bar: null };
+    const box = bar.getBoundingClientRect(); const round = (r) => [r.left, r.top, r.width, r.height].map((value) => Math.round(value));
+    const over = [];
+    for (const selector of ['#app-sidebar', '#app-sidebar .sidebar-foot', '#task-drawer', '.technical-layer-control', ...${JSON.stringify(selectors)}]) {
+      for (const node of document.querySelectorAll(selector)) {
+        const r = node.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && !(r.right <= box.left + 0.5 || r.left >= box.right - 0.5 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5)) over.push({ selector, tag: node.tagName, cls: node.className, rect: round(r) });
+      }
+    }
+    return { bar: round(box), hidden: bar.hidden, position: getComputedStyle(bar).position, view: [innerWidth, innerHeight], scroll: [bar.scrollWidth, bar.clientWidth],
+      vars: ['--bottom-controls', '--status-area-right', '--status-bar-height'].map((name) => document.documentElement.style.getPropertyValue(name)), over };
+  })()`;
+}
+
 /** The sidebar on the library: the seven destinations in their order with their exact names, 书库 current, 设置 at the foot. */
 export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'tasks:任务', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:AI 助手']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
 

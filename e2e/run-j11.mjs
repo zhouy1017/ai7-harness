@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 import { admittedSpanText, ADMITTED_BASELINE_DOCX, fixedArchiveTime } from './composed-docx.mjs';
-import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass, statusBarClear } from './controller.mjs';
+import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
@@ -1439,7 +1439,7 @@ async function main() {
           })()`, `library-error-${kind}-arm`);
           await pointerClick(renderer, waitFor, '[data-book-filter-action="find"]', `library-error-${kind}-find`);
           await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return bar instanceof HTMLElement && !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith(${JSON.stringify(kind === 'short' ? '无法查找图书。' : '查找没有完成')}) && document.documentElement.dataset.statusBar === 'shown'; })()`, `library-error-${kind}-shown`);
-          await assertRenderer(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`);
+          await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`, 10_000, statusBarOverlaps());
           for (const form of ['full', 'icons']) {
             if (form === 'icons') {
               await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);

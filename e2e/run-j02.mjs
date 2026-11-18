@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass, statusBarClear } from './controller.mjs';
+import { DIRECT_EDIT, MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, manuscriptBoundary, applyRendererDiagnostics, attachProductOutput, discloseJ02Viewport, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -2235,7 +2235,12 @@ async function main() {
           await clickVisibleControl(renderer, '#sidebar-toggle', 'status-bar-long-fold-sidebar');
           await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, 'status-bar-long-folded');
         }
-        await waitFor(renderer, `${statusBarClear(MANUSCRIPT_CONTROLS)} && ${LAST_LINE_CLEAR} && (() => { const line = document.querySelector('#persistence-status .status-line'); return line.scrollHeight > line.clientHeight && document.querySelector('#persistence-status').getBoundingClientRect().height <= innerHeight / 4; })()`, `status-bar-long-clear-${form}`, 10_000);
+        const longClear = `${statusBarClear(MANUSCRIPT_CONTROLS)} && ${LAST_LINE_CLEAR} && (() => { const line = document.querySelector('#persistence-status .status-line'); return line.scrollHeight > line.clientHeight && document.querySelector('#persistence-status').getBoundingClientRect().height <= innerHeight / 4; })()`;
+        try {
+          await waitFor(renderer, longClear, `status-bar-long-clear-${form}`, 10_000);
+        } catch {
+          requireJourney(false, `status-bar-long-clear-${form}`, { overlaps: await renderer.evaluate(statusBarOverlaps(MANUSCRIPT_CONTROLS)), lastLine: await renderer.evaluate(LAST_LINE_CLEAR) });
+        }
         requireJourney(await renderer.evaluate(SETTLED) === true, `status-bar-long-settled-${form}`);
         const long = await renderer.evaluate(barLayout);
         const before = form === 'full' ? quiet : quietIcons;
