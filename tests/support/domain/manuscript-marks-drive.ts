@@ -68,3 +68,25 @@ export function refusal(operation: () => unknown): string {
   }
   return 'no-error';
 }
+
+type HostBound<M, H> = {
+  [K in keyof M as M[K] extends (host: H, ...rest: never[]) => unknown ? K : never]:
+    M[K] extends (host: H, ...rest: infer A) => infer R ? (...rest: A) => R : never
+};
+
+/**
+ * The domain's operations under the store's own member names, each the real exported function with its Host bound first:
+ * partial application only — no store method is re-implemented here. `imported` names the Book, `close` ends the case.
+ */
+export function domainOf(book: ManuscriptMarksBook) {
+  const bind = <M extends object, H>(module: M, host: H): HostBound<M, H> => Object.fromEntries(Object.entries(module)
+    .filter(([, value]) => typeof value === 'function')
+    .map(([name, operation]) => [name, (...rest: unknown[]) => (operation as (host: H, ...args: unknown[]) => unknown)(host, ...rest)])) as HostBound<M, H>;
+  return {
+    ...bind(marks, book.marksHost),
+    ...bind(manuscript, book.manuscriptHost),
+    imported: imported(book),
+    db: book.db,
+    close: () => book.db.close(),
+  };
+}
