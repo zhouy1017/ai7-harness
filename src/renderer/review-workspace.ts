@@ -3015,7 +3015,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.choicePending = false;
       projection = next;
       renderSheet(next, state);
-      if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
+      if (focused instanceof HTMLElement) queueMicrotask(() => {
+        // renderSheet reopens the native chooser popover in its preceding microtask.
+        if (document.activeElement === document.body || state.chooser?.element.contains(document.activeElement)) focused.focus({ preventScroll: true });
+      });
     } catch (error) {
       if (destroyed || sheetState !== state || state.choiceTicket !== ticket) return;
       state.choicePending = false;
