@@ -362,7 +362,7 @@ function seedBook() {
 }
 afterAll(async () => { if (seededBook !== null) await (await seededBook.catch(() => null))?.seedRoots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string; routedEntries: ReadonlyMap<string, ModelFixtureEntry> }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
   const seed = await seedBook();
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
   cpSync(seed.seedRoots.dataRoot, scenarioRoots.dataRoot, { recursive: true });
@@ -383,7 +383,7 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
   const registered = inheritGeneratedEntries && !ownProfile;
   if (registered) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
   try {
-    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...seed.imported });
+    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, routedEntries: routedFixture.entries, ...seed.imported });
     store.markCleanShutdown();
     return result;
   } finally {
@@ -717,15 +717,22 @@ it('generates the authored review fixture without unreachable committed entries'
 }, 600_000);
 
 
-it('keeps a late entry of an ended case out of the stock map of the next', () => {
-  // A case that timed out leaves its map registered until its callback ends; the next case must not see that map filled.
+it('keeps a late entry of an ended case out of the stock map of the next', async () => {
+  // A case that timed out leaves its map registered until its callback ends; the next case's own stock map must not be filled by it.
   const stale = new Map<string, ModelFixtureEntry>();
   activeFixtureEntries.add(stale);
   resetGeneratorState();
-  add({ unitOrdinal: 1, requestDigest: 'a'.repeat(64), attempt: null, contentDigest: null,
-    response: { kind: 'unit-result', text: '{}', usage: { inputTokens: 1, outputTokens: 1 } } }, 0, 'late');
+  const late = { unitOrdinal: 1, requestDigest: 'a'.repeat(64), attempt: null, contentDigest: null,
+    response: { kind: 'unit-result', text: '{}', usage: { inputTokens: 1, outputTokens: 1 } } } as const satisfies ModelFixtureEntry;
+  const leaf = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-stock-typos-leaf-authored');
+  await withBook(async ({ routedEntries }) => {
+    const before = [...routedEntries.keys()];
+    add(late, 0, 'late');
+    expect([...routedEntries.keys()]).toEqual(before);
+    expect(routedEntries.has(fixtureEntryKey(late.unitOrdinal, late.requestDigest))).toBe(false);
+  }, leaf, true, true);
   expect(stale.size).toBe(0);
-});
+}, 120_000);
 
 it('authors the stock review synthesis through its independent native-child fixture', async () => {
   const leafPath = resolve(FIXTURE_PATH, '..', 'sample1-stock-typos-leaf-authored.json');
