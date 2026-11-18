@@ -1282,7 +1282,9 @@ async function main() {
       for (const viewport of [{width:1280,height:800},{width:1008,height:681}]) {
         at(viewport.width===1280?'review-keyboard-wide':'review-keyboard-gate');
         // Each form reviews its own tester edit, and takes away what it leaves (below), so the Book is as it found it.
-        await assertRenderer(renderer, `(() => {return (() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05TriageBlock=block.dataset.blockId; return window.__j05.place(window.__j05TriageBlock,0,0); })() && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
+        // Each form edits its own short, unmarked paragraph: the edit and the Apply of its 「……」 together add about 1,100
+        // characters, and a paragraph holds at most 2,048 (MAX_BLOCK_GRAPHEMES), so two forms in one paragraph cannot both apply.
+        await assertRenderer(renderer, `(() => {return (() => { const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node)=>node.dataset.blockId!==window.__j05TriageBlock && node.querySelector('.editorial-mark')===null && (node.textContent??'').length<600); if(!block)return false; window.__j05TriageBlock=block.dataset.blockId; return window.__j05.place(window.__j05TriageBlock,0,0); })() && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
         await settled(renderer, 'review-triage-edit-saved');
         await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
         await triageClick(renderer,'[data-nav-book-section="review"]');
@@ -1381,7 +1383,11 @@ async function main() {
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRunId===${JSON.stringify(runId)} && document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]')?.disabled===false`, 'review-triage-cleanup-ready');
         await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
-        await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
+        try {
+          await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
+        } catch {
+          requireJourney(false, 'review-triage-cleanup-applied', await renderer.evaluate(`({strip:document.querySelector('.review-batch-strip')?.textContent??null, problem:document.querySelector('.review-problem')?.textContent??null, status:window.__j05.status(), block:window.__j05.text(window.__j05TriageBlock)?.length??null})`));
+        }
         // What the Book's pending list counts: a pending finding with a mark on the manuscript. One with none (its words already
         // carry another mark) adds nothing to it and cannot be accepted.
         const leftover=`(async () => (await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}, findingsAfterOrdinal:null, categoryId:null, severity:null, status:'pending', chapterBlockId:null})).run.findings.filter((item)=>item.markId!==null).map((item)=>[item.ordinal,item.quote,item.output,item.markStatus,item.anchorState]))()`;
