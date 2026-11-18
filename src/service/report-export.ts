@@ -376,7 +376,8 @@ function publishedReportDocx(input: ReportExportInput): Uint8Array {
     publishedParagraph(`审阅对象：《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}｜审阅日期：${publishedDate(input.generatedAt)}`,
       `<w:spacing w:after="240"/>${center}`, `<w:color w:val="777777"/>${size(19)}`),
     ...(record.synthesis?.summary == null ? [] : [styled('全书审阅统合总结', 'Heading1'),
-      ...(record.run.modelLabel === undefined ? [] : [publishedParagraph(record.run.modelLabel)]),
+      // The summary's own source mark: the model 生成统合总结 used when it differs from the Run's (Issue #1506).
+      ...((record.synthesis.modelLabel ?? record.run.modelLabel) === undefined ? [] : [publishedParagraph((record.synthesis.modelLabel ?? record.run.modelLabel)!)]),
       ...reviewSynthesisLines(record.synthesis).map((line) => publishedParagraph(line))]),
     styled('一、审阅说明', 'Heading1'),
     publishedParagraph(`本次审阅对象为《${input.bookTitle}》${extentLabel === null ? '' : `（${extentLabel}）`}，稿件修订版 ${record.run.manuscript.revisionLabel}，审阅范围：${record.run.scopeLabel}。` +
