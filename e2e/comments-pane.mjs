@@ -379,15 +379,16 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const textMoved=scroll.scrollTop!==beforeText, paneKept=paneBefore>0&&pane.scrollTop===paneBefore, textAfter=scroll.scrollTop;
     pane.scrollTop=0;
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    // With the pane at its top the text moves back and then forward again, over the same two places as the first move: the words end
-    // where that move left them (they stay below the pane top, where a card can meet them above its 8 px floor) and the cards follow.
-    scroll.scrollTop=beforeText;
-    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
-    scroll.scrollTop=textAfter;
+    // With the pane at its top the text moves back half the first move: never onto the window's top or end, where the editor pages,
+    // and the words stay below the pane top, where a card can meet them above its 8 px floor. The cards follow the words.
+    scroll.scrollTop=beforeText+Math.round((textAfter-beforeText)/2);
     await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     const cardTop=firstAnchor.card.getBoundingClientRect().top, wordsTop=firstAnchor.anchor.getBoundingClientRect().top;
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
+    // The stage goes on with the text where the first move left it, as before #1523.
+    scroll.scrollTop=textAfter;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
     return {pass:reachable && textMoved && paneKept && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, paneKept, paneBefore, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
   })()`);
   const assertCoordinates = coordinates => {
