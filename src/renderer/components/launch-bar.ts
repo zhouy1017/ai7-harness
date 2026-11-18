@@ -134,8 +134,11 @@ export function createLaunchBarPresentation(chooser: HTMLElement, start: HTMLBut
         const up = natural.height > below && above > below;
         const height = Math.min(natural.height, up ? above : below);
         if (height < natural.height) panel.style.maxHeight = `${Math.max(0, height)}px`;
-        panel.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - natural.width - 8))}px`;
-        panel.style.top = `${up ? anchor.top - 4 - height : anchor.bottom + 4}px`;
+        const left = Math.max(8, Math.min(anchor.left, innerWidth - natural.width - 8)), top = up ? anchor.top - 4 - height : anchor.bottom + 4;
+        panel.style.left = `${left}px`; panel.style.top = `${top}px`;
+        // Inside a sheet the fixed offsets may resolve against the sheet rather than the window: correct by where it landed.
+        const landed = panel.getBoundingClientRect();
+        if (Math.abs(landed.left - left) > 0.5 || Math.abs(landed.top - top) > 0.5) { panel.style.left = `${2 * left - landed.left}px`; panel.style.top = `${2 * top - landed.top}px`; }
       };
       // The plan and the references arrive after the panel opens: place it again whenever its size changes.
       if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(panel);
