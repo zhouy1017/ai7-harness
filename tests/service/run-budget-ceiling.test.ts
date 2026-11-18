@@ -11,12 +11,13 @@ import {
   CROSS_UNIT_BUDGET_REACHED,
   SAFE_RETRY_BUDGET_REACHED,
 } from '../../src/service/analysis/execution.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { CLARIFICATION_RECORD_GAP } from '../../src/service/analysis/clarifications.js';
 import { ASSURANCE_SAMPLING_REMOVED } from '../../src/service/analysis/plan-edits.js';
 import { RUN_REPORT_REVISION_USAGE_STAGES, runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -28,7 +29,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_UNANSWERABLE_ENDED } from '../../src/service/task-plan.js';
+import { CLARIFICATION_UNANSWERABLE_ENDED, PLAN_EDIT_DRIFT_REASON } from '../../src/service/task-plan.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -246,6 +247,117 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('lets the editor set the ceiling again in the plan of a redo after 预算已达上限 under ordinary production, and sends the redo unchanged', async () => {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const mapped = capturedMapAnswer(happy.entries);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      const header = parseUnitMessageHeader(message);
+      if (request.stage === 'units' && header !== null) return resolveFixtureEntry(happy.entries, header.ordinal,
+        unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+      if (request.stage === 'run-report-reflection') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+      return mapped(request, message);
+    }, { unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) });
+    launchPolicy = captured.policy;
+    const execution = captured.owner;
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 普通模式预算重做');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const plan = (ref = taskIntentId): ReturnType<EditorialStore['inspectTaskPlan']> => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref });
+      // Ordinary production reaches a remote route, but it is not developer-live: the plan sets the ceiling from the start.
+      expect(plan().edit.budget).toEqual({ ceiling: 'unset', settable: true, reason: null });
+      const edited = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(5000),
+      });
+      const stopped = await run(store, execution, bookId, taskIntentId, edited.planEnvelope!.digest);
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 5000 });
+      const reached = plan();
+      expect(reached.state.key).toBe('budget-reached');
+      expect(reached.budgetStop?.launchSetsCeiling).toBe(false);
+      const runRecordId = stopped.run!.runRecordId;
+      // The redo's plan offers the ceiling to the editor, under no developer-live reason.
+      const redo = prepare(store, bookId, SYNC, runRecordId);
+      const redoIntentId = redo.taskIntent!.taskIntentId;
+      expect(plan(redoIntentId).edit.budget).toEqual({ ceiling: tokens(5000), settable: true, reason: null });
+      const sentBefore = captured.wireRequests.length;
+      const raised = store.editBaselineAnalysisPlan({
+        bookId, taskIntentId: redoIntentId, planEnvelopeDigest: redo.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(20000),
+      });
+      expect(raised.planVersion?.materialInputs.runBudgetCeiling).toEqual(tokens(20000));
+      expect(raised.providerResolutionPlan?.runBudgetCeiling).toEqual(tokens(20000));
+      const settled = await run(store, execution, bookId, redoIntentId, raised.planEnvelope!.digest);
+      expect(settled.run?.state).toBe('completed');
+      expect(settled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([5, 6, 7, 8]);
+      expect(settled.providerResolutionPlan?.runBudgetCeiling).toEqual(tokens(20000));
+      // The redo sends what an uninterrupted run under the same ceiling sends for the same ranges, and nothing more.
+      const control = (await importSample1Book(store, roots.codeRoot, 'L2 sample1 普通模式预算对照')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, control);
+      const controlPrepared = prepare(store, control);
+      const controlEdited = store.editBaselineAnalysisPlan({
+        bookId: control, taskIntentId: controlPrepared.taskIntent!.taskIntentId, planEnvelopeDigest: controlPrepared.planEnvelope!.digest,
+        removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(20000),
+      });
+      const controlStart = captured.wireRequests.length;
+      await run(store, execution, control, controlPrepared.taskIntent!.taskIntentId, controlEdited.planEnvelope!.digest);
+      // Every stage the redo sent — units 5 to 8, the reduction, the sample and the reflection — is the whole request body
+      // the uninterrupted control sent for the same stage and range. Only ids minted per imported Book (and the reflection's
+      // run UUID and accounting digest) are normalised; the ceiling reaches no request, and the redo sends no range it had already read.
+      const keyOf = (index: number): string => `${captured.requests[index]!.stage}:${captured.requests[index]!.unitOrdinal ?? ''}`;
+      const body = (index: number): string => JSON.stringify(captured.wireRequests[index]).replace(/blk_[0-9a-f]+/g, 'blk')
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, 'uuid')
+        // The reflection carries its own Run's accounting — a redo's (4 read, 4 reused) differs from an uninterrupted Run's by
+        // design — so for that stage its digest and accounting JSON are set aside; the rest of its body is compared whole.
+        .replace(/(账目摘要 )[0-9a-f]{64}/g, keyOf(index).startsWith('run-report-reflection') ? '$1digest' : '$&')
+        .replace(/\{\\"adaptationCount.*?(?=","role":"user")/g, keyOf(index).startsWith('run-report-reflection') ? 'accounting' : '$&');
+      const indexes = (from: number, to: number): number[] => Array.from({ length: to - from }, (_, offset) => from + offset);
+      const redoKeys = indexes(sentBefore, controlStart).map(keyOf);
+      expect(redoKeys.filter((key) => key.startsWith('units:'))).toEqual(['5', '6', '7', '8'].map((ordinal) => `units:${ordinal}`).sort((x, y) => redoKeys.indexOf(x) - redoKeys.indexOf(y)));
+      expect(new Set(redoKeys).size).toBe(redoKeys.length);
+      expect(redoKeys).toEqual(expect.arrayContaining(['cross-unit-reduction:', 'assurance-sampling:', 'run-report-reflection:']));
+      for (const index of indexes(sentBefore, controlStart)) {
+        const counterpart = indexes(controlStart, captured.wireRequests.length).filter((other) => keyOf(other) === keyOf(index));
+        expect(counterpart, keyOf(index)).toHaveLength(1);
+        expect(body(index), keyOf(index)).toBe(body(counterpart[0]!));
+      }
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      try { captured.assertMatched(); } finally { store.close(); }
+    }
+  }, 300_000);
+
+  it('never offers the ceiling in a plan frozen under ordinary production once the launch is rebound to developer-live', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, () => undefined);
+    launchPolicy = captured.policy;
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算与启动重绑');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const plan = () => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan().edit.budget).toEqual({ ceiling: 'unset', settable: true, reason: null });
+      // The launch changes under the frozen plan: the projection never says settable where the revision gate refuses.
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: captured.policy,
+        live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+          credentialSlot: 'opencode-go', credentialReference: '00000000-0000-4000-8000-000000000001', runBudgetCeiling: tokens(240_000) } });
+      // The rebinding moves the plan's key content: it is drifted — a revision pending — so the projection and the gate agree.
+      expect(store.inspectBaselineAnalysis(bookId).planRevision?.state).toBe('pending');
+      expect(plan().edit.budget).toEqual({ ceiling: 'unset', settable: false, reason: PLAN_EDIT_DRIFT_REASON });
+      expect(await refusal(() => store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(5000),
+      }))).toBe('ANALYSIS_PLAN_REVISION_PENDING');
+      store.markCleanShutdown();
+    } finally {
+      await captured.owner.dispose();
       store.close();
     }
   }, 300_000);
