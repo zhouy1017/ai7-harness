@@ -1272,7 +1272,7 @@ async function main() {
     await settled(renderer, 'locks-settled');
 
     // Last before closing (#1592): the large Run leaves several hundred open marks in one paragraph, more than one manuscript
-    // window carries, so every 批注栏 and later stage runs before it on the Book state it was written for.
+    // window carries (400, Issue #1604), so every 批注栏 and later stage runs before it on the Book state it was written for.
     // #1525: a fresh local review supplies real findings for keyboard triage and the return route. A tester's edit of sample1:
     // each single 「…」 is one 修改建议 (P02): several hundred of them, so the Run's findings need a second page (#1592) and
     // deciding walks focus past the window.
