@@ -1,8 +1,8 @@
 /** Exact symbol geometry from September prototypes ②B and ①, editor-surfaces §0.4.
  * The 17 A4 IDs are fixed; i-nav and i-task are the prototype's right-rail extensions. Issue #1413 cluster 2 gives every
- * entry its own symbol: i-agent (全域智能体), i-workspace (Agent 工作区) and i-comment (批注).
+ * entry its own symbol: i-agent (AI 助手), i-workspace (AI 改稿) and i-comment (批注); i-derivative (衍生稿件) is the one id added since.
  */
-export const ICON_IDS = ['i-inbox', 'i-library', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo'] as const;
+export const ICON_IDS = ['i-inbox', 'i-library', 'i-series', 'i-kb', 'i-learn', 'i-settings', 'i-ms', 'i-review', 'i-star', 'i-box', 'i-flag', 'i-analysis', 'i-source', 'i-overview', 'i-history', 'i-menu', 'i-back', 'i-nav', 'i-task', 'i-agent', 'i-workspace', 'i-comment', 'i-undo', 'i-redo', 'i-derivative'] as const;
 export type IconId = (typeof ICON_IDS)[number];
 const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>>> = {
   "i-undo": [["path", {"d": "M4 9h10a6 6 0 010 12"}], ["path", {"d": "M9 4L4 9l5 5"}]],
@@ -28,6 +28,7 @@ const SYMBOLS: Readonly<Record<IconId, ReadonlyArray<readonly [string, Readonly<
   "i-task": [["path", {"d": "M4 20l3.6-.9 10.2-10.2-2.7-2.7L4.9 16.4z"}], ["path", {"d": "M13.6 7.7l2.7 2.7"}], ["path", {"d": "M14 20h6"}]],
   "i-agent": [["path", {"d": "M4 5h16v11H9l-4 3.5V16H4z"}], ["path", {"d": "M12 7.6l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z"}]],
   "i-workspace": [["rect", {"x": "3", "y": "4", "width": "18", "height": "16", "rx": "2"}], ["path", {"d": "M3 9h18"}], ["path", {"d": "M10 9v11"}], ["circle", {"cx": "15.5", "cy": "14.5", "r": "1.6"}]],
+  "i-derivative": [["path", {"d": "M8 4h8l3 3v10H8z"}], ["path", {"d": "M5 8v12h10"}], ["path", {"d": "M11 10h5M11 13h5"}]],
   "i-comment": [["path", {"d": "M5 5h14v10h-7l-4 3.5V15H5z"}], ["path", {"d": "M8.5 9h7M8.5 12h4"}]],
 };
 const NS = 'http://www.w3.org/2000/svg';

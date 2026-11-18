@@ -17,7 +17,7 @@ export function globalAgentAnswerStatus(attempt: DialogueAttemptProjection | und
 
 export type ShellDestination = 'attention' | 'tasks' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
 
-/** The seven global destinations in their fixed order (IA-007): 待我处理 · 任务 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
+/** The seven global destinations in their fixed order (IA-007): 待我处理 · 任务 · 书库 · 书系 · 知识库 · 质量与学习 · AI 助手（Issue #1083; named by #1521）. */
 export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: IconId }> = Object.freeze([
   { key: 'attention', label: '待我处理', icon: 'i-inbox' },
   { key: 'tasks', label: '任务', icon: 'i-task' },
@@ -25,39 +25,39 @@ export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination;
   { key: 'series', label: '书系', icon: 'i-series' },
   { key: 'knowledge', label: '知识库', icon: 'i-kb' },
   { key: 'quality', label: '质量与学习', icon: 'i-learn' },
-  { key: 'global-agent', label: '全域智能体', icon: 'i-agent' },
+  { key: 'global-agent', label: 'AI 助手', icon: 'i-agent' },
 ]);
 
-/** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */
+/**
+ * The current Book's two groups (IA-012; #1521): 工作 · 资料与记录. 待办汇总 (the Book's open items, once 发现) sits after 审阅;
+ * 历史与恢复 is no row — its records are 工作概览's 导入记录. `history` stays a stored section only (a recent Book may hold it).
+ */
 export const SHELL_BOOK_GROUPS: ReadonlyArray<{
-  readonly key: 'work' | 'handling' | 'records';
+  readonly key: 'work' | 'records';
   readonly label: string;
   readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: IconId }>;
 }> = Object.freeze([
   { key: 'work', label: '工作', sections: [
     { key: 'manuscript', label: '主稿件', icon: 'i-ms' },
-    { key: 'derivatives', label: '衍生稿件', icon: 'i-ms' },
+    { key: 'derivatives', label: '衍生稿件', icon: 'i-derivative' },
     { key: 'review', label: '审阅', icon: 'i-review' },
+    { key: 'findings', label: '待办汇总', icon: 'i-flag' },
     { key: 'evaluation', label: '评估', icon: 'i-star' },
     { key: 'deliverables', label: '交付物', icon: 'i-box' },
-  ] },
-  { key: 'handling', label: '处理', sections: [
-    { key: 'findings', label: '发现', icon: 'i-flag' },
   ] },
   { key: 'records', label: '资料与记录', sections: [
     { key: 'analysis', label: '分析', icon: 'i-analysis' },
     { key: 'sources', label: '来源与证据', icon: 'i-source' },
     { key: 'overview', label: '工作概览', icon: 'i-overview' },
-    { key: 'history', label: '历史与恢复', icon: 'i-history' },
   ] },
 ]);
 
 /**
- * Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015; AGENT-001, 004): the 工作 group's one row that is no Book section.
- * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
- * section, and nothing opens it on its own.
+ * AI 改稿 (Issue #90, wave 13 slice 13a; UI ADR 0015; AGENT-001, 004; named by #1521), developer name Agent 工作区: the 工作 group's
+ * one row that is no Book section. It is an explicit choice of a work surface for the current Book, entered on the Book's own
+ * route; it records no recent section, and nothing opens it on its own.
  */
-export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work' as const, get label(): string { return technicalWords('Agent 工作区', 'AI 协作'); },
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work' as const, get label(): string { return technicalWords('Agent 工作区', 'AI 改稿'); },
   icon: 'i-workspace' as const, state: 'agent-workspace' as const });
 
 export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
@@ -75,6 +75,7 @@ export const SHELL_LABELS = Object.freeze({
   collapse: '收起侧栏',
   expand: '展开侧栏',
   narrow: '窗口较窄，侧栏只显示图标',
+  column: '右侧栏打开时侧栏只显示图标，以保持正文行宽；关闭右侧栏后恢复',
   pin: (title: string) => `置顶《${title}》`,
   unpin: (title: string) => `取消置顶《${title}》`,
   pinned: '已置顶',
@@ -105,16 +106,20 @@ export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.fre
   help: '本机 · 帮助',
 });
 
-const SECTION_LABELS: Readonly<Record<ShellBookSection, string>> = Object.freeze(Object.fromEntries(
+/** A section the preference file may still hold but the sidebar no longer has: 历史与恢复 was folded into 工作概览 (#1521). */
+const FOLDED_SECTIONS: Readonly<Partial<Record<ShellBookSection, ShellBookSection>>> = Object.freeze({ history: 'overview' });
+const shownSection = (section: ShellBookSection): ShellBookSection => FOLDED_SECTIONS[section] ?? section;
+
+const SECTION_LABELS: Readonly<Partial<Record<ShellBookSection, string>>> = Object.freeze(Object.fromEntries(
   SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => [section.key, section.label])),
-) as Record<ShellBookSection, string>);
+));
 
 export function shellSectionLabel(section: ShellBookSection): string {
-  return SECTION_LABELS[section];
+  return SECTION_LABELS[shownSection(section)]!;
 }
 
 export function shellSectionGroupLabel(section: ShellBookSection): string {
-  return SHELL_BOOK_GROUPS.find((group) => group.sections.some((entry) => entry.key === section))!.label;
+  return SHELL_BOOK_GROUPS.find((group) => group.sections.some((entry) => entry.key === shownSection(section)))!.label;
 }
 
 /** A recent Book's one-line state: where it was last seen. */
