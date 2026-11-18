@@ -24,7 +24,8 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 
 - **The four ADR 0091 Public SampleBooks** (`luxun-zhaohua-xishi.docx`, `luxun-nahan.docx`, `liue-laocan-youji.docx`,
   `wujingzi-rulin-waishi.docx`) — **score-only** cases (#1074). Each is reviewed developer-live on its exact, unedited file over
-  its first two body chapters; no tester edit is made to them (only `sample1` admits a tester's edits), and no fixture may be
+  its first two body chapters, 错别字与规范用语 only (the measured call rate on `sample1` left no budget for 体例与格式 on the
+  four, a budget reason, not a result); no tester edit is made to them (only `sample1` admits a tester's edits), and no fixture may be
   generated from them (ADR 0091 §3.3), so their evidence stays in the Provider Test Ledger and the developer-live data root
   outside the repository. The cases fix their references before any live output: the chapter rule, three false-positive traps
   (a name, and period-authentic forms a reprint keeps), and the reprint-fidelity rule below.

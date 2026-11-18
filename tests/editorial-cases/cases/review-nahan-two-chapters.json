@@ -2,7 +2,7 @@
   "schema": "ai7.editorial-case/1",
   "id": "review-nahan-two-chapters",
   "kind": "review",
-  "title": "错别字与规范用语、体例与格式 · 《呐喊》前两章（原文，计分专用）",
+  "title": "错别字与规范用语 · 《呐喊》前两章（原文，计分专用）",
   "manuscript": {
     "source": "public-samplebook",
     "file": "luxun-nahan.docx"
@@ -10,8 +10,7 @@
   "bookTitle": "呐喊",
   "input": {
     "categories": [
-      "typos-and-usage",
-      "style-and-format"
+      "typos-and-usage"
     ],
     "scope": {
       "chapters": {

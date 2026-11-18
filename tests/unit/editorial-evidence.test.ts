@@ -173,7 +173,7 @@ describe('the case set', () => {
     const chapters = (store: EditorialStore, book: ImportedBook) => chapterScope(store, book, testCase).scope;
     expect(await scoreRefusal(() => {})).toBe('EDITORIAL_CASE/score-run-absent');
     expect(await scoreRefusal((store, book) => prepare(store, book, categories, { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }))).toBe('EDITORIAL_CASE/score-run-not-case');
-    expect(await scoreRefusal((store, book) => prepare(store, book, categories.slice(0, 1), chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-not-case');
+    expect(await scoreRefusal((store, book) => prepare(store, book, [...categories, 'style-and-format'], chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-not-case');
     expect(await scoreRefusal((store, book) => { prepare(store, book, categories, chapters(store, book)); prepare(store, book, categories, chapters(store, book)); })).toBe('EDITORIAL_CASE/score-runs-ambiguous');
     expect(await scoreRefusal((store, book) => {
       prepare(store, book, categories, chapters(store, book));
