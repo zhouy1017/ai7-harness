@@ -388,9 +388,11 @@ export function mountMenuControls(root: HTMLElement): () => void {
       const panel = panelOf(menu), summary = menu.querySelector('summary');
       if (!panel || !summary) continue;
       const rect = summary.getBoundingClientRect();
-      const width = Math.min(panel.offsetWidth, view.innerWidth - 16);
       panel.style.position = 'fixed'; panel.style.margin = '0'; panel.style.right = 'auto';
       const origin = fixedOrigin(panel);
+      // Measure where the panel will stand: fixed, with the whole window to grow into, not inside its (maybe narrow) anchor.
+      panel.style.left = `${8 - origin.left}px`;
+      const width = Math.min(panel.offsetWidth, view.innerWidth - 16);
       panel.style.left = `${Math.max(8, Math.min(rect.right - width, view.innerWidth - width - 8)) - origin.left}px`;
       const below = view.innerHeight - rect.bottom - 12;
       const upwards = below < Math.min(panel.scrollHeight, 200) && rect.top > below;

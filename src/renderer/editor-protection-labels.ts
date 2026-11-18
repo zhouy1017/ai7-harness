@@ -81,6 +81,8 @@ export const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存
 
 /** Only a distinct cause belongs in the status bar; the banner owns the general state. */
 export function protectionFailureReason(error: unknown): string {
-  const reason = (error instanceof Error ? error.message : typeof error === 'string' ? error : '').trim();
+  // The preload bridge throws a plain `{ code, message }` object, not an Error.
+  const message = typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : error;
+  const reason = (typeof message === 'string' ? message : '').trim();
   return reason === PROTECTION_HEADLINE || reason === PROTECTION_READ_ONLY_HEADLINE ? '' : reason || '保存失败，未提供具体原因。';
 }

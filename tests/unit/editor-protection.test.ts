@@ -209,6 +209,7 @@ describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
 it('keeps a specific write failure while leaving the general protection statement to the banner', () => {
   expect(protectionFailureReason(new Error('确认结果与当前编辑不符'))).toBe('确认结果与当前编辑不符');
   expect(protectionFailureReason(new Error(PROTECTION_HEADLINE))).toBe('');
+  expect(protectionFailureReason(Object.freeze({ code: 'AI7_EDIT_JOURNAL_FAULT', message: '修订日志暂时无法确认写入。' }))).toBe('修订日志暂时无法确认写入。');
   expect(protectionFailureReason(null)).toBe('保存失败，未提供具体原因。');
   expect(protectionFailureReason('磁盘无法写入')).toBe('磁盘无法写入');
 });
