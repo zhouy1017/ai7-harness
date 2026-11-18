@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass, statusBarClear } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, milestonePersisted, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
@@ -1691,6 +1691,12 @@ async function main() {
       observer.observe(bar, { attributes: true, attributeFilter: ['hidden'] });
       return true;
     })()`;
+    // A first-frame check that fails says what each hit saw: the button's box, the bar's, and what lay under the button's centre.
+    const firstFrames = async (predicate, name) => {
+      try { await waitFor(primary, `Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every(${predicate})`, name, 20_000); }
+      catch { requireJourney(false, name, await primary.evaluate(`(() => { const node = document.querySelector('[data-commit-source-import]'), r = node?.getBoundingClientRect(); const under = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+        return { hits: window.__j12FirstFrames ?? null, button: r ? [r.left, r.top, r.width, r.height].map(Math.round) : null, under: under ? [under.tagName, String(under.className), under.id] : null, hidden: document.hidden, bar: ${statusBarOverlaps(['.commit-bar'])} }; })()`)); }
+    };
     await primary.evaluate(FIRST_FRAMES_PROBE);
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('已显示这本图书现有的工作台') && document.querySelector('#persistence-status')?.textContent.includes('来源材料未提交') && !document.querySelector('[data-commit-source-import]')?.disabled`, 'preflight-duplicate-rejected');
@@ -1722,7 +1728,7 @@ async function main() {
       await waitFor(primary, `document.visibilityState === 'visible'`, name);
     };
     await bringPrimaryBack('preflight-error-window-visible');
-    await waitFor(primary, `Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every((hit) => hit !== false)`, 'preflight-short-commit-hit-first-frame');
+    await firstFrames('(hit) => hit !== false', 'preflight-short-commit-hit-first-frame');
     for (const kind of ['short', 'long']) {
       if (kind === 'long') {
         // At the Gate's window size, the bar appears anew for the long refusal: the standing one is dismissed first.
@@ -1741,7 +1747,7 @@ async function main() {
         await pointerClick(primary, waitFor, '[data-commit-source-import]', 'preflight-long-press');
         await waitFor(primary, `(() => { const bar = document.querySelector('#persistence-status'); return bar.dataset.tone === 'error' && bar.textContent.includes('故意写得很长，用来确认它在导入复核页里') && document.documentElement.dataset.statusBar === 'shown'; })()`, 'preflight-long-shown');
         await bringPrimaryBack('preflight-long-window-visible');
-        await waitFor(primary, `Array.isArray(window.__j12FirstFrames) && window.__j12FirstFrames.length === 4 && window.__j12FirstFrames.every((hit) => hit === true)`, 'preflight-long-commit-hit-first-frame');
+        await firstFrames('(hit) => hit === true', 'preflight-long-commit-hit-first-frame');
       }
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
