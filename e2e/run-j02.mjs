@@ -1031,7 +1031,7 @@ async function panelGeometry(renderer, selector, width, height, facts = false) {
     const nodes = ${facts} ? [...panel.querySelectorAll('[data-protection-fact]')] : [];
     if (box.width <= 0 || box.height <= 0) return 'unrendered';
     if (${facts} && nodes.length !== 3) return 'facts';
-    if (!(box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight)) return 'outside';
+    if (!(box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight)) return 'outside-L' + Math.round(box.left) + '-R' + Math.round(box.right) + '-T' + Math.round(box.top) + '-B' + Math.round(box.bottom) + '-W' + innerWidth + '-H' + innerHeight + '-Y' + Math.round(scrollY);
     if (panel.scrollWidth > panel.clientWidth + 1) return 'overflow';
     if (!nodes.every(node => node.textContent.length > 0 && node.getBoundingClientRect().width > 0)) return 'fact-empty';
     return 'fits';
