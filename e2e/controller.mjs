@@ -241,7 +241,7 @@ export function statusBarClear(selectors = []) {
     const box = bar.getBoundingClientRect();
     if (!(box.width > 0 && box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth + 0.5 && bar.scrollWidth <= bar.clientWidth + 1)) return false;
     const over = (node) => { const r = node.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !(r.right <= box.left + 0.5 || r.left >= box.right - 0.5 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5); };
-    return ['#app-sidebar', '#app-sidebar .sidebar-foot', '#task-drawer', ...${JSON.stringify(selectors)}].every((selector) => Array.from(document.querySelectorAll(selector)).every((node) => !over(node)));
+    return ['#app-sidebar', '#app-sidebar .sidebar-foot', '#task-drawer', '.technical-layer-control', ...${JSON.stringify(selectors)}].every((selector) => Array.from(document.querySelectorAll(selector)).every((node) => !over(node)));
   })()`;
 }
 
