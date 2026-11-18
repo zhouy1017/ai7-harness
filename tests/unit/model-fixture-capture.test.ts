@@ -34,7 +34,9 @@ it('replays the current recorded baseline units with their real ordinal answers 
   const manifest = deriveCoverageManifest({ bookId: id, manuscriptId: id, branchId: id, revisionId: id,
     revisionLabel: 'r1', revisionDigest: 'a'.repeat(64), blocks });
   const prompt = clarificationPromptContractDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
-  expect(fixture.entries.size).toBe(manifest.units.length);
+  expect([...fixture.entries.values()].filter(entry => entry.unitOrdinal > 0)).toHaveLength(manifest.units.length);
+  expect([...fixture.entries.values()].filter(entry => entry.unitOrdinal === 0).map(entry => entry.capture?.subject))
+    .toEqual(['reduction', 'sampling', 'sampling', 'sampling', 'sampling', 'reflection']);
   for (const unit of manifest.units) {
     const entry = [...fixture.entries.values()].find(value => value.unitOrdinal === unit.ordinal &&
       value.requestDigest === unitRequestDigest(prompt, unit.ordinal, unit.digest));

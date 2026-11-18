@@ -309,6 +309,256 @@
         "identityMap": [],
         "fixtureResponseDigest": "32b710a49973ab7b7b58f67fd1ff822deffa7df8f69d2caa4b25c9bbbbd38213"
       }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "529fee4570107d6992b898b734051ad123213f0d69e68e2869b8df0496aa62a8",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\n  \"schema\": \"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\n  \"findings\": [\n    {\n      \"kind\": \"alias-identity-divergence\",\n      \"description\": \"“青铜重器”这一名称在不同单元所指不一致：单元1用作书名《青铜重器》；单元4将其作为“两周重器”的别名，属于术语层面的避讳替代；单元7既把它当作类别术语，又将其列为曾侯乙尊盘的别名。\",\n      \"rowRefs\": [\"r2\", \"r51\", \"r91\", \"r98\"],\n      \"confidence\": \"medium\"\n    },\n    {\n      \"kind\": \"alias-identity-divergence\",\n      \"description\": \"曾侯乙尊盘实物与照片的指称在不同单元不一致：单元7将“曾侯乙尊盘”与“曾侯乙尊盘黑白照片”分列为两个对象；单元8则把“曾侯乙尊盘”标为“曾侯乙尊盘照片”的别名，使实物与照片身份合并。\",\n      \"rowRefs\": [\"r91\", \"r92\", \"r108\"],\n      \"confidence\": \"medium\"\n    },\n    {\n      \"kind\": \"alias-identity-divergence\",\n      \"description\": \"甲骨文书信的写信人身份在各单元间未统一：单元2定为一九八○年代最后一个夏天去世的“写信人（死者）”；单元3仅称“写信的人”；单元4依据印章“郝嘉”将其推定为写信人，但未确认郝嘉即单元2的死者。\",\n      \"rowRefs\": [\"r16\", \"r27\", \"r31\", \"r43\", \"r203\"],\n      \"confidence\": \"medium\"\n    },\n    {\n      \"kind\": \"alias-identity-divergence\",\n      \"description\": \"曾本之与安静的关系在各单元中明确程度不同：单元4称其四十岁与在水果湖银行做出纳的安静结婚；单元5、单元8按夫妻同住处理；单元7则称稿件未明言，仅由外公、外婆称呼推为夫妻。\",\n      \"rowRefs\": [\"r198\", \"r271\", \"r220\", \"r232\"],\n      \"confidence\": \"medium\"\n    },\n    {\n      \"kind\": \"chronology-conflict\",\n      \"description\": \"年龄与婚龄的时间线在各单元间显得紧张：单元1称曾本之刚过六十五岁生日；单元4称其四十岁才与安静结婚；单元7称曾小安为曾本之女儿、安静为外婆；单元8称曾小安与郑雄已结婚八年。若曾小安为曾本之与安静婚后所生，其年龄与八年婚龄之和接近六十五岁上限；稿件未交代曾小安生母。\",\n      \"rowRefs\": [\"r235\", \"r198\", \"r271\", \"r220\", \"r221\", \"r228\"],\n      \"confidence\": \"low\"\n    }\n  ],\n  \"notes\": [\n    \"单元2称先月亭前固定独坐处除家人外外人不应当知道，而信封地址精确写出该处；单元4又将印章署名者郝嘉推定为写信人。稿件以悬念保留，未在两个单元间解决。\",\n    \"单元1的“另一位弟子”（八年前被警察带走）与单元2的写信人（一九八○年代末去世）、单元4的郝嘉之间，未见跨单元明确同一或区分的表述。\",\n    \"单元4称马跃之不爱打电话、此次因着急才费力找出曾本之的电话号码；单元5、单元6却显示二人相交数十年、遇事必相告，并能长时间通话。未见跨单元解释。\",\n    \"单元6称当天下午的会是“新省长上任后的第一个会”，单元7郑雄则称会议内容是省长“首次公开露面”；表述略有差异，但未构成直接冲突。\",\n    \"单元7约定次日上午在楚学院与马跃之见面，单元8只写当晚书房情形，未再提及该约定。\"\n  ]\n}",
+        "usage": {
+          "inputTokens": 10940,
+          "outputTokens": 17728
+        }
+      },
+      "capture": {
+        "subject": "reduction",
+        "itemId": "S40/reanalyze-book/9",
+        "selectedItemId": "S40/reanalyze-book/9",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "165ee1266185d14d38d784c33ba8428be10b428270768e87ddd8e3bab441a9d0",
+        "taskPromptContractDigest": "ec6bea8a7c171dba83cca181d6cc12299cbd5e45c17ed71cd43020e2b8eaf385",
+        "capturedAt": "2026-11-18T10:19:18.491Z",
+        "providerRequestDigest": "75c0156d208dae9b5914cafd823fe7fac5d9f39a08f1fc16be3fda7d900d5b0f",
+        "providerResponseDigest": "03cea1e2320f291360e64c32b56f2c3f7bc4502850d8dc62048cf7e8b24ee0e8",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "debaf7053bf670055cd613f45569b74e8bbb1b44643eaa18251b5c083fcb29eb",
+        "generation": "eb06f5e03cc672a4be72c5b1dc8ab83655363a2af406944bd89290fe0132db5a",
+        "validation": {
+          "family": "baseline-analysis",
+          "case": "sample1-whole-book",
+          "step": "reanalyze-book/reduction"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "22467d5ac34ae1c2ae692b9578467c009f16568ec60fbfcd2116cc207722b9a9"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "8ec160c93e3964d5407c368c2a6739149124a0582c0dbef1ee4b33ad0e19bb85",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"需降级\",\"reason\":\"本单元仅见《青铜重器》作书题（blk_6cb58f11）与“青铜重器中极品”作类别用语、曾侯乙尊盘为其极品实例（blk_b5913f14），可证同篇两种用法；但“两周重器别名”“列为尊盘别名”及他单元用法不在本单元，跨单元不一致的结论无据。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"需降级\",\"reason\":\"本单元只支持“刚刚过完六十五岁生日”（blk_5ce5e576）及郑雄为女婿、安静为妻；四十岁成婚、曾小安生母、婚龄八年等前提均不在本单元，故时间线紧张的推断无法在此证实。\"}]}",
+        "usage": {
+          "inputTokens": 2339,
+          "outputTokens": 1240
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/reanalyze-book/10",
+        "selectedItemId": "S40/reanalyze-book/10",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ec6bea8a7c171dba83cca181d6cc12299cbd5e45c17ed71cd43020e2b8eaf385",
+        "capturedAt": "2026-11-18T10:21:51.559Z",
+        "providerRequestDigest": "5b97da520212400a9b97d01c7928bb57293a2052bc3c60eda1173953d5a2839d",
+        "providerResponseDigest": "af9cf94a3ffe102885489d73a46e36ca53b26e186e3cd7d16721c8d77da0d57d",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "391e930dd37a8cbf0f8e2cf3385052062701989130aa0c1bdbea3d083ee74663",
+        "generation": "ed4d09fe9ce8ebc7c6f88b01649d6224ce892081d028afc955c6d71f75373a2e",
+        "validation": {
+          "family": "baseline-analysis",
+          "case": "sample1-whole-book",
+          "step": "reanalyze-book/sampling-1-unit-1"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "0"
+          },
+          {
+            "placeholder": "{{ref:2}}",
+            "identity": "4"
+          }
+        ],
+        "fixtureResponseDigest": "3dadb100b66e84bc2f9f62b4ced6ead664da816bb7b4f73192c3e7981d206049"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "03c2ec66a166b7abf229faed00a706e86c950e25589601e7d1dfd50d70ca6fe7",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"需降级\",\"reason\":\"本单元 {{sample-block:7}} 仅支持“甲骨文写信人死于一九八○年代最后一个夏天、曾本之在场”这一子主张；发现的核心“各单元间未统一”及对单元3、单元4 的引述不在本消息内容块中，无法由本单元块验证，故只能支持较弱说法。\"}]}",
+        "usage": {
+          "inputTokens": 2095,
+          "outputTokens": 3421
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/reanalyze-book/11",
+        "selectedItemId": "S40/reanalyze-book/11",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ec6bea8a7c171dba83cca181d6cc12299cbd5e45c17ed71cd43020e2b8eaf385",
+        "capturedAt": "2026-11-18T10:22:05.408Z",
+        "providerRequestDigest": "35a0333eee097df4329a7bad91cb4db62d2b76b9500be40e0a6eb090f0f2c6a3",
+        "providerResponseDigest": "a0e18a655e63ffbbaecb38212419b23b7adc9e0d3c052f35a26b9a7daa4c87f6",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "87723d404d47d2851624dc1027520914de313a8e4ecff158374b189bec43917f",
+        "generation": "ed4d09fe9ce8ebc7c6f88b01649d6224ce892081d028afc955c6d71f75373a2e",
+        "validation": {
+          "family": "baseline-analysis",
+          "case": "sample1-whole-book",
+          "step": "reanalyze-book/sampling-2-unit-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "2"
+          },
+          {
+            "placeholder": "{{sample-block:7}}",
+            "identity": "blk_4167bc573a86630fcbf49b1e"
+          }
+        ],
+        "fixtureResponseDigest": "4b709735b545301e74ab62b93aa163dfbe0448b5f3a6aa97f4ddb30607019a8c"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "6398e49172f679ef8cb68437afe5b7c40ed79c26f5919f28cb08b479b73eeae2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"需降级\",\"reason\":\"本单元块明确写出曾本之四十岁与水果湖银行出纳员安静结婚，安静在家中接电话、对马跃之说“来我家”，可支持“此处明确为夫妻同住”；但关于单元7“未明言、仅由外公外婆称呼推为夫妻”的比较部分在本消息内容块中无依据，故只能支持较弱的说法。\"}]}",
+        "usage": {
+          "inputTokens": 2328,
+          "outputTokens": 946
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/reanalyze-book/12",
+        "selectedItemId": "S40/reanalyze-book/12",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ec6bea8a7c171dba83cca181d6cc12299cbd5e45c17ed71cd43020e2b8eaf385",
+        "capturedAt": "2026-11-18T10:22:35.830Z",
+        "providerRequestDigest": "72c0a959e45316b10bd3fb55b09fcd209837c22395c73083b47f5b951e3bd1fe",
+        "providerResponseDigest": "a920a626ea5df0e2783de2e61eb40d05674383d6493fa8b571deb83018ce17bb",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "75d35535b5e472c0589561ca34bfb4d9e6a7018e05087a1255d48ff8f7d404c0",
+        "generation": "ed4d09fe9ce8ebc7c6f88b01649d6224ce892081d028afc955c6d71f75373a2e",
+        "validation": {
+          "family": "baseline-analysis",
+          "case": "sample1-whole-book",
+          "step": "reanalyze-book/sampling-3-unit-4"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "3"
+          }
+        ],
+        "fixtureResponseDigest": "eeef4a7d390933a420c72f3e9c64dd9b7e135ce6e06ecfda4f4c38d24dd8594c"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "6ac57f0d64b57d590ca53b98eab81b5db4f33e703cd1e97e5d8ecbadb7aca1c0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"需降级\",\"reason\":\"本单元仅出现“曾侯乙尊盘照片”“曾侯乙尊盘黑白照片”，并以“比实物要大几倍”把照片与实物区分开，只能支持“照片与实物非同一指称”这一较弱说法；发现所称单元7与单元8实体表的分列/合并对比，本单元内容块无从核对。\"}]}",
+        "usage": {
+          "inputTokens": 2358,
+          "outputTokens": 862
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/reanalyze-book/13",
+        "selectedItemId": "S40/reanalyze-book/13",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+        "taskPromptContractDigest": "ec6bea8a7c171dba83cca181d6cc12299cbd5e45c17ed71cd43020e2b8eaf385",
+        "capturedAt": "2026-11-18T10:22:54.738Z",
+        "providerRequestDigest": "641583320fc8809f7ae6b3d934cb4e5dd2464e1e43db63e1d11f273dec455c5e",
+        "providerResponseDigest": "faec1026072548dc656b536eeee2f5c71ccc4f1230f182525cb02239c6c0b38f",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "3c4c1a33f77892ee572a5e5168b685c6b3852938044b025e796e78da6ec00f79",
+        "generation": "ed4d09fe9ce8ebc7c6f88b01649d6224ce892081d028afc955c6d71f75373a2e",
+        "validation": {
+          "family": "baseline-analysis",
+          "case": "sample1-whole-book",
+          "step": "reanalyze-book/sampling-4-unit-7"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "1"
+          }
+        ],
+        "fixtureResponseDigest": "1597f0dd427d8ee46e7703d353251d15219c122c1d7e92c3dc80aa8addbd16e8"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "f6dc51ed9d7bacf1e1eed75f75ed04a471445e49474d51cf0b691b7c579ca424",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下次下调 assurance 候选的默认信任等级，尤其对 setting-claim-divergence 与 alias-identity-divergence 两类，先做单元级复核再进入归并。\",\"basis\":\"assurance 候选 5 条全部被抽样（low 1、medium 4），upheld 0，precision 估计 0；这两类计数分别为 7 与 4。\"},{\"suggestion\":\"扩大 assurance 候选池并保留 high 层分层抽样；本次候选无 high 层，估计精度为 0，应先补足分层再评估。\",\"basis\":\"candidateCount 5，抽样层级为 low 1、medium 4，无 high 层；precision estimate 0。\"},{\"suggestion\":\"将跨单元归并从 1 次大请求拆成按 finding kind 的多次小请求，控制单次输出规模。\",\"basis\":\"cross-unit-reduction 仅 1 次请求，outputTokens 为 17728，明显高于 assurance-sampling 的 6469。\"},{\"suggestion\":\"对产出重复类别较多的单元安排定向重读，不必 8 个单元全部重算；优先处理 setting-claim-divergence 与 alias-identity-divergence 计数较高的来源单元。\",\"basis\":\"units 提交 8、重算 8、复用 0、重试 0；对应两类发现计数为 7 与 4。\"},{\"suggestion\":\"下次运行前先核对 units 阶段用量记录，再据此设定单元预算；本次 8 次请求的输入输出 token 均为 0。\",\"basis\":\"usagePerStage.units 为 inputTokens 0、outputTokens 0、requests 8。\"},{\"suggestion\":\"把 unit-reported 冲突设为跨单元归并的强制核对项，避免只依赖自动归并结果。\",\"basis\":\"findingCounts 中 conflict:unit-reported 为 1，cross-unit-reduction 仅 1 次请求。\"},{\"suggestion\":\"下次对仅 1 条的 alias-collision 和 entity-kind-divergence 降低抽样优先级，把复核预算留给计数更高的类别。\",\"basis\":\"alias-collision 与 entity-kind-divergence 各 1 条，setting-claim-divergence 7 条、alias-identity-divergence 4 条。\"},{\"suggestion\":\"下次不增加重试预算，把节省的请求转给 assurance 复核；本次无失败码、无缺口且重试为 0。\",\"basis\":\"failureCodes 为空，units.gaps 0、retried 0，adaptationCount 0。\"}]}",
+        "usage": {
+          "inputTokens": 1317,
+          "outputTokens": 2579
+        }
+      },
+      "capture": {
+        "subject": "reflection",
+        "itemId": "S40/reanalyze-book/14",
+        "selectedItemId": "S40/reanalyze-book/14",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+        "taskPromptContractDigest": "ec6bea8a7c171dba83cca181d6cc12299cbd5e45c17ed71cd43020e2b8eaf385",
+        "capturedAt": "2026-11-18T10:23:10.549Z",
+        "providerRequestDigest": "49ae8b6cfe7d16477c08249c0ea58cd55193f8c5ec5403cfdc314e59f6f82054",
+        "providerResponseDigest": "2517e4fb70d03cf280c7b31236253beaaf404125988855119f3497898de3a1d1",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "d6b42cf8854ea2724127f5126d70f53eb545fc82184b809d642ff44eebfa7f1e",
+        "generation": "0306636457726d8b66e7f932960f3efb9c9e29ee8b9289a9d695f0ca11289c39",
+        "validation": {
+          "family": "baseline-analysis",
+          "case": "sample1-whole-book",
+          "step": "reanalyze-book/reflection"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "267053e802d4dea0aa56575168426dbe8dc637d2980fcd6c64d62cff0b60c44a"
+      }
     }
   ]
 }
