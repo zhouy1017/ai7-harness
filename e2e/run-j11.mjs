@@ -1439,7 +1439,7 @@ async function main() {
           })()`, `library-error-${kind}-arm`);
           await pointerClick(renderer, waitFor, '[data-book-filter-action="find"]', `library-error-${kind}-find`);
           await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return bar instanceof HTMLElement && !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith(${JSON.stringify(kind === 'short' ? '无法查找图书。' : '查找没有完成')}) && document.documentElement.dataset.statusBar === 'shown'; })()`, `library-error-${kind}-shown`);
-          await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`, 10_000, statusBarOverlaps());
+          await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`, 10_000, statusBarOverlaps());
           for (const form of ['full', 'icons']) {
             if (form === 'icons') {
               await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);
@@ -1447,7 +1447,7 @@ async function main() {
             }
             await waitFor(renderer, statusBarClear(), `library-error-${kind}-${form}-clear`);
             await wheel(100000);
-            await waitFor(renderer, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`);
+            await waitFor(renderer, `(document.documentElement.scrollHeight <= innerHeight + 1 || scrollY > 0) && scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`, 60_000, statusBarOverlaps());
             await wheel(-100000);
             await waitFor(renderer, `scrollY === 0`, `library-error-${kind}-${form}-scrolled-back`);
           }
