@@ -1269,6 +1269,15 @@ async function main() {
         // What the Book's pending list counts: a pending finding with a mark on the manuscript. One with none (its words already
         // carry another mark) adds nothing to it and cannot be accepted.
         const leftover=`(async () => (await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}, findingsAfterOrdinal:null, categoryId:null, severity:null, status:'pending', chapterBlockId:null})).run.findings.filter((item)=>item.markId!==null).map((item)=>[item.ordinal,item.quote,item.output,item.markStatus,item.anchorState]))()`;
+        // The whole-Book check also left 批注 (on 「著」) open on the manuscript: each is marked handled from its own card's ⋯ menu.
+        const NOTE=`article.review-finding[data-status="pending"][data-output="annotation"]`;
+        for (let note=0; note<16 && await renderer.evaluate(`document.querySelector('${NOTE} details.review-card-more')!==null`); note+=1) {
+          const id=await renderer.evaluate(`document.querySelector('${NOTE}').dataset.findingId`);
+          const card=`article.review-finding[data-finding-id="${id}"]`;
+          await triageClick(renderer,`${card} details.review-card-more > summary`);
+          await triageClick(renderer,`${card} [data-review-action="mark-handled"]`);
+          await waitFor(renderer, `document.querySelector('${card}')?.dataset.status==='handled'`, 'review-triage-cleanup-note-handled');
+        }
         try {
           await waitFor(renderer, `${leftover}.then((items)=>items.length===0)`, 'review-triage-cleanup-none-pending', 20_000);
         } catch {
