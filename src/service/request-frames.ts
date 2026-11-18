@@ -2090,6 +2090,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'generateReviewSynthesis': {
+      const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId', 'clientCommandId'], ['executionConfig', 'rememberedChoice'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId) || !validUuid(input.clientCommandId) ||
+          (input.executionConfig !== undefined && !validRuntimeExecutionConfig(input.executionConfig)) ||
+          (input.rememberedChoice !== undefined && typeof input.rememberedChoice !== 'boolean')) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'continueReviewRun':
     case 'cancelReviewRun':
     case 'generateReviewReport': {

@@ -486,6 +486,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['recordReviewFindingDisposition']['output']>(IPC_CHANNELS.recordReviewFindingDisposition, input),
   generateReviewReport: (input: Omit<ServiceOperationMap['generateReviewReport']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['generateReviewReport']['output']>(IPC_CHANNELS.generateReviewReport, input),
+  generateReviewSynthesis: (input: Omit<ServiceOperationMap['generateReviewSynthesis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['generateReviewSynthesis']['output']>(IPC_CHANNELS.generateReviewSynthesis, input),
   inspectReviewFindingOfMark: (input: InspectReviewFindingOfMarkRendererInput) =>
     invoke<ServiceOperationMap['inspectReviewFindingOfMark']['output']>(IPC_CHANNELS.inspectReviewFindingOfMark, input),
   listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
