@@ -15,6 +15,7 @@ const forbiddenFeatureImports = {
   'src/service/house-review-preference.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/learning/memory-facade.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/learning/ledger.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/store-inventory.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
 };
 for (const [module, forbidden] of Object.entries(forbiddenFeatureImports)) {
   const source = ts.createSourceFile(module, readFileSync(resolve(ROOT, module), 'utf8'), ts.ScriptTarget.Latest, true);
