@@ -283,7 +283,23 @@ async function commentsInsideSelection(renderer,check,waitFor) {
     }
     await commentsRangeInside(renderer,check,waitFor,selector);
     await renderer.evaluate('globalThis.__commentsInkPrevious=null');
-    await waitFor(renderer, `(() => { const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2; const before=globalThis.__commentsInkPrevious;globalThis.__commentsInkPrevious={x,y};return words.contains(document.elementFromPoint(x,y))&&getSelection().containsNode(words,true)&&before?.x===x&&before?.y===y;})()`, 'comments-existing-range-inside-stable');
+    try { await waitFor(renderer, `(() => { const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2; const before=globalThis.__commentsInkPrevious;globalThis.__commentsInkPrevious={x,y};return words.contains(document.elementFromPoint(x,y))&&getSelection().containsNode(words,true)&&before?.x===x&&before?.y===y;})()`, 'comments-existing-range-inside-stable'); } catch {
+      // Say which part never held (the hosted log prints only the label), with the words' box over four frames and what a hit test finds there.
+      const state=await renderer.evaluate(`(async () => {
+        const describe=${pointerElementDescription.toString()},words=document.querySelector(${JSON.stringify(selector)}),frames=[],coveringAncestors=[];
+        if(!words)return {reason:'missing',detail:null};
+        let hit=null;
+        for(let index=0;index<4;index++){await new Promise(resolve=>requestAnimationFrame(resolve));const r=words.getClientRects()[0],x=r?r.left+r.width/2:null,y=r?r.top+r.height/2:null;hit=r?document.elementFromPoint(x,y):null;frames.push({rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!hit&&words.contains(hit)});}
+        for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}
+        const last=frames.at(-1),moved=frames.some(frame=>JSON.stringify(frame.rect)!==JSON.stringify(last.rect));
+        const reason=last.rect===null?'no-box':last.point[0]<0||last.point[1]<0||last.point[0]>innerWidth||last.point[1]>innerHeight?'offscreen':!last.contains?'covered':!getSelection().containsNode(words,true)?'unselected':moved?'moving':'settled';
+        return {reason,detail:{viewport:[innerWidth,innerHeight],target:describe(words),frames,coveringAncestors}};
+      })()`);
+      const names=pane?{missing:'comments-existing-range-inside-stable-pane-missing','no-box':'comments-existing-range-inside-stable-pane-no-box',offscreen:'comments-existing-range-inside-stable-pane-offscreen',covered:'comments-existing-range-inside-stable-pane-covered',unselected:'comments-existing-range-inside-stable-pane-unselected',moving:'comments-existing-range-inside-stable-pane-moving',settled:'comments-existing-range-inside-stable-pane-settled'}
+        :{missing:'comments-existing-range-inside-stable-floating-missing','no-box':'comments-existing-range-inside-stable-floating-no-box',offscreen:'comments-existing-range-inside-stable-floating-offscreen',covered:'comments-existing-range-inside-stable-floating-covered',unselected:'comments-existing-range-inside-stable-floating-unselected',moving:'comments-existing-range-inside-stable-floating-moving',settled:'comments-existing-range-inside-stable-floating-settled'};
+      try { check(false,names[state.reason]??'comments-existing-range-inside-stable'); }
+      catch(error) { if(error&&typeof error==='object'&&state.detail)Object.defineProperty(error,'pointerFailure',{value:pointerFailureDetail(state.detail),configurable:true});throw error; }
+    }
     const before=await point();check(before.hit&&before.inside,'comments-existing-range-inside-hit',before);
     check((await commentsNativeClick(renderer,before)).real,'comments-existing-range-inside-real-click');
     await waitFor(renderer,pane?`document.querySelector('[data-comment-card="'+${JSON.stringify(id)}+'"]').dataset.selected==='true'`:`document.querySelector('.editorial-mark-layer [data-mark-card="'+${JSON.stringify(id)}+'"]')`,pane?'comments-existing-range-inside-pane-selected':'comments-existing-range-inside-floating-open');
