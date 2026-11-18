@@ -144,7 +144,7 @@ describe('the entry and the screen', () => {
     expect(globalAttentionEntryView(2)).toEqual({ text: '待我处理', badge: '2', accessibleName: '待我处理，2 项需要你处理' });
     expect(GLOBAL_ATTENTION_HEADING).toBe('待我处理');
     expect(GLOBAL_ATTENTION_LEDE).toBe('所有图书里需要你处理的事项。点开一项回到它自己的记录，在那里决定；这里只列出，不替你做任何决定。');
-    expect(GLOBAL_ATTENTION_FINDINGS_NOTE).toBe('书内的发现在那本书的「发现」里。');
+    expect(GLOBAL_ATTENTION_FINDINGS_NOTE).toBe('书内的发现在那本书的「待办汇总」里。');
   });
 
   it('keeps the four groups in their one fixed order, each with a quiet line when empty', () => {

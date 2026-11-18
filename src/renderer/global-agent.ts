@@ -1,6 +1,6 @@
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { GLOBAL_AGENT_TITLE, type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
-import { globalAgentAnswerStatus } from './shell-labels.js';
+import { type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
+import { globalAgentAnswerStatus, shellDestinationLabel } from './shell-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, modelServiceChannelOf } from '../shared/protocol/model-service.js';
 
@@ -57,7 +57,7 @@ export function mountGlobalAgent(options: {
   root.className = 'panel global-agent';
   root.dataset['globalAgent'] = 'destination';
   const heading = el('header'); heading.className = 'global-agent-heading';
-  heading.append(el('h2', GLOBAL_AGENT_TITLE), el('p', '讨论审阅习惯、参考选入的图书与工序，或管理本社记忆。'));
+  heading.append(el('h2', shellDestinationLabel('global-agent')), el('p', '讨论审阅习惯、参考选入的图书与工序，或管理本社记忆。'));
   root.append(heading);
   const state = el('p');
   state.className = 'global-agent-status';
@@ -221,7 +221,7 @@ export function mountGlobalAgent(options: {
   const questionForm = el('form'); questionForm.className = 'global-agent-composer';
   questionForm.dataset['globalAgentQuestionForm'] = '';
   const question = el('textarea'); question.maxLength = 500; question.rows = 3;
-  question.placeholder = '向全域智能体提问…'; question.dataset['globalAgentQuestion'] = '';
+  question.placeholder = `向${shellDestinationLabel('global-agent')}提问…`; question.dataset['globalAgentQuestion'] = '';
   const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'btn ' + ('primary'); ask.disabled = true; question.disabled = true;
   const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'btn ' + ('secondary'); previewButton.disabled = true;
   const scopeList = el('fieldset'); scopeList.className = 'global-agent-scope';
@@ -483,7 +483,7 @@ export function mountGlobalAgent(options: {
   });
   update();
   void options.api.inspectGlobalAgent().then((projection) => { if (root.isConnected) render(projection); }).catch((error: unknown) => {
-    if (root.isConnected) options.setStatus(options.errorMessage(error, '无法读取全域智能体。'), 'error');
+    if (root.isConnected) options.setStatus(options.errorMessage(error, `无法读取${shellDestinationLabel('global-agent')}。`), 'error');
   });
   const foregroundChanged = (): void => { if (document.visibilityState === 'visible') void showDialogue(); };
   document.addEventListener('visibilitychange', foregroundChanged);

@@ -602,7 +602,7 @@ it.each<readonly [string, (drawer: Drawer, root: HTMLElement) => { working: HTML
  ['the open command palette', () => { const sheet = document.createElement('dialog'); sheet.dataset['sheet'] = ''; miniDocument.body.append(sheet as unknown as MiniElement); sheet.show(); return { working: inside(sheet), kept: true }; }],
  ['a dialog', () => { const dialog = document.createElement('section'); dialog.setAttribute('role', 'dialog'); miniDocument.body.append(dialog as unknown as MiniElement); return { working: inside(dialog), kept: true }; }],
  ['no overlay (the closed drawer still marks the shell)', () => ({ working: inside(document.body), kept: false })],
-])('a late 修订记录 answer keeps focus in %s only while it is open (#1504 item 5)', async (_name, overlay) => {
+])('a late 评估 answer keeps focus in %s only while it is open (#1504 item 5)', async (_name, overlay) => {
  vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => undefined, getSelection: () => null });
  try {
   const root = document.createElement('aside'); miniDocument.body.append(root as unknown as MiniElement);
@@ -610,21 +610,15 @@ it.each<readonly [string, (drawer: Drawer, root: HTMLElement) => { working: HTML
   const drawer = mountTaskDrawer({ root, shell: document.body, api: never, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
    onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
   expect(document.body.dataset['taskDrawer']).toBeDefined();
-  const overview = Promise.withResolvers<object>();
-  const page = harness({ getBookWorkbenchRoute: async () => ({ kind: 'book', bookId: 'book-a', bookTitle: '甲' }), getBookOverview: () => overview.promise });
-  page.shell['markSection' as 'follow'] = vi.fn();
-  const heading = document.createElement('h3');
-  page.context['renderBookOverview'] = () => {
-   const content = document.createElement('section'), folded = document.createElement('details'), records = document.createElement('div');
-   content.dataset['bookId'] = 'book-a'; records.className = 'record-navigation'; records.append(heading); folded.append(records); content.append(folded);
-   page.replaceScreen('book-overview', content);
-  };
+  // 评估 opened at a named risk: the risk takes focus once the surface's late read has painted it.
+  const loaded = Promise.withResolvers<void>(), risk = document.createElement('div');risk.dataset['riskId'] = 'risk-1';
+  const page = harness();page.context['CSS'] = { escape: (value: string) => value };
+  page.context['mountEvaluation'] = (options: { root: HTMLElement }) => ({ load: () => loaded.promise.then(() => { options.root.append(risk); }), refresh: vi.fn() });
   const { working, kept } = overlay(drawer, root);
   MiniElement.prototype.focus.call(working);
-  const opening = page.run("openBookSection({bookId:'book-a',title:'甲'},'history')");
-  overview.resolve({ book: { bookId: 'book-a' }, manuscriptAnchor: null }); await opening;
-  expect(page.screen.querySelector('.record-navigation h3')).toBe(heading);
-  expect(miniDocument.activeElement).toBe(kept ? working : heading);
+  await page.run("renderBookEvaluation('book-a','甲',{recordId:'record-1',riskId:'risk-1'})");
+  loaded.resolve();await vi.waitFor(() => expect(page.screen.querySelector('[data-risk-id="risk-1"]')).toBe(risk));await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(miniDocument.activeElement).toBe(kept ? working : risk);
  } finally { vi.unstubAllGlobals(); }
 });
 

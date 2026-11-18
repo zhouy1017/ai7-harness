@@ -104,8 +104,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (tab === 'memory') {
       try {
         await mountReviewPreferences(panelNode, rendererApi, openWordSourceVersion);
-        if (page.isCurrent()) setStatus('本社审阅偏好已打开');
-      } catch (error) { if (!page.isCurrent()) return; setStatus(rendererErrorMessage(error, '无法读取本社审阅偏好。'), 'error'); }
+        if (page.isCurrent()) setStatus(REVIEW_PREFERENCES_STATUS.opened);
+      } catch (error) { if (!page.isCurrent()) return; setStatus(rendererErrorMessage(error, REVIEW_PREFERENCES_STATUS.unavailable), 'error'); }
       return;
     }
     if (tab === 'evaluation') {
@@ -410,7 +410,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       all.dataset['learningAction'] = 'all-books';
       back.append(all);
     }
-    back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
+    // AI 助手 is in the sidebar; the developer layer keeps this way in as well (#1521).
+    if (technicalLayerVisible) back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
