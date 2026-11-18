@@ -1,4 +1,4 @@
-import { EditorialMemoryFacade, dialogueMemoryContext } from './learning/memory-facade.js';
+import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
 import { withModelClarification } from './provider/clarification-contract.js';
@@ -8840,61 +8840,7 @@ export class EditorialStore {
    * review). A read.
    */
   inspectLearningMaterials(bookId: string | null, after: LearningMaterialCursor | null = null): LearningMaterialsProjection {
-    return this.#learningCall(() => {
-      requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.bookTitle === safeTitle(after.bookTitle) &&
-        !Number.isNaN(Date.parse(after.orderedAt)) && LEARNING_MATERIAL_KEY_PATTERN.test(after.materialKey)),
-      'LEARNING_CURSOR_INVALID', '学习准入列表位置无效。');
-      const rows = (bookId === null
-        ? after === null
-          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate()
-          : this.#authority.prepare('SELECT book_id, title FROM books WHERE title > ? OR (title = ? AND book_id >= ?) ORDER BY title, book_id')
-            .iterate(after.bookTitle, after.bookTitle, after.bookId)
-        : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').iterate(bookId)) as IterableIterator<SqlRow>;
-      // Up to one material beyond the page, so the page knows whether another follows.
-      const collected: Array<{ bookId: string; title: string; material: LearningMaterialProjection; orderedAt: string }> = [];
-      let namedTitle: string | null = null;
-      for (const row of rows) {
-        const id = asString(row.book_id);
-        const title = asString(row.title);
-        if (bookId !== null) namedTitle = title;
-        const materials = learningSupervision.learningMaterialsPage(this.#learningSupervisionHost, id, id === after?.bookId ? after : null,
-          MAX_LEARNING_MATERIALS_PAGE + 1 - collected.length);
-        for (const { material, orderedAt } of materials) {
-          collected.push({ bookId: id, title, material, orderedAt });
-          if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
-        }
-        if (collected.length > MAX_LEARNING_MATERIALS_PAGE) break;
-      }
-      const shown: typeof collected = [];
-      const books: LearningMaterialsBookProjection[] = [];
-      let bytes = 4_096; // Basis, final cursor and envelope punctuation, beyond the weighed Books and materials.
-      let more = collected.length > MAX_LEARNING_MATERIALS_PAGE;
-      for (const entry of collected.slice(0, MAX_LEARNING_MATERIALS_PAGE)) {
-        const book = books.at(-1);
-        const heading = book?.bookId === entry.bookId ? null : learningSupervision.learningBookOf(this.#learningSupervisionHost, entry.bookId, entry.title);
-        const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
-          (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
-        if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
-          more = true;
-          break;
-        }
-        if (book !== undefined && book.bookId === entry.bookId) (book.materials as LearningMaterialProjection[]).push(entry.material);
-        else books.push({ ...heading!, materials: [entry.material] });
-        shown.push(entry);
-        bytes += weight;
-      }
-      // A Book named by itself is shown even while it has no material.
-      if (bookId !== null && after === null && books.length === 0 && namedTitle !== null) books.push({ ...learningSupervision.learningBookOf(this.#learningSupervisionHost, bookId, namedTitle), materials: [] });
-      const last = shown.at(-1);
-      return {
-        basis: LOCAL_LEARNING_POLICY_BASIS.text,
-        books,
-        nextCursor: more && last !== undefined
-          ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
-          : null,
-      };
-    });
+    return learningSupervision.inspectLearningMaterials(this.#learningSupervisionHost, bookId, after);
   }
 
   /** What the 学习素材 and 学习整理 operations in house-review-preference.ts reach of the store (Issue #1172), read live. */
@@ -8911,6 +8857,9 @@ export class EditorialStore {
       memoryFacade: this.#memoryFacade.bind(this),
       learningMaterialSource: this.#learningMaterialSource.bind(this),
       get learningSupervisionHost() { return store.#learningSupervisionHost; },
+      get inspectEditorialLearning() { return store.inspectEditorialLearning.bind(store); },
+      dialogueTask: (dialogueId) => this.#dialogues.task(dialogueId),
+      get editorialMemory() { return store.editorialMemory.bind(store); },
       get replacementFrozen() { return store.replacementFrozen.bind(store); },
       transaction: this.#transaction.bind(this),
     };
@@ -9020,17 +8969,11 @@ export class EditorialStore {
   }
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#memoryFacade().accept(input, this.#baselineAnalysis.launch.operationalScope);
-      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-    }));
+    return learningSupervision.acceptEditorialMemory(this.#editorialLearningHost, input);
   }
 
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#memoryFacade().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
-      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-    }));
+    return learningSupervision.deactivateEditorialMemory(this.#editorialLearningHost, input);
   }
 
   /**
@@ -9151,6 +9094,10 @@ export class EditorialStore {
       learningMaterialSource: this.#learningMaterialSource.bind(this),
       get reviewRuns() { return store.#reviewRuns; },
       get series() { return store.#series; },
+      safeTitle,
+      requireSeries: (seriesId) => seriesOperations.requireStoredSeries(this.#seriesHost, seriesId),
+      reviewCall: this.#reviewCall.bind(this),
+      analysisItemLabel,
       transaction: this.#transaction.bind(this),
     };
   }
@@ -9179,78 +9126,7 @@ export class EditorialStore {
    * every page come the filters' choices. A read: product history, granting nothing.
    */
   inspectLearningAudit(input: LearningAuditInput = {}): LearningAuditProjection {
-    return this.#learningCall(() => {
-      const after = input.after ?? null;
-      requireStore(input.bookId == null || UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
-      // A Book gone since it was chosen, a remembered filter's included, is refused as a missing Series is (Issue #677).
-      requireStore(input.bookId == null || this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined,
-        'BOOK_NOT_FOUND', '图书不存在。');
-      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.bookTitle === safeTitle(after.bookTitle) &&
-        !Number.isNaN(Date.parse(after.orderedAt)) && LEARNING_MATERIAL_KEY_PATTERN.test(after.materialKey)),
-      'LEARNING_CURSOR_INVALID', '学习回溯列表位置无效。');
-      // A Series filters by the Books it holds now (LAUD-002); it widens nothing the editor may read.
-      const members = input.seriesId == null
-        ? null
-        : new Set(Array.from(this.#series.members(seriesOperations.requireStoredSeries(this.#seriesHost, input.seriesId).seriesId), (entry) => entry.bookId));
-      const query = input.query == null ? '' : input.query.trim().toLocaleLowerCase('zh-CN');
-      const matches = (candidate: LearningMaterialCandidate, standing: string): boolean =>
-        (input.kind == null || candidate.kind === input.kind) &&
-        (input.standing == null || standing === input.standing) &&
-        (input.recordedFrom == null || candidate.recordedAt >= input.recordedFrom) &&
-        (input.recordedBefore == null || candidate.recordedAt < input.recordedBefore) &&
-        (query.length === 0 || [candidate.originLabel, ...candidate.excerpt].join('\n').toLocaleLowerCase('zh-CN').includes(query));
-      const rows = (input.bookId != null
-        ? this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').iterate(input.bookId)
-        : after === null
-          ? this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate()
-          : this.#authority.prepare('SELECT book_id, title FROM books WHERE title > ? OR (title = ? AND book_id >= ?) ORDER BY title, book_id')
-            .iterate(after.bookTitle, after.bookTitle, after.bookId)) as IterableIterator<SqlRow>;
-      // Up to one material beyond the page, so the page knows whether another follows.
-      const collected: Array<{ bookId: string; title: string; material: LearningAuditMaterialProjection; orderedAt: string }> = [];
-      const counts = new Map<string, number>();
-      for (const row of rows) {
-        const id = asString(row.book_id);
-        if (members !== null && !members.has(id)) continue;
-        const title = asString(row.title);
-        const { page, count } = learningSupervision.learningAuditPage(this.#learningSupervisionHost, id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
-        counts.set(id, count);
-        for (const { material, orderedAt } of page) {
-          collected.push({ bookId: id, title, material, orderedAt });
-          if (collected.length > MAX_LEARNING_AUDIT_PAGE) break;
-        }
-        if (collected.length > MAX_LEARNING_AUDIT_PAGE) break;
-      }
-      const shown: typeof collected = [];
-      const books: LearningAuditBookProjection[] = [];
-      let bytes = 4_096; // The final cursor and envelope punctuation, beyond the weighed Books and materials.
-      let more = collected.length > MAX_LEARNING_AUDIT_PAGE;
-      for (const entry of collected.slice(0, MAX_LEARNING_AUDIT_PAGE)) {
-        const book = books.at(-1);
-        let heading: Omit<LearningAuditBookProjection, 'materials'> | null = null;
-        if (book?.bookId !== entry.bookId) {
-          const people = this.#bookPeople.current(entry.bookId);
-          heading = { bookId: entry.bookId, title: entry.title, authors: people.authors, editors: people.editors, materialCount: counts.get(entry.bookId) ?? 0 };
-        }
-        const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
-          (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
-        if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
-          more = true;
-          break;
-        }
-        if (heading === null) (book!.materials as LearningAuditMaterialProjection[]).push(entry.material);
-        else books.push({ ...heading, materials: [entry.material] });
-        shown.push(entry);
-        bytes += weight;
-      }
-      const last = shown.at(-1);
-      return {
-        books,
-        nextCursor: more && last !== undefined
-          ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
-          : null,
-        choices: learningSupervision.readLearningAuditChoices(this.#learningSupervisionHost, input.bookId ?? null),
-      };
-    });
+    return learningSupervision.inspectLearningAudit(this.#learningSupervisionHost, input);
   }
 
   inspectLearningLineage(bookId: string, materialKey: string): LearningLineageProjection {
@@ -9267,48 +9143,7 @@ export class EditorialStore {
 
   /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
   #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'> {
-    const source = candidate.source;
-    if (source.kind === 'word-tracked-edit') return { target: { ...source, bookId }, sourceTask: null,
-      wordCurrentEligibility: this.#memoryFacade().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
-    if (source.kind === 'analysis') {
-      // The judged revision owns this Task, even after a newer analysis becomes current.
-      const row = one(this.#authority.prepare(
-        `SELECT t.task_intent_id, t.goal FROM analysis_result_set_revisions r
-         JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
-         JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
-         WHERE r.revision_id = ? AND s.book_id = ? AND t.book_id = ?`,
-      ).all(source.revisionId, bookId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源任务不存在。');
-      return { target: { ...source, bookId }, sourceTask: { taskIntentId: asString(row.task_intent_id), label: asString(row.goal) } };
-    }
-    if (source.kind === 'review') {
-      // A finding can have no mark. Its own category in the frozen Review Run still identifies its Task.
-      const row = one(this.#authority.prepare(
-        'SELECT category_id FROM review_findings WHERE review_run_id = ? AND finding_id = ?',
-      ).all(source.reviewRunId, source.findingId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源发现不存在。');
-      const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, source.reviewRunId));
-      const category = facts.categories.find((entry) => entry.categoryId === asString(row.category_id));
-      requireStore(category !== undefined, 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源审阅类别不存在。');
-      return {
-        target: { ...source, bookId },
-        sourceTask: category.task === null ? null : { taskIntentId: category.task.taskIntentId, label: `${category.label} · ${category.task.modeLabel}` },
-      };
-    }
-    // A 审稿意见 offered into 范例 (Issue #429) is admitted from 范例 and has no card here.
-    requireStore(source.kind === 'decision', 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料不在学习准入之列。');
-    const row = one(this.#authority.prepare(
-      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label,
-              EXISTS (SELECT 1 FROM dialogue_tasks t WHERE t.dialogue_id = m.source_task_id) AS from_dialogue
-       FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
-       JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
-    ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
-    return {
-      target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
-        blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
-      // A 修改建议 made of a dialogue's answer (Issue #52, S17a) names the dialogue on its card, never as a Task Intent here.
-      sourceTask: row.source_task_id === null || row.from_dialogue === 1
-        ? null
-        : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
-    };
+    return learningSupervision.learningMaterialSource(this.#learningSupervisionHost, bookId, candidate);
   }
 
   /**
@@ -9317,75 +9152,7 @@ export class EditorialStore {
    * finding the editor last ignored with a reason. Nothing is asked of the editor to find them.
    */
   *#learningCandidates(bookId: string, withExcerpt: boolean, includeWord = true): IterableIterator<LearningMaterialCandidate> {
-    const reasons = new DecisionFeedbackLedger(this.#authority);
-    const decisions = this.#authority.prepare(
-      `SELECT i.current_text, i.proposed_text, d.decision_id, d.disposition, d.edited_text, d.recorded_at, r.reason, r.reason_source
-       FROM editorial_marks m
-       JOIN proposal_change_items i ON i.mark_id = m.mark_id
-       JOIN proposal_item_decisions d ON d.item_id = i.item_id
-       LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
-       WHERE m.book_id = ? AND m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
-         AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)
-       ORDER BY d.recorded_at, d.decision_id`,
-    ).iterate(bookId) as IterableIterator<SqlRow>;
-    for (const row of decisions) {
-      const decisionId = asString(row.decision_id);
-      const first = row.reason === null || row.reason === undefined
-        ? null
-        : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
-      const standing = reasons.standing(decisionId, first);
-      const disposition = asString(row.disposition);
-      if (standing.reasonState !== 'given' && disposition !== 'accepted-with-edit') continue;
-      // 保留当前稿件 resolved a conflict with a rejection whose reason AI7 wrote (Issue #57): the editor judged no suggestion
-      // by it, so it is material only once they give a reason of their own.
-      if (standing.reasonRevisedAt === null && decisionResolvesConflict(this.#authority, decisionId)) continue;
-      yield proposalDecisionCandidate({
-        decisionId,
-        disposition,
-        currentText: asString(row.current_text),
-        proposedText: asString(row.proposed_text),
-        editedText: row.edited_text === null ? null : asString(row.edited_text),
-        reason: standing.reason,
-        reasonSource: standing.reasonSource,
-        feedbackEntries: standing.feedbackEntries,
-        recordedAt: standing.reasonRevisedAt ?? asString(row.recorded_at),
-        decidedAt: asString(row.recorded_at),
-      }, withExcerpt);
-    }
-    let labeledRevision: string | null = null;
-    let labels: BaselineAnalysisResultSetRevisionProjection | null = null;
-    for (const signal of this.#analysisFeedback.latestWithWords(bookId)) {
-      let label: string | null = null;
-      if (withExcerpt) {
-        if (labeledRevision !== signal.revisionId) {
-          const inspected = this.inspectBaselineAnalysis(bookId, undefined, signal.revisionId);
-          labels = inspected.inspectedRevision?.revision ?? inspected.resultSetRevision;
-          labeledRevision = signal.revisionId;
-        }
-        label = analysisItemLabel(labels, signal.itemKey);
-      }
-      yield analysisFeedbackCandidate(signal, withExcerpt ? label ?? '' : null);
-    }
-    const ignored = this.#authority.prepare(
-      `SELECT signal_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
-       WHERE book_id = ? AND kind = 'review-finding-ignored'
-         AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
-                            WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)
-       ORDER BY recorded_at, signal_id`,
-    ).iterate(bookId) as IterableIterator<SqlRow>;
-    for (const row of ignored) {
-      const categoryId = asString(row.category_id);
-      yield reviewDispositionCandidate({
-        signalId: asString(row.signal_id),
-        reviewRunId: asString(row.review_run_id),
-        findingId: asString(row.finding_id),
-        categoryLabel: reviewCategoryDisplayLabel(categoryId, reviewCategoryEntry(categoryId)?.label),
-        reason: asString(row.reason),
-        recordedAt: asString(row.recorded_at),
-      }, withExcerpt);
-    }
-    // Retained Word pairs verify their original before projecting; a consumer that never uses them skips that read.
-    if (includeWord) yield* this.#memoryFacade().wordCandidates(bookId);
+    yield* learningSupervision.learningCandidates(this.#learningSupervisionHost, bookId, withExcerpt, includeWord);
   }
 
   #learningCall<T>(operation: () => T): T {
@@ -14271,15 +14038,7 @@ export class EditorialStore {
    * changes the lines a Run's pin carries stops it before its next range, as a withdrawal does; a change elsewhere does not.
    */
   #preferenceGovernanceGuard(runRecordId: string): string | null {
-    const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
-    if (run === undefined) return null;
-    try {
-      return this.#memoryFacade().governanceChanged(asString(run.task_intent_id))
-        ? '本社审阅偏好的学习监督已变化' : null;
-    } catch (error) {
-      if (!(error instanceof LearningEligibilityError)) throw error;
-      return '无法读取的学习监督记录';
-    }
+    return learningSupervision.preferenceGovernanceGuard(this.#learningSupervisionHost, runRecordId);
   }
 
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
@@ -16016,14 +15775,11 @@ export class EditorialStore {
 
   /** Automatic house context for Global Agent; book context for selection dialogue and workspace turns. */
   dialogueEditorialMemory(dialogueId: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
-    const task = this.#dialogues.task(dialogueId);
-    return this.editorialMemory(...dialogueMemoryContext(task == null ? null : { bookId: task.bookId, workspace: task.origin === 'agent-workspace' }));
+    return learningSupervision.dialogueEditorialMemory(this.#editorialLearningHost, dialogueId);
   }
 
   editorialMemory(bookId: string | null, taskKind: string): import('./learning/editorial-memory.js').EditorialMemorySnapshot | null {
-    const launch = this.#baselineAnalysis.launch;
-    return this.#memoryFacade().request({ operationalScope: launch.operationalScope,
-      providerProcessingVersion: launch.policy?.selectedPolicyIdentity?.providerProcessingVersion, bookId, taskKind });
+    return learningSupervision.editorialMemory(this.#editorialLearningHost, bookId, taskKind);
   }
 
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
