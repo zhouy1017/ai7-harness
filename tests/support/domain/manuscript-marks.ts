@@ -24,6 +24,7 @@ import { initializeProposalConflictSchema, ProposalConflictStore } from '../../.
 import { canonicalJson, sha256 } from '../../../src/service/store-records.js';
 import { admittedSourcePath, ADMITTED_BASELINE_DOCX } from '../composed-fixture.js';
 import { DOCX_SOURCE_STUBS } from './docx-stubs.js';
+import { transaction } from './transaction.js';
 
 /**
  * External-owner source stubs (Issue #1536), the import side of a committed Book — not a schema or provenance proof.
@@ -104,8 +105,9 @@ export const manuscriptMarksStubTables = new Set<string>([...SOURCE_STUB_TABLES,
 /** Production manuscript, mark, Apply, conflict, lock and revision definitions plus labelled source stubs on `:memory:`. */
 export function manuscriptMarksDatabase(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
-  db.exec('PRAGMA foreign_keys = ON');
   try {
+    // The behaviour-bearing pragmas of the store's configureDatabase (the file-only ones have no meaning here).
+    db.exec('PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON; PRAGMA trusted_schema = OFF; PRAGMA temp_store = MEMORY;');
     for (const table of SOURCE_STUB_TABLES) db.exec(DOCX_SOURCE_STUBS[table]);
     for (const sql of Object.values(READER_STUBS)) db.exec(sql);
     for (const sql of MANUSCRIPT_DEFINITIONS) db.exec(sql);
@@ -153,13 +155,6 @@ export interface ManuscriptMarksBook {
   readonly proposalConflicts: ProposalConflictStore;
   readonly marksHost: editorialMarkOperations.EditorialMarkOperationsHost;
   readonly manuscriptHost: manuscriptOperations.ManuscriptOperationsHost;
-}
-
-/** Test-owned transaction runner: the store's `#transaction` shape on the one connection, nothing more. */
-function transaction<T>(connection: DatabaseSync, operation: () => T): T {
-  connection.exec('BEGIN IMMEDIATE');
-  try { const result = operation(); connection.exec('COMMIT'); return result; }
-  catch (error) { connection.exec('ROLLBACK'); throw error; }
 }
 
 /**

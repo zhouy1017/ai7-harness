@@ -87,6 +87,6 @@ export function domainOf(book: ManuscriptMarksBook) {
     ...bind(manuscript, book.manuscriptHost),
     imported: imported(book),
     db: book.db,
-    close: () => book.db.close(),
+    close: () => { if (book.db.isOpen) book.db.close(); },
   };
 }
