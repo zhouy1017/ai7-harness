@@ -1414,13 +1414,22 @@ async function main() {
 
     // #1519: a failed 查找图书 stands in the bar fixed to the bottom of the content area — a short line and a very long one, at both
     // window sizes, with the sidebar open and folded to icons. The bar is whole inside the window, wraps its words (a long one
-    // scrolls inside the bar), covers neither the sidebar nor its pinned 设置 row, and with the page scrolled to its end the last
-    // line stands clear above it; × only dismisses it. The fault is armed apart from the press, which is real pointer input.
+    // scrolls inside the bar) and covers no control the page shows — the sidebar, its pinned 设置 row and every control of the
+    // library; × only dismisses it. (With the Journey's Books the library does not scroll at these sizes, so the last line is
+    // proved where a page scrolls with the bar showing: J-02's manuscript and J-12's import review.) The fault is armed apart
+    // from the press, which is real pointer input.
     const LONG_FAILURE = '查找没有完成：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在窗口里自行折行，既不超出窗口，也不压住侧栏、侧栏底部的设置，或页面的最后一行。'.repeat(5);
-    const wheel = async (deltaY) => {
-      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await renderer.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
-    };
-    const LAST_LINE_CLEAR = `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = document.querySelector('#screen').lastElementChild; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`;
+    // The bar covers no control the page shows: every visible button, link, field, select and disclosure outside the bar lies
+    // clear of its box, and a hit test at the control's centre lands on the control, not on the bar.
+    const COVERED_CONTROLS = `Array.from(document.querySelectorAll('button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"]')).filter((node) => {
+      const bar = document.querySelector('#persistence-status'); if (bar.contains(node)) return false;
+      const r = node.getBoundingClientRect(), box = bar.getBoundingClientRect();
+      if (!(r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) || getComputedStyle(node).visibility === 'hidden') return false;
+      const hit = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+      return !(r.right <= box.left + 0.5 || r.left >= box.right - 0.5 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5) || (hit instanceof Element && bar.contains(hit));
+    })`;
+    const NO_CONTROL_COVERED = `${COVERED_CONTROLS}.length === 0`;
+    const COVERED_DETAIL = `({ ...${statusBarOverlaps()}, covered: ${COVERED_CONTROLS}.slice(0, 6).map((node) => [node.tagName, String(node.className), ...['left', 'top', 'width', 'height'].map((key) => Math.round(node.getBoundingClientRect()[key]))]) })`;
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -1445,11 +1454,7 @@ async function main() {
               await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);
               await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, `library-error-${kind}-folded`);
             }
-            await waitFor(renderer, statusBarClear(), `library-error-${kind}-${form}-clear`);
-            await wheel(100000);
-            await waitFor(renderer, `(document.documentElement.scrollHeight <= innerHeight + 1 || scrollY > 0) && scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`, 60_000, statusBarOverlaps());
-            await wheel(-100000);
-            await waitFor(renderer, `scrollY === 0`, `library-error-${kind}-${form}-scrolled-back`);
+            await waitFor(renderer, `${statusBarClear()} && ${NO_CONTROL_COVERED}`, `library-error-${kind}-${form}-covers-no-control`, 60_000, COVERED_DETAIL);
           }
           await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-open-sidebar`);
           await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, `library-error-${kind}-opened`);

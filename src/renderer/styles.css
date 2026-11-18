@@ -1988,6 +1988,10 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
    scrolled clear of it; the manuscript keeps its height and its text pane gets that padding instead. */
 body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawer-width), 100vw - 1rem) + .75rem), calc(var(--status-area-right, 0px) + .75rem)); }
 :root[data-focus-mode="on"] .status-bar { left: .75rem; }
+/* Until it has been placed above the page's bottom controls the bar takes no pointer and shows nothing (it stays in the
+   accessibility tree, so its words are still said): a press in that instant reaches the control under it, never the ×. Its
+   position, the scroll padding and the space above a sticky bar then take effect together. */
+:root:not([data-status-bar="shown"]) .status-bar { opacity: 0; pointer-events: none; }
 :root[data-status-bar="shown"] body:not(:has(#screen[data-screen="editor"])) { padding-bottom: calc(var(--status-bar-height, 0px) + 1rem); }
 /* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
    control just above the sticky bar is not under it. */
