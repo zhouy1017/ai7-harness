@@ -151,6 +151,10 @@ const SCOPED_HELPERS = `(() => {
 
 const WRITING_LIBRARY_TEXT = '这份笔记整理自一次博物馆讲座：青铜器出土后最怕潮湿与盐分，修复人员先要清除锈蚀，再逐件建立档案。\n\n讲座还提到，研究者常把器物铭文与传世文献对读，一个字的释读往往要花上数年。\n';
 const WRITING_LIBRARY_CHARACTERS = 85;
+// 衍生稿件's management page imports a file of its own: the Book already holds the library's file as a source version, and a file the Book already holds must be chosen explicitly to be reused.
+const MANAGEMENT_IMPORT_FILE = '管理页导入稿.txt';
+const MANAGEMENT_IMPORT_TITLE = '管理页导入稿';
+const MANAGEMENT_IMPORT_TEXT = '这是管理页导入的一份短稿。\n\n第二段说明它只用于验证导入文件的新建方式。';
 const WRITING_LIBRARY_REQUEST = Object.freeze({ typeId: 'review-article', audience: '关注历史题材小说的读者', channel: '读书网站书评栏目' });
 const WRITING_LIBRARY_DRAFT_TITLE = '一封古怪的来信与一门安静的学问';
 const WRITING_MATERIALS_NONE = '资料库里还没有这本书可以参考的资料：资料定了归属（这本书或社级）与学习准入、建好索引以后，才能在这里勾选，列进「允许参考」。';
@@ -3221,10 +3225,13 @@ async function main() {
     await waitFor(renderer, `window.ai7.inspectProductionDocuments().then(page=>page.types.flatMap(type=>type.documents).find(doc=>doc.documentId===${JSON.stringify(managementBlankId)})?.title===${JSON.stringify(blurredTitle)})`, 'management-renamed-on-blur', 60_000);
     at('derivatives-management-import');
     // 导入文件 in the same form: the file names the document unless the editor wrote a title. The launch's scripted picker
-    // answers once and the stage 'multi-import' used it, so the product is launched again with the file as its answer
-    // and the Book is opened from the landing screen; the stage then starts on 稿件.
+    // answers once and the stage 'multi-import' used it; the Book also holds that stage's file as a source version already,
+    // and reusing one needs an explicit choice. So a file of this stage's own is written and the product is launched again
+    // with it as the answer, and the Book is opened from the landing screen; the stage then starts on 稿件.
+    const managementImportPath = resolve(runRoot, MANAGEMENT_IMPORT_FILE);
+    await writeFile(managementImportPath, MANAGEMENT_IMPORT_TEXT, 'utf8');
     await close();
-    renderer = await launch({ picker: libraryPath, adapter: WRITING_FIXTURE });
+    renderer = await launch({ picker: managementImportPath, adapter: WRITING_FIXTURE });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]')`, 'management-product-ready');
     await pointerClick(renderer, waitFor, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'management-book-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'management-book-ready', 120_000);
@@ -3233,7 +3240,7 @@ async function main() {
     await chooseCreateType('promotion-article', 'management-import');
     await chooseCreateMode('import', 'management-import');
     await confirmCreate('management-import');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'management-import-open', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .document-title-heading')?.textContent===${JSON.stringify(MANAGEMENT_IMPORT_TITLE)}`, 'management-import-open', 120_000);
     at('derivatives-management-source');
     // 从来源材料创建 begins with the Book's first source chosen; the document opens at its first paragraph.
     await openManagement('management-source');
