@@ -3120,9 +3120,10 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-run-leading > .review-run-heading h4 { font: inherit; font-weight: 700; }
 .review-run-leading .review-run-meta, .review-run-leading .review-new-actions { margin: 0; }
 .review-run-leading .review-history-fold { flex: 0 0 auto; order: 0; position: relative; }
-.review-run-leading .review-history-fold[open] { flex-basis: 100%; }
+.review-run-leading .review-history-fold[open] { flex-basis: 100%; order: 2; }
 .review-run-leading .review-new-actions { margin-left: auto; }
-.review-run-leading > .review-results { margin-top: .3rem; padding-top: .3rem; }
+/* Category frames already separate findings; avoid a second padded divider above them. */
+.review-run-leading > .review-results { margin-top: 0; padding-top: 0; border-top: 0; }
 .review-run-leading .review-filters { margin-top: 0; gap: .3rem .5rem; align-items: center; }
 .review-run-leading .review-filter { display: flex; align-items: center; gap: .3rem; }
 .review-run-leading .review-filter:has(select) { max-width: 15rem; }
@@ -3132,3 +3133,7 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-card-more { position: relative; }
 .review-card-more > summary { cursor: pointer; padding: .15rem .65rem; }
 .review-finding { container: review-finding / inline-size; }
+
+.review-filters > :is(.review-filtered, .review-no-findings) { font-size: .86rem; color: var(--text-subdued); }
+
+.review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }

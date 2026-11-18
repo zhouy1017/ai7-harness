@@ -97,6 +97,8 @@ export const REVIEW_ACTION_LABELS = {
   'batch-cancel': '取消',
   'batch-reprepare': '重新准备应用',
   'batch-undo': '撤销本批应用',
+  'all-categories': '全部类别',
+  'export-version': '导出报告',
   'more-findings': '显示更多发现',
   'generate-report': '生成报告',
   export: '导出',
@@ -408,7 +410,7 @@ export const REVIEW_BLOCK_GONE = '这段文字所在的段落已不在当前稿�
 export const REVIEW_CANNOT_APPLY = '原文已变，无法应用这条修改建议。';
 export const REVIEW_CANNOT_CONVERT = '原文已变，无法在这段文字上转换。';
 
-/** 共 N 条 (Issue #1524 6.1): the total, shown beside the 发现 heading once the six numbers move into the state pills. */
+/** 共 N 条 (Issue #1524 6.1): the total announced in the findings heading; visible totals live in the filter pills. */
 export function reviewTotalLine(counts: ReviewFindingCountsProjection): string {
   return `共 ${counts.pending + counts.handled + counts.ignored} 条`;
 }
