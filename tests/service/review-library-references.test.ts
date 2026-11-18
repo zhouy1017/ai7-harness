@@ -480,6 +480,9 @@ describe('review categories reference exact library versions over ordinary captu
       expect(() => prepare([id], ['factual-review'])).toThrow(REVIEW_MATERIAL_CATEGORY_REQUIRED);
       prepare([id]);
       expect(workspace).not.toHaveBeenCalled();
+      // The moved findings reader must still resolve this public method at call time.
+      store.inspectBookFindings(bookId);
+      expect(workspace).toHaveBeenCalled();
     } finally { workspace.mockRestore(); }
   });
 });

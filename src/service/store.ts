@@ -8,18 +8,19 @@ import { LEGACY_WORKFLOW_PROFILE, LEGACY_WORKFLOW_PROFILE_DIGEST, BASELINE_EDITO
 import * as importReviewOperations from './import-review-records.js';
 import { type AbandonmentCleanupIntent, type CommitAttempt, type DraftSnapshot, INGEST_BATCH_SIZE, type ImmutableManuscriptImportResult, type IngestedDocx, MANUSCRIPT_REIMPORT_NON_EFFECTS, MANUSCRIPT_REIMPORT_RECORD_SCHEMA, REIMPORT_COMMIT_FILE_BATCH_BYTES, REIMPORT_GROUPING, REIMPORT_GROUP_PAGE_SIZE, REIMPORT_MAPPING_BATCH_SIZE, REIMPORT_WIRE_HEADROOM_BYTES, type ReimportBlockFact, type ReimportCommitWork, type ReimportMappingBatch, type ReimportMappingFact, type ReimportPendingResolution, type ReimportPreparationWork, type ReimportReplayWork, type ReimportResolutionWork, type ResolvedImportTarget, type ResolvedReimportTarget, type ResolvedSourceImportTarget, type ReviewedFidelity, SOURCE_IMPORT_NON_EFFECTS, SOURCE_IMPORT_RECORD_SCHEMA, type StoredImportCommitProjection, type WordIntakePlan, appendReimportOffsetSegment, canonicalDegradationDecision, commitRequestFingerprint, continuationNotice, conversionFidelityReport, createImportReviewDigestV6, createLegacyNewBookReviewDigestV2, createReimportComparisonHasher, createReimportResolutionHasher, createReimportReviewDigest, createSourceImportReviewDigest, degradationReview, draftSourceProjection, emptyReimportResolutionDigest, immutableCommitResult, isNotAWordprocessingPackage, manuscriptBlockDigest, readConversionColumns, reconstructReviewedTargetChoice, requireSourceFormat, safeDisplayName, sourceImportRetainedBoundary, workingObjectRelativeKey } from './import-review-records.js';
 import { writeImportedManuscriptRows } from './import-intake-operations.js';
+import * as reviewOperations from './review/review-operations.js';
 import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
-import { withModelClarification } from './provider/clarification-contract.js';
-import { RUN_SYNTHESIS_ENTRY, runSynthesisKind } from './review/run-synthesis-kind.js';
+
+import { RUN_SYNTHESIS_ENTRY } from './review/run-synthesis-kind.js';
 import { launchedRunModelLabels } from './editorial-mark-source.js';
 import { transact as transactLaunch } from './analysis/run-state.js';
 import { TaskLaunchPreview } from './task-plan-creation.js';
 import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js';
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
-import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
+
 import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
 import { commitReplacementAsRevisions } from './replacement-revisions.js';
 import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
@@ -77,7 +78,6 @@ import {
   type PrepareCustomAnalysisInput,
   type SaveCustomAnalysisDimensionInput,
   type HouseReviewPreferenceProjection,
-  type HouseReviewPreferenceUse,
   type EditQualitySignalsProjection,
   type ApplyReceiptProjection,
   type BatchProposalDecisionDraftInput,
@@ -113,7 +113,6 @@ import {
   resolveMilestonePurpose,
   type ControlTaskRunInput,
   type EditTaskPlanInput,
-  type CoverageManifestProjection,
   type InspectSeriesKnowledgeReviewInput,
   type ServiceOperationMap,
   type InspectTaskPlanInput,
@@ -369,7 +368,6 @@ import {
   type BackgroundAnalysisEnrollmentProjection,
   type BackgroundAnalysisScopeKind,
   type BackgroundAnalysisStartingPoint,
-  type DefaultExecutionRuleBinding,
   type DefaultExecutionRulesProjection,
   type TaskPlanDefaultRuleProjection,
   type FactualReviewGoal,
@@ -387,13 +385,11 @@ import {
   type WritingProjection,
   type WritingTaskProjection,
   type WritingTaskTypeProjection,
-  type ReviewCategoryGoal,
   type ReviewCategoryProjection,
   type ReviewCategoryTaskRequest,
   type ReviewFindingPageRequest,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
-  type BookFindingProjection,
   type BookFindingsProjection,
   type ParagraphAnalysisProjection,
   MAX_EVALUATION_COMPARABLES,
@@ -488,7 +484,6 @@ import {
   type AnalysisPreparationResult,
   type BaselineAnalysisPreparationResult,
   type ProgressReader,
-  type ResendPlan,
   type UnconfirmedOutcomeRecord,
 } from './analysis/baseline-analysis-store.js';
 import {
@@ -506,13 +501,9 @@ import {
 } from './task-authorization.js';
 import {
   initializeLocalStageSchema,
-  reviewRunConclusions,
-  reviewRunEvidence,
   initializeReviewRunSchema,
   ReviewRunError,
   ReviewRunStore,
-  type ReviewRunPlanFacts,
-  type ReviewRunPreparationProgress,
 } from './review/review-runs.js';
 import { sha256Hex, canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
 import { graphemeCount, FACTUAL_VERIFICATION_POLICY_VERSION } from './analysis/factual-review-contract.js';
@@ -574,7 +565,6 @@ import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
 import * as learningSupervision from './house-review-preference.js';
 import {
   HouseReviewPreferenceLedger,
-  houseReviewPreferenceKindDefinition,
   initializeHouseReviewPreferenceSchema,
 } from './house-review-preference.js';
 import {
@@ -601,8 +591,6 @@ import {
   TASK_MATERIALS_NONE,
   TASK_MATERIALS_STATEMENT,
   TASK_MATERIAL_LIVE_UNAVAILABLE,
-  REVIEW_MATERIAL_CATEGORY_REQUIRED,
-  taskMaterialKindDefinition,
   taskMaterialSources,
   taskMaterialWords,
   taskMaterialRefusal,
@@ -647,9 +635,9 @@ import {
   sha256,
   type SqlRow,
 } from './store-records.js';
-import { bookFindingsPage, paragraphAnalysis } from './book-findings.js';
+import { inspectBookFindings, paragraphAnalysis, type BookFindingsHost } from './book-findings.js';
 import { initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
+import { liveMaterialRule } from './analysis/live-kind-admission.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
 import { predictionRange } from './evaluation/pricing-prediction.js';
@@ -742,9 +730,6 @@ import {
   newSeriesKnowledgeReadings,
   frozenSeriesScopes,
   seriesScopeMaterials,
-  seriesScopeKindDefinition,
-  seriesConsistencyKindDefinition,
-  procedureOffersSeries,
 } from './review/series-consistency.js';
 import {
   initializePublicationVersionSchema,
@@ -790,7 +775,6 @@ import {
   withLedgerRunControls,
   isRemoteExecutionRoute,
   withResend,
-  categoryResendDisclosure,
   RESUME_BLOCKED_BINDING,
   withWaitingReason,
   type WaitingFor,
@@ -901,7 +885,6 @@ import {
   defaultExecutionRuleCovers,
   defaultExecutionRuleDoes,
   defaultExecutionRuleKind,
-  reviewRulePattern,
   defaultExecutionRuleDrift,
   defaultExecutionRuleReference,
   initializeDefaultExecutionRuleSchema,
@@ -1042,8 +1025,6 @@ import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   HISTORICAL_REVIEW_CATEGORY_CONFIGURATION,
   reviewCategoryEntry,
-  reviewCategoryContractInput,
-  type ReviewCategoryConfigurationEntry,
 } from './review/category-configuration.js';
 import {
   EvaluationCalibrationError,
@@ -1184,11 +1165,7 @@ import {
   reimportGroupVerbs,
 } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
-import {
-  historicalReviewCategoryDefinitions,
-  reviewCategoryKindDefinition,
-  withReviewLocalTools,
-} from './review/review-category-kind.js';
+
 import {
   BoundedManuscriptStore,
   BoundedStoreError,
@@ -1223,7 +1200,6 @@ import {
   type LedgerTaskKind,
   type StoreControl,
   type WritingExemplarScan,
-  unwrappedPlanPromptDigest,
 } from './store-operation-support.js';
 import {
   configureDatabase,
@@ -2163,7 +2139,7 @@ export class EditorialStore {
       executionFor: binding => this.#baselineAnalysis.withExecutionChoice(binding,
         resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', binding)).launch,
       memoryFacade: () => this.#memoryFacade(),
-      ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
+      ledgerOf: (entry, materials, digest, bookId, preference, version) => reviewOperations.reviewLedgerOf(this.#reviewOperationsHost, entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
         const use = this.#memoryFacade().reviewPreference(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
         if (use === null) return null;
@@ -2752,47 +2728,21 @@ export class EditorialStore {
   }
 
   /** Read-only aggregation: the source owners derive dispositions on every read. */
-  inspectBookFindings(bookId: string, offset = 0): BookFindingsProjection {
-    requireStore(Number.isSafeInteger(offset) && offset >= 0, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
-    this.#evaluationBookTitle(bookId);
+  readonly #bookFindingsHost: BookFindingsHost = this.#bookFindingsHostOf();
+
+  #bookFindingsHostOf(): BookFindingsHost {
     const store = this;
-    function* findings(): Generator<BookFindingProjection> {
-      const revision = store.#latestAnalysisRevision(bookId);
-      if (revision !== null) for (const gap of revision.gaps) {
-        yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未覆盖', severity: '注意', status: '未覆盖', summary: gap.reason,
-          target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
-      }
-      // The workspace's history is bounded; enumerate identities from its ledger, then page each Run through its owner.
-      const runs = store.#authority.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').iterate(bookId);
-      for (const row of runs) {
-        const reviewRunId = asString(row.review_run_id);
-        let after: number | null = null;
-        for (;;) {
-          const run: NonNullable<ReviewWorkspaceProjection['run']> = store.inspectReviewWorkspace(bookId, reviewRunId, undefined,
-            { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
-          for (const finding of run.findings) if (finding.status === 'pending') {
-            yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
-              ...(finding.output === 'change-suggestion' && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null ? {
-                suggestion: { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, markId: finding.markId, blockId: finding.blockId,
-                  batchAllowed: !reviewFindingHasGuessedAnchor(finding.note) && run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
-              } : {}),
-              target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
-          }
-          if (!run.findingsTruncated || run.findings.length === 0) break;
-          after = run.findings[run.findings.length - 1]!.ordinal;
-        }
-      }
-      // Only the version on show is current: an earlier version is immutable history, its risks carried or settled by the next.
-      const record = store.inspectEvaluation(bookId, null).record;
-      if (record !== null) {
-        for (const risk of record.content.risks) if (!risk.reviewed && (risk.level !== null || risk.statement !== null)) {
-          yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待复核',
-            summary: risk.statement ?? record.profile.risks.find((item) => item.riskId === risk.riskId)?.label ?? '评估风险',
-            target: { kind: 'risk', recordId: record.recordId, riskId: risk.riskId, revisionId: record.revisionId } };
-        }
-      }
-    }
-    return bookFindingsPage(bookId, findings(), offset);
+    return {
+      get authority() { return store.#authority; },
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      latestAnalysisRevision: this.#latestAnalysisRevision.bind(this),
+      inspectReviewWorkspace: (bookId, reviewRunId, progress, page) => this.inspectReviewWorkspace(bookId, reviewRunId, progress, page),
+      inspectEvaluation: (bookId, recordId) => this.inspectEvaluation(bookId, recordId),
+    };
+  }
+
+  inspectBookFindings(bookId: string, offset = 0): BookFindingsProjection {
+    return inspectBookFindings(this.#bookFindingsHost, bookId, offset);
   }
 
   inspectParagraphAnalysis(bookId: string, manuscriptId: string, blockId: string, radius: number): ParagraphAnalysisProjection {
@@ -2871,16 +2821,47 @@ export class EditorialStore {
    * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
    * freezes names the binding this launch actually bound — which the one execution owner then checks.
    */
-  reviewCategoryLedger(definition: AnalysisKindDefinition, cached = true): BaselineAnalysisStore {
-    this.#assertAvailable();
-    requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
-    const make = (): BaselineAnalysisStore => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
+  readonly #reviewOperationsHost: reviewOperations.ReviewOperationsHost = this.#reviewOperationsHostOf();
+
+  #reviewOperationsHostOf(): reviewOperations.ReviewOperationsHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get factualReview() { return store.#factualReview; },
+      get control() { return store.#control; },
+      get codeRoot() { return store.#codeRoot; },
+      get reviewRuns() { return store.#reviewRuns; },
+      get reviewCategoryLedgers() { return store.#reviewCategoryLedgers; },
+      get reviewCategoryDefinitions() { return store.#reviewCategoryDefinitions; },
+      get factualVerification() { return store.#factualVerification; },
+      get capturedProcedureHost() { return store.#capturedProcedureHost; },
+      get rules() { return store.#rules; },
+      get manuscriptExport() { return store.#manuscriptExport; },
+      assertAvailable: this.#assertAvailable.bind(this),
+      analysisCall: this.#analysisCall.bind(this),
+      reviewCall: this.#reviewCall.bind(this),
+      verificationCall: this.#verificationCall.bind(this),
+      ruleCall: this.#ruleCall.bind(this),
+      exportCall: this.#exportCall.bind(this),
+      transaction: this.#transaction.bind(this),
+      memoryFacade: this.#memoryFacade.bind(this),
+      taskMaterialReadings: this.#taskMaterialReadings.bind(this),
+      prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
+      resultBinding: this.#resultBinding.bind(this),
+      launchChoice: this.#launchChoice.bind(this),
+      executionLedgerForRun: (runRecordId) => this.executionLedgerForRun(runRecordId),
+      materializeFactualVerification: (reviewRunId) => this.materializeFactualVerification(reviewRunId),
+      inspectTaskPlanWithConnection: (input, credentialReadiness, connectivity, progress) => this.inspectTaskPlanWithConnection(input, credentialReadiness, connectivity, progress),
+      inspectFactualVerification: (input) => this.inspectFactualVerification(input),
+      inspectEvidenceWorkspace: (input) => this.inspectEvidenceWorkspace(input),
+      inspectResearchEvidence: (input) => this.inspectResearchEvidence(input),
     };
-    const seriesRule = definition.seriesScopes === undefined ? '' : sha256(canonicalJson(this.#baselineAnalysis.launch.policy?.providerProcessing.admittedRules ?? []));
-    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}\n${canonicalJson(definition.seriesScopes ?? null)}\n${seriesRule}\n${definition.structuredInputKey ?? ''}\n${canonicalJson(definition.inheritedBudgetCeiling ?? null)}`, make) : make();
+  }
+
+  reviewCategoryLedger(definition: AnalysisKindDefinition, cached = true): BaselineAnalysisStore {
+    return reviewOperations.reviewCategoryLedger(this.#reviewOperationsHost, definition, cached);
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -2890,8 +2871,7 @@ export class EditorialStore {
     progress?: ProgressReader,
     revisionId: string | null = null,
   ): ReviewCategoryProjection {
-    const ledger = this.reviewCategoryLedger(definition);
-    return this.#analysisCall(() => ledger.inspect(bookId, progress, revisionId)) as ReviewCategoryProjection;
+    return reviewOperations.inspectReviewCategory(this.#reviewOperationsHost, bookId, definition, progress, revisionId);
   }
 
   /**
@@ -2907,28 +2887,15 @@ export class EditorialStore {
     launchPolicy: LaunchPolicyProjection,
     reconfirm = false,
   ): AnalysisPreparationResult<ReviewCategoryProjection> {
-    const ledger = this.reviewCategoryLedger(definition);
-    const result = this.#analysisCall(() => ledger.prepare({
-      phase: 'start',
-      bookId,
-      goal: definition.mode(request.mode).goal as ReviewCategoryGoal,
-      update: request.mode === definition.initialMode ? null : { mode: request.mode, selectedRange: request.selectedRange },
-      reconfirm,
-      launchPolicy,
-    }));
-    return { ...result, projection: result.projection as ReviewCategoryProjection | null };
+    return reviewOperations.createReviewCategoryPreparationWork(this.#reviewOperationsHost, bookId, definition, request, launchPolicy, reconfirm);
   }
 
   advanceReviewCategoryPreparationWork(definition: AnalysisKindDefinition, workId: string): AnalysisPreparationResult<ReviewCategoryProjection> {
-    const ledger = this.reviewCategoryLedger(definition);
-    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    return { ...result, projection: result.projection as ReviewCategoryProjection | null };
+    return reviewOperations.advanceReviewCategoryPreparationWork(this.#reviewOperationsHost, definition, workId);
   }
 
   cancelReviewCategoryPreparationWork(definition: AnalysisKindDefinition, workId: string): boolean {
-    const ledger = this.reviewCategoryLedger(definition);
-    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
-    return true;
+    return reviewOperations.cancelReviewCategoryPreparationWork(this.#reviewOperationsHost, definition, workId);
   }
 
   /** Records the standard-direct authorization and the Run; the caller hands the Run and this category's ledger to the execution owner. */
@@ -2938,118 +2905,10 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
   ): { projection: ReviewCategoryProjection; dispatchRunRecordId: string | null } {
-    const ledger = this.reviewCategoryLedger(definition);
-    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { projection: authorized.projection as ReviewCategoryProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
+    return reviewOperations.authorizeReviewCategory(this.#reviewOperationsHost, bookId, definition, taskIntentId, planEnvelopeDigest);
   }
 
   // ---- 审阅 Review Runs (Issue #417, plan slice S69) ----------------------------------------------
-
-  /**
-   * The ledger a Task-backed category of a Review Run executes on: the factual kind's for 事实核查, and
-   * otherwise the category's own, built from the configuration entry the Run snapshotted — so a Run keeps
-   * finding the ledger of the exact contract it prepared under.
-   */
-  #reviewLedgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string, preference?: HouseReviewPreferenceUse | null, frozenVersion?: 1 | 2): BaselineAnalysisStore {
-    if (entry.executor === 'factual-review-kind') return this.#factualReview;
-    requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
-    const input = reviewCategoryContractInput(entry);
-    const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
-    const base = entry.synthesisKey === undefined
-      ? this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)))
-      : runSynthesisKind(this.#authority, entry.synthesisKey, entry.synthesisSource, contractVersion);
-    const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
-    let scopes = entry.seriesScopes;
-    const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
-      : entry.seriesKnowledge === undefined ? seriesScopeKindDefinition(this.#authority, definition, scopes) : definition;
-    if (materials === undefined && latestForBook !== undefined) {
-      const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1").get(latestForBook, base.kind) as SqlRow | undefined;
-      if (row !== undefined) {
-        // Current consistency availability is derived from today's knowledge. Its historical Run reconstructs from its
-        // snapshot entry instead; mixing today's definition with a prior Run's pins would falsely make a saved step unavailable.
-        if (entry.seriesKnowledge === undefined) scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
-        preference = this.#memoryFacade().pinned(asString(row.task_intent_id));
-        const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
-        const components = new Map(records.map((record) => {
-          const json = asString(record.canonical_json);
-          requireStore(sha256(json) === record.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
-          return [asString(record.component), JSON.parse(json) as Record<string, unknown>] as const;
-        }));
-        const pins = components.get('execution-plan')?.materialReferences;
-        if (pins !== undefined) {
-          const frozenBase = components.get('execution-plan')!.materialReferenceBasePromptContractDigest;
-          requireStore(typeof frozenBase === 'string' && /^[0-9a-f]{64}$/u.test(frozenBase), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
-          // A new guideline version is a new current kind contract, not corruption of the previous Task's pins.
-          // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
-          if (frozenBase !== base.promptContractDigest && frozenBase !== toolBase.promptContractDigest &&
-              !historicalReviewCategoryDefinitions(input, contractVersion).some((candidate) => candidate.promptContractDigest === frozenBase)) return this.reviewCategoryLedger(base);
-          materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
-          const envelope = components.get('plan-envelope');
-          requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
-          frozenPromptDigest = unwrappedPlanPromptDigest(components.get('execution-plan')!, envelope);
-        }
-      }
-    }
-    const readings = materials === undefined ? [] : this.#taskMaterialReadings(materials);
-    // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
-    // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
-    const refused = readings.some((reading) => reading.refusal !== null);
-    const wrap = (candidate: AnalysisKindDefinition): AnalysisKindDefinition => {
-      const series = entry.seriesKnowledge !== undefined && scopes !== undefined ? seriesConsistencyKindDefinition(this.#authority, candidate, scopes) : candidate;
-      const material = materials === undefined ? series : this.#analysisCall(() => taskMaterialKindDefinition(series, materials, readings,
-        refused && scopes === undefined ? frozenPromptDigest : undefined));
-      return finish(refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true));
-    };
-    let definition: AnalysisKindDefinition;
-    let prior: AnalysisKindDefinition;
-    if (frozenPromptDigest === undefined) {
-      definition = wrap(toolBase);
-      prior = toolBase.promptContractDigest === base.promptContractDigest ? definition : wrap(base);
-    } else {
-      const candidates: AnalysisKindDefinition[] = [];
-      for (const historical of entry.synthesisKey === undefined ? historicalReviewCategoryDefinitions(input, contractVersion) : [base]) {
-        try { candidates.push(wrap(historical)); }
-        catch (error) {
-          // Series consistency accepts only its own supported base; another historical form gains no proof.
-          if (!(error instanceof AnalysisError && error.code === 'SERIES_SCOPE_INVALID')) throw error;
-        }
-      }
-      const matched = candidates.find((candidate) => candidate.promptContractDigest === frozenPromptDigest);
-      requireStore(matched !== undefined, materials === undefined ? 'ANALYSIS_RECORD_INVALID' :
-        preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
-      definition = matched;
-      prior = candidates[0]!;
-    }
-    requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
-      preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
-    if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
-    Object.assign(definition, { historicalDefinitionForDigest: (digest: string): AnalysisKindDefinition | null => {
-      const row = this.#authority.prepare(`SELECT r.canonical_json, r.sha256, member.value category, t.contract_version,
-        p.canonical_json envelope_json, p.sha256 envelope_digest, x.canonical_json execution_json, x.sha256 execution_digest FROM review_runs r
-        JOIN json_each(r.canonical_json, '$.categories') member
-        JOIN analysis_task_intents t ON t.task_intent_id=json_extract(member.value, '$.task.taskIntentId')
-        JOIN analysis_plan_records p ON p.task_intent_id=t.task_intent_id AND p.component='plan-envelope'
-        JOIN analysis_plan_records x ON x.task_intent_id=t.task_intent_id AND x.plan_version=p.plan_version AND x.component='execution-plan'
-        WHERE t.kind=? AND COALESCE(json_extract(p.canonical_json, '$.basePromptContractDigest'),
-          json_extract(p.canonical_json, '$.editorialMemoryBasePromptContractDigest'),json_extract(p.canonical_json, '$.promptContractDigest'))=?
-        ORDER BY r.ordinal DESC LIMIT 1`).get(definition.kind, digest);
-      if (row === undefined) return null;
-      requireStore(sha256(String(row.canonical_json)) === row.sha256 && sha256(String(row.envelope_json)) === row.envelope_digest && sha256(String(row.execution_json)) === row.execution_digest,
-        'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
-      const snapshot = JSON.parse(String(row.canonical_json)) as { materialReferences?: TaskMaterialBoundary };
-      const category = JSON.parse(String(row.category)) as { entry: ReviewCategoryConfigurationEntry; task: { taskIntentId: string } };
-      if (category.entry.executor !== 'review-category-contract') return null;
-      const use = this.#memoryFacade().pinned(category.task.taskIntentId);
-      const baseDigest = unwrappedPlanPromptDigest(JSON.parse(String(row.execution_json)), JSON.parse(String(row.envelope_json)));
-      const historical = this.#reviewLedgerOf(category.entry, snapshot.materialReferences, baseDigest, undefined, use,
-        row.contract_version === 'ai7.editorial-review/1' ? 1 : 2).definition;
-      const base = historical.clarificationBase ?? historical;
-      return [historical, base, withModelClarification(base)].find(candidate => candidate.promptContractDigest === digest) ?? null;
-    } });
-    // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
-    // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
-    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
-  }
 
   // ---- 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4) ---------------------------------------------------
 
@@ -3232,14 +3091,7 @@ export class EditorialStore {
   }
 
   inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page?: ReviewFindingPageRequest, executionConfig?: RuntimeExecutionConfig): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => {
-      if (executionConfig === undefined || Object.keys(executionConfig).length === 0) return this.#reviewRuns.workspace(bookId, reviewRunId, progress, page);
-      const choice = this.#launchChoice('main-editorial', executionConfig);
-      const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
-        ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : this.#baselineAnalysis.launch.policy!;
-      const execution = this.#baselineAnalysis.withExecutionChoice(choice.binding, policy).launch;
-      return this.#reviewRuns.workspace(bookId, reviewRunId, progress, page, execution);
-    });
+    return reviewOperations.inspectReviewWorkspace(this.#reviewOperationsHost, bookId, reviewRunId, progress, page, executionConfig);
   }
 
   /**
@@ -3261,52 +3113,9 @@ export class EditorialStore {
     localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
     decisionId?: string, procedureDefinition: import('../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare(this.#reviewRunRequest(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft, seriesId, localCheck, decisionId, procedureDefinition)));
+    return reviewOperations.createReviewRunPreparationWork(this.#reviewOperationsHost, bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft, seriesId, localCheck, decisionId, procedureDefinition);
   }
 
-  #reviewRunRequest(
-    bookId: string,
-    categoryIds: ReadonlyArray<string>,
-    scope: ReviewRunScopeRequest,
-    launchPolicy: LaunchPolicyProjection,
-    // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
-    capturedProcedure: { versionId: string; documentSha256: string } | null = null,
-    materialIds: ReadonlyArray<string> = [],
-    redoOf: string | null = null,
-    // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
-    intentDraft: DraftPromotion | null = null,
-    seriesId: string | null = null,
-    localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
-    decisionId?: string, procedureDefinition: import('../shared/protocol/procedures.js').ProcedureDefinitionPin | null = null,
-  ): Extract<import('./review/review-runs.js').ReviewRunPrepareInput, { phase: 'start' }> {
-    const factualDecision = decisionId === undefined ? undefined : this.#verificationCall(() => {
-      const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, bookId);
-      requireStore(row !== undefined && categoryIds.length === 1 && categoryIds[0] === 'factual-review', 'FACTUAL_DECISION_INVALID', '补充核查需要当前图书的核查决定。');
-      const { reader } = this.#resultBinding(bookId, String(row.result_id));
-      return this.#factualVerification.recheckSelection(bookId, decisionId, reader);
-    });
-    if (factualDecision !== undefined) {
-      const claim = this.#factualVerification.claims(factualDecision.originalRunRecordId)!.claims.find((entry) => entry.claimId === factualDecision.claimId)!;
-      scope = { kind: 'selection', fromChapterBlockId: claim.occurrence.block, toChapterBlockId: claim.occurrence.block };
-    }
-    const procedure = capturedProcedure === null ? null : capturedProcedureOperations.procedureCall(this.#capturedProcedureHost, () => capturedProcedureOperations.capturedProcedurePin(this.#capturedProcedureHost, bookId, capturedProcedure));
-    requireStore(seriesId === null || capturedProcedure === null || procedureOffersSeries(capturedProcedureOperations.requireCapturedVersion(this.#capturedProcedureHost, capturedProcedure.versionId).document),
-      'SERIES_SCOPE_UNAVAILABLE', '这个工序版本只允许参考当前图书。');
-    requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
-      'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
-    if (materialIds.length > 0) {
-      requireStore(this.#baselineAnalysis.launch.live === null || this.#reviewCall(() => this.#reviewRuns.materialReferencesLiveAllowed(bookId, categoryIds)), 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
-      requireStore(this.#reviewCall(() => this.#reviewRuns.materialReferencesAllowed(bookId, categoryIds)),
-        'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
-    }
-    const references = this.#prepareTaskMaterials(bookId, materialIds);
-    return { phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, procedureDefinition, redoOf, seriesId,
-      ...(factualDecision === undefined ? {} : { factualDecision }),
-      ...(localCheck === undefined ? {} : { localCheck }),
-      ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
-      ...(intentDraft === null ? {} : { intentDraft }),
-    };
-  }
 
   captureScopedAiEditLaunch(input: import('../shared/protocol/scoped-edit.js').StartScopedAiEditInput & { bookId: string; clientCommandId: string },
     create: (binding: ConfiguredProviderBinding | null) => { runId: string; manuscript: unknown }): { runId: string; repeated: boolean; notice?: string } {
@@ -3457,46 +3266,17 @@ export class EditorialStore {
 
   launchReviewRun(input: import('../shared/protocol.js').ServiceOperationMap['launchReviewRun']['input'], launchPolicy: LaunchPolicyProjection,
     startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
-    try {
-      const { clientCommandId, executionConfig = {}, ...request } = input;
-      const launched = launchFromSnapshot(this.#authority, { clientCommandId, bookId: input.bookId, kind: 'review-run', input: { ...request, executionConfig } },
-        () => !this.#reviewRuns.requiresModel(input.bookId, input.categoryIds) ? { executionConfig: {}, binding: null } : this.#launchChoice('main-editorial', executionConfig, input.rememberedChoice), (choice, snapshotId) => {
-          const policy = choice.binding !== null && this.#baselineAnalysis.launch.operationalScope === 'ordinary-production'
-            ? resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production', choice.binding) : launchPolicy;
-          const planned = this.#reviewRunRequest(input.bookId, input.categoryIds, input.scope, policy,
-            input.capturedProcedure ?? null, input.materialIds ?? [], null, null, input.seriesId ?? null, input.localCheck, input.decisionId, input.procedureDefinition ?? null);
-          const run = this.#reviewRuns.launch(planned, snapshotId, choice.binding, {
-            ...(input.evidenceAssuranceLevel === undefined ? {} : { evidenceAssuranceLevel: input.evidenceAssuranceLevel }), startWhen: input.startWhen ?? startWhen });
-          return { runId: run.reviewRunId, manuscript: run.manuscript };
-        });
-      return { projection: { ...this.#reviewRuns.workspace(input.bookId, launched.runId), ...(launched.notice === undefined ? {} : { launchNotice: launched.notice }) }, repeated: launched.repeated };
-    } catch (error) {
-      if (error instanceof TaskLaunchError) throw new StoreError(error.code, error.message);
-      return this.#reviewCall(() => { throw error; });
-    }
+    return reviewOperations.launchReviewRun(this.#reviewOperationsHost, input, launchPolicy, startWhen);
   }
 
   advanceReviewRunPreparationWork(workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'advance', workId }));
+    return reviewOperations.advanceReviewRunPreparationWork(this.#reviewOperationsHost, workId);
   }
 
   cancelReviewRunPreparationWork(workId: string): boolean {
-    this.#reviewCall(() => this.#reviewRuns.prepare({ phase: 'cancel', workId }));
-    return true;
+    return reviewOperations.cancelReviewRunPreparationWork(this.#reviewOperationsHost, workId);
   }
 
-  #reviewPreparation(body: () => ReviewRunPreparationProgress): AnalysisPreparationResult<ReviewWorkspaceProjection> {
-    return this.#reviewCall(() => {
-      const progress = body();
-      return {
-        done: progress.done,
-        workId: progress.workId,
-        completed: progress.completed,
-        total: progress.total,
-        projection: progress.reviewRunId === null || progress.bookId === null ? null : this.#reviewRuns.workspace(progress.bookId, progress.reviewRunId),
-      };
-    });
-  }
 
   /**
    * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
@@ -3509,10 +3289,7 @@ export class EditorialStore {
     approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
     _slotBusy = false,
   ): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => {
-      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, 'now');
-      return this.#reviewRuns.workspace(bookId, reviewRunId);
-    });
+    return reviewOperations.authorizeReviewRun(this.#reviewOperationsHost, bookId, reviewRunId, approvedDigests, _slotBusy);
   }
 
   /**
@@ -3527,27 +3304,17 @@ export class EditorialStore {
     reason: string,
     progress?: ProgressReader,
   ): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => {
-      this.#transaction(this.#authority, () => {
-        this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-        this.#memoryFacade().captureIgnoredFinding(bookId, reviewRunId, findingId);
-      });
-      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
-    });
+    return reviewOperations.recordReviewFindingDisposition(this.#reviewOperationsHost, bookId, reviewRunId, findingId, reason, progress);
   }
 
   /** The next version of the Run's 审阅报告 (REV-009). */
   generateReviewReport(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => {
-      this.#reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(this, bookId, reviewRunId),
-        { conclusions: () => reviewRunConclusions(this, bookId, reviewRunId) });
-      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
-    });
+    return reviewOperations.generateReviewReport(this.#reviewOperationsHost, bookId, reviewRunId, progress);
   }
 
   /** The Review Run and finding a produced mark belongs to, for the Mark Card's `查看任务`; `null` for any other mark. */
   reviewFindingOfMark(markId: string): { bookId: string; reviewRunId: string; findingId: string } | null {
-    return this.#reviewCall(() => this.#reviewRuns.findingOfMark(markId));
+    return reviewOperations.reviewFindingOfMark(this.#reviewOperationsHost, markId);
   }
 
   /**
@@ -3555,7 +3322,7 @@ export class EditorialStore {
    * so an operation that hands it a Run the renderer named — 继续审阅 — asks this first.
    */
   requireReviewRunOfBook(bookId: string, reviewRunId: string): void {
-    this.#reviewCall(() => this.#reviewRuns.requireRunOfBook(bookId, reviewRunId));
+    return reviewOperations.requireReviewRunOfBook(this.#reviewOperationsHost, bookId, reviewRunId);
   }
 
   /**
@@ -3563,31 +3330,7 @@ export class EditorialStore {
    * store's own error handling, so a fatal store error poisons the store exactly as any other call does.
    */
   get reviewRunDriveSteps(): ReviewRunDriveSteps {
-    const runs = this.#reviewRuns;
-    return {
-      local: (reviewRunId, stopping) => runs.runLocal(reviewRunId, stopping),
-      background: (reviewRunId, categoryId) => runs.backgroundOrigin(reviewRunId, categoryId),
-      begin: (reviewRunId) => this.#reviewCall(() => runs.beginDrive(reviewRunId)),
-      end: (reviewRunId) => runs.endDrive(reviewRunId),
-      step: (reviewRunId, categoryId) => this.#reviewCall(() => runs.step(reviewRunId, categoryId)),
-      start: (reviewRunId, categoryId) => this.#reviewCall(() => runs.start(reviewRunId, categoryId)),
-      recordDispatch: (reviewRunId, categoryId, runRecordId) => this.#reviewCall(() => runs.recordDispatch(reviewRunId, categoryId, runRecordId)),
-      refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
-        this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
-      settle: (reviewRunId, categoryId, options) => {
-        this.#reviewCall(() => runs.settle(reviewRunId, categoryId, options));
-        if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
-      },
-      write: (reviewRunId, categoryId) => {
-        this.#reviewCall(() => runs.write(reviewRunId, categoryId));
-        // The settled 事实核查 category's Versioned Verification Results (Issue #901), once its findings are on the manuscript.
-        if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
-      },
-      fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
-      waitingForPlace: (reviewRunId, categoryId) => runs.waitingForPlace(reviewRunId, categoryId),
-      paused: (reviewRunId) => this.#reviewCall(() => runs.paused(reviewRunId)),
-      launchDriveMode: (reviewRunId) => this.#reviewCall(() => runs.launchDriveMode(reviewRunId)),
-    };
+    return reviewOperations.reviewRunDriveSteps(this.#reviewOperationsHost);
   }
 
   // ---- The Task Drawer (Issue #418, plan slice S72) ------------------------------------------------
@@ -3685,7 +3428,7 @@ export class EditorialStore {
             FACTUAL_VERIFICATION_POLICY_VERSION.minimumLevel) } };
         }
       }
-      plan = { ...plan, defaultRule: this.#reviewDefaultRule(input.bookId, plan.ref) };
+      plan = { ...plan, defaultRule: reviewOperations.reviewDefaultRule(this.#reviewOperationsHost, input.bookId, plan.ref) };
     }
     if (input.kind !== 'baseline-analysis' && input.kind !== 'review-run') {
       const ledger = this.#currentLedgerOf(input.kind, input.bookId, plan.ref);
@@ -3846,7 +3589,7 @@ export class EditorialStore {
     if (seriesReports.length > 0) reviewed = { ...reviewed, technical: [...reviewed.technical, { key: 'series-read-counts', label: '书系范围任务已读取',
       value: `${seriesReports.reduce((count, report) => count + report.unitRows.filter((unit) => unit.attempts > 0).length, 0)} 个阅读范围 · ${seriesReports.reduce((count, report) => count + report.usagePerStage.units.requests, 0)} 次模型请求` }] };
     // 结果待确认 (Issue #757): each category that sends again a range an earlier Run of its kind left unconfirmed says so.
-    const plan = { ...reviewed, resend: this.#reviewResend(input.bookId, facts) };
+    const plan = { ...reviewed, resend: reviewOperations.reviewResend(this.#reviewOperationsHost, input.bookId, facts) };
     // The route the categories' frozen plans resolve, read from the first Task's Provider Resolution Plan as the
     // baseline reads its own: a review's Tasks share one launch, and a Run of the leads alone reaches no model.
     const frozenRoute = facts.categories
@@ -4249,7 +3992,7 @@ export class EditorialStore {
     if (isReviewCategoryKindId(kind)) {
       const entry = reviewCategoryEntry(kind.slice(kind.indexOf('/') + 1));
       requireStore(entry !== null, 'ANALYSIS_CLARIFICATION_STALE', '这个审阅类别已经变化。');
-      return this.#reviewLedgerOf(entry, undefined, undefined, bookId);
+      return reviewOperations.reviewLedgerOf(this.#reviewOperationsHost, entry, undefined, undefined, bookId);
     }
     const surface = unconfirmedSurfaceOf(kind);
     requireStore(surface === 'initial-evaluation' || surface === 'readers-report' || surface === 'evaluation-rewrite' || surface === 'writing',
@@ -4320,12 +4063,7 @@ export class EditorialStore {
   }
 
   finishCancelledReviewRun(runRecordId: string): void {
-    for (const row of this.#authority.prepare(`SELECT DISTINCT rr.review_run_id, rr.book_id FROM review_runs rr
-      JOIN review_run_category_events e ON e.review_run_id = rr.review_run_id
-      WHERE e.run_record_id = ? AND e.state = 'dispatched'`).all(runRecordId) as SqlRow[]) {
-      this.#reviewCall(() => this.#reviewRuns.finishCancelled(asString(row.book_id), asString(row.review_run_id)));
-      this.materializeFactualVerification(asString(row.review_run_id));
-    }
+    return reviewOperations.finishCancelledReviewRun(this.#reviewOperationsHost, runRecordId);
   }
 
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
@@ -4347,25 +4085,7 @@ export class EditorialStore {
 
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
-    this.#assertAvailable();
-    const settled = this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns()));
-    // The category router's existing active-state query excludes terminal reflection and already
-    // paused Runs. Their optional physical-request evidence still requires local settlement.
-    for (const row of this.#authority.prepare(`SELECT DISTINCT r.run_record_id FROM analysis_run_records r
-      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN analysis_run_states s ON s.run_record_id = r.run_record_id
-      WHERE substr(i.kind, 1, 17) = 'editorial-review/' AND json_type(s.canonical_json, '$.requestAdmission') IS NOT NULL`).all() as SqlRow[]) {
-      try { this.#analysisCall(() => this.executionLedgerForRun(asString(row.run_record_id)).reconcileRequestAdmissions(asString(row.run_record_id))); }
-      catch (error) {
-        if (error instanceof StoreFatalError) throw error;
-        // As with the existing category router, a damaged snapshot is its surface's refusal. Its
-        // continuation validates the same receipt before admission and cannot silently send again.
-      }
-    }
-    // Retention reads terminal outcomes only after the execution ledger has settled their request evidence.
-    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) {
-      try { this.materializeFactualVerification(reviewRunId); } catch { /* one Run never stops startup; the next open records what is still missing */ }
-    }
-    return { settled };
+    return reviewOperations.reconcileStoppedReviewCategoryRuns(this.#reviewOperationsHost);
   }
 
   /** Exact recorded ranges for a live Run's cancellation disclosure; no stopped-Run authority is inferred. */
@@ -4487,12 +4207,7 @@ export class EditorialStore {
 
   /** A Review Run approved 「空闲时处理」 begins at the first quiet, after the same preflight 联网后开始任务 makes (OFF-008). */
   admitIdleReview(reviewRunId: string, drive: () => void): void {
-    this.#reviewCall(() => {
-      if (!this.#reviewRuns.waitsForIdle(reviewRunId)) return;
-      const drift = this.#reviewRuns.preflightDrift(reviewRunId);
-      if (drift.length > 0) { this.#reviewRuns.blockWaiting(reviewRunId, drift, 'plan-moved'); return; }
-      this.#reviewRuns.admitWaiting(reviewRunId, drive);
-    });
+    return reviewOperations.admitIdleReview(this.#reviewOperationsHost, reviewRunId, drive);
   }
 
   // ---- 联网后开始任务 for every kind (Issue #760, plan slice S74c) ----------------------------------------------
@@ -4632,8 +4347,7 @@ export class EditorialStore {
 
   /** Reconnect Preflight starts a waiting Review Run (Issue #760): `drive` hands it to the drive loop, which may take it now. */
   admitWaitingReviewRun(reviewRunId: string, drive: () => void): void {
-    this.#assertAvailable();
-    this.#reviewCall(() => this.#reviewRuns.admitWaiting(reviewRunId, drive));
+    return reviewOperations.admitWaitingReviewRun(this.#reviewOperationsHost, reviewRunId, drive);
   }
 
   /**
@@ -4931,8 +4645,8 @@ export class EditorialStore {
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'DEFAULT_EXECUTION_RULE_INVALID', '默认执行规则的参数无效。');
     if (this.#authority.prepare('SELECT 1 FROM review_runs WHERE review_run_id = ? AND book_id = ?').get(taskIntentId, bookId) !== undefined) {
-      const facts = this.#reviewRuleFacts(bookId, taskIntentId);
-      const offer = this.#reviewDefaultRule(bookId, taskIntentId);
+      const facts = reviewOperations.reviewRuleFacts(this.#reviewOperationsHost, bookId, taskIntentId);
+      const offer = reviewOperations.reviewDefaultRule(this.#reviewOperationsHost, bookId, taskIntentId);
       requireStore(facts.digest === planEnvelopeDigest && (offer.canSet || offer.current?.fromThisPlan === true),
         'DEFAULT_EXECUTION_RULE_UNAVAILABLE', offer.reason ?? SET_RULE_CHANGED);
       requireStore(facts.binding !== null && facts.tasks[0] !== undefined, 'DEFAULT_EXECUTION_RULE_UNAVAILABLE', '没有可设为默认的审阅计划。');
@@ -4973,73 +4687,11 @@ export class EditorialStore {
     return { rules, statement: DEFAULT_EXECUTION_RULES_STATEMENT };
   }
 
-  #reviewRuleFacts(bookId: string, reviewRunId: string) {
-    const review = this.#reviewCall(() => this.#reviewRuns.planFacts(bookId, reviewRunId));
-    const tasks = this.#reviewCall(() => this.#reviewRuns.controlTasks(bookId, reviewRunId));
-    const projections = tasks.map((task) => this.#analysisCall(() => task.ledger.inspect(bookId)));
-    const pattern = reviewRulePattern(review.categories.map((category) => category.categoryId));
-    const digest = canonicalRecord(tasks.map((task) => ({ categoryId: task.categoryId, digest: task.planEnvelopeDigest }))).digest;
-    const bindings = projections.map((projection) => projection.planVersion === null ? null : defaultExecutionRuleBindingOf(projection.planVersion.materialInputs));
-    const first = bindings[0];
-    const binding: DefaultExecutionRuleBinding | null = first == null || bindings.some((value) => value === null) ? null : {
-      ...first,
-      artifactPin: { ...first.artifactPin, identity: pattern, nativeCarrierSha256: canonicalRecord(bindings).digest,
-        sidecarSha256: canonicalRecord(review.categories.map((category) => ({ categoryId: category.categoryId, procedure: category.procedure, basis: category.basisStatement }))).digest },
-      expectedOutcome: `审阅类别：${review.categories.map((category) => category.categoryId).sort().join('、')}`,
-    };
-    const allowed = tasks.every((task) => task.ledger.launch.live === null ||
-      liveKindRule(task.ledger.launch.policy, task.ledger.definition.kind)?.matchingActiveDefaultExecutionRuleAllowed === true);
-    return { tasks, projections, pattern, digest, binding, allowed, review };
-  }
-
-  #reviewDefaultRule(bookId: string, reviewRunId: string): TaskPlanDefaultRuleProjection {
-    const facts = this.#reviewRuleFacts(bookId, reviewRunId);
-    const rule = this.#ruleCall(() => this.#rules.forPattern(bookId, facts.pattern));
-    const current = rule === null ? null : { ...defaultExecutionRuleReference(rule, rule.version), state: rule.state,
-      fromThisPlan: rule.version.sourcePlanEnvelopeDigest === facts.digest };
-    const reason = !facts.allowed ? '当前模型处理规则未允许审阅快速开始；请先看计划。'
-      : facts.binding === null ? '这次审阅没有可设为默认的模型任务。'
-        : facts.projections.some((projection, index) => projection.taskIntent?.taskIntentId !== facts.tasks[index]!.taskIntentId || projection.planRevision !== null)
-          ? SET_RULE_CHANGED
-          : facts.projections.some((projection) => projection.planVersion?.edits.runBudgetCeiling !== undefined) ? SET_RULE_BUDGET
-            : facts.projections.some((projection) => { const edits = projection.planVersion?.edits; return edits !== undefined &&
-              (edits.removedSteps.length > 0 || edits.disallowedAdaptations.length > 0 || (edits.askFirstAdaptations ?? []).length > 0); }) ? SET_RULE_EDITED
-              : current?.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
-    const ruleVersionId = this.#reviewCall(() => this.#reviewRuns.defaultRuleVersion(reviewRunId));
-    const started = ruleVersionId === null ? null : this.#ruleCall(() => this.#rules.version(ruleVersionId));
-    return { canSet: reason === null, reason, current, planEnvelopeDigest: reason === null ? facts.digest : null,
-      binds: facts.binding === null ? [] : defaultRuleBindingRows(facts.binding, '审阅', defaultExecutionRuleCovers(facts.pattern)),
-      startedBy: started === null ? null : defaultExecutionRuleReference(started.rule, started.version) };
-  }
 
   async quickStartReviewRun(input: { bookId: string; reviewRunId: string; planEnvelopeDigest: string; ruleVersionId: string },
     runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
     progress?: ProgressReader): Promise<{ outcome: 'started' | 'fell-back'; reasons: string[]; dispatch: boolean }> {
-    const facts = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
-    const startedBy = this.#reviewCall(() => this.#reviewRuns.defaultRuleVersion(input.reviewRunId));
-    if (startedBy !== null) {
-      requireStore(startedBy === input.ruleVersionId && facts.digest === input.planEnvelopeDigest,
-        'ANALYSIS_AUTHORIZATION_STALE', '这次审阅已经按另一份计划或规则开始。');
-      return { outcome: 'started', reasons: [], dispatch: false };
-    }
-    const rule = this.#ruleCall(() => this.#rules.activeFor(input.bookId, facts.pattern));
-    const fallBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatch: false });
-    if (rule === null || rule.version.ruleVersionId !== input.ruleVersionId) return fallBack(quickStartNoRuleReason(facts.pattern));
-    if (!facts.allowed) return fallBack('当前模型处理规则未允许审阅快速开始；请先看计划。');
-    if (facts.digest !== input.planEnvelopeDigest || facts.binding === null ||
-      canonicalRecord(facts.binding).digest !== canonicalRecord(rule.version.binding).digest) return fallBack(QUICK_START_PLAN_CHANGED);
-    if (facts.projections.some((projection) => projection.planVersion?.edits.removedSteps.length !== 0 ||
-      projection.planVersion.edits.disallowedAdaptations.length !== 0 || (projection.planVersion.edits.askFirstAdaptations ?? []).length !== 0 ||
-      projection.planVersion.edits.runBudgetCeiling !== undefined)) return fallBack(SET_RULE_EDITED);
-    const plan = await this.inspectTaskPlanWithConnection({ bookId: input.bookId, kind: 'review-run', ref: input.reviewRunId },
-      runtime.credentialReadiness, runtime.connectivity, progress);
-    if (plan.start.readiness !== 'ready') return fallBack(plan.start.readiness === 'offline' ? QUICK_START_OFFLINE : QUICK_START_NOT_READY);
-    // Re-read every match after asynchronous credential readiness, before recording the one approval.
-    const now = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
-    const active = this.#ruleCall(() => this.#rules.activeFor(input.bookId, now.pattern));
-    if (active?.version.ruleVersionId !== input.ruleVersionId || now.digest !== facts.digest || !now.allowed) return fallBack(QUICK_START_RULE_CHANGED);
-    this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.reviewRunId, plan.start.categoryDigests, 'now', input.ruleVersionId));
-    return { outcome: 'started', reasons: [], dispatch: true };
+    return reviewOperations.quickStartReviewRun(this.#reviewOperationsHost, input, runtime, progress);
   }
 
   /** 停用 (S75 D7): the rule stays on record with every version, and quick start stops using it. */
@@ -9860,10 +9512,7 @@ export class EditorialStore {
    * manuscript stays as it is. The answer is the Book's 审阅 with the Run open.
    */
   cancelReviewRun(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => {
-      this.#reviewRuns.cancelStoppedRun(bookId, reviewRunId);
-      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
-    });
+    return reviewOperations.cancelReviewRun(this.#reviewOperationsHost, bookId, reviewRunId, progress);
   }
 
   /**
@@ -10645,16 +10294,7 @@ export class EditorialStore {
    * is saved as a revision for the export first.
    */
   async reviewManuscriptExport(input: ReviewManuscriptExportInput, available: boolean): Promise<ManuscriptExportReviewProjection> {
-    // 导出审阅报告（DOCX） (Issue #1430): the report is compiled first, then reviewed as any recorded version is. Issue #1446:
-    // an unchanged report is its latest recorded version; a changed one is recorded only by the preparation of its destination.
-    const target = input.target;
-    if (target.kind === 'book-review-report') {
-      await this.#exportCall(async () => this.#manuscriptExport.requireAvailable(available));
-      const reportId = this.#reviewCall(() => this.#reviewRuns.compileBookReport(input.bookId, (runId) => reviewRunEvidence(this, input.bookId, runId),
-        (runId) => reviewRunConclusions(this, input.bookId, runId), target.reviewRunId));
-      return this.#exportCall(() => this.#manuscriptExport.review({ ...input, target: { kind: 'report', reportId } }, available));
-    }
-    return this.#exportCall(() => this.#manuscriptExport.review(input, available));
+    return reviewOperations.reviewManuscriptExport(this.#reviewOperationsHost, input, available);
   }
 
   /** Freeze one Local Export Preparation for the destination the system dialog returned (V2-UX-EXP-010). */
@@ -10865,26 +10505,6 @@ export class EditorialStore {
       this.#analysisCall(() => this.#outcomeResolutions.record(bookId, surface, keys, now));
       return { resolved: keys.length };
     });
-  }
-
-  /** A Review Run's categories that send again ranges an earlier Run of their kind left 结果待确认 (Issue #757), before it starts. */
-  #reviewResend(bookId: string, facts: ReviewRunPlanFacts): TaskPlanProjection['resend'] {
-    // Until a category runs — prepared, or waiting to start once online (Issue #760) — the plan says what starting it sends.
-    if (facts.state !== 'prepared' && facts.state !== 'waiting' && facts.state !== 'plan-moved') return null;
-    const entries: Array<{ category: string; units: number[] }> = [];
-    for (const category of facts.categories) {
-      const task = category.task;
-      const manifest = task?.components['coverage-manifest'] as CoverageManifestProjection | undefined;
-      if (task === null || manifest === undefined) continue;
-      const kind = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(task.taskIntentId) as SqlRow | undefined;
-      if (kind === undefined) continue;
-      const plan = (task.components['reuse-plan'] ?? null) as ResendPlan | null;
-      const units = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsByContent(bookId, asString(kind.kind), manifest, plan));
-      if (units.length > 0) entries.push({ category: category.label, units });
-    }
-    if (entries.length === 0) return null;
-    const units = [...new Set(entries.flatMap((entry) => entry.units))].sort((left, right) => left - right);
-    return { units, statement: categoryResendDisclosure(entries) };
   }
 
   /**
