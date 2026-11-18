@@ -256,7 +256,7 @@ async function scoreOnly(options, runner) {
     await writeFile(join(options.out, `score-${metrics.id}.json`), `${JSON.stringify({ schema: METRICS_SCHEMA, mode: 'score developer-live store copy', case: metrics }, null, 2)}
 `);
     const changes = metrics.result.changesToOriginal;
-    console.log(`EDITORIAL_EVIDENCE/score/${metrics.id} state=${metrics.outcome.state} listed=${metrics.findings.listed} located=${metrics.findings.located} excluded=${metrics.findings.excluded} checks=${metrics.checks.triggered.length}/${metrics.checks.total} changes=${changes.suggestions}+${changes.annotations}`);
+    console.log(`EDITORIAL_EVIDENCE/score/${metrics.id} state=${metrics.outcome.state} listed=${metrics.findings.listed} located=${metrics.findings.located} excluded=${metrics.findings.excluded} checks=${metrics.checks.triggered.length}/${metrics.checks.total} changes=${changes.suggestions}+${changes.annotations}/${changes.counted} residue=${changes.variantResidue} traps=${changes.trapHits} run=${metrics.result.run.ordinal}/${metrics.result.run.runCount}`);
     return 0;
   }
   if (cases.length === 0) throw new EditorialEvidenceError('EDITORIAL_EVIDENCE/score-only-cases-absent');

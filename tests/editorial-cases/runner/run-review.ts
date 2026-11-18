@@ -28,12 +28,49 @@ export interface ReviewObservation {
    * proposes to change (a 修改建议) or flags (a 批注) the original text — the reprint-fidelity count, an upper bound of false
    * positives that is stricter than a modern manuscript's editor would be. `null` for every other case.
    */
-  readonly changesToOriginal: null | {
-    suggestions: number; annotations: number;
-    /** Suggestions that only turn 著 into 着: the zh-hans conversion's residue in the pinned text, plausibly useful, counted apart. */
-    variantResidue: number;
-    byCategory: Readonly<Record<string, { suggestions: number; annotations: number; variantResidue: number }>>;
-  };
+  readonly changesToOriginal: null | ChangesToOriginal;
+}
+
+export interface ChangesToOriginal {
+  /** Every located finding of the case's categories: `suggestions + annotations === counted`. */
+  counted: number;
+  suggestions: number;
+  annotations: number;
+  /**
+   * Suggestions whose replacement is exactly their quotation with every 著 turned into 着 — the zh-hans conversion's residue in
+   * the pinned text, plausibly useful, counted apart (and still inside `suggestions`). Only for a case that declares the residue;
+   * a 著→着 suggestion that changes anything else is an ordinary change to the original.
+   */
+  variantResidue: number;
+  /** Findings that fired a false-positive trap; they are inside `suggestions` and `annotations` too. */
+  trapHits: number;
+  byCategory: Readonly<Record<string, { suggestions: number; annotations: number; variantResidue: number; trapHits: number }>>;
+}
+
+/**
+ * The reprint-fidelity count (#1074), a pure function of the Run's located findings: on an unedited original every located finding
+ * proposes to change (修改建议) or flags (批注) it.
+ */
+export function countChangesToOriginal(
+  findings: ReadonlyArray<{ key: string; categoryId: string; quote: string; replacement: string | null }>,
+  categories: ReadonlyArray<string>,
+  residue: { from: string; to: string } | null,
+  trapFindingKeys: ReadonlySet<string>,
+): ChangesToOriginal {
+  const byCategory: Record<string, { suggestions: number; annotations: number; variantResidue: number; trapHits: number }> = {};
+  for (const categoryId of categories) byCategory[categoryId] = { suggestions: 0, annotations: 0, variantResidue: 0, trapHits: 0 };
+  let counted = 0;
+  for (const finding of findings) {
+    const bucket = byCategory[finding.categoryId];
+    if (bucket === undefined) continue;
+    counted += 1;
+    if (trapFindingKeys.has(finding.key)) bucket.trapHits += 1;
+    if (finding.replacement === null) { bucket.annotations += 1; continue; }
+    bucket.suggestions += 1;
+    if (residue !== null && finding.quote.includes(residue.from) && finding.replacement === finding.quote.replaceAll(residue.from, residue.to)) bucket.variantResidue += 1;
+  }
+  const total = (key: 'suggestions' | 'annotations' | 'variantResidue' | 'trapHits') => Object.values(byCategory).reduce((sum, bucket) => sum + bucket[key], 0);
+  return { counted, suggestions: total('suggestions'), annotations: total('annotations'), variantResidue: total('variantResidue'), trapHits: total('trapHits'), byCategory };
 }
 
 /**
@@ -181,18 +218,10 @@ export async function observeReviewRun(
     },
     ignoreAnnotation: (finding) => { store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, finding.key, '编辑价值证据：误报'); },
   });
-  const changesToOriginal = testCase.manuscript.source !== 'public-samplebook' ? null : (() => {
-    const byCategory: Record<string, { suggestions: number; annotations: number; variantResidue: number }> = {};
-    for (const categoryId of categories) byCategory[categoryId] = { suggestions: 0, annotations: 0, variantResidue: 0 };
-    for (const finding of findings) {
-      const bucket = byCategory[finding.categoryId]!;
-      if (finding.replacement === null) { bucket.annotations += 1; continue; }
-      bucket.suggestions += 1;
-      if (finding.quote.includes('著') && finding.replacement === finding.quote.replaceAll('著', '着')) bucket.variantResidue += 1;
-    }
-    const total = (key: 'suggestions' | 'annotations' | 'variantResidue') => Object.values(byCategory).reduce((sum, bucket) => sum + bucket[key], 0);
-    return { suggestions: total('suggestions'), annotations: total('annotations'), variantResidue: total('variantResidue'), byCategory };
-  })();
+  const changesToOriginal = testCase.manuscript.source !== 'public-samplebook' ? null : countChangesToOriginal(
+    findings.map((finding) => ({ key: finding.findingId, categoryId: finding.categoryId, quote: finding.quote, replacement: finding.replacement })),
+    categories, (testCase.input.conversionResidue as { from: string; to: string } | undefined) ?? null,
+    new Set(scored.scored.filter(({ verdict }) => verdict.kind === 'false-positive').map(({ finding }) => finding.key)));
   return {
     outcome: { state: run.state, categories: run.categories.map((category) => ({ categoryId: category.categoryId, state: category.state })), unitsClosed, unitsTotal, gaps },
     findings: { listed, located, excluded, ...scored.counts },

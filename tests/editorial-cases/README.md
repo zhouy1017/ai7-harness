@@ -85,13 +85,31 @@ of its `keywords`. Keyword checks are a coarse proxy; the report says so.
 ## Score-only cases (#1074)
 
 `node tools/editorial-evidence.mjs --check-references` imports each score-only case's exact file into a disposable product and checks
-its chapter rule and every check anchor; `pnpm test` runs it. After a developer-live Review Run, `--score <data root> --case <id>`
-copies that data root into a disposable directory (the root itself is never opened), refuses every `fetch`, scores the copy's one
-Book's latest Review Run with the same scoring, simulated editor, Apply and reversal as a replayed case, and writes
-`score-<id>.json` (counts only). With no planted defect the original is the reference: there is no useful rate or concern recall.
-Every located finding proposes to change (修改建议) or flags (批注) the pinned original — the **reprint-fidelity** count
-`changesToOriginal`, an upper bound of false positives, stricter than a modern manuscript's editor would be; a 修改建议 that only
-turns 著 into 着 (the zh-hans conversion's residue) is counted apart as `variantResidue`, plausibly useful.
+its chapter rule and every check anchor; `pnpm test` runs it. After a developer-live Review Run, and only once that product has
+stopped, `--score <data root> --case <id>` copies the data root into a disposable directory (the root itself is never opened),
+refuses every `fetch`, and binds the Run to the case before scoring: the copy must hold exactly one Book and exactly one Review
+Run, a 选章 Run over the case's chapters with exactly the case's categories, on an unedited Book (its block contents equal a fresh
+import of the exact file and its journal has not moved). It then scores that Run with the same scoring, simulated editor, Apply
+and reversal as a replayed case and writes `score-<id>.json` (counts, the Run's identity, ordinal and state, and the Run count).
+
+**References and rules, fixed before any live output.**
+
+- With no planted defect the original is the reference: there is no useful rate or concern recall on the four books.
+- **Reprint fidelity.** Every located finding of the case's categories proposes to change (修改建议) or flags (批注) the pinned
+  original: `changesToOriginal` counts them (`suggestions + annotations === counted`, every located finding of the two
+  categories), an upper bound of false positives, stricter than a modern manuscript's editor would be. Trap hits
+  (`trapHits`) are inside that count.
+- **Conversion residue.** A case may declare `input.conversionResidue` (`著` → `着`): a 修改建议 whose replacement is exactly its
+  quotation with every 著 turned into 着 is counted apart as `variantResidue` (plausibly useful; still inside `suggestions`).
+  In the chosen ranges 著 / 着 occur: 《朝花夕拾》 47 / 0, 《老残游记》 39 / 0, 《儒林外史》 98 / 0, so those three declare it;
+  《呐喊》 1 / 47 (its one 著 is a correct use), so it does not, and a 著→着 suggestion there is an ordinary change to the
+  original. With 39–98 residue sites per range, 错别字 results on three books largely measure the Wikisource zh-hans conversion,
+  not editorial judgement on the authors' text.
+- **Traps.** Three per book: one name, and two period-authentic forms whose modern variant occurs 0 times in the range, so no
+  consistency 批注 is defensible there. Twelve traps prove little: 0 of 12 fired is still compatible with a true firing rate of
+  about 22 % (95 % upper bound), and the name traps are near-trivial.
+- **Time and cost** come from the Provider Test Ledger and the driver's timestamps, never from `score-<id>.json`, whose model
+  and usage fields are empty for a store copy and are not measurements.
 
 ## Metrics (per case)
 

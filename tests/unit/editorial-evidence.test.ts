@@ -22,6 +22,7 @@ import { generateSyntheticManuscript, SYNTHETIC_MANUSCRIPT_IDS } from '../editor
 import { validateCase } from '../editorial-cases/runner/case-file.js';
 import { classifyFinding, locateOnce, simulatedEditor, structuralMet, type TextAnchor } from '../editorial-cases/runner/scoring.js';
 import { createCaseRoots, importManuscript, openStore } from '../editorial-cases/runner/session.js';
+import { countChangesToOriginal } from '../editorial-cases/runner/run-review.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -117,6 +118,25 @@ describe('the case set', () => {
     }
     expect(cases.filter((entry) => entry.replay.route === 'score-only').map((entry) => (entry.manuscript as { file: string }).file).sort())
       .toEqual(['liue-laocan-youji.docx', 'luxun-nahan.docx', 'luxun-zhaohua-xishi.docx', 'wujingzi-rulin-waishi.docx']);
+  });
+
+  it('counts every located finding on an unedited original as a change to it, with 著→着-only suggestions and trap hits apart', () => {
+    const findings = [
+      { key: 'suggestion', categoryId: 'typos-and-usage', quote: '一个字', replacement: '一些字' },
+      { key: 'annotation', categoryId: 'style-and-format', quote: '一处', replacement: null },
+      { key: 'trap', categoryId: 'typos-and-usage', quote: '那里', replacement: '哪里' },
+      { key: 'residue', categoryId: 'typos-and-usage', quote: '看著他', replacement: '看着他' },
+      { key: 'residue-and-more', categoryId: 'style-and-format', quote: '看著他', replacement: '看着她' },
+      { key: 'other-category', categoryId: 'literary-expression', quote: '字', replacement: '词' },
+    ];
+    const counted = countChangesToOriginal(findings, ['typos-and-usage', 'style-and-format'], { from: '著', to: '着' }, new Set(['trap']));
+    expect(counted).toEqual({ counted: 5, suggestions: 4, annotations: 1, variantResidue: 1, trapHits: 1, byCategory: {
+      'typos-and-usage': { suggestions: 3, annotations: 0, variantResidue: 1, trapHits: 1 },
+      'style-and-format': { suggestions: 1, annotations: 1, variantResidue: 0, trapHits: 0 },
+    } });
+    expect(counted.suggestions + counted.annotations).toBe(counted.counted);
+    // 《呐喊》 declares no residue: the same suggestion is an ordinary change to the original.
+    expect(countChangesToOriginal(findings, ['typos-and-usage', 'style-and-format'], null, new Set(['trap'])).variantResidue).toBe(0);
   });
 
   it('resolves every score-only chapter rule and check on the product import, and scores only a store that holds a Run', async () => {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { cp, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { runPolishCase } from './run-polish.js';
 import { chapterScope, observeReviewRun, runReviewCase } from './run-review.js';
 import { clarificationRun, finalizedNewsRelease, sample1DerivedLibraryItem } from './run-setups.js';
 import { initialEvaluationCase, readersReportCase, writingDraftCase } from './run-structural.js';
-import { createCaseRoots, deterministicOwner, developerLiveReplayOwner, type ImportedBook, importManuscript, openStore, type ReplayTally } from './session.js';
+import { createCaseRoots, deterministicOwner, developerLiveReplayOwner, type ImportedBook, importManuscript, openStore, type ReplayTally, workingBlocks } from './session.js';
 import { resolveTextAnchors } from './text-cases.js';
 
 /**
@@ -263,11 +264,37 @@ export async function checkScoreOnlyCase(request: { readonly codeRoot: string; r
   }
 }
 
+/** The Book's text as content only — kind, level and a digest of each block's words, in order — never its block identities. */
+function contentSequence(store: Awaited<ReturnType<typeof openStore>>, book: ImportedBook): string {
+  return createHash('sha256').update(JSON.stringify(workingBlocks(store, book).map((block) =>
+    [block.kind, block.level, createHash('sha256').update(block.text).digest('hex')]))).digest('hex');
+}
+
+/** A fresh import of the case's exact file in a disposable product: its content sequence and its journal position. */
+async function freshImport(codeRoot: string, testCase: EditorialCase): Promise<{ content: string; journalSequence: number }> {
+  const roots = await createCaseRoots();
+  const store = await openStore(roots, codeRoot, null);
+  try {
+    const book = await importManuscript(store, codeRoot, roots, testCase.manuscript, testCase.bookTitle);
+    return { content: contentSequence(store, book), journalSequence: store.getManuscriptWindow(book.manuscriptId, book.branchId, null).journalSequence };
+  } finally {
+    store.markCleanShutdown();
+    store.close();
+    await roots.dispose();
+  }
+}
+
 /**
  * Score a score-only case (#1074) on the developer-live Run it was made in. The data root is never opened: it is copied into a
- * disposable directory first (the caller has already refused every `fetch`), the copy holds exactly one Book with a primary
- * Manuscript whose latest Review Run is the case's, and the same scoring, simulated editor, Apply and reversal as a replayed
- * case run on the copy, which is then deleted. Counts, states and identities only.
+ * disposable directory first (the caller has already refused every `fetch`; the product must have stopped before the copy). The
+ * Run is bound to the case before anything is scored, and any mismatch refuses:
+ * - the copy holds exactly one Book with a primary Manuscript and exactly one Review Run;
+ * - that Run is a 选章 Run whose range is the case's chapters and whose categories are exactly the case's;
+ * - the Book is unedited: its content sequence equals a fresh import of the exact file, the journal has not moved since that
+ *   import, and the working state is the one the Run was prepared on (its working digest names block identities, which differ
+ *   between imports, so it is compared with the copy's own working state, not with the fresh import's).
+ * The same scoring, simulated editor, Apply and reversal as a replayed case then run on the copy, which is deleted. Counts, states
+ * and identities only.
  */
 export async function scoreEditorialCase(request: { readonly codeRoot: string; readonly testCase: EditorialCase; readonly dataRoot: string }): Promise<CaseMetrics> {
   const { codeRoot, testCase } = request;
@@ -281,6 +308,7 @@ export async function scoreEditorialCase(request: { readonly codeRoot: string; r
   try {
     const database = new DatabaseSync(join(copy, 'store', 'ai7.sqlite'), { readOnly: true });
     const books = database.prepare("SELECT b.book_id, m.manuscript_id FROM books b JOIN manuscripts m ON m.book_id = b.book_id AND m.role = 'primary'").all() as Array<{ book_id: string; manuscript_id: string }>;
+    const runCount = books.length !== 1 ? 0 : Number((database.prepare('SELECT COUNT(*) n FROM review_runs WHERE book_id = ?').get(books[0]!.book_id) as { n: number }).n);
     database.close();
     if (books.length !== 1) throw new Error(`EDITORIAL_CASE/score-book-ambiguous: ${testCase.id}`);
     store = await openStore({ ...caseRoots, dataRoot: copy }, codeRoot, null);
@@ -288,7 +316,15 @@ export async function scoreEditorialCase(request: { readonly codeRoot: string; r
     if (latest === null || latest === undefined) throw new Error(`EDITORIAL_CASE/score-run-absent: ${testCase.id}`);
     const book: ImportedBook = { bookId: books[0]!.book_id, manuscriptId: latest.manuscript.manuscriptId, branchId: latest.manuscript.branchId, revisionId: latest.manuscript.revisionId };
     if (book.manuscriptId !== books[0]!.manuscript_id) throw new Error(`EDITORIAL_CASE/score-manuscript-mismatch: ${testCase.id}`);
+    if (runCount !== 1) throw new Error(`EDITORIAL_CASE/score-runs-ambiguous: ${testCase.id}`);
     const range = chapterScope(store, book, testCase);
+    const categories = [...(testCase.input.categories as ReadonlyArray<string>)].sort();
+    if (latest.scope.kind !== 'chapters' || latest.scope.selectedRange?.startPosition !== range.startPosition || latest.scope.selectedRange?.endPosition !== range.endPosition ||
+      JSON.stringify(latest.categories.map((category) => category.categoryId).sort()) !== JSON.stringify(categories)) throw new Error(`EDITORIAL_CASE/score-run-not-case: ${testCase.id}`);
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const fresh = await freshImport(codeRoot, testCase);
+    if (contentSequence(store, book) !== fresh.content || window.journalSequence !== fresh.journalSequence ||
+      latest.manuscript.journalSequence !== fresh.journalSequence || latest.manuscript.workingDigest !== window.workingDigest) throw new Error(`EDITORIAL_CASE/score-book-edited: ${testCase.id}`);
     const resolution = resolveTextAnchors(store, book, testCase);
     const observed = await observeReviewRun(store, book, latest.reviewRunId, testCase, resolution, copy);
     return {
@@ -297,7 +333,9 @@ export async function scoreEditorialCase(request: { readonly codeRoot: string; r
         recordedUsage: { requests: 0, inputTokens: 0, outputTokens: 0 }, replayContracts: [], contractsAgree: null },
       outcome: { ...observed.outcome, chapterRange: { startPosition: range.startPosition, endPosition: range.endPosition } }, findings: { ...observed.findings },
       concerns: { total: 0, ...observed.concerns }, checks: { total: testCase.falsePositiveChecks.length, ...observed.checks },
-      effort: { ...observed.effort }, delivery: null, result: { ...observed.defect879, changesToOriginal: observed.changesToOriginal },
+      effort: { ...observed.effort }, delivery: null,
+      result: { ...observed.defect879, changesToOriginal: observed.changesToOriginal,
+        run: { reviewRunId: latest.reviewRunId, ordinal: latest.ordinal, state: latest.state, runCount } },
       replay: { answered: 0, unmatched: 0, elapsedMs: Date.now() - started },
     };
   } finally {

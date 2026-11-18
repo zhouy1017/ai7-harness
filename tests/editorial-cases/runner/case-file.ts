@@ -106,6 +106,9 @@ export function validateCase(value: unknown, fileId: string): EditorialCase {
     const titles = value.input.chapterTitles;
     require(Array.isArray(titles) && titles.length === (chapters.to as number) - (chapters.from as number) + 1 &&
       titles.every((title) => typeof title === 'string' && title.length > 0), id, 'input/chapterTitles');
+    const residue = value.input.conversionResidue;
+    require(residue === undefined || (isRecord(residue) && Object.keys(residue).length === 2 && typeof residue.from === 'string' &&
+      typeof residue.to === 'string' && residue.from.length === 1 && residue.to.length === 1 && residue.from !== residue.to), id, 'input/conversionResidue');
   }
   for (const field of ['expectedConcerns', 'falsePositiveChecks'] as const) {
     const list = value[field];
