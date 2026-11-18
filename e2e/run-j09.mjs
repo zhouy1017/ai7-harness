@@ -64,11 +64,9 @@ const SAMPLE1_UNITS = 8;
 /** The 修改建议 the editor applies on 丙 while its Run holds a range in flight (Issue #632): six graphemes, replaced by synthetic words. */
 const APPLY_RANGE = Object.freeze([20, 26]);
 const APPLIED_TEXT = '〔并行应用〕';
-const GROUP_ORDER = Object.freeze(['exceptions', 'decisions', 'active', 'recent']);
 const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决定', '运行中与已暂停', '最近完成']);
 // The screen's own words (`src/renderer/global-attention-labels.ts`), pinned there by its unit suite.
 const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
-const ACTIVE_EMPTY = '没有正在运行或中途停止的任务。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
 const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
@@ -627,7 +625,7 @@ async function openAttention(renderer, name) {
   await waitAttentionPainted(renderer, name);
 }
 async function waitAttentionPainted(renderer, name) {
-  await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined && document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4`, `${name}-painted`);
+  await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')?.dataset.attentionCount !== undefined`, `${name}-painted`);
 }
 
 /** The page as an editor reads it: each group's key, heading, count line, empty line, and each item's words. */
@@ -663,11 +661,11 @@ const READ_PAGE = `(() => {
   };
 })()`;
 
-/** The service's own answer, reduced to what the page is checked against. */
+/** The service's own answer, reduced to what the page is checked against: the groups the page draws are the ones that hold an item (#1522). */
 const READ_SERVICE = `window.ai7.inspectGlobalAttention().then((projection) => ({
   count: projection.actionableCount,
   running: projection.running,
-  groups: projection.groups.map((group) => ({ key: group.key, total: group.total, items: group.items.map((item) => ({ itemId: item.itemId, state: item.state, nextStep: item.nextStep, target: item.target, bookId: item.book.bookId, title: item.book.title })) })),
+  groups: projection.groups.filter((group) => group.total > 0).map((group) => ({ key: group.key, total: group.total, items: group.items.map((item) => ({ itemId: item.itemId, state: item.state, nextStep: item.nextStep, target: item.target, bookId: item.book.bookId, title: item.book.title })) })),
 }))`;
 
 /** Compare both rendered views with the same authoritative answer, allowing an in-flight refresh to finish. */
@@ -983,7 +981,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'model-open-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1051,17 +1049,18 @@ async function main() {
     await waitFor(renderer, `(() => { const page=${READ_PAGE}; return page.count===${JSON.stringify(String(service?.count))} && JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(serviceIds)}; })()`, 'attention-page-current', 30_000);
     const page = await renderer.evaluate(READ_PAGE);
     const pageGroups = page?.groups ?? [];
-    const exceptions = pageGroups[0]?.items ?? [];
-    const decisions = pageGroups[1]?.items ?? [];
-    const recent = pageGroups[3]?.items ?? [];
-    // The four groups in their fixed order, each keeping its heading; 运行中与已暂停 says it is empty; and every
-    // item's identities wait one deliberate step below its words, in a closed 查看技术详情.
-    requireJourney(JSON.stringify(pageGroups.map((group) => group.key)) === JSON.stringify(GROUP_ORDER) &&
-      JSON.stringify(pageGroups.map((group) => group.heading)) === JSON.stringify(GROUP_LABELS) &&
-      JSON.stringify(pageGroups.map((group) => group.counted)) === '["true","true","false","false"]' &&
-      pageGroups[2].items.length === 0 && pageGroups[2].empty === ACTIVE_EMPTY && pageGroups[2].countLine === '' &&
+    const groupOf = (key) => pageGroups.find((group) => group.key === key);
+    const exceptions = groupOf('exceptions')?.items ?? [];
+    const decisions = groupOf('decisions')?.items ?? [];
+    const recent = groupOf('recent')?.items ?? [];
+    // Only the groups that hold an item are drawn, in their fixed order, each keeping its heading; the two with nothing in them are
+    // absent and not read as empty; and every item's identities wait one deliberate step below its words, in a closed 查看技术详情.
+    requireJourney(JSON.stringify(pageGroups.map((group) => group.key)) === JSON.stringify(['exceptions', 'recent']) &&
+      JSON.stringify(pageGroups.map((group) => group.heading)) === JSON.stringify([GROUP_LABELS[0], GROUP_LABELS[3]]) &&
+      JSON.stringify(pageGroups.map((group) => group.counted)) === '["true","false"]' &&
+      groupOf('decisions') === undefined && groupOf('active') === undefined && pageGroups.every((group) => group.empty === null) &&
       pageGroups.every((group) => group.items.every((entry) => entry.technical === false)),
-    'four-groups-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
+    'groups-with-items-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
     // 异常与结果待确认: the first Book's Run, blocked before dispatch — its Book, object, exact state, reason and step.
     const blockedItem = exceptions[0];
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('.global-attention-item')).every((item) => {
@@ -1090,15 +1089,15 @@ async function main() {
     // The page is the service's answer, item for item.
     requireJourney(service?.count === 1 && service.running === false &&
       JSON.stringify(service.groups.map((group) => group.items.map((item) => item.itemId))) === JSON.stringify(pageGroups.map((group) => group.items.map((item) => item.itemId))) &&
-      service.groups[0].items[0].nextStep === 'view-run' && service.groups[1].items.length === 0,
+      service.groups[0].items[0].nextStep === 'view-run' && !service.groups.some((group) => group.key === 'decisions'),
     'page-is-the-service-answer', service);
     // Nothing here grants anything: no 待审批 or 批准, no control carries 授权, and no item claims a pause.
     await assertRenderer(renderer, `(() => { const screen=document.querySelector('[data-screen="global-attention"]'); const text=screen?.textContent??''; return !/待审批|批准/u.test(text) && !Array.from(screen.querySelectorAll('button')).some((button)=>/授权/u.test(button.textContent??'')) && !Array.from(screen.querySelectorAll('.global-attention-pill')).some((pill)=>/已暂停/u.test(pill.textContent??'')); })()`, 'no-authority-words');
 
     at('attention-count');
     // The number is the first two groups' and no other: this launch has one blocked Run.
-    requireJourney(page.count === '1' && pageGroups[0].countLine === '1 项需要你处理' && pageGroups[1].countLine === '' &&
-      pageGroups[3].countLine === '1 项' && Number(pageGroups[0].total) + Number(pageGroups[1].total) === Number(page.count), 'count-is-the-first-two-groups', page);
+    requireJourney(page.count === '1' && groupOf('exceptions').countLine === '1 项需要你处理' && groupOf('decisions') === undefined &&
+      groupOf('recent').countLine === '1 项' && Number(groupOf('exceptions').total) === Number(page.count), 'count-is-the-first-two-groups', page);
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='1' && document.querySelector('#global-attention-entry .global-attention-badge')?.textContent==='1' && document.querySelector('#global-attention-entry')?.getAttribute('aria-label')==='待我处理，1 项需要你处理'`, 'entry-count-one', 30_000);
 
     at('attention-writes-nothing');
@@ -1247,7 +1246,7 @@ async function main() {
     const concurrentIds = JSON.stringify(concurrentService?.groups?.map((group) => group.items.map((item) => item.itemId)) ?? null);
     await waitFor(renderer, `(() => { const page=${READ_PAGE}; return JSON.stringify(page.groups.map((group)=>group.items.map((item)=>item.itemId)))===${JSON.stringify(concurrentIds)}; })()`, 'concurrent-page-current', 30_000);
     const concurrentPage = await renderer.evaluate(READ_PAGE);
-    const activeItems = concurrentPage?.groups?.[2]?.items ?? [];
+    const activeItems = concurrentPage?.groups?.find((group) => group.key === 'active')?.items ?? [];
     const itemOf = (bookId) => activeItems.find((item) => item.bookId === bookId) ?? null;
     const queuedItem = itemOf(bookB);
     requireJourney(concurrentService?.count === 0 && concurrentService.running === true && concurrentPage.count === '0' && activeItems.length === 3 &&
@@ -1255,7 +1254,7 @@ async function main() {
       itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
       queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingTaskB}` &&
       queuedItem.pill === '等待运行名额' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
-      queuedItem.next === '查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
+      queuedItem.next === '查看运行' && !concurrentPage.groups.some((group) => group.key === 'exceptions' || group.key === 'decisions'),
     'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
 
@@ -1711,7 +1710,7 @@ async function main() {
     }
     await writeFile(holdPath, '1', 'utf8');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('#screen .settings-navigation')`,'overview-poll-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'overview-poll-ordinary-settings-ready');
     await click(renderer,'帮助','overview-poll-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
@@ -1844,7 +1843,7 @@ async function main() {
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
-    await waitFor(renderer,`document.querySelector('#screen .settings-navigation')`,'overview-poll-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'overview-poll-developer-settings-ready');
     await click(renderer,'帮助','overview-poll-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'overview-poll-developer-mode');
 

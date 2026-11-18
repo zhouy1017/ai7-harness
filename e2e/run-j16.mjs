@@ -945,7 +945,7 @@ async function main() {
     // ordinary rule editor (one to add a rule, 编辑偏好 on an active one).
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -981,7 +981,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'model-open-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -1070,7 +1070,7 @@ async function main() {
     const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
     await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
-    await waitFor(renderer,`document.querySelector('#screen .settings-navigation')`,'poll-attention-ordinary-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-ordinary-settings-ready');
     await click(renderer,'帮助','poll-attention-ordinary-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked||input.disabled)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
@@ -1086,7 +1086,7 @@ async function main() {
       requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
     }
     await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
-    await waitFor(renderer,`document.querySelector('#screen .settings-navigation')`,'poll-attention-developer-settings-ready');
+    await waitFor(renderer,`document.querySelector('[data-screen="model-service"] .settings-navigation')`,'poll-attention-developer-settings-ready');
     await click(renderer,'帮助','poll-attention-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false||input.disabled)return false;input.click();return true;})()`,'poll-attention-developer-mode');
     await openManuscriptOf(renderer,bookId,'poll-attention-return-book');

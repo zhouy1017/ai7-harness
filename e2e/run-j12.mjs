@@ -504,7 +504,7 @@ async function assertModelEffortDefaults(renderer) {
       await save('main', 'high');
       await save('fast', 'low');
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-effort-leave');
-      await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'model-effort-settings-ready');
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-effort-settings-ready');
       await waitFor(renderer, `document.querySelector('input[aria-label="主编辑思考强度"]')?.value==='high' && document.querySelector('input[aria-label="快速交互思考强度"]')?.value==='low' && document.querySelector('[data-model-role="main-editorial"]')?.textContent.includes('@high') && document.querySelector('[data-model-role="fast-interaction"]')?.textContent.includes('@low')`, 'model-effort-reopened-defaults');
       await save('fast', 'low');
       await waitFor(renderer, `window.ai7.getModelServiceSettings().then(settings => settings.roles.find(role=>role.roleId==='main-editorial')?.binding?.reasoningEffort==='high')`, 'model-effort-other-role-kept');
@@ -966,7 +966,7 @@ async function main() {
     await waitFor(onboardingPage, `document.querySelector('[data-onboarding-card="first-run"]')`, 'first-run-import-step-returned');
     at('first-run-data-location-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
-    await waitFor(onboardingPage, `document.querySelector('#screen .settings-navigation')`, 'first-run-settings-ready');
+    await waitFor(onboardingPage, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'first-run-settings-ready');
     await firstRunClick(onboardingPage, '.settings-navigation [data-settings-nav="data-storage"]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="data-storage"]')`, 'first-run-data-storage-ready');
     await assertRenderer(onboardingPage, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(onboardingRoot)}`, 'first-run-location-in-settings');
@@ -1035,7 +1035,8 @@ async function main() {
     await primary.send('Emulation.clearDeviceMetricsOverride');
     // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'technical-mode-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-settings-ready');
+    await click(primary, '帮助', 'technical-mode-help');
     // #1376 / #1382: the persisted switch is one step from Settings Local.
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'technical-mode-default-on');
     await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'technical-mode-off');
@@ -1048,7 +1049,7 @@ async function main() {
     await waitFor(primary, `document.documentElement.dataset.reducedMotion==='true' && localStorage.getItem('ai7.reducedMotion')==='true'`, 'ordinary-reduced-motion-applied');
     await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'ordinary-model-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-model-settings-ready');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && !document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
     await assertOrdinaryModelReachability(primary);
     // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
@@ -1074,7 +1075,7 @@ async function main() {
     await click(primary, '保存网络代理', 'ordinary-proxy-save');
     await waitFor(primary, `document.querySelector('[data-model-service-proxy="proxy"]') && !document.querySelector('.model-service-proxy-form button')?.disabled`, 'ordinary-proxy-saved');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-search-roundtrip-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'ordinary-search-roundtrip-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-search-roundtrip-ready');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('select[aria-label="网络代理方式"]')?.value==='proxy' && document.querySelector('input[aria-label="代理 URL"]')?.value==='http://127.0.0.1:1'`, 'ordinary-search-proxy-roundtrip-restored');
     await assertRenderer(primary, `(() => { document.querySelector('[data-action="always-use-selected-search-backend"]').click(); return true; })()`, 'ordinary-search-source-reset');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false && document.querySelector('[data-action="always-use-selected-search-backend"]')?.disabled===false`, 'ordinary-search-source-reset-saved');
@@ -1172,12 +1173,12 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'technical-mode-restore-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
     await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled)return false; input.click(); return true; })()`, 'technical-mode-on');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'technical-mode-on-applied');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'developer-keyboard-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'developer-keyboard-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'developer-keyboard-settings-ready');
     await click(primary, '键盘与无障碍', 'developer-keyboard-entry');
     await waitFor(primary, `document.querySelector('[data-keyboard-change]') && Array.from(document.querySelectorAll('.keyboard-table th[data-developer-only="true"]')).some(node=>getComputedStyle(node,'::after').content.includes('开发者'))`, 'developer-keyboard-badge');
 
@@ -1766,7 +1767,7 @@ async function main() {
     })()`, 'restart-entry-notice-returns-to-remembered-position');
     // #1402: both actual card consumers show the executing model with the recorded effort in ordinary mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-author-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-author-settings-ready');
     await click(primary, '帮助', 'model-author-help');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle)return false; if(toggle.checked)toggle.click(); return true; })()`, 'model-author-ordinary-toggle');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-author-ordinary-mode');
@@ -1868,7 +1869,7 @@ async function main() {
     requireJourney(await primary.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(workspace=>workspace.runs.length===0&&workspace.run===null)`), 'factual-first-scope-no-run');
     requireJourney(await primary.evaluate(`window.ai7.inspectBookTasks().then(tasks=>JSON.stringify(tasks))`) === tasksBeforeFactualSheet, 'factual-first-scope-no-task');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-author-restore-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-author-restore-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-author-restore-settings-ready');
     await click(primary, '帮助', 'model-author-restore-help');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle.checked)toggle.click(); return true; })()`, 'model-author-restore-development');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'model-author-development-mode');
@@ -1913,14 +1914,14 @@ async function main() {
     }
     for (const [label, state] of [['数据与存储','data-storage'], ['模型服务','model-service'], ['评估校准与预测','evaluation-calibration']]) {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), `return-${state}-settings`);
-      await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, `return-${state}-settings-ready`);
+      await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `return-${state}-settings-ready`);
       await click(primary, label, `return-${state}-open`);
       await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${state}-ready`);
     }
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'return-library-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'data-storage-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
     await waitFor(primary, `document.querySelector('[data-screen="data-storage"]')`, 'data-storage-ready');
     await assertRenderer(primary, `(() => { const view=document.querySelector('.data-storage-summary'); return view?.dataset.platform===${JSON.stringify(process.platform === 'win32' ? 'windows' : 'macos')} && view.dataset.runtimeForm==='source-checkout' && view.dataset.channel==='source-checkout' && [...view.querySelectorAll('dt')].find((term)=>term.textContent==='分发渠道')?.nextElementSibling?.textContent==='源码检出' &&view.dataset.footprintMaximumEntries==='128' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)} && view.textContent.includes('产品数据位置') && view.textContent.includes('凭据与产品数据分开') && view.textContent.includes(${JSON.stringify(process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串')}) && !Object.keys(window.ai7).some((key)=>key.toLowerCase().includes('path')); })()`, 'truthful-data-location');
@@ -1951,7 +1952,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'diagnostics-landing');
     // 设置 › 本机 › 诊断 replaces 11a's 即将提供 row (Issue #938 restack onto #934).
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'diagnostics-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'diagnostics-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'diagnostics-open-settings-hub');
     await assertRenderer(primary, `(() => { const entry=document.querySelector('.settings-navigation [data-settings-nav="diagnostics"]'); return entry instanceof HTMLButtonElement && !entry.disabled && entry.textContent==='诊断'; })()`, 'diagnostics-settings-row');
     await click(primary, '诊断', 'diagnostics-open');
     await waitFor(primary, `document.querySelector('[data-screen="diagnostics"] [data-crash-list-ready="true"]')`, 'diagnostics-ready');
@@ -1978,7 +1979,7 @@ async function main() {
     at('model-service-first-save');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-service-landing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-service-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-service-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-service-open-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .settings-layout > .model-service-settings.page-content', returnToScreen: async () => {
@@ -2068,25 +2069,25 @@ async function main() {
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const radio=flow.querySelector('[data-model-choice="deepseek-flash"]'); const custom=flow.querySelector('[data-custom-model-id]'); if(!(custom instanceof HTMLInputElement)||!radio.checked)return false; custom.value='j12-temporary-manual'; custom.dispatchEvent(new Event('input',{bubbles:true})); if(radio.checked)return false; custom.value=''; custom.dispatchEvent(new Event('input',{bubbles:true})); return radio.checked && !flow.querySelector('[data-action="test-flow-connection"]').disabled && flow.querySelector('[data-action="use-model-for-both-roles"]').disabled; })()`, 'model-manual-id-round-trip');
     // Ordinary mode uses the same remembered catalogue choice; channel round trips restore the selection through the owner.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-mode-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-memory-ordinary-mode-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-memory-ordinary-mode-settings-ready');
     await click(primary, '帮助', 'model-memory-ordinary-mode-help');
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true && document.querySelector('.help-developer-mode input')?.disabled===false`, 'model-memory-ordinary-mode-toggle-ready');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'model-memory-ordinary-mode-toggle');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'model-memory-ordinary-mode');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-memory-ordinary-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-memory-ordinary-settings-ready');
     await waitFor(primary, `document.querySelector('select[aria-label="渠道"]')`, 'model-memory-ordinary-ready');
     await assertRenderer(primary, `(() => { const channel=document.querySelector('select[aria-label="渠道"]'); const choose=(value)=>{channel.value=value;channel.dispatchEvent(new Event('change',{bubbles:true}));}; choose('deepseek-open-platform'); const selected=document.querySelector('select[aria-label="AI7 使用的模型"]').value; choose('openai-platform'); choose('deepseek-open-platform'); const model=document.querySelector('select[aria-label="AI7 使用的模型"]'); return selected==='deepseek-flash' && model.value===selected && !model.disabled; })()`, 'model-ordinary-catalogue-round-trip');
     // #1431 item 97: a manual model ID is the developer layer's; ordinary settings keep the searchable catalogue choice.
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const select=flow.querySelector('select[aria-label="AI7 使用的模型"]'); return flow.querySelector('[data-custom-model-id]')===null && select.value==='deepseek-flash' && !flow.querySelector('[data-action="test-flow-connection"]').disabled && flow.querySelector('[data-action="use-model-for-both-roles"]').disabled; })()`, 'model-ordinary-manual-id-hidden');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-development-restored-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-memory-development-restored-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-memory-development-restored-settings-ready');
     await click(primary, '帮助', 'model-memory-development-restored-help');
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===false && document.querySelector('.help-developer-mode input')?.disabled===false`, 'model-memory-development-restored-toggle-ready');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'model-memory-development-restored-toggle');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'model-memory-development-restored');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-return-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-memory-return-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-memory-return-settings-ready');
     await waitFor(primary, `document.querySelector('[data-model-channel="deepseek-open-platform"] input')`, 'model-memory-return-models-ready');
     await primary.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
     // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
@@ -2107,12 +2108,12 @@ async function main() {
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
     // #1372: ordinary-mode configuration uses the same role, refresh, filter and persisted favourite operations.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'ordinary-catalogue-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-catalogue-settings-ready');
     await click(primary, '帮助', 'ordinary-catalogue-help');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; toggle.click(); return true; })()`, 'ordinary-catalogue-mode');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'ordinary-catalogue-mode-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-catalogue-return-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'ordinary-catalogue-return-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-catalogue-return-ready');
     await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelectorAll('[data-model-role]').length===2`, 'ordinary-catalogue-roles');
     await assertProgressiveSelect(primary);
     await primary.evaluate(`globalThis.__j12PollOriginalRole=document.querySelector('[data-model-role="main-editorial"]').textContent`);
@@ -2156,7 +2157,7 @@ async function main() {
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     // Changing channels only repaints the model controls. Leave settings to discard the unsaved proxy draft.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-poll-discard-proxy-draft');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'ordinary-poll-draft-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'ordinary-poll-draft-settings-ready');
     await waitFor(primary, `document.querySelector('select[aria-label="网络代理方式"]')?.value==='direct' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash'`, 'ordinary-poll-draft-cleared');
     await assertOrdinaryModelReachability(primary);
     await assertModelEffortDefaults(primary);
@@ -2176,15 +2177,17 @@ async function main() {
     // #1445: the editor leaves 模型服务 while its refresh is still answering. Effects run one at a time, so a second refresh answers
     // only after the editor's; once it has, the editor's late answer has landed and must not have brought 模型服务 back.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-restore-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'catalogue-restore-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'catalogue-restore-settings-ready');
+    // 设置 opens on 模型服务, so the editor leaves it for 帮助 and the late answer must not bring it back.
+    await click(primary, '帮助', 'catalogue-restore-help');
+    await waitFor(primary, `document.querySelector('[data-screen="help"] .help-developer-mode')`, 'catalogue-restore-help-ready');
     requireJourney(await primary.evaluate(`window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'})
       .then(()=>new Promise((resolve)=>setTimeout(resolve,250)))
-      .then(()=>document.querySelector('#screen')?.dataset.screen==='settings' && document.querySelector('.model-service-settings')===null)`), 'late-refresh-stays-away');
-    await click(primary, '帮助', 'catalogue-restore-help');
+      .then(()=>document.querySelector('#screen')?.dataset.screen==='help' && document.querySelector('.model-service-settings')===null)`), 'late-refresh-stays-away');
     await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; toggle.click(); return true; })()`, 'catalogue-restore-developer');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'catalogue-developer-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-developer-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'catalogue-developer-settings-ready');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'catalogue-developer-settings-ready');
     await waitFor(primary, `document.querySelector('[data-model-service-mode="developer"]')`, 'catalogue-developer-entry-ready');
     // A manual model ID per role is the developer layer's (#1431 item 97): the role assignments run here, in developer mode.
     await fill(primary, '[data-custom-model-id]', 'j12-ordinary-main', 'ordinary-custom-model');
@@ -2371,7 +2374,7 @@ async function main() {
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.routeChoice.routes.find((item)=>item.route==='openai-platform').connection.credentialOperationState==='missing')`), 'openai-removal-state');
     at('model-service-restart-and-replace');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-replace-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-replace-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-replace-open-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-replace-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-restart-no-redisplay');
     const replacementCatalogue = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(','))`);
@@ -2397,7 +2400,7 @@ async function main() {
     [primary] = await waitForRendererCount(manager, 1, 'database-export-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-export-landing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'database-export-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'database-export-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'database-export-open-settings-hub');
     await click(primary, '数据与存储', 'database-export-open');
     await waitFor(primary, `document.querySelector('.database-export [data-database-export-action="choose"]') && document.querySelector('.database-export-records summary')`, 'database-export-ready');
     // Issue #1410 item 2: the destination chosen in the save dialog is written at once; there is no 按上述方式导出 step. The
@@ -2463,7 +2466,7 @@ async function main() {
     const bookTitles = async () => JSON.parse(await primary.evaluate(`window.ai7.listBooks({ after: null }).then((page) => JSON.stringify(page.items.map((book) => book.title).sort()))`));
     const openDataAndStorage = async (name) => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), `${name}-open-settings`);
-      await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, `${name}-open-settings-hub`);
+      await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-open-settings-hub`);
       await click(primary, '数据与存储', `${name}-open`);
       await waitFor(primary, `document.querySelector('.database-import [data-database-import-action="choose"]') && document.querySelector('.database-import')?.dataset.pending === 'false'`, `${name}-ready`);
     };
@@ -2632,7 +2635,7 @@ async function main() {
     [primary] = await waitForRendererCount(manager, 1, 'model-remove-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-remove-landing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-remove-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'model-remove-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-remove-open-settings-hub');
     await waitFor(primary, `document.querySelector('[data-credential-state="ready"]')`, 'model-remove-ready');
     await click(primary, '移除凭据', 'model-remove');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
@@ -2662,7 +2665,7 @@ async function main() {
     // again; the prediction switch stays closed until thirty published Books carry actuals; and with no Book yet published
     // the central entry says where the actuals come from.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'calibration-open-settings');
-    await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'calibration-open-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'calibration-open-settings-hub');
     await click(primary, '评估校准与预测', 'calibration-open');
     const calibrationPage = await readCalibration(primary, () => true, 'calibration-page');
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
@@ -2703,11 +2706,11 @@ async function main() {
         await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'dispatch-landing');
         await primary.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
         await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-settings');
-        await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'dispatch-settings-ready');
+        await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'dispatch-settings-ready');
         await click(primary, '帮助', 'dispatch-help');
         await assertRenderer(primary, `(() => {const toggle=document.querySelector('.help-developer-mode input');if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false;if(!toggle.checked)toggle.click();return true;})()`, 'dispatch-development-controls');
         await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-model-settings');
-        await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'dispatch-model-settings-ready');
+        await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'dispatch-model-settings-ready');
         await waitFor(primary, `document.querySelector('[data-model-channel="deepseek-open-platform"] input')`, 'dispatch-channel');
         await primary.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
         await fill(primary, '#main-editorial-credential', secretTwo, 'dispatch-placeholder-credential');
@@ -2720,7 +2723,7 @@ async function main() {
         const defaults = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>JSON.stringify(settings.roles.map(role=>[role.roleId,role.binding])))`);
         const otherKinds = await primary.evaluate(`window.ai7.getPreferences().then(preferences=>JSON.stringify(Object.entries(preferences.values['model.dispatchChoices']).filter(([kind])=>kind!=='baseline-analysis')))`);
         await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dispatch-ordinary-settings');
-        await waitFor(primary, `document.querySelector('#screen .settings-navigation')`, 'dispatch-ordinary-settings-ready');
+        await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'dispatch-ordinary-settings-ready');
         await click(primary, '帮助', 'dispatch-ordinary-help');
         await assertRenderer(primary, `(() => {const toggle=document.querySelector('.help-developer-mode input');if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false;if(toggle.checked)toggle.click();return true;})()`, 'dispatch-ordinary-mode');
         await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'dispatch-library');

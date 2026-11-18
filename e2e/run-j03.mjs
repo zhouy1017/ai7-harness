@@ -100,7 +100,7 @@ async function checkSettingsPinned(renderer) {
       }
       await waitFor(renderer, settingsInView(width, height, form), `sidebar-settings-in-view-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-settings]', `sidebar-settings-press-${name}`);
-      await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, `sidebar-settings-opened-${name}`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `sidebar-settings-opened-${name}`);
       await pointerClick(renderer, waitFor, '#app-sidebar [data-nav-book-section="manuscript"]', `sidebar-settings-return-${name}`);
       await waitFor(renderer, `document.querySelector('.editor-window')`, `sidebar-settings-returned-${name}`);
       if (form === 'icons') {
@@ -398,7 +398,7 @@ async function runSettingsPages(renderer, cancellation) {
   at('usage-settings');
   cancellation.throwIfRequested();
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'usage-open-settings');
-  await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'usage-hub-ready');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'usage-hub-ready');
   await clickSelector(renderer, '.settings-navigation [data-settings-nav="usage"]', 'usage-open');
   await waitFor(renderer, `document.querySelector('[data-screen="usage"] .usage-page[data-usage-range]') && document.querySelector('[data-usage-empty]')`, 'usage-ready');
   // Nothing has run in this data root: the page says so, offers no export, and shows no cost it could not have.
@@ -482,7 +482,7 @@ async function runSettingsPages(renderer, cancellation) {
   at('keyboard-restore-default');
   cancellation.throwIfRequested();
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'series-back');
-  await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'series-back-library');
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'series-back-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen');
   await waitFor(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-reopen-screen');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-reopen-preference');
@@ -963,7 +963,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
-    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'model-open-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'model-ready');
     at('model-settings-ready');
     cancellation.throwIfRequested();

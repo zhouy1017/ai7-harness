@@ -117,6 +117,7 @@ function renderGlobalAttention(bookId?: string | null): void {
   };
   const surface = mountGlobalAttention({
     openTasks: () => renderTaskOverview(),
+    startTask: () => { renderTaskOverview(); state.taskOverviewSurface?.showStart(); },
     root: content,
     reader: bookId === undefined ? globalAttentionReader : {
       ...globalAttentionReader,

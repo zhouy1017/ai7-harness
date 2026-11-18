@@ -834,7 +834,7 @@ async function main() {
     // #1377 / J-13: ordinary navigation reaches the same preferences owner from both destinations.
     for (const developer of ['false', 'true']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `quality-mode-${developer}-settings`);
-      await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
+      await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `quality-mode-${developer}-settings-ready`);
       await click(renderer, '帮助', `quality-mode-${developer}-help`);
       await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `quality-mode-${developer}-switch-ready`);
       await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input||input.disabled)return false; if(input.checked!==${developer})input.click(); return true; })()`, `quality-mode-${developer}-switch`);
@@ -1214,7 +1214,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-overview');
     await backToLibrary(renderer, 'consistency-model');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'consistency-model-open-settings');
-    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'consistency-model-open-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'consistency-model-open-settings-hub');
     await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'consistency-model-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
@@ -2240,7 +2240,7 @@ async function main() {
     // Preload readiness precedes renderer startup; wait for its completed landing paint before navigating or switching mode.
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'exemplar-catalogue-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'catalogue-settings');
-    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'catalogue-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'catalogue-settings-ready');
     await click(renderer, '帮助', 'catalogue-help');
     await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'catalogue-mode-ready');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'catalogue-ordinary-mode');

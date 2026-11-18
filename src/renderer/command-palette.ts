@@ -1,6 +1,6 @@
 import { COMMAND_NAMES } from './commands-labels.js';
 import { shortcutLabel } from './commands.js';
-import { commandUsable, shownEntry, type UsableScreen } from './command-usable.js';
+import { commandEntry, commandUsable, type UsableScreen } from './command-usable.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { SHELL_AGENT_WORKSPACE_ROW, shellDestinationLabel } from './shell-labels.js';
 import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
@@ -53,6 +53,8 @@ export function createCommandPalette(options: {
     if (event.isComposing) return;
     const rows = [...list.querySelectorAll<HTMLButtonElement>('button')];
     const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+    // A held Enter walked onto a row that starts a task must not press it: only a fresh press of Enter chooses it.
+    if (event.key === 'Enter' && event.repeat && rowEntry.get(event.target as HTMLButtonElement)?.starts) { event.preventDefault(); return; }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); rows[(index + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length]?.focus(); }
     else if (event.key === 'Enter' && event.target === input) {
       event.preventDefault();
@@ -70,9 +72,10 @@ export function createCommandPalette(options: {
     const ticket = ++generation;
     entries = booksOnly ? [] : Object.entries(COMMAND_NAMES).filter(([id]) => id !== 'command.palette' && commandUsable(id, options.screen)).map(([id, name]) => ({ label: `${name}${shortcutLabel(id) ? ` · ${shortcutLabel(id)}` : ''}`, run: () => options.execute(id) }));
     if (!booksOnly) {
-      // AI 改稿 and AI 助手 are sidebar entries with no chord: listed only while their entry is on screen.
-      for (const [name, selector] of [[SHELL_AGENT_WORKSPACE_ROW.label, '[data-nav-agent-workspace]'], [shellDestinationLabel('global-agent'), '[data-nav-destination="global-agent"]']] as const) {
-        if (shownEntry(selector) !== null) entries.push({ label: name, run: () => shownEntry(selector)?.click() });
+      // AI 改稿 (a Book's) and AI 助手 are sidebar entries with no chord: listed while their entry is there to press.
+      const inBook = options.screen.currentBookId() !== null;
+      for (const [name, selector, needsBook] of [[SHELL_AGENT_WORKSPACE_ROW.label, '[data-nav-agent-workspace]', true], [shellDestinationLabel('global-agent'), '[data-nav-destination="global-agent"]', false]] as const) {
+        if ((inBook || !needsBook) && commandEntry(selector) !== null) entries.push({ label: name, run: () => commandEntry(selector)?.click() });
       }
       entries.push({ label: '发起任务 · 连续加入队列', run: options.openStart }, { label: '设置 · 帮助', run: options.openHelp });
     }

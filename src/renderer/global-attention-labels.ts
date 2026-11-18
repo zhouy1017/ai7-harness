@@ -51,6 +51,9 @@ export function globalAttentionEntryView(count: number | null): { text: string; 
 // ---- the screen -----------------------------------------------------------------------------------------
 
 export const GLOBAL_ATTENTION_HEADING = '待我处理';
+/** Nothing waits for the editor: the page says so once, beside the way to start a task. */
+export const GLOBAL_ATTENTION_NONE = '现在没有需要你处理的事项。';
+export const GLOBAL_ATTENTION_START = '发起任务';
 export const GLOBAL_ATTENTION_LEDE = '所有图书里需要你处理的事项；点开一项回到它自己的记录，在那里决定。';
 /** IA-013: a Book's own findings stay in that Book's 待办汇总; this view keeps only what crosses Books. */
 export const GLOBAL_ATTENTION_FINDINGS_NOTE = '书内的发现在那本书的「待办汇总」里。';

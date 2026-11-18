@@ -7,6 +7,8 @@ import {
   GLOBAL_ATTENTION_ENTRY_LABEL,
   GLOBAL_ATTENTION_HEADING,
   GLOBAL_ATTENTION_LEDE,
+  GLOBAL_ATTENTION_NONE,
+  GLOBAL_ATTENTION_START,
   GLOBAL_ATTENTION_STATUS_LINES,
   GLOBAL_ATTENTION_TECHNICAL_ITEM,
   globalAttentionEntryView,
@@ -191,6 +193,8 @@ export interface GlobalAttentionSurface {
 
 export interface MountGlobalAttentionOptions {
   openTasks?(): void;
+  /** 发起任务 when nothing waits: the 任务 page with its 发起任务 sheet open. */
+  startTask?(): void;
   /** The screen's panel: the surface appends its heading and groups, and the caller its persistent actions after them. */
   readonly root: HTMLElement;
   readonly reader: GlobalAttentionReader;
@@ -218,9 +222,9 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   heading.id = uid('title');
   const host = el('div', 'global-attention-host');
   host.setAttribute('aria-busy', 'true');
-  const loading = el('span', 'global-attention-loading', ` · ${GLOBAL_ATTENTION_STATUS_LINES.loading}`);
+  const loading = el('p', 'global-attention-loading', GLOBAL_ATTENTION_STATUS_LINES.loading);
   loading.setAttribute('role', 'status');
-  heading.append(loading);
+  host.append(loading);
   options.root.setAttribute('aria-labelledby', heading.id);
   options.root.append(
     heading,
@@ -284,6 +288,14 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     return node;
   }
 
+  function nothingWaiting(): HTMLElement {
+    const none = el('section', 'global-attention-none');
+    const start = el('button', 'primary', GLOBAL_ATTENTION_START); start.type = 'button'; start.dataset['attentionStart'] = '';
+    start.addEventListener('click', () => options.startTask?.());
+    none.append(el('p', undefined, GLOBAL_ATTENTION_NONE), start);
+    return none;
+  }
+
   function groupNode(view: GlobalAttentionGroupView, projection: GlobalAttentionProjection): HTMLElement {
     const section = el('section', 'global-attention-group');
     section.dataset['attentionGroup'] = view.key;
@@ -298,10 +310,6 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     if (view.truncated !== null) groupHeading.append(el('span', 'global-attention-truncated', view.countLine.length > 0 ? view.truncated.replace(/^共 \d+ 项，/u, '') : view.truncated));
     section.setAttribute('aria-labelledby', headingId);
     section.append(groupHeading);
-    if (view.empty !== null) {
-      section.append(el('p', 'global-attention-empty', view.empty));
-      return section;
-    }
     const list = el('ol', 'global-attention-items');
     for (const item of view.key === 'active' ? view.items.slice(0, 3) : view.items) {
       const entry = group?.items.find((candidate) => candidate.itemId === item.itemId);
@@ -325,7 +333,9 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     host.dataset['attentionRunning'] = projection.running ? 'true' : 'false';
     host.removeAttribute('aria-busy');
     loading.remove();
-    host.replaceChildren(...globalAttentionView(projection).map((view) => groupNode(view, projection)));
+    // A group is drawn only while it holds an item; with none at all the page is one sentence and the way to start a task.
+    const shown = globalAttentionView(projection).filter((view) => view.empty === null);
+    host.replaceChildren(...(shown.length > 0 ? shown.map((view) => groupNode(view, projection)) : [nothingWaiting()]));
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
     restoreInteraction();
   }

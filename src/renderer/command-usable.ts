@@ -13,11 +13,10 @@ export interface UsableScreen {
   readonly bookPage: () => boolean;
 }
 
-/** A shell entry that is on screen and can be pressed; `null` when it is hidden, disabled or not there. */
-export function shownEntry(selector: string): HTMLElement | null {
+/** The shell entry a command presses, as its handler finds it: there and not disabled. A hidden sidebar (专注模式) does not take its commands away. */
+export function commandEntry(selector: string): HTMLElement | null {
   const entry = document.querySelector<HTMLElement>(selector);
-  if (entry === null || entry.hasAttribute('disabled') || entry.getAttribute('aria-disabled') === 'true') return null;
-  return typeof entry.getClientRects !== 'function' || entry.getClientRects().length > 0 ? entry : null;
+  return entry === null || entry.hasAttribute('disabled') || entry.getAttribute('aria-disabled') === 'true' ? null : entry;
 }
 
 const SECTION_OF = new Map<string, string>(BOOK_SECTION_COMMANDS.map(([id, , section]) => [id, section]));
@@ -27,8 +26,8 @@ export function commandUsable(id: string, screen: UsableScreen): boolean {
   if (id === 'review.new' || id === 'evaluation.start') return screen.currentBookId() !== null;
   if (id === 'view.openTasks') return screen.bookPage();
   const section = SECTION_OF.get(id);
-  if (section !== undefined) return shownEntry(`[data-nav-book-section="${section}"]`) !== null;
-  if (id.startsWith('nav.') && id !== 'nav.back' && id !== 'nav.settings') return shownEntry(`[data-nav-destination="${id.slice(4)}"]`) !== null;
-  if (id === 'nav.settings') return shownEntry('[data-nav-settings]') !== null;
+  if (section !== undefined) return screen.currentBookId() !== null && commandEntry(`[data-nav-book-section="${section}"]`) !== null;
+  if (id.startsWith('nav.') && id !== 'nav.back' && id !== 'nav.settings') return commandEntry(`[data-nav-destination="${id.slice(4)}"]`) !== null;
+  if (id === 'nav.settings') return commandEntry('[data-nav-settings]') !== null;
   return true;
 }

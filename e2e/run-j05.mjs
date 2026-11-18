@@ -215,7 +215,7 @@ async function click(renderer, label, name) {
 // Settings > Help remains compatible with the one-step Settings Local switch (#1376 / #1382).
 async function markTechnicalMode(renderer, visible, name) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
-  await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, `${name}-settings-ready`);
+  await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, `${name}-settings-ready`);
   await click(renderer, '帮助', `${name}-help`);
   await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, `${name}-toggle-ready`);
   await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!toggle||toggle.disabled)return false; if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);
@@ -526,7 +526,7 @@ async function main() {
     // Reuse J-12's product-authored catalogue choice; the placeholder credential remains the existing cleanup owner's.
     await markTechnicalMode(renderer, true, 'dispatch-catalogue');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'dispatch-catalogue-settings');
-    await waitFor(renderer, `document.querySelector('#screen .settings-navigation')`, 'dispatch-catalogue-settings-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'dispatch-catalogue-settings-ready');
     await waitFor(renderer, `document.querySelector('[data-custom-model-id]')`, 'dispatch-catalogue-field');
     await fill(renderer, '[data-custom-model-id]', 'j05-dispatch-alternative', 'dispatch-catalogue-alternative');
     await assertRenderer(renderer, `(() => {const button=document.querySelector('[data-action="select-main-role-model"]');if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, 'dispatch-catalogue-save');
