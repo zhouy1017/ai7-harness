@@ -1155,7 +1155,8 @@ async function main() {
     // governance form, the directives, the sending preview and the habits summary are developer-only, and 学习回溯 waits until
     // its page opens in ordinary mode (#1549). This stage stops the one preference it creates, so the fold's honest state is
     // "nothing to include"; the live choice is proved on J-16's accepted preference above.
-    await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')`, 'ordinary-agent-fold-ready');
+    // The fold exists at mount; its list is written when the projection arrives, so wait for that sentence before asserting.
+    await waitFor(primary, `document.querySelector('[data-global-agent-fold="references"]')?.textContent.includes('还没有可加入提问的审阅偏好。')===true`, 'ordinary-agent-fold-ready');
     const ordinaryAgentSurface = `(() => {
       const root=document.querySelector('[data-global-agent="destination"]');
       const fold=root?.querySelector('[data-global-agent-fold="references"]');
