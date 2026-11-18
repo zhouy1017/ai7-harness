@@ -9,9 +9,8 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await pointerClick(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-${width}`);
       await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .review-estimate')?.textContent`, `review-estimate-${width}`);
-      const reachable = await renderer.evaluate(`!!document.querySelector('dialog.review-sheet .task-launch-estimate .review-consequences') && ${popoverShownInside(`document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover')`)}`);
+      await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .task-launch-estimate .review-consequences') && ${popoverShownInside(`document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover')`)}`, `review-plan-reachable-${width}`);
       await pointerClick(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-close-${width}`);
-      if (reachable !== true) throw new Error('REVIEW_SHEET_START_OUTSIDE_VIEWPORT');
     }
   } finally {
     if (viewport === undefined) await renderer.send('Emulation.clearDeviceMetricsOverride');

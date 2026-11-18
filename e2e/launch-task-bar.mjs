@@ -1,9 +1,12 @@
 import { pointerClick } from './dispatch-chooser.mjs';
 
+/** Fail as the runner's own named check (its `waitFor` reports the code-only name), never as a bare Error without one. */
+const failCheck = (renderer, waitFor, name) => waitFor(renderer, 'false', name, 1);
+
 /** Choose through the actual product control; never assign a select's value from script. */
 export async function chooseLaunchOption(renderer, waitFor, selector, value, name) {
   const index = await renderer.evaluate(`Array.from(document.querySelector(${JSON.stringify(selector)}).options).findIndex(option=>option.value===${JSON.stringify(value)})`);
-  if (index < 0) throw new Error('launch-option-unavailable');
+  if (index < 0) await failCheck(renderer, waitFor, `${name}-option-unavailable`);
   const custom = await renderer.evaluate(`document.querySelector(${JSON.stringify(selector)})?.nextElementSibling?.matches('.ui-select-trigger')===true`);
   if (custom) {
     await pointerClick(renderer, waitFor, `${selector} + .ui-select-trigger`, `${name}-open`);
@@ -47,7 +50,7 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
     const active = Array.from(document.querySelectorAll('[data-task-launch-kind]')).filter(node=>node.getClientRects().length>0);
     return (active.find(node=>node.querySelector('.task-launch-estimate[open]')) ?? active.find(node=>node.id==='task-drawer') ?? active[0])?.id;
   })()`);
-  if (!id) throw new Error('launch-surface-missing');
+  if (!id) await failCheck(renderer, waitFor, `${name}-launch-surface-missing`);
   const root = `#${id}`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(root + ' [data-task-drawer-control="launch"]')})?.disabled===false`, `${name}-launch-ready`);
   try {
@@ -55,7 +58,8 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       const options = `${root} .task-launch-options`;
       if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(options)})?.open===true`))) await pointerClick(renderer, waitFor, `${options} > summary`, `${name}-options-${width}`);
-      if (await renderer.evaluate(popoverShownInside(`document.querySelector(${JSON.stringify(options + ' .task-launch-popover')})`)) !== true) throw new Error(`task-launch-options-unreachable-${width}x${height}`);
+      // The popover shows on the details' toggle task and is placed again once its content has a size: wait for both.
+      await waitFor(renderer, popoverShownInside(`document.querySelector(${JSON.stringify(options + ' .task-launch-popover')})`), `${name}-options-reachable-${width}`);
       const retry = `${root} [data-task-launch-option="retry"]`;
       const original = await renderer.evaluate(`document.querySelector(${JSON.stringify(retry)}).value`);
       for (const value of [original === 'never' ? 'auto' : 'never', original]) await chooseLaunchOption(renderer, waitFor, retry, value, `${name}-retry-${value}-${width}`);
@@ -65,10 +69,9 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
       else await pointerClick(renderer, waitFor, `${root} [data-task-drawer-control="preview-launch"]`, `${name}-refresh-preview-${width}`);
       await waitFor(renderer, `document.querySelector(${JSON.stringify(estimate + ' ol')})?.children.length>0 && document.querySelector(${JSON.stringify(estimate)})?.textContent.includes('阅读范围')`, `${name}-preview-current-${width}`);
       for (const text of previewContains) {
-        if (!(await renderer.evaluate(`document.querySelector(${JSON.stringify(estimate)})?.textContent.includes(${JSON.stringify(text)})`))) throw new Error(`${name}-preview-missing-disclosure-${width}`);
+        await waitFor(renderer, `document.querySelector(${JSON.stringify(estimate)})?.textContent.includes(${JSON.stringify(text)})===true`, `${name}-preview-missing-disclosure-${width}`, 5_000);
       }
-      const reachable = await renderer.evaluate(popoverShownInside(`document.querySelector(${JSON.stringify(estimate + ' .task-launch-popover')})`));
-      if (reachable !== true) throw new Error(`task-launch-bar-unreachable-${width}x${height}`);
+      await waitFor(renderer, popoverShownInside(`document.querySelector(${JSON.stringify(estimate + ' .task-launch-popover')})`), `${name}-plan-reachable-${width}`);
       await pointerClick(renderer, waitFor, `${estimate} > summary`, `${name}-preview-close-${width}`);
     }
   } finally {
@@ -78,6 +81,6 @@ export async function launchTaskFromBar(renderer, waitFor, name, viewport, previ
   await pointerClick(renderer, waitFor, startSelector ?? `${root} [data-task-drawer-control="launch"]`, `${name}-start`);
   await waitFor(renderer, `(document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' && !!document.querySelector('#task-drawer')?.dataset.taskPlanRef) || !!document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent`, `${name}-launched`, 120_000);
   const refusal = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanStart==='started' ? '' : document.querySelector(${JSON.stringify(root + ' .task-bar-refusal')})?.textContent??''`);
-  if (refusal) throw new Error('task-launch-refused');
+  if (refusal) await failCheck(renderer, waitFor, `${name}-launch-refused`);
   return renderer.evaluate(`document.querySelector('#task-drawer').dataset.taskPlanRef`);
 }

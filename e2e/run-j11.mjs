@@ -3737,7 +3737,7 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
         await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-${width}`);
         await waitFor(renderer, `document.querySelector('${initialBar} .task-launch-estimate')?.textContent.includes('sample1')===true`, `launch-reference-plan-current-${width}`);
-        requireJourney(await renderer.evaluate(popoverShownInside(`document.querySelector('${initialBar} .task-launch-estimate .task-launch-popover')`))===true,'launch-reference-plan-reachable');
+        await waitFor(renderer, popoverShownInside(`document.querySelector('${initialBar} .task-launch-estimate .task-launch-popover')`), 'launch-reference-plan-reachable');
         await pointerClick(renderer, waitFor, `${initialBar} .task-launch-estimate > summary`, `launch-reference-plan-close-${width}`);
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
