@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { mountSeries } from '../../src/renderer/series.js';
-import { SERIES_PURPOSE } from '../../src/renderer/series-labels.js';
+import { mountSeries, seriesListHead } from '../../src/renderer/series.js';
+import { SERIES_LEDE } from '../../src/renderer/series-labels.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
@@ -36,6 +36,10 @@ it('offers 去审阅 beside 可以审阅 on a member whose 书系一致性 can b
   } finally { store.close(); await roots.dispose(); }
 });
 
-it('says in one sentence what a Series is for', () => {
-  expect(SERIES_PURPOSE).toBe('把同一系列的图书归到一个书系里，就能审阅它们前后是否一致。');
+it('opens 书系 with one sentence on what a Series is for, and says its name only in the hidden heading', () => {
+  const [heading, lede] = seriesListHead();
+  expect(heading!.className).toContain('visually-hidden');
+  expect(lede!.textContent).toBe('把同一系列的图书归到一个书系里，就能审阅它们前后是否一致。');
+  setTechnicalLayerVisible(true);
+  expect(seriesListHead()[1]!.textContent).toBe(SERIES_LEDE);
 });

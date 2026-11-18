@@ -120,6 +120,9 @@ describe('the entry and the screen', () => {
       const none = mount(projection({}));
       expect(none.root.querySelectorAll('section.global-attention-group')).toHaveLength(0);
       expect(none.root.querySelector('.global-attention-none p')!.textContent).toBe('现在没有需要你处理的事项。');
+      expect(none.root.querySelector<HTMLElement>('.lede')!.hidden).toBe(true);
+      expect(none.root.querySelector<HTMLElement>('[data-attention-read-all]')!.hidden).toBe(true);
+      expect(some.root.querySelector<HTMLElement>('.lede')!.hidden).toBe(false);
       none.root.querySelector<HTMLElement>('[data-attention-start]')!.click();
       expect(none.startTask).toHaveBeenCalledOnce();
       none.surface.destroy();

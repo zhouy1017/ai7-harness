@@ -220,6 +220,14 @@ function settingsPages(): Partial<Record<SettingsRoute, () => void>> {
   };
 }
 
+/** A settings page with the navigation beside it; any other page is itself. */
+function settingsLayout(state: string, content: HTMLElement): HTMLElement {
+  if (!SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) return content;
+  const layout = element('div', 'settings-layout');
+  layout.append(settingsNavigation(state), content);
+  return layout;
+}
+
 function settingsNavigation(state: string): HTMLElement {
   const nav = element('nav', 'settings-navigation');
   nav.setAttribute('aria-label', '设置分类');
@@ -310,5 +318,5 @@ function renderAppearance(): void {
   setStatus(APPEARANCE_STATUS);
 }
 
-return { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHome, renderHelp, renderAppearance };
+return { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, settingsLayout, renderSettingsHome, renderHelp, renderAppearance };
 }

@@ -1199,8 +1199,9 @@ async function main() {
       await assertRenderer(primary, `(() => { const page = document.querySelector('[data-screen="model-service"]'); return document.querySelector('#context-title')?.textContent === '设置' && document.querySelector('#context-position')?.textContent === '服务 · 模型服务' && !Array.from(page.querySelectorAll('button')).some((node) => node.textContent === '返回') && document.querySelector('#app-sidebar [data-nav-settings]')?.getAttribute('aria-current') === 'page'; })()`, `settings-lands-words-${settingsWidth}`);
     }
     await primary.send('Emulation.clearDeviceMetricsOverride');
-    await pointerClick(primary, waitFor, SIDEBAR.destination('library'), 'settings-lands-library');
-    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'settings-lands-library-ready');
+    // The next stage works from Book A's overview, where 打开另一本图书 is.
+    await pointerClick(primary, waitFor, SIDEBAR.section('overview'), 'settings-lands-overview');
+    await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'settings-lands-overview-ready');
 
     at('distinct-and-duplicate-book-routing');
     await click(primary, '打开另一本图书', 'open-other-from-a');
@@ -2179,9 +2180,7 @@ async function main() {
     await assertRenderer(primary, `(() => { const refresh=document.querySelector('[data-action="retry-model-list"]'); if(refresh.disabled)return false; refresh.click(); return true; })()`, 'ordinary-catalogue-refresh');
     // #1445: the editor leaves 模型服务 while its refresh is still answering. Effects run one at a time, so a second refresh answers
     // only after the editor's; once it has, the editor's late answer has landed and must not have brought 模型服务 back.
-    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'catalogue-restore-settings');
-    await waitFor(primary, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'catalogue-restore-settings-ready');
-    // 设置 opens on 模型服务, so the editor leaves it for 帮助 and the late answer must not bring it back.
+    // The editor leaves 模型服务 for 帮助 and the late answer must not bring it back.
     await click(primary, '帮助', 'catalogue-restore-help');
     await waitFor(primary, `document.querySelector('[data-screen="help"] .help-developer-mode')`, 'catalogue-restore-help-ready');
     requireJourney(await primary.evaluate(`window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'})

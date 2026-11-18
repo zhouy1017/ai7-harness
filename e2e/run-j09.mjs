@@ -1722,7 +1722,7 @@ async function main() {
     await waitFor(renderer, `!document.querySelector('.task-overview-sheet')?.open && document.activeElement?.matches('[data-task-overview-start]')`, 'overview-sheet-focus-return');
     await pointerClick(renderer, waitFor, '[data-task-overview-start]', 'overview-sheet-reopen');
     // The sheet opens with no Book ticked on this page (#1522), and each tick is a real press that the button's count follows.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet.open===true && sheet.querySelectorAll('input[type="checkbox"]:checked').length===0 && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（0 本）'; })()`, 'overview-sheet-none-ticked');
+    await waitFor(renderer, `(() => { const sheet=document.querySelector('.task-overview-sheet'); return sheet?.open===true && sheet.querySelectorAll('input[type="checkbox"]:checked').length===0 && document.querySelector('[data-task-overview-enqueue]')?.textContent==='加入队列（0 本）'; })()`, 'overview-sheet-none-ticked');
     const selectOverviewBooks = async (ids) => {
       const toggle = await renderer.evaluate(`Array.from(document.querySelectorAll('.task-overview-sheet input[type="checkbox"][value]')).filter((input) => input.checked !== ${JSON.stringify(ids)}.includes(input.value)).map((input) => input.value)`);
       for (const id of toggle) await pointerClick(renderer, waitFor, `.task-overview-sheet input[value="${id}"]`, 'overview-sheet-book');
@@ -1781,11 +1781,22 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}))()`, 'overview-first-resumed');
     await overviewAction(overviewIds[2], 'resume');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1))()`, 'overview-third-requeued');
-    await clickSelector(renderer, '[data-task-overview-start]', 'overview-fourth-sheet');
-    await selectOverviewBooks([overviewBooks[3]]);
-    await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-fourth');
+    // #1522: with more than six Books the 图书 filter is a list. Chosen by the keyboard, it leaves focus on the list's control, and the
+    // page must keep repainting while focus rests there: a task started now appears under the filter without the editor moving.
+    const filterTrigger = '.task-overview-filters select[aria-label="图书"] + .ui-select-trigger';
+    const filterIndex = await renderer.evaluate(`Array.from(document.querySelector('.task-overview-filters select[aria-label="图书"]').options).findIndex((option) => option.value === ${JSON.stringify(overviewBooks[3])})`);
+    requireJourney(filterIndex > 0, 'overview-filter-lists-the-book', { filterIndex });
+    await pointerClick(renderer, waitFor, filterTrigger, 'overview-filter-open');
+    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowDown');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === ${JSON.stringify(overviewBooks[3])} && document.activeElement?.matches('.task-overview-filters .ui-select-trigger') && document.querySelectorAll('.task-overview-card').length === 0`, 'overview-filter-chosen-by-key');
+    await renderer.evaluate(`window.ai7.startQuickTasks({ tasks: [{ bookId: ${JSON.stringify(overviewBooks[3])}, procedureId: 'baseline-analysis' }] })`);
+    await waitFor(renderer, `document.querySelectorAll('.task-overview-card').length === 1 && document.activeElement?.matches('.task-overview-filters .ui-select-trigger')`, 'overview-repaints-with-focus-on-the-filter', 60000);
+    await press(renderer, 'ArrowDown');
+    for (let step = 0; step < filterIndex; step += 1) await press(renderer, 'ArrowUp');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('.task-overview-filters select[aria-label="图书"]')?.value === 'all' && document.querySelectorAll('.task-overview-card').length > 1`, 'overview-filter-back-to-all');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
-    await clickSelector(renderer, '.task-overview-sheet .sheet-foot button:last-child', 'overview-fourth-sheet-close');
     overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
     await overviewAction(fourth.itemId, 'top');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items[0]?.itemId===${JSON.stringify(fourth.itemId)})()`, 'overview-fourth-top');

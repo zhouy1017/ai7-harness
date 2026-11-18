@@ -226,11 +226,8 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   loading.setAttribute('role', 'status');
   host.append(loading);
   options.root.setAttribute('aria-labelledby', heading.id);
-  options.root.append(
-    heading,
-    el('p', 'lede', GLOBAL_ATTENTION_LEDE),
-    host,
-  );
+  const lede = el('p', 'lede', GLOBAL_ATTENTION_LEDE);
+  options.root.append(heading, lede, host);
   const readAll = el('button', 'quiet', '全部标记已读'); readAll.type = 'button'; readAll.dataset['attentionReadAll'] = '';
   readAll.addEventListener('click', () => {
     const before = new Set(readItems);
@@ -336,6 +333,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     // A group is drawn only while it holds an item; with none at all the page is one sentence and the way to start a task.
     const shown = globalAttentionView(projection).filter((view) => view.empty === null);
     host.replaceChildren(...(shown.length > 0 ? shown.map((view) => groupNode(view, projection)) : [nothingWaiting()]));
+    lede.hidden = readAll.hidden = shown.length === 0;
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
     restoreInteraction();
   }

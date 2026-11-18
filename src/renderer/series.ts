@@ -14,7 +14,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 import { stateTerm } from './components/controls.js';
 import { mountSeriesKnowledge } from './series-knowledge.js';
 import { mountSeriesExclusions } from './series-exclusions.js';
-import { technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import {
   BOOK_SERIES_HEADING,
   BOOK_SERIES_HISTORY,
@@ -47,7 +47,10 @@ import {
   SERIES_REFRESH,
   SERIES_REMOVE_OPEN,
   SERIES_REVIEW_OPEN,
+  SERIES_LEDE,
+  SERIES_PURPOSE,
   SERIES_SCOPE_NOTE,
+  SERIES_TITLE,
   SERIES_STATUS,
   SERIES_UNCHANGED_LABEL,
   bookSeriesChangeLine,
@@ -147,6 +150,11 @@ export interface MountSeriesListOptions {
 }
 
 /** 书系: every Series by name with its member count, and 新建书系 in place. */
+/** 书系's page head: the name once (the header says it; this is the page's label) and one sentence on what a Series is for. */
+export function seriesListHead(): HTMLElement[] {
+  return [el('h2', 'visually-hidden', SERIES_TITLE), el('p', 'field-note series-lede', technicalWords(SERIES_LEDE, SERIES_PURPOSE))];
+}
+
 export function mountSeriesList(options: MountSeriesListOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('series-list-page');

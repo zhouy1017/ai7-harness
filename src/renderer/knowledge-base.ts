@@ -72,7 +72,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const home = element('div', 'knowledge-home');
       const back = element('div', 'button-row');
       back.append(button('返回', 'quiet', () => void returnToOrigin()));
-      content.append(element('h2', undefined, KNOWLEDGE_BASE_TITLE), home, back);
+      content.append(element('h2', 'visually-hidden', KNOWLEDGE_BASE_TITLE), home, back);
       replaceScreen('knowledge-base', content);
       const page = navigation.read(content);
       options.rememberReturn(content, () => renderKnowledgeBase());

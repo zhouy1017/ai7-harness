@@ -18,7 +18,7 @@ const running = (id: string, book = BOOKS[0]!): GlobalAttentionItemProjection =>
   target: { kind: 'analysis', bookId: book.bookId, taskIntentId: id }, technical: [{ key: 'run-record', label: '运行', value: id }] });
 
 let uninstall = (): void => undefined;
-let surface: { destroy(): void } | null = null;
+let surface: { destroy(): void; showStart(): void } | null = null;
 // The mini DOM has no select options: a stand-in is enough for the lists these tests read.
 const miniSelect = MiniElement.prototype as unknown as { add?: (option: MiniElement) => void };
 beforeEach(() => {
@@ -76,6 +76,27 @@ describe('发起任务 sheet', () => {
 });
 
 describe('任务 page', () => {
+  it('says how the queue is kept only while the page holds tasks', async () => {
+    const busy = await mount([running('a')]);
+    const note = (root: MiniElement) => root.querySelectorAll('.field-note').find((node) => node.textContent === '队列顺序保存在本次使用中；重新启动后按发起顺序排列。')!;
+    expect(note(busy).hidden).toBe(false);
+    surface?.destroy();
+    const empty = await mount([]);
+    expect(note(empty).hidden).toBe(true);
+  });
+
+  it('opened from the palette, hands focus back to 发起任务 ▾ when it closes', async () => {
+    const root = await mount([]);
+    const start = root.querySelector('[data-task-overview-start]')!;
+    miniDocument.body.append(document.createElement('input') as never);
+    (miniDocument.body.querySelector('input') as MiniElement).focus();
+    surface!.showStart(); await settled(); await settled();
+    const sheet = root.querySelector('.task-overview-sheet')!;
+    expect(sheet.open).toBe(true);
+    sheet.close();
+    expect(miniDocument.activeElement).toBe(start);
+  });
+
   it('is one sentence when there is no task, and draws only the groups that hold one', async () => {
     const empty = await mount([]);
     expect(empty.querySelectorAll('.task-overview-group')).toHaveLength(0);

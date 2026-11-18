@@ -48,7 +48,7 @@ import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 
-import { mountSeries, mountSeriesList } from './series.js';
+import { mountSeries, mountSeriesList, seriesListHead } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
 import { activeCommandBindings, BOOK_SECTION_COMMANDS, configureCommandLabels, createCommandDispatcher, refreshShortcutLabels, type CommandPlatform } from './commands.js';
 import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
@@ -56,7 +56,7 @@ import { BACK_COMMAND_ENTRIES } from './commands-labels.js';
 
 
 
-import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_PURPOSE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
+import { SERIES_BACK_TO_LIST, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 
 import { EVALUATION_STATUS } from './evaluation-labels.js';
 import { openTaskResultWindow, type TaskResultWindow } from './task-result-window.js';
@@ -89,7 +89,7 @@ import { mountShell, ShellPreferences, type ShellPlace } from './shell.js';
 
 
 
-import { SETTINGS_HUB_GROUPS, SHELL_LABELS } from './shell-labels.js';
+import { SHELL_LABELS } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { type TaskOverviewSurface } from './tasks-overview.js';
@@ -1042,11 +1042,7 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   leaveGuard = null;
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
-  if (SETTINGS_HUB_GROUPS.some((group) => group.rows.some((row) => row.route === state))) {
-    const layout = element('div', 'settings-layout');
-    layout.append(settingsNavigation(state), content);
-    screen.replaceChildren(layout);
-  } else screen.replaceChildren(content);
+  screen.replaceChildren(settingsLayout(state, content));
   if (authorityInterrupted) {
     for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
       control.disabled = true;
@@ -3131,7 +3127,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('h2', 'visually-hidden', SERIES_TITLE), element('p', 'field-note series-lede', technicalWords(SERIES_LEDE, SERIES_PURPOSE)), host, back);
+  content.append(...seriesListHead(), host, back);
   replaceScreen('series-list', content);
   const page = navigation.read(content);
   setStatus(SERIES_STATUS.loading, 'busy');
@@ -3544,7 +3540,7 @@ const { openGlobalAttention, renderGlobalAttention, openOverviewTask, openTaskNo
 });
 
 
-const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsNavigation, renderSettingsHome, renderHelp, renderAppearance } = createSettingsScreens({
+const { renderEvaluationCalibration, renderNotificationSettings, openUsageRun, renderUsage, renderKeyboardSettings, settingsPages, settingsLayout, renderSettingsHome, renderHelp, renderAppearance } = createSettingsScreens({
   setStatus: (...args) => setStatus(...args),
   panel: (...args) => panel(...args),
   element: (...args) => element(...args),
