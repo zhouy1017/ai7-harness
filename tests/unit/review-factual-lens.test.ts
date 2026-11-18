@@ -834,6 +834,36 @@ describe('review triage in place (#1525)', () => {
     expect(mounted.root.querySelectorAll('section.review-group')).toHaveLength(0);
   });
 
+  it('keeps the card the editor moved on to in place when the decided card above it grows', async () => {
+    const ask = deferred<unknown>();
+    const scroller = { scrollTop: 0 };
+    // No layout of its own: cards stand at fixed places, and a reason prompt in card 1 pushes the cards below it down by 60 px.
+    const placeOf: Record<string, number> = { rvf_s1: 100, rvf_s2: 400, rvf_s3: 700 };
+    const empty = Object.getOwnPropertyDescriptor(MiniElement.prototype, 'getBoundingClientRect')!;
+    Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
+    Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: MiniElement) {
+      const id = this.dataset['findingId'] ?? '';
+      const grown = id !== 'rvf_s1' && miniDocument.body.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask') !== null;
+      const top = (placeOf[id] ?? 0) + (grown ? 60 : 0) - scroller.scrollTop;
+      return { top, bottom: top + 280, left: 0, right: 800, width: 800, height: 280 };
+    } });
+    try {
+      const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
+        recordChangeSuggestionDecision: vi.fn(async () => rejected('decision-1')), recordLearningReasonAsk: vi.fn(() => ask.promise) });
+      article(root, 'rvf_s1').focus();
+      article(root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
+      expect(miniDocument.activeElement).toBe(article(root, 'rvf_s2'));
+      const before = article(root, 'rvf_s2').getBoundingClientRect().top;
+      ask.resolve({ askId: 'ask-1', decisionId: 'decision-1', question: '为什么拒绝？', options: [] }); await flush();
+      expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
+      expect(article(root, 'rvf_s2').getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(60);
+    } finally {
+      Reflect.deleteProperty(miniDocument, 'scrollingElement');
+      Object.defineProperty(MiniElement.prototype, 'getBoundingClientRect', empty);
+    }
+  });
+
   it('says only that an unfiltered empty Run has no findings', async () => {
     const view = mount('settled', 0); await flush();
     expect(view.root.querySelector('.review-no-findings')!.textContent).toBe('这次审阅还没有发现。');
