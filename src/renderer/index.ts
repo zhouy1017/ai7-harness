@@ -148,7 +148,7 @@ const taskDrawer = mountTaskDrawer({
   onOpen: () => {
     manuscriptOnScreen?.closeSupportingPanel();
     if (taskDrawer.view()?.kind === 'launch') taskResultWindow?.close(false);
-  },
+  }, onClose: () => manuscriptOnScreen?.restoreSupportingPanel(),
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
     taskOverviewSurface?.refresh();
