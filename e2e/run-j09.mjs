@@ -1140,11 +1140,11 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(blockedA.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='blocked'`, 'keyboard-item-opened', 30_000);
 
     at('j14-attention-zoom-200-reflow');
-    // At 200% the header, the four groups and every item reflow into the width: nothing scrolls sideways.
+    // At 200% the header, the two groups that hold an item and every item reflow into the width: nothing scrolls sideways.
     await openAttention(renderer, 'zoom');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 7 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('header.context-header'), ...document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group, [data-screen="global-attention"] li.global-attention-item')]; return parts.length === 5 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && ${SIDEBAR_ICONS_ONLY} && document.querySelector('#global-attention-entry').getBoundingClientRect().width > 0; })()`, 'reflow-at-200', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 

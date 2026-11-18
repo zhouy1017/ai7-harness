@@ -776,6 +776,7 @@ async function main() {
 
     at('notification-settings');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'notification-settings-hub');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] .settings-navigation')`, 'notification-settings-landed');
     await clickSelector(renderer, '.settings-navigation [data-settings-nav="notifications"]', 'notification-settings-open');
     await waitFor(renderer, `document.querySelector('[data-screen="notifications"] [data-notification-settings]')`, 'notification-settings-shown');
     await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent==='设置' && document.querySelector('#context-position')?.textContent==='本机 · 通知'`, 'notification-settings-place');
