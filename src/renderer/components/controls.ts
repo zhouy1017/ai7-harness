@@ -367,6 +367,11 @@ export function mountMenuControls(root: HTMLElement): () => void {
   const menus = (): HTMLDetailsElement[] => Array.from(root.querySelectorAll<HTMLDetailsElement>(selector));
   const panelOf = (menu: HTMLElement): HTMLElement | null => menu.querySelector('.ui-menu-panel, .view-menu-list, .editor-save-menu-body, .export-menu-body');
   const position = (): void => {
+    // A closed panel drops its placement: the next opening starts at the summary, not at the last window size's spot.
+    for (const menu of menus().filter((item) => !item.open)) {
+      const style = panelOf(menu)?.style;
+      if (style) for (const property of ['position', 'margin', 'right', 'left', 'top', 'max-height']) style.removeProperty(property);
+    }
     for (const menu of menus().filter((item) => item.open)) {
       const panel = panelOf(menu), summary = menu.querySelector('summary');
       if (!panel || !summary) continue;
