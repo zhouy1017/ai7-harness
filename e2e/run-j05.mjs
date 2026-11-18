@@ -1320,7 +1320,7 @@ async function main() {
         let outside=0;
         // R, A, R, then R until a decision has moved focus to a card that started below the window, at least once.
         for (let index=0; index<3 || outside===0; index+=1) {
-          requireJourney(index<24,'review-keyboard-next-below-window',{decided});
+          if (index>=24) requireJourney(false,'review-keyboard-next-below-window',{decided, page:await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const pending=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')); return {innerHeight, scroll:document.scrollingElement.scrollTop, pending:pending.length, articles:document.querySelectorAll('article.review-finding').length, focused:card===null?null:Math.round(card.getBoundingClientRect().top), next:pending.slice(0,6).map((node)=>[Math.round(node.getBoundingClientRect().top), Math.round(node.getBoundingClientRect().height)])}; })()`)});
           const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, below:next!==undefined && next.getBoundingClientRect().top>=innerHeight}; })()`);
           requireJourney(state.id!==null && !decided.includes(state.id),'review-keyboard-focused-distinct',{state,decided});
           if (state.below) outside+=1;
