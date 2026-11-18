@@ -13,10 +13,7 @@ export type { EditorialMemorySnapshot };
 /** Preserve the historical reading scope of polish, scoped edit and conflict regeneration. */
 export function fastRoleMemoryContext(bookId: string): [string, string] { return [bookId, 'editorial-dialogue']; }
 
-/** Task owners supply only these source facts; no dialogue object crosses the seam. */
-export function dialogueMemoryContext(book: { bookId: string; workspace: boolean } | null): [string | null, string] {
-  return [book?.bookId ?? null, book === null ? 'global-agent' : book.workspace ? 'agent-workspace' : 'editorial-dialogue'];
-}
+export { dialogueMemoryContext } from './editorial-memory.js';
 
 export function analysisUsesAutomaticMemory(scope: TrustedOperationalScope, version: string | null | undefined, sourceKind: string): boolean {
   return !sourceKind.startsWith('editorial-review/') && scope === 'ordinary-production' && version === 'v35';

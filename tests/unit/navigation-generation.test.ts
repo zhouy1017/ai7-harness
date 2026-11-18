@@ -7,8 +7,9 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import ts from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit } from '../../src/renderer/navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad } from '../../src/renderer/navigation-generation.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
+import { mountTaskDrawer } from '../../src/renderer/task-drawer.js';
 
 // Execute the private shell loaders, as the existing renderer composition tests do,
 // without starting the application or replacing the production navigation code.
@@ -76,7 +77,7 @@ function harness(api: object = {}) {
   const renderBookOverview = vi.fn((overview: { book: { bookId: string } }) => replaceScreen(overview.book.bookId, undefined));
   const renderBaselineAnalysis = vi.fn((host: HTMLElement) => host.append(element('p', '', '已读取分析')));
  const guardedApi = reconcileBookWorkbenchApi({acknowledgeImportCompletion:async()=>undefined,getPreferences:async()=>({values:{'onboarding.state':'skipped'}}),getProductDataLocation:async()=>({}),getModelServiceSettings:async()=>({roles:[]}),...api} as never, {bookOnScreen:()=>navigation.bookId,editorOnScreen:()=>{const editor=context?.['manuscriptOnScreen'] as {manuscriptId:string;branchId:string}|null;return editor&&editor.manuscriptId?{manuscriptId:editor.manuscriptId,branchId:editor.branchId}:null;},left:()=>shell.leaveBook(),failed:(error,retry)=>(context['reportReacquisitionFailure'] as (error:unknown,retry:()=>Promise<void>)=>void)(error,retry),recovered:()=>{(context['clearBookReacquisitionNotice'] as ()=>void)();}},navigation);
-  context = createContext({ showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
+  context = createContext({ showOnboardingCard, navigation, BookHeldElsewhereError, BookOwnershipFailure, bookOwnershipFailureLine, sendJournalEdit, focusAfterLoad, Error, shellNavigation:navigation, rememberActionDefaults:async()=>undefined, hasErrorCode:()=>false, renderImported:vi.fn(), queueMicrotask, api: guardedApi, rendererApi: guardedApi, window: { ai7: guardedApi }, document, screen, shell, setStatus,
     localStorage: { getItem: () => 'on' }, showQuietNotice: vi.fn(), openCurrentBookCompletion,
     mountTaskOverview: vi.fn(() => ({ focus: vi.fn(), destroy: vi.fn() })),
     mountReviewWorkspace: vi.fn(() => ({ start: vi.fn(), refresh: vi.fn(), destroy: vi.fn() })),
@@ -535,6 +536,99 @@ it('the real re-acquisition notice uses editorial words even when the error form
  await page.run("reportBookReacquisitionFailure(new Error('AI7_EDITOR_ROUTE_INVALID'),async()=>undefined)");
  expect(page.setStatus).toHaveBeenCalledExactlyOnceWith('暂时无法重新连接当前图书。未保存的修改仍保留在当前页，请使用本页「重试连接当前图书」后保存。','error');
  expect(formatter).not.toHaveBeenCalled();expect(page.screen.firstElementChild).toBe(manuscript);
+});
+
+it('a change of failure kind rewrites the existing notice in place, keeping its node, its retry and the status (#1504 item 12)', async () => {
+ const leave=Promise.withResolvers<void>();let opens=0;
+ const open=vi.fn(async()=>{if(++opens===1)throw new Error('offline');return {target:'held-elsewhere'};});
+ const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:open});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const notice=page.screen.querySelector('[data-book-reacquire]')!,again=notice.querySelector('button')!;
+ expect(notice.querySelector('p')!.textContent).toBe(bookOwnershipFailureLine(new Error('offline')));
+ page.setStatus.mockClear();
+ await page.actions.get('重试连接当前图书')!();
+ const held=bookOwnershipFailureLine(new BookHeldElsewhereError());
+ expect(open).toHaveBeenCalledTimes(2);expect(page.screen.firstElementChild).toBe(manuscript);
+ expect(page.screen.querySelectorAll('[data-book-reacquire]')).toHaveLength(1);expect(page.screen.querySelector('[data-book-reacquire]')).toBe(notice);
+ expect(notice.querySelector('button')).toBe(again);expect(notice.querySelector('p')!.textContent).toBe(held);
+ expect(page.setStatus).toHaveBeenCalledExactlyOnceWith(held,'error');
+});
+
+it('a superseded explicit open of another Book keeps the remaining page paused until its own recovery, which then resumes it (#1504 item 13)', async () => {
+ const leave=Promise.withResolvers<void>(),answerB=Promise.withResolvers<object>();let elsewhere=true;
+ const leaving=vi.fn().mockReturnValueOnce(leave.promise).mockResolvedValue({state:'library'});
+ const open=vi.fn(async(input:{bookId:string;activation?:string})=>input.activation===undefined?answerB.promise
+  :elsewhere?{target:'held-elsewhere'}:{target:'requesting-window',route:{kind:'book',bookId:input.bookId,bookTitle:'甲'}});
+ const page=harness({leaveBookWorkbench:leaving,openBookWorkbench:open,getBookWorkbenchRoute:async()=>null,inspectBookTasks:async()=>({groups:[]})});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ const pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ // The task poll of the page on screen pauses on the failure until its Book is held again.
+ const paused=await page.run('api.inspectBookTasks()').then(()=>null,(error:unknown)=>error as BookOwnershipFailure);
+ expect(paused).toBeInstanceOf(BookOwnershipFailure);let resumed=false;void paused!.recovered.then(()=>{resumed=true;});
+ // A failed retry keeps the same recovery the poll waits on.
+ await page.actions.get('重试连接当前图书')!();expect(open).toHaveBeenCalledTimes(2);expect(resumed).toBe(false);
+ // An explicit open of Book B is answered "this window" after a later click superseded its page.
+ const opening=page.run("openBookSection({bookId:'book-b',title:'乙'},'overview')");await vi.waitFor(()=>expect(open).toHaveBeenCalledTimes(3));
+ await page.run('leaveThen(() => renderGlobalAgent())');
+ answerB.resolve({target:'requesting-window',route:{kind:'book',bookId:'book-b',bookTitle:'乙'}});await opening;
+ expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).not.toBeNull();
+ await Promise.resolve();expect(resumed).toBe(false);
+ // The page's own recovery hands B back and re-acquires A; the paused poll resumes.
+ elsewhere=false;await page.actions.get('重试连接当前图书')!();await Promise.resolve();
+ expect(leaving).toHaveBeenCalledTimes(2);expect(open).toHaveBeenLastCalledWith({kind:'book',bookId:'book-a',activation:'non-activating'});
+ expect(resumed).toBe(true);expect(page.screen.firstElementChild).toBe(manuscript);expect(page.screen.querySelector('[data-book-reacquire]')).toBeNull();
+});
+
+it('when the opened Book\'s page does arrive, a later recovery there never resumes the old Book\'s paused reader (#1504 item 13)', async () => {
+ const leave=Promise.withResolvers<void>(),again=Promise.withResolvers<void>();let elsewhere=true;
+ const leaving=vi.fn().mockReturnValueOnce(leave.promise).mockReturnValueOnce(again.promise).mockResolvedValue({state:'library'});
+ const open=vi.fn(async(input:{bookId:string;activation?:string})=>input.activation===undefined?{target:'requesting-window',route:{kind:'book',bookId:input.bookId,bookTitle:'乙'}}
+  :elsewhere?{target:'held-elsewhere'}:{target:'requesting-window',route:{kind:'book',bookId:input.bookId,bookTitle:'乙'}});
+ const page=harness({leaveBookWorkbench:leaving,openBookWorkbench:open,inspectBookTasks:async()=>({groups:[]})});
+ const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);
+ let pending=page.run('renderGlobalAgent()');page.context['settleScreen']=async()=>false;
+ await page.run('leaveThen(() => renderGlobalAgent())');leave.resolve();await pending;
+ const paused=await page.run('api.inspectBookTasks()').then(()=>null,(error:unknown)=>error as BookOwnershipFailure);
+ let resumed=false;void paused!.recovered.then(()=>{resumed=true;});
+ // The explicit open of B is answered for this window and B's page arrives.
+ await page.run("api.openBookWorkbench({kind:'book',bookId:'book-b'})");
+ const shown=document.createElement('section');shown.dataset['bookId']='book-b';page.replaceScreen('book-overview',shown);
+ // A superseded leave on B re-acquires B: B's recovery, not A's.
+ elsewhere=false;pending=page.run('renderGlobalAgent()');
+ await page.run('leaveThen(() => renderGlobalAgent())');again.resolve();await pending;await Promise.resolve();
+ expect(open).toHaveBeenLastCalledWith({kind:'book',bookId:'book-b',activation:'non-activating'});
+ expect(page.screen.firstElementChild).toBe(shown);expect(resumed).toBe(false);
+});
+
+// The real drawer, mounted as the shell mounts it: it marks the shell (document.body) as well as its own root.
+type Drawer = ReturnType<typeof mountTaskDrawer>;
+const inside = (host: HTMLElement): HTMLElement => { const control = document.createElement('button'); host.append(control); return control; };
+it.each<readonly [string, (drawer: Drawer, root: HTMLElement) => { working: HTMLElement; kept: boolean }]>([
+ ['the open Task Drawer', (drawer, root) => { drawer.openPanel('book-a', () => null); return { working: inside(root), kept: true }; }],
+ ['the open command palette', () => { const sheet = document.createElement('dialog'); sheet.dataset['sheet'] = ''; miniDocument.body.append(sheet as unknown as MiniElement); sheet.show(); return { working: inside(sheet), kept: true }; }],
+ ['a dialog', () => { const dialog = document.createElement('section'); dialog.setAttribute('role', 'dialog'); miniDocument.body.append(dialog as unknown as MiniElement); return { working: inside(dialog), kept: true }; }],
+ ['no overlay (the closed drawer still marks the shell)', () => ({ working: inside(document.body), kept: false })],
+])('a late 评估 answer keeps focus in %s only while it is open (#1504 item 5)', async (_name, overlay) => {
+ vi.stubGlobal('window', { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => undefined, getSelection: () => null });
+ try {
+  const root = document.createElement('aside'); miniDocument.body.append(root as unknown as MiniElement);
+  const never = new Proxy({}, { get: () => () => new Promise(() => undefined) });
+  const drawer = mountTaskDrawer({ root, shell: document.body, api: never, setStatus: vi.fn(), errorMessage: (_error: unknown, fallback: string) => fallback,
+   onOpen: vi.fn(), onRecorded: vi.fn(), settle: async () => true } as unknown as Parameters<typeof mountTaskDrawer>[0]);
+  expect(document.body.dataset['taskDrawer']).toBeDefined();
+  // 评估 opened at a named risk: the risk takes focus once the surface's late read has painted it.
+  const loaded = Promise.withResolvers<void>(), risk = document.createElement('div');risk.dataset['riskId'] = 'risk-1';
+  const page = harness();page.context['CSS'] = { escape: (value: string) => value };
+  page.context['mountEvaluation'] = (options: { root: HTMLElement }) => ({ load: () => loaded.promise.then(() => { options.root.append(risk); }), refresh: vi.fn() });
+  const { working, kept } = overlay(drawer, root);
+  MiniElement.prototype.focus.call(working);
+  await page.run("renderBookEvaluation('book-a','甲',{recordId:'record-1',riskId:'risk-1'})");
+  loaded.resolve();await vi.waitFor(() => expect(page.screen.querySelector('[data-risk-id="risk-1"]')).toBe(risk));await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(miniDocument.activeElement).toBe(kept ? working : risk);
+ } finally { vi.unstubAllGlobals(); }
 });
 
 it('five background Book reads after failed reconciliation send no retry and keep the existing notice', async () => {

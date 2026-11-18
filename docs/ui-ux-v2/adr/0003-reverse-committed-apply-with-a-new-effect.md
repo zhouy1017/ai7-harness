@@ -4,6 +4,8 @@ status: accepted
 
 # Reverse a committed manuscript Apply with a new governed Effect
 
+> Amended by [ADR 0105 §1](../../adr/0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md#1--undo-is-an-editor-step): Ctrl+Z dispatches this governed Reverse Apply Effect directly, as one editor step and without a separate preparation and confirmation; it is recorded with interaction `undo-step`. The rejected option "exposing committed Apply as an ordinary untracked editor undo" is narrowed accordingly: the receipt still stays and the reversal is still refused when the words changed.
+
 AI7 never erases or mutates a committed Apply Effect Receipt to represent undo. `准备撤销本次应用` compares the inverse of the original Apply with the current authoritative Manuscript, handles interacting later edits through exact conflict or Correction Proposal, and—when valid—creates a new Reverse Apply Effect with its own target, payload, approval, atomic commit, and receipt linked to the original. The original Apply remains historically committed even when the new reverse Effect later counteracts its textual result.
 
 ## Considered options

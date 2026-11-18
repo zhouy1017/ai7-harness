@@ -20,10 +20,11 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts tests/unit/editorial-evidence.test.ts --no-file-parallelism -t 'generates the authored|refreshes the overlap|authors the synthetic|authors the stock|regeneration preserves'
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
+import { cpSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -328,15 +329,43 @@ function harvest(categoryIndex: number, definition: AnalysisKindDefinition, sett
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 
-beforeEach(async () => {
+/** A case starts with nothing of an earlier one, including the maps an earlier case registered and a timed-out one never removed. */
+function resetGeneratorState(): void {
   entries.clear(); refreshedRequests.clear(); controlRequests.clear(); j16Keys.clear(); j16SharedKeys.clear(); fixture.entries.clear(); emittedFiles.clear();
+  activeFixtureEntries.clear();
+}
+
+beforeEach(async () => {
+  resetGeneratorState();
   roots = await createServiceTestRoots('ai7-s69-generate-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
+// Every scenario reads the same freshly imported sample1 Book with Revision 2 pinned and one missing-credential connection. That
+// state is built once (#1537) and cloned into each scenario's own data root, so a scenario still opens its own store and no
+// state is shared between scenarios; the import path itself stays proven by the many tests that run it.
+let seededBook: Promise<{ seedRoots: ServiceTestRoots; imported: { bookId: string; manuscriptId: string; branchId: string; revisionId: string } }> | null = null;
+function seedBook() {
+  seededBook ??= (async () => {
+    const seedRoots = await createServiceTestRoots('ai7-s69-generate-seed-');
+    const store = await EditorialStore.open(seedRoots.dataRoot, seedRoots.codeRoot);
+    try {
+      const imported = await importSample1Book(store, seedRoots.codeRoot, 'S69 夹具生成');
+      await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+      recordMissingCredentialConnection(store, 'S69 主编辑连接');
+      store.markCleanShutdown();
+      return { seedRoots, imported };
+    } finally { store.close(); }
+  })();
+  return seededBook;
+}
+afterAll(async () => { if (seededBook !== null) await (await seededBook.catch(() => null))?.seedRoots.dispose(); });
+
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; dataRoot: string; bookId: string; manuscriptId: string; branchId: string; revisionId: string; routedEntries: ReadonlyMap<string, ModelFixtureEntry> }) => Promise<T>, baselineFixture?: ResolvedModelFixture, inheritGeneratedEntries = true, ownProfile = false): Promise<T> {
+  const seed = await seedBook();
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
+  cpSync(seed.seedRoots.dataRoot, scenarioRoots.dataRoot, { recursive: true });
   const stockAnswers = [...entries.values()].filter(({ order }) => order === 'synthesis-leaf').map(({ entry }) => ({ ...entry, attempt: 1 }));
   const routedFixture = baselineFixture === undefined ? fixture : ownProfile
     ? { ...baselineFixture, entries: new Map([...baselineFixture.entries, ...stockAnswers.map(entry => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, 1), entry] as const)]) }
@@ -350,17 +379,16 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     baselineAnalysisRoute: { fixtureIdentity: routedFixture.identity, fixtureSha256: routedFixture.sha256, fixtureLineage: routedFixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
-  if (inheritGeneratedEntries) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
+  // A private stock map (ownProfile) must never receive the generator's entries: they carry no attempt, which the stock fixture refuses.
+  const registered = inheritGeneratedEntries && !ownProfile;
+  if (registered) activeFixtureEntries.add(routedFixture.entries as Map<string, ModelFixtureEntry>);
   try {
-    const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
-    await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
-    recordMissingCredentialConnection(store, 'S69 主编辑连接');
-    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, ...imported });
+    const result = await body({ store, owner, dataRoot: scenarioRoots.dataRoot, routedEntries: routedFixture.entries, ...seed.imported });
     store.markCleanShutdown();
     return result;
   } finally {
     await owner.dispose();
-    activeFixtureEntries.delete(routedFixture.entries as Map<string, ModelFixtureEntry>);
+    if (registered) activeFixtureEntries.delete(routedFixture.entries as Map<string, ModelFixtureEntry>);
     store.close();
     await scenarioRoots.dispose();
   }
@@ -688,6 +716,23 @@ it('generates the authored review fixture without unreachable committed entries'
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);
 
+
+it('keeps a late entry of an ended case out of the stock map of the next', async () => {
+  // A case that timed out leaves its map registered until its callback ends; the next case's own stock map must not be filled by it.
+  const stale = new Map<string, ModelFixtureEntry>();
+  activeFixtureEntries.add(stale);
+  resetGeneratorState();
+  const late = { unitOrdinal: 1, requestDigest: 'a'.repeat(64), attempt: null, contentDigest: null,
+    response: { kind: 'unit-result', text: '{}', usage: { inputTokens: 1, outputTokens: 1 } } } as const satisfies ModelFixtureEntry;
+  const leaf = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-stock-typos-leaf-authored');
+  await withBook(async ({ routedEntries }) => {
+    const before = [...routedEntries.keys()];
+    add(late, 0, 'late');
+    expect([...routedEntries.keys()]).toEqual(before);
+    expect(routedEntries.has(fixtureEntryKey(late.unitOrdinal, late.requestDigest))).toBe(false);
+  }, leaf, true, true);
+  expect(stale.size).toBe(0);
+}, 120_000);
 
 it('authors the stock review synthesis through its independent native-child fixture', async () => {
   const leafPath = resolve(FIXTURE_PATH, '..', 'sample1-stock-typos-leaf-authored.json');

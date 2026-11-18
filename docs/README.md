@@ -40,6 +40,7 @@ Read only the family relevant to the selected outcome, resolving its status at t
 
 - [Initial v1.0.0 Development Milestone](development/milestone-1.0.0-scope.md): scope and exact completion record, with disclosed delivery limits.
 - [Editorial-value evidence, 2026-10](development/editorial-evidence-2026-10.md): bounded measured pass, scoring corrections and provider-free replay.
+- [Large-manuscript read and write baseline](development/large-manuscript-baseline.md): #1557 measurement of structural-edit write amplification and reads on `SampleBooks/` at 2,000 / 15,000 / 46,000 blocks; the R5 baseline.
 - [Search backend evaluation](development/search-backend-evaluation.md): generated historical measurement supporting selection order; not a current price guarantee.
 - [Design normalization provenance](development/design-baseline-allowlist.md): stable retrieval pointer for Issue #20's exact source/disposition accounting.
 - [Documentation review, 2026-10](development/documentation-review-2026-10.md): this refresh's family findings, dispositions and unresolved work.
