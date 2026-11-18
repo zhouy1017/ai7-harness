@@ -36,14 +36,22 @@ const SOURCE_STUB_TABLES = [
   'staged_import_blocks', 'staged_import_note_sources', 'import_commits', 'manuscript_import_records', 'import_fidelity_reviews',
 ] as const;
 
-/** Readers' external-owner stubs (book-people.ts owns this table): the columns the mark card reads, and the keys. */
+/** Readers' external-owner stubs: only the columns the mark and workspace readers read, with their keys. */
 const READER_STUBS = {
+  // book-people.ts owns it: the mark card names the Book's registered editors.
   book_people_versions: `CREATE TABLE "book_people_versions" (
   "version_id" TEXT PRIMARY KEY,
   "book_id" TEXT NOT NULL,
   "version" INTEGER NOT NULL,
   "editors_text" TEXT NOT NULL,
   UNIQUE ("book_id", "version")
+) STRICT`,
+  // review/review-runs.ts owns it: the workspace's Review Run filter reads which finding a mark answers.
+  review_findings: `CREATE TABLE "review_findings" (
+  "review_run_id" TEXT NOT NULL,
+  "finding_id" TEXT NOT NULL,
+  "mark_id" TEXT,
+  PRIMARY KEY ("review_run_id", "finding_id")
 ) STRICT`,
 } as const;
 
