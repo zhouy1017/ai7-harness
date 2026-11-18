@@ -50,6 +50,24 @@ it('a closed menu panel drops its placement so the next opening starts at its su
   expect(style.values).toEqual({});
 });
 
+it('a menu panel wider than its narrow anchor stays inside the window near the right edge', () => {
+  const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
+  const body = source.slice(source.indexOf('const position = (): void => {', source.indexOf('export function mountMenuControls')), source.indexOf('  const close = (menu: HTMLDetailsElement'));
+  const values: Record<string, string> = {};
+  const style = { removeProperty: (name: string) => { delete values[name]; }, set position(value: string) { values['position'] = value; }, set left(value: string) { values['left'] = value; }, get left() { return values['left'] ?? ''; }, set top(value: string) { values['top'] = value; }, set margin(value: string) { values['margin'] = value; }, set right(value: string) { values['right'] = value; }, set maxHeight(value: string) { values['max-height'] = value; }, get maxHeight() { return values['max-height'] ?? ''; } };
+  // Inside its 83 px anchor the nowrap content measures 83 px; once fixed with room to grow it is 340 px.
+  const panel = { style, scrollHeight: 120, get offsetWidth() { return values['position'] === 'fixed' && values['left'] !== undefined ? 340 : 83; } };
+  const summary = { getBoundingClientRect: () => ({ left: 907, right: 990, top: 8, bottom: 40 }) };
+  const menu = { open: true, querySelector: () => summary };
+  const position = runInNewContext(transpileModule(`${body}; position;`, {}).outputText, {
+    menus: () => [menu], panelOf: () => panel, fixedOrigin: () => ({ left: 0, top: 0 }), view: { innerWidth: 1008, innerHeight: 681 },
+  });
+  position();
+  const left = Number.parseFloat(values['left'] ?? 'NaN');
+  expect(left).toBeGreaterThanOrEqual(8);
+  expect(left + 340).toBeLessThanOrEqual(1008 - 8);
+});
+
 it('Space chooses the active option in an open select and preserves spaces in its filter', () => {
   const source = readFileSync('src/renderer/components/controls.ts', 'utf8');
   const handler = source.slice(source.indexOf('const keydown = (event: KeyboardEvent)'), source.indexOf('  function destroy()'));
