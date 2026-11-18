@@ -12,6 +12,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Feature operations may depend on domain owners, never the composition root or UI.
 // Later extractions add one entry; targets are root-relative resolved paths or directory prefixes.
 const forbiddenFeatureImports = {
+  'src/service/import-retention.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/manuscript-export.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/manuscript-reimport-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/import-review-records.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
+  'src/service/import-intake-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/review/review-operations.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/book-findings.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
   'src/service/house-review-preference.ts': ['src/service/store.ts', 'src/renderer/', 'src/main/'],
