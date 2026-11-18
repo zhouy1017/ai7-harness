@@ -2109,6 +2109,7 @@ export class EditorialStore {
       },
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
+      connectionOf: (reference) => this.getModelServiceConnections().find((connection) => connection.credentialReference === reference)?.connectionId ?? null,
       baseline: () => this.#baselineAnalysis,
     }, () => this.#control.baselineAnalysisRoute?.reviewContractVersion === 1
       ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION : this.#reviewGuidelines.configuration());
@@ -3231,6 +3232,12 @@ export class EditorialStore {
 
   advanceReviewRunPreparationWork(workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {
     return reviewOperations.advanceReviewRunPreparationWork(this.#reviewOperationsHost, workId);
+  }
+
+  /** 生成统合总结 (Issue #1506): the summary alone for a settled Review Run; the caller hands the Run to its drive loop. */
+  launchReviewSynthesis(input: import('../shared/protocol.js').ServiceOperationMap['generateReviewSynthesis']['input'], launchPolicy: LaunchPolicyProjection,
+    startWhen: 'now' | 'when-online' = 'now'): { projection: ReviewWorkspaceProjection; repeated: boolean } {
+    return reviewOperations.launchReviewSynthesis(this.#reviewOperationsHost, input, launchPolicy, startWhen);
   }
 
   cancelReviewRunPreparationWork(workId: string): boolean {

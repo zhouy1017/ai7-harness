@@ -1,5 +1,26 @@
-import type { ReviewSynthesisProjection } from '../shared/protocol.js';
+import type { ModelServiceSettingsProjection, ReviewSynthesisProjection } from '../shared/protocol.js';
+import type { ModelFavourites } from '../shared/preferences.js';
+import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewSynthesisLines } from '../shared/review-synthesis-wording.js';
+import { createDispatchChooser } from './components/dispatch-chooser.js';
+import { REVIEW_ACTION_LABELS } from './review-labels.js';
+
+/**
+ * 生成统合总结 (Issue #1506): the usual dispatch chooser, offering the Run's own model and 思考强度 first, and the one button.
+ * 恢复默认 hands the role's default back, as every other start does.
+ */
+export function reviewSynthesisGenerateRow(runChoice: RuntimeExecutionConfig | undefined,
+  load: () => Promise<{ settings: ModelServiceSettingsProjection; favourites: ModelFavourites } | null>, generate: (config: RuntimeExecutionConfig) => void): HTMLElement {
+  let config: RuntimeExecutionConfig = runChoice ?? {};
+  const chooser = createDispatchChooser({ role: 'main-editorial', changed: (next) => { config = next; } });
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'secondary'; button.dataset['reviewAction'] = 'generate-synthesis'; button.textContent = REVIEW_ACTION_LABELS['generate-synthesis'];
+  button.addEventListener('click', () => generate(config));
+  const row = document.createElement('div'); row.className = 'button-row review-synthesis-generate';
+  row.append(chooser.element, button);
+  void load().then((value) => { if (value === null) chooser.unavailable(); else chooser.render(value.settings, value.favourites, config); }, () => chooser.unavailable());
+  return row;
+}
 
 /** Native disclosure keeps evidence keyboard reachable while leaving finding cards in view. */
 export function reviewSynthesisNode(value: ReviewSynthesisProjection, modelLabel: string | undefined,
