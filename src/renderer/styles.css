@@ -2969,9 +2969,9 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-finding.is-split > .review-finding-main { grid-column: 1; min-width: 0; }
 .review-finding.is-split > .review-finding-actions { grid-column: 2; margin-top: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .35rem; }
 .review-finding.is-split > :not(.review-finding-heading):not(.review-finding-main):not(.review-finding-actions) { grid-column: 1 / -1; }
-@media (max-width: 760px) {
-  .review-finding.is-split { grid-template-columns: minmax(0, 1fr); }
-  .review-finding.is-split > .review-finding-actions { grid-column: 1; flex-wrap: wrap; }
+@container review-finding (max-width: 720px) {
+  .review-finding.is-split > .review-finding-main { grid-column: 1 / -1; }
+  .review-finding.is-split > .review-finding-actions { grid-column: 1 / -1; flex-wrap: wrap; margin-top: .35rem; }
 }
 
 /* BEGIN Issue #1429: semantic mark categories and persistent comments filters. */
@@ -3146,6 +3146,34 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+/* Review results: a compact header and filters leave the findings in view. */
+.review-workspace-card:has(.review-run-leading) { margin-top: .4rem; padding: .6rem .8rem; }
+.review-run-leading { margin-top: 0; padding-top: 0; border-top: 0; }
+.review-run-leading > .review-run-heading { justify-content: flex-start; gap: .3rem .5rem; font-size: .84rem; }
+.review-run-leading > .review-run-heading h4 { font: inherit; font-weight: 700; }
+.review-run-leading .review-run-meta, .review-run-leading .review-new-actions { margin: 0; }
+.review-run-leading .review-history-fold { flex: 0 0 auto; order: 0; position: relative; }
+.review-run-leading .review-history-fold[open] { flex-basis: 100%; order: 2; }
+.review-run-leading .review-new-actions { margin-left: auto; }
+/* Category frames already separate findings; no second padded divider above them. The .3rem gap keeps the header row apart from the filters and collapses into the synthesis box's margin. */
+.review-run-leading > .review-results { margin-top: .3rem; padding-top: 0; border-top: 0; }
+.review-run-leading .review-filters { margin-top: 0; gap: .3rem .5rem; align-items: center; }
+.review-run-leading .review-filter { display: flex; align-items: center; gap: .3rem; }
+.review-run-leading .review-filter:has(select) { max-width: 15rem; }
+.review-run-leading .review-group { margin-top: .35rem; padding: .35rem .5rem; }
+.review-category-fold > summary { cursor: pointer; }
+.review-category-fold > summary .review-group-heading { display: inline-flex; width: calc(100% - 1.5rem); }
+.review-card-more { position: relative; }
+.review-card-more > summary { cursor: pointer; padding: .15rem .65rem; }
+.review-finding { container: review-finding / inline-size; }
+
+.review-filters > :is(.review-filtered, .review-no-findings) { font-size: .86rem; color: var(--text-subdued); }
+
+.review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }
+
+/* The menu controls place the panel from its width while it still sits in the narrow header box; a content-sized panel keeps that width right, so the panel stays inside a 1008 px window. */
+.review-header-export > .export-menu-body { width: max-content; max-width: calc(100vw - 16px); }
 
 .dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
 .dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
