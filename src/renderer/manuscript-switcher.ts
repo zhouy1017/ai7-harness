@@ -9,8 +9,8 @@ import type {
 } from '../shared/protocol.js';
 import { DOCUMENT_STATUS_LINES, documentCreatedLine } from './production-document-labels.js';
 import { mountWritingTask, type WritingTaskSurface } from './writing-task.js';
-import { DERIVATIVE_CREATE_WORDS, createDerivative, derivativeCreateForm, importedDerivativeTitle,
-  suggestedDerivativeTitle, type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
+import { DERIVATIVE_CREATE_WORDS, createDerivative, derivativeCreateForm, suggestedDerivativeTitle,
+  type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
 
 /**
  * 本书稿件 on 稿件 (Issues #1403, #1404): the Book's manuscript and every derivative document — 新闻稿、内容简介、审稿意见 … — side by
@@ -306,7 +306,7 @@ export function mountManuscriptSwitcher(options: MountManuscriptSwitcherOptions)
       panel.hidden = true;
       panel.replaceChildren();
       paintBar();
-      options.setStatus(documentCreatedLine(outcome.type.label), 'success');
+      options.setStatus(documentCreatedLine(outcome.document.title), 'success');
       await options.openDocument(outcome.document, outcome.type, outcome.notice);
     } catch (error) {
       working = false;

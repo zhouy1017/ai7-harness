@@ -120,12 +120,12 @@ export function derivativeCreateForm(options: DerivativeCreateFormOptions): Deri
   }
   type.addEventListener('change', () => {
     state.typeId = type.value;
+    // The title follows the type in place; nothing else of the form changes, so the select keeps focus.
     if (!state.titleEdited) {
       state.title = options.suggest(type.value);
       title.value = state.title;
     }
     state.problem = null;
-    options.changed(null);
   });
   typeLabel.append(el('span', undefined, DERIVATIVE_CREATE_WORDS.type), type);
   const modes = el('fieldset', 'derivative-modes');
@@ -225,8 +225,6 @@ export async function createDerivative(request: DerivativeCreateRequest): Promis
   if (state.mode === 'source' && state.sourceVersionId === null) {
     return { kind: 'problem', problem: DERIVATIVE_CREATE_WORDS.pickSource, focus: 'source' };
   }
-  // A type an earlier edition marked 本书不做 is taken up again: making one of its documents is the editor's answer.
-  if (type.notForThisBook) await api.decideProductionDocumentType({ typeId: type.typeId, notForThisBook: false });
   let sourceVersionId = state.mode === 'source' ? state.sourceVersionId : null;
   let title = state.title.trim();
   if (state.mode === 'import') {
@@ -246,6 +244,9 @@ export async function createDerivative(request: DerivativeCreateRequest): Promis
     // An imported file is named after itself unless the editor wrote a title of their own.
     if (!state.titleEdited) title = importedDerivativeTitle(staged.source.displayName);
   }
+  // A type an earlier edition marked 本书不做 is taken up again: making one of its documents is the editor's answer. An
+  // import's picker comes first, so closing it records nothing.
+  if (type.notForThisBook) await api.decideProductionDocumentType({ typeId: type.typeId, notForThisBook: false });
   const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId, ...(title === '' ? {} : { title }) });
   if (result.bookId !== bookId || result.document === null) throw new Error(DERIVATIVE_CREATE_WORDS.createFailed);
   return { kind: 'created', document: result.document, documents: result.documents,

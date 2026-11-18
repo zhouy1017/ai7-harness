@@ -3,6 +3,7 @@ import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ManuscriptExportFormat, type Pr
 import { localInstantLabel } from './plan-preview-labels.js';
 import { documentCreatedLine } from './production-document-labels.js';
 import { showToast } from './components/toast.js';
+import { menuPanel } from './components/controls.js';
 import { DERIVATIVE_CREATE_WORDS, createDerivative, derivativeCreateForm, suggestedDerivativeTitle,
   type DerivativeCreateFocus, type DerivativeCreateState } from './components/derivative-create.js';
 import { mountWritingTask, type WritingTaskSurface } from './writing-task.js';
@@ -46,14 +47,14 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   let keyword = '';
   let managing = false;
   let form: DerivativeCreateState | null = null;
+  /** The category 删除类别 asks about, and the service's refusal while it stands. */
+  let pendingDelete: string | null = null;
+  let deleteProblem: string | null = null;
   const heading = el('h2', '衍生稿件');
   const toolbar = el('div', undefined, 'derivatives-toolbar');
   const createPanel = el('div', undefined, 'derivatives-create-panel');
   const writingHost = el('div', undefined, 'derivative-writing-host');
   const categories = el('section', undefined, 'derivatives-category-editor');
-  const confirmStrip = el('div', undefined, 'derivatives-confirm');
-  confirmStrip.setAttribute('role', 'alert');
-  confirmStrip.hidden = true;
   const chips = el('nav', undefined, 'derivatives-category-chips');
   chips.setAttribute('aria-label', '按衍生稿件类别筛选');
   const filters = el('div', undefined, 'derivatives-filters');
@@ -68,7 +69,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
   filters.append(search, statusSelect);
   const list = el('ul', undefined, 'derivatives-list');
   const resultCount = el('p', '', 'field-note'); resultCount.setAttribute('role', 'status');
-  root.append(heading, toolbar, createPanel, writingHost, categories, confirmStrip, chips, filters, resultCount, list);
+  root.append(heading, toolbar, createPanel, writingHost, categories, chips, filters, resultCount, list);
 
   function button(label: string, run: () => void, className = 'secondary'): HTMLButtonElement {
     const node = el('button', label, `btn ${className}`); node.type = 'button'; node.disabled = busy;
@@ -172,8 +173,9 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       if (outcome.kind === 'cancelled') return;
       if (outcome.kind === 'problem') { state.problem = outcome.problem; paint(outcome.focus); return; }
       form = null;
-      await refresh();
-      options.setStatus(documentCreatedLine(outcome.type.label), 'success');
+      projection = outcome.documents;
+      paint();
+      options.setStatus(documentCreatedLine(outcome.document.title), 'success');
       await options.openDocument(outcome.document, outcome.type, outcome.notice);
     } catch (error) {
       if (stopped) return;
@@ -201,7 +203,10 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
         errorMessage: options.errorMessage,
         awaitServiceJob: options.writing.awaitServiceJob,
         openPlan: options.writing.openWritingPlan,
-        openLaunch: options.writing.openLaunch,
+        // The writing surface is this page's only poller: a start from its sheet refreshes it at once, so the task is
+        // followed and its draft opens here (the editor's own registration lives in index.ts and is not this screen's).
+        openLaunch: (request: TaskLaunchRequest) => options.writing.openLaunch({ ...request,
+          onStarted: () => { request.onStarted?.(); writing?.refresh(); } } as TaskLaunchRequest),
         openDocument: (document, type) => options.openDocument(document, type),
         documentsChanged: () => { void reload(); },
       });
@@ -219,7 +224,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
 
   function paintCategories(): void {
     categories.replaceChildren(); categories.hidden = !managing;
-    if (!managing || projection === null) return;
+    if (!managing || projection === null) { pendingDelete = null; deleteProblem = null; return; }
     categories.append(el('h3', '管理衍生稿件类别'));
     const types = projection.types;
     types.forEach((type, index) => {
@@ -234,7 +239,10 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       };
       const up = button('上移', () => move(-1)); up.disabled = busy || index === 0;
       const down = button('下移', () => move(1)); down.disabled = busy || index === types.length - 1;
-      const remove = button('删除类别', () => requestDeleteType(type), 'quiet');
+      const remove = button('删除类别', () => {
+        pendingDelete = type.typeId; deleteProblem = null; paintCategories();
+        categories.querySelector<HTMLElement>('.derivatives-confirm [data-derivative-confirm="yes"]')?.focus();
+      }, 'quiet');
       remove.dataset['derivativeAction'] = 'delete-type';
       row.append(name, button('保存名称', () => void act(async () => { await api.saveProductionDocumentType({ typeId: type.typeId, name: name.value }); })), up, down, remove);
       categories.append(row);
@@ -243,24 +251,55 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
     const add = button('添加类别', () => void act(async () => { await api.saveProductionDocumentType({ name: name.value }); }));
     add.dataset['derivativeAction'] = 'add-type';
     categories.append(name, add);
+    if (pendingDelete !== null) {
+      const type = types.find((entry) => entry.typeId === pendingDelete);
+      // A category removed elsewhere takes its question with it.
+      if (type === undefined) { pendingDelete = null; deleteProblem = null; }
+      else categories.append(deleteStrip(type));
+    }
   }
 
-  /** 删除类别 asks in an in-app strip that names the category and how many documents it holds. */
-  function requestDeleteType(type: ProductionDocumentsProjection['types'][number]): void {
-    const count = type.documents.length;
-    const yes = count === 0
-      ? button('确认删除', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); void act(async () => { await api.deleteProductionDocumentType({ typeId: type.typeId }); }, '已删除类别'); }, 'danger')
-      : button('知道了', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet');
-    yes.dataset['derivativeConfirm'] = count === 0 ? 'yes' : 'know';
-    const no = button('取消', () => { confirmStrip.hidden = true; confirmStrip.replaceChildren(); }, 'quiet');
+  /**
+   * 删除类别 asks in an in-app strip (Issue #1551) that always names the category and how many documents it holds; 确认删除
+   * asks the service, whose refusal for a category still in use is said here.
+   */
+  function deleteStrip(type: ProductionDocumentsProjection['types'][number]): HTMLElement {
+    const strip = el('div', undefined, 'derivatives-confirm');
+    strip.setAttribute('role', 'alert');
+    strip.append(el('span', `删除「${type.label}」类别？类别里有 ${type.documents.length} 篇衍生稿件。`));
+    if (deleteProblem !== null) strip.append(el('p', deleteProblem, 'derivatives-confirm-problem'));
+    const yes = button('确认删除', () => void deleteType(type), 'danger');
+    yes.dataset['derivativeConfirm'] = 'yes';
+    const no = button('取消', () => { pendingDelete = null; deleteProblem = null; paintCategories(); focusDeleteType(type.typeId); }, 'quiet');
     no.dataset['derivativeConfirm'] = 'no';
-    confirmStrip.replaceChildren(
-      el('span', count === 0
-        ? `删除「${type.label}」类别？`
-        : `「${type.label}」类别里有 ${count} 篇衍生稿件，先把它们改到别的类别才能删除。`),
-      yes, no);
-    confirmStrip.hidden = false;
-    yes.focus();
+    strip.append(yes, no);
+    return strip;
+  }
+
+  function focusDeleteType(typeId: string): void {
+    const row = Array.from(categories.querySelectorAll<HTMLElement>('[data-derivative-type]')).find((node) => node.dataset['derivativeType'] === typeId);
+    row?.querySelector<HTMLElement>('[data-derivative-action="delete-type"]')?.focus();
+  }
+
+  /** One delete, its refusal kept in the strip that asked; nothing of the service's rule is copied here. */
+  async function deleteType(type: ProductionDocumentsProjection['types'][number]): Promise<void> {
+    if (busy || stopped) return;
+    busy = true;
+    paintCategories();
+    try {
+      await api.deleteProductionDocumentType({ typeId: type.typeId });
+      if (stopped) return;
+      pendingDelete = null; deleteProblem = null;
+      options.setStatus('已删除类别', 'success');
+      await refresh();
+    } catch (error) {
+      if (stopped) return;
+      deleteProblem = options.errorMessage(error, '删除类别未完成，请重试。');
+      options.setStatus(deleteProblem, 'error');
+    } finally {
+      busy = false;
+      if (!stopped) paint();
+    }
   }
 
   function paintChips(): void {
@@ -290,18 +329,39 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       const titleRow = el('div', undefined, 'derivatives-item-title');
       const titleText = el('span', doc.title, 'derivatives-item-title-text');
       const beginRename = (): void => {
+        if (titleRow.querySelector('.derivatives-item-title-input') !== null) return;
         const input = el('input', undefined, 'derivatives-item-title-input');
         input.value = doc.title; input.maxLength = 80; input.disabled = busy;
         input.setAttribute('aria-label', `稿件题目：${doc.title}`);
         let done = false;
+        const restore = (focusRename: boolean): void => { titleRow.replaceChildren(titleText, rename); if (focusRename) rename.focus(); };
         const finish = (save: boolean): void => {
           if (done) return; done = true;
           const title = input.value.trim();
-          // Only a changed, non-empty title is written; Enter and leaving the field both save once.
-          if (!save || title === '' || title === doc.title) { paintList(); return; }
-          void act(async () => { await api.renameProductionDocument({ documentId: doc.documentId, title }); });
+          // Only a changed, non-empty title is written; Enter and leaving the field both save once. Nothing of the page
+          // is disabled here, so the click that took focus away still reaches what it was aimed at.
+          if (!save || title === '' || title === doc.title) { restore(true); return; }
+          void commitTitle(title);
+        };
+        const commitTitle = async (title: string): Promise<void> => {
+          input.disabled = true;
+          try {
+            const result = await api.renameProductionDocument({ documentId: doc.documentId, title });
+            if (stopped) return;
+            doc.title = result.document?.title ?? title;
+            titleText.textContent = doc.title;
+            restore(false);
+            options.setStatus('已保存', 'success');
+          } catch (error) {
+            if (stopped) return;
+            // The typed text stays where it is, ready to be saved again.
+            input.disabled = false;
+            input.focus();
+            options.setStatus(options.errorMessage(error, '题目未改成，请重试。'), 'error');
+          }
         };
         input.addEventListener('keydown', (event) => {
+          if (event.isComposing || event.keyCode === 229) return;
           if (event.key === 'Enter') { event.preventDefault(); finish(true); }
           else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
         });
@@ -326,7 +386,7 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
       exportDocx.dataset['derivativeAction'] = 'export-docx';
       const exportMarkdown = button('导出 MD', () => void act(() => exportDocument(doc, 'markdown'), ''), 'secondary');
       exportMarkdown.dataset['derivativeAction'] = 'export-markdown';
-      const exportMenu = rowMenu('导出 ▾', 'export', [exportDocx, exportMarkdown]);
+      const exportMenu = rowMenu('export-menu', '导出 ▾', 'export', [exportDocx, exportMarkdown]);
       // One step with 撤销 (Issue #1431 item 28): the delete is a soft record the toast's action restores.
       const finalize = button(doc.finalized ? '取消定稿' : '设为定稿', () => void act(async () => { await api.updateProductionDocumentMeta({ documentId: doc.documentId, finalized: !doc.finalized }); }), 'secondary');
       finalize.dataset['derivativeAction'] = doc.finalized ? 'unfinalize' : 'finalize';
@@ -337,19 +397,20 @@ export function mountDerivativesWorkspace(options: WorkspaceOptions): { start():
         }, '已恢复衍生稿件') } });
       }, ''), 'quiet');
       remove.dataset['derivativeAction'] = 'delete';
-      const moreMenu = rowMenu('⋯', 'more', [finalize, remove]);
+      const moreMenu = rowMenu('review-more', '⋯', 'more', [finalize, remove]);
       moreMenu.querySelector('summary')!.setAttribute('aria-label', `更多操作：${doc.title}`);
       actions.append(open, exportMenu, moreMenu);
       row.append(titleRow, meta, el('p', doc.preview ?? '', 'derivatives-preview'), actions); list.append(row);
     }
   }
 
-  function rowMenu(summaryText: string, name: string, items: HTMLButtonElement[]): HTMLDetailsElement {
-    const menu = el('details', undefined, 'derivatives-row-menu');
+  /** A row's secondary actions in the shared disclosure menu, so Escape, an outside click and focus behave as elsewhere. */
+  function rowMenu(className: 'export-menu' | 'review-more', summaryText: string, name: string, items: HTMLButtonElement[]): HTMLDetailsElement {
+    const menu = el('details', undefined, className);
     const summary = el('summary', summaryText, 'btn secondary');
     summary.dataset['derivativeRowMenu'] = name;
-    const body = el('div', undefined, 'derivatives-row-menu-body');
-    body.append(...items);
+    const body = menuPanel(...items);
+    body.dataset['derivativeRowMenuBody'] = name;
     menu.append(summary, body);
     return menu;
   }
