@@ -1165,7 +1165,7 @@ async function main() {
     at('analysis-prerequisites-unavailable');
     // Synchronized delta (#406): on 工作概览 the analysis is one line, not the card.
     await waitFor(renderer, `document.querySelector('.book-overview .book-analysis-summary[data-analysis-state="unavailable"]') && !document.querySelector('.baseline-analysis-card')`, 'analysis-unavailable-before-prerequisites');
-    await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
+    await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]:not([data-analysis-action="open-analysis"])') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
 
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
