@@ -950,6 +950,24 @@ async function main() {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-existing-preference-quality');
       await waitFor(renderer, `document.querySelector('[data-review-preference]')?.textContent.includes('保留作者有意使用的短句。')`, 'ordinary-existing-preference-visible');
       await assertRenderer(renderer, `(() => { const root=document.querySelector('[data-editorial-memory]'); const row=root.querySelector('[data-review-preference]'); const buttons=Array.from(row.querySelectorAll('button'), button=>button.textContent); return row.textContent.includes('已启用') && buttons.includes('停用') && buttons.includes('编辑偏好') && Array.from(root.querySelectorAll('form')).every(form=>form.matches('form.preference-editor[data-preference-editor]')) && root.querySelectorAll('form[data-preference-editor="new"]').length===1 && !/tokens|日志|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu.test(root.textContent); })()`, 'ordinary-existing-preference-actions');
+      // #1553: the fold lists a real choice — the preference/memory accepted above — counts it on the closed summary and
+      // ticks it; ordinary mode no longer offers the stopped or proposed items as dead checkboxes.
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-memory-entry');
+      await waitFor(renderer, `document.querySelector('[data-global-agent-fold="references"] input[data-source-item]')`, 'ordinary-agent-memory-listed');
+      await assertRenderer(renderer, `(() => {
+        const fold=document.querySelector('[data-global-agent-fold="references"]');
+        const summary=fold?.querySelector(':scope > summary');
+        const input=fold?.querySelector('input[data-source-item]');
+        const row=input?.closest('.global-agent-source-card');
+        if(!(fold instanceof HTMLDetailsElement)||!(summary instanceof HTMLElement)||!(input instanceof HTMLInputElement)||input.disabled)return false;
+        if(summary.textContent!=='参考哪些书和偏好 · 已选 0 本书、0 条偏好')return false;
+        if(!row.textContent.includes('已启用')||/监督|治理/u.test(row.textContent))return false;
+        summary.click();
+        if(!fold.open)return false;
+        input.click();
+        return input.checked && summary.textContent==='参考哪些书和偏好 · 已选 0 本书、1 条偏好';
+      })()`, 'ordinary-agent-memory-choice-counts');
+      await assertRenderer(renderer, `(() => { const fold=document.querySelector('[data-global-agent-fold="references"]'); if(fold instanceof HTMLDetailsElement)fold.open=false; return true; })()`, 'ordinary-agent-memory-fold-closed');
     }
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-preference-return-global');
     await waitFor(renderer, `document.querySelector('[data-global-agent-item]') && document.querySelector('[data-global-agent-save]')`, 'ordinary-preference-developer-preserved');
