@@ -154,12 +154,14 @@ body { padding-left: var(--sidebar-width); }
 /* Issue #1413 cluster 5: the current Book leads, set off by its title; at most three other Books show, the rest fold. */
 .sidebar-book:not([hidden]) { order: -1; padding: .35rem 0 .45rem; border-top: 0; border-bottom: 1px solid var(--boundary); }
 .sidebar-book .sidebar-current-book { color: var(--text); font-size: .9rem; letter-spacing: 0; }
+.sidebar-current-book-row .sidebar-current-book { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.sidebar-current-book-row:hover .sidebar-current-book, .sidebar-current-book-row:focus-within .sidebar-current-book { padding-right: 30px; }
 .sidebar-more-books > summary { list-style: none; color: var(--text-subdued); font-size: .82rem; font-weight: 600; }
 .sidebar-more-books > summary::-webkit-details-marker { display: none; }
 .sidebar-more-books[open] > summary { color: var(--text); }
 .sidebar-books, .sidebar-book { display: grid; flex: 0 0 auto; gap: .2rem; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-books > div { max-height: clamp(80px, calc(100dvh - 720px), 260px); overflow: auto; scrollbar-width: thin; }
-.sidebar-book[hidden] { display: none; }
+.sidebar-books[hidden], .sidebar-book[hidden] { display: none; }
 .sidebar-book-row { position: relative; display: flex; align-items: center; }
 .sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; min-height: 26px; }
 .sidebar-book-row .nav-label { flex: 1 1 auto; font-family: var(--font-serif); }
@@ -174,7 +176,9 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
 .sidebar-group + .sidebar-group { margin-top: .1rem; }
-.sidebar-foot { display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--boundary); }
+/* 设置 is pinned by layout, not by a second scroller (#1521): the foot sticks to the bottom edge of the sidebar's own scroll, so it
+   is in view at any window height, in the full and in the icon form alike; the rows above it scroll under its background. */
+.sidebar-foot { position: sticky; bottom: 0; z-index: 1; display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding: .35rem 0 .5rem; border-top: 1px solid var(--boundary); background: var(--shell); }
 /* Icons only: the names leave the row's box but not the accessibility tree. */
 /* A thin scrollbar and a narrow inset keep the icon column inside the rail when the Book's groups make it scroll. */
 :root[data-sidebar="icons"] .app-sidebar { padding-inline: .15rem; }
@@ -2473,11 +2477,11 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .view-region-row { margin: .3rem 0; }
 
 /* Issue #961: optional guidance stays within the existing landing and Book overview. */
+.library-home > .onboarding-card { grid-column: 1 / -1; }
 .onboarding-card:empty, .onboarding-guidance:empty { display: none; }
 .onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; }
-.onboarding-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
-.onboarding-data-location { overflow-wrap: anywhere; }
-@media (max-width: 900px) { .onboarding-steps { grid-template-columns: 1fr; } }
+.onboarding-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
+.onboarding-steps li { min-width: 200px; }
 
 /* Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015): the Book-bound workspace's central screen — its safety state, the
    paragraphs a range is chosen in, the 修改要求 and the proposals, which read as candidates rather than marks. */
@@ -3121,3 +3125,15 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+.dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
+.dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
+.dialogue-attempt:not([open]) > summary { flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-menu-options { border-top: 1px solid var(--boundary); padding-top: .5rem; display: grid; gap: .5rem; }
+
+.dialogue-citation.btn { display: inline; min-height: 0; min-width: 0; height: auto; padding: 0 .15em; vertical-align: baseline; font: inherit; line-height: inherit; }
+.dialogue-attempt > summary::before { content: "▸"; flex: none; }
+.dialogue-attempt[open] > summary::before { content: "▾"; }
+.dialogue .ui-disclosure-menu { position: relative; }
+.dialogue .ui-disclosure-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
+.dialogue .ui-disclosure-menu > summary::-webkit-details-marker { display: none; }

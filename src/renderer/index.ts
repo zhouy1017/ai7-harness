@@ -2,7 +2,7 @@ import { createLibraryScreen } from './library-screen.js';
 import { createBookOverviewScreen } from './book-overview-screen.js';
 import { createSettingsScreens } from './settings-screens.js';
 import { createGlobalPages } from './global-pages.js';
-import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, type NavigationCheckpoint } from './navigation-generation.js';
+import { navigation, reconcileBookWorkbenchApi, bindRendererApi, bookOwnershipFailureLine, focusAfterLoad, type NavigationCheckpoint } from './navigation-generation.js';
 
 
 import { mountMenuControls, mountSelectControls } from './components/controls.js';
@@ -1160,7 +1160,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
       const reader = mountWordTrackedEditDetail({ root: content, api: api, ...target, openSourceVersion: openWordSourceVersion });
       if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
-      replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'history' });
+      replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'overview' });
       await reader.load();
       return;
     }
@@ -1546,7 +1546,7 @@ async function renderStartupProjection(
       api.listBooks({ after: null }),
     ]);
     if (!navigationRoute.isCurrent()) return;
-    navigation.present(() => renderLanding(priorWork, recoveryReturn, books));
+    await navigation.presentAsync(() => renderLanding(priorWork, recoveryReturn, books));
     return;
   }
   if (startup.state === 'committed-recovered') {
@@ -1565,7 +1565,7 @@ async function renderApplicationStartup(startup: StartupProjection, navigationRo
   } else {
     const books = await api.listBooks({ after: null });
     if (!navigationRoute.isCurrent()) return;
-    navigation.present(() => renderLanding(startup.priorWork, undefined, books));
+    await navigation.presentAsync(() => renderLanding(startup.priorWork, undefined, books));
   }
 }
 
@@ -1576,7 +1576,7 @@ async function renderLandingFromAuthority(
 ): Promise<void> {
   const books = await api.listBooks({ after: null });
   if (!navigationRoute.isCurrent()) return;
-  renderLanding(priorWork, recoveryReturn, books);
+  await navigation.presentAsync(() => renderLanding(priorWork, recoveryReturn, books));
 }
 
 function recoveryCandidateCard(
@@ -1645,7 +1645,7 @@ function focusRecoveryHeading(content: HTMLElement): void {
   if (!heading) return;
   heading.tabIndex = -1;
   const page = navigation.read(content);
-  requestAnimationFrame(() => { if (page.isCurrent()) heading.focus(); });
+  requestAnimationFrame(() => { if (page.isCurrent()) focusAfterLoad(heading); });
 }
 
 function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void {
@@ -1963,7 +1963,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   if (projection.previousCursor) actions.append(button('上一窗口', 'quiet', () => showPage(projection.previousCursor!)));
   if (projection.nextCursor) actions.append(button('下一窗口', 'quiet', () => showPage(projection.nextCursor!)));
   content.append(actions);
-  replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'history' });
+  replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'overview' });
   agentWorkspaceReturns.set(content, () => renderHistoricalRevision(projection));
   focusRecoveryHeading(content);
   setStatus(technicalWords(`只读历史修订版已打开；${projection.position.label}。`, `已打开历史稿件；${projection.position.label}。`));
@@ -2530,7 +2530,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
         if (first && focus !== undefined) {
           host.querySelector<HTMLButtonElement>(`button[data-analysis-tab="${focus.tab}"]`)?.click();
           const item = focus.gap === undefined ? host.querySelector<HTMLElement>(`[data-analysis-panel="${focus.tab}"]`) : host.querySelector<HTMLElement>(`[data-analysis-gap-unit="${focus.gap}"]`);
-          if (item !== null) { item.tabIndex = -1; item.scrollIntoView({ block: 'center' }); item.focus({ preventScroll: true }); }
+          if (item !== null) { item.tabIndex = -1; item.scrollIntoView({ block: 'center' }); focusAfterLoad(item, { preventScroll: true }); }
         }
         if (first && judged !== undefined) showJudgedAnalysisItem(host, judged.itemKey);
       },
@@ -2574,7 +2574,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
   if (item === null) return;
   item.tabIndex = -1;
   item.scrollIntoView({ block: 'center' });
-  item.focus({ preventScroll: true });
+  focusAfterLoad(item, { preventScroll: true });
 }
 
 /**
@@ -2788,7 +2788,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
         if (start) host.querySelector<HTMLButtonElement>('[data-evaluation-action="new-evaluation"]')?.click();
         if (focus !== undefined) {
           const risk = host.querySelector<HTMLElement>(`[data-risk-id="${CSS.escape(focus.riskId)}"]`);
-          if (risk !== null) { risk.tabIndex = -1; risk.scrollIntoView({ block: 'center' }); risk.focus({ preventScroll: true }); }
+          if (risk !== null) { risk.tabIndex = -1; risk.scrollIntoView({ block: 'center' }); focusAfterLoad(risk, { preventScroll: true }); }
         }
       }
     },
@@ -2827,7 +2827,7 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
         if (card !== null) {
           card.tabIndex = -1;
           card.scrollIntoView({ block: 'center' });
-          card.focus();
+          focusAfterLoad(card);
         }
       }
     },
@@ -3228,7 +3228,7 @@ async function renderSeries(seriesId: string): Promise<void> {
  * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): reuse the window's owned Book route so
  * section changes preserve its manuscript capabilities. Reassigning even the same Book deliberately revokes those in main.
  * A different route still goes through the window owner; 稿件 enters at the remembered position (RET-002), as 书库 does.
- * 发现 opens its read-only Book aggregate; 历史与恢复 is 工作概览's records.
+ * 待办汇总 opens its read-only Book aggregate; 工作概览 holds the 导入记录 the removed 历史与恢复 row once opened.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
   const navigationRoute = navigation.begin();
@@ -3251,18 +3251,6 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
         const overview = await api.getBookOverview({ bookId, historyCursor: null });
         if (!navigationRoute.isCurrent()) return;
         navigation.present(() => renderBookOverview(overview, undefined, recoveryReturn));
-        if (section === 'history') {
-          shell.markSection('history');
-          const records = screen.querySelector<HTMLElement>('.record-navigation');
-          const folded = records?.closest('details');
-          if (folded) folded.open = true;
-          const heading = records?.querySelector<HTMLElement>('h3');
-          if (heading) {
-            heading.tabIndex = -1;
-            heading.focus();
-            records?.scrollIntoView({ block: 'start' });
-          }
-        }
       }
     };
     const ownedRoute = await api.getBookWorkbenchRoute();
@@ -3646,7 +3634,7 @@ const { renderBookOverview } = createBookOverviewScreen({
   editorialRecordLabel: (...args) => editorialRecordLabel(...args),
   appendRecoveryReturnAction: (...args) => appendRecoveryReturnAction(...args),
   replaceScreen: (...args) => replaceScreen(...args),
-  shell,
+  shell, modelSettings: () => renderModelServiceSettings(),
   renderBookWorkbenchChooser: (...args) => renderBookWorkbenchChooser(...args),
   get taskSurfaceRefresh() { return taskSurfaceRefresh; },
   set taskSurfaceRefresh(value) { taskSurfaceRefresh = value; },
@@ -3660,13 +3648,13 @@ const { renderBookFilter, renderLanding, renderImported, reimportUnfollowedLine,
   element: (...args) => element(...args),
   button: (...args) => button(...args),
   setStatus: (...args) => setStatus(...args),
-  api,
+  api, startReview: (id, title) => { renderBookReview(id, title); reviewWorkspace?.openNew(); },
   rendererErrorMessage: (...args) => rendererErrorMessage(...args),
   panel: (...args) => panel(...args),
   renderBookCreationForm: (...args) => renderBookCreationForm(...args),
   renderTargetChoice: (...args) => renderTargetChoice(...args),
   renderError: (...args) => renderError(...args),
-  renderDataAndStorage: (...args) => renderDataAndStorage(...args),
+  renderDataAndStorage: () => renderDataAndStorage(),
   renderModelServiceSettings: (...args) => renderModelServiceSettings(...args),
   get authorityInterrupted() { return authorityInterrupted; },
   set authorityInterrupted(value) { authorityInterrupted = value; },

@@ -57,7 +57,8 @@ describe('the command registry', () => {
     expect(validatedBindings({ 'view.focusMode': 'Mod+Shift+E' }, 'win32')).toEqual({});
   });
   it('covers the complete sidebar Book sections, settings and toggle without replacing shell navigation', () => {
-    expect(BOOK_SECTION_COMMANDS.map((entry) => entry[2])).toEqual(SHELL_BOOK_SECTIONS);
+    // 历史与恢复 is a stored section only since #1521; its records are 工作概览's 导入记录.
+    expect(BOOK_SECTION_COMMANDS.map((entry) => entry[2])).toEqual(SHELL_BOOK_SECTIONS.filter((section) => section !== 'history'));
     expect(COMMANDS.some((entry) => entry.id === 'nav.settings')).toBe(true);
     expect(effectiveSequence('view.toggleSidebar', {}, 'win32')).toBe('Mod+Backslash');
   });

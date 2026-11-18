@@ -1,5 +1,23 @@
 # E2E journeys: what each admitted runner proves
 
+## #1529 synchronized deltas (0.7.3 first use)
+
+- J-12 retains the wide first-run stage and adds 1008×681 geometry: full-row card, columns at least 200 px, required buttons on steps ① and ②. Real pointer stages open model settings and import from those steps. The prior exact data-root proof moves to Settings › Data and storage in the same developer mode, through real clicks; skip persistence remains.
+- After importing the first sample Book, `first-book-review-wide` and `first-book-review-gate` return to the library, require the named Book and step ③ button, check geometry at both forms, and open and close the review sheet using real pointer input. Sample guidance and no-task-start checks continue afterward.
+- J-01 completion checks require no intake step strip; empty-Book first import uses a real CDP file drop while retaining the target, relationship and completion assertions. Library readiness accepts either enabled import entry. The #1521 record stages remain unchanged.
+- J-04 `analysis-no-premature-prepare` now asserts that no analysis action other than the always-present `open-analysis` entry is offered on the overview while the analysis is unavailable; the absent 「开始基线稿件分析」 button stays asserted.
+- J-07 source-import acknowledgement and J-11 readers-report overview readiness wait for the deliverables/evaluation state marker as well as the immediate tile entry, preserving their prior post-read meaning.
+
+
+## #1521 synchronized deltas (0.7.3 slice, `codex/integration-0.7.3`)
+
+The sidebar names and rows change: 全域智能体 is AI 助手, 书内 AI 协作 is AI 改稿 (the developer layer keeps Agent 工作区), 发现 is 待办汇总 in the 工作 group, and the 处理 group and the 历史与恢复 row are gone. The open Book has no row in the Book list: its heading carries its 置顶 star and menu. `e2e/controller.mjs` carries the new row names (`sidebarNavigate`, `SIDEBAR_LIBRARY_READY`, `sidebarBookCurrent`).
+
+- J-01: `empty-book-sidebar-history` and `…-history-records` become `empty-book-sidebar-no-history-row` (no row; the empty Book's 导入记录 fold is open). New location `book-records-reachable`: on a populated Book, real pointer input goes to 工作概览, finds the fold closed, presses its summary, opens one record in place, leaves to 审阅 and comes back, and finds the same way and the same record again.
+- J-03: `book-row-current` reads the Book heading instead of a current row; `book-row-open` is a real pointer press. New locations `sidebar-settings-pinned` (at 1280×800 and 1008×681, in the expanded and the icon form, with no scripted scrolling: 设置 lies inside innerWidth × innerHeight, is hit-tested, and a real press opens the settings page and returns), `sidebar-long-book-list` (the same two sizes, synthesized rows present: real wheel input scrolls the list and the sidebar, the last row ends above the pinned foot and is hit-tested there, 设置 stays inside the viewport) and `sidebar-current-book-pin` (the heading's star on hover and by pointer, then by keyboard, restoring the state, the Book never listed, the focus kept).
+- J-12 and J-13 read the new names; `ordinary-quality-no-global-history-button` and `ordinary-house-same-name` prove the removed button and the one 审阅偏好 name from 知识库 and 质量与学习. J-15 and J-16 read the names through the controller only.
+- The `GLOBAL_AGENT_TITLE` protocol constant (now unread) and `usage.ts`'s 「全域智能体（无图书）」 row keep the old name until #1531.
+
 ## #1496 synchronized deltas (0.7.2, `codex/integration-0.7.2`)
 
 **0.7.2 Alpha** (protocol **204**, schema **116**, Data Version **1**) is delivered at `dev@790acbcb` through [PR #1515](https://github.com/zhouy1017/ai7-harness/pull/1515), which records its exact closure verification. The delivered 0.7.1 identity and its evidence remain historical below.
