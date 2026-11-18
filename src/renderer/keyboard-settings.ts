@@ -25,6 +25,7 @@ import {
 } from './commands.js';
 import { bindingRefusalLabel } from './commands-labels.js';
 import { TRIAGE_KEY_NAMES, triageKeyLabel } from './triage-keys.js';
+import { REVIEW_ENTER_KEY_NAME } from './review-labels.js';
 import {
   KEYBOARD_ALWAYS_ON,
   KEYBOARD_CAPTURE_ADD_STEP,
@@ -308,7 +309,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       list.append(item);
     }
     const reviewReturn = el('li');
-    reviewReturn.append('回到原文（审阅卡片有焦点时） · ', el('kbd', undefined, 'Enter'));
+    reviewReturn.append(`${REVIEW_ENTER_KEY_NAME} · `, el('kbd', undefined, 'Enter'));
     list.append(reviewReturn);
     fixed.append(list);
     table.replaceChildren(grid, fixed);

@@ -1,5 +1,6 @@
 import type { RendererApi } from '../shared/protocol.js';
 import { returnChipPlace } from './task-panel-labels.js';
+import { clearReviewReturn } from './review-return.js';
 /** Navigation hints only: manuscript identity and content remain the service's authority. */
 export interface ReadingPlace {
   readonly manuscriptId: string;
@@ -97,7 +98,9 @@ export function consumeReturnPlace(place: ReadingPlace): Promise<ReadingPlace | 
   return access(place.manuscriptId, place.branchId, (current) => current?.blockId === place.blockId ? null : current);
 }
 
+/** Leaves the reading return of a jump from elsewhere (a task result's 跳到); it replaces a way back to a review finding. */
 export async function preserveReadingReturn(api: Pick<RendererApi, 'getBookOverview' | 'getManuscriptWindowAt'>, known: ReadingPlace | null, bookId: string, manuscriptId: string, branchId: string): Promise<void> {
+  clearReviewReturn();
   if (await readReturnPlace(manuscriptId, branchId) !== null) return;
   if (known?.manuscriptId === manuscriptId && known.branchId === branchId) {
     await preserveReturnPlace(known);

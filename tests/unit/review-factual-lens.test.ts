@@ -101,10 +101,11 @@ afterEach(() => {
 const flush = async (): Promise<void> => { for (let count = 0; count < 25; count += 1) await Promise.resolve(); };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 
-function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, procedureId: string | null = null, resume = false) {
+function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, procedureId: string | null = null, resume = false,
+  read?: (input: Parameters<RendererApi['inspectReviewWorkspace']>[0]) => ReviewWorkspaceProjection) {
   const root = new MiniElement('main');
   miniDocument.body.append(root);
-  const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async (input) => workspace(input?.reviewRunId ?? RUN, state, findingsCount));
+  const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async (input) => read?.(input) ?? workspace(input?.reviewRunId ?? RUN, state, findingsCount));
   const inspectFactualVerification = vi.fn<RendererApi['inspectFactualVerification']>().mockImplementation(async (input) => lens(input.reviewRunId ?? RUN));
   const inspectEvidenceWorkspace = vi.fn<RendererApi['inspectEvidenceWorkspace']>().mockImplementation(async (input) => evidence(result(RUN, input.resultId)));
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
@@ -673,5 +674,237 @@ describe('one-step review actions (#1410)', () => {
     expect((root.querySelector('[data-review-field="ignore-reason"]') as MiniElement & { required?: boolean }).required).not.toBe(true);
     button(root, 'ignore-confirm')!.click(); await flush();
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ disposition: 'ignored', reason: '编辑决定忽略' }));
+  });
+});
+
+// Issue #1525 review: decisions in place keep the Fact-check Lens, release what an action held, re-read what did not settle,
+// decide only from the card itself, and leave no stale way back.
+describe('review triage in place (#1525)', () => {
+  const suggestion = (ordinal: number): ReviewFindingProjection => ({ ...finding(), findingId: `rvf_s${ordinal}`, categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语',
+    ordinal, output: 'change-suggestion', markId: `m${ordinal}`, replacement: '改后', quote: '原文', blockId: `blk_${String(ordinal).repeat(24)}` });
+  function typos(findings: ReviewFindingProjection[], truncated = false): ReviewWorkspaceProjection {
+    const base = workspace(RUN, 'settled', findings.length);
+    const run = base.run!;
+    return { ...base, run: { ...run, findingsTruncated: truncated, categories: [{ ...run.categories[0]!, categoryId: 'typos-and-usage', label: '错别字与规范用语', output: 'change-suggestion',
+      batchApply: true, state: 'settled', stateLabel: '已完成', findingsCount: findings.length }], findings: findings.map((entry) => ({ ...entry })) } };
+  }
+  async function view(findings: ReviewFindingProjection[], extra: Partial<Record<keyof RendererApi, unknown>>, truncated = false) {
+    const mounted = mount();
+    Object.assign(mounted.api, extra);
+    mounted.inspectReviewWorkspace.mockImplementation(async () => typos(findings, truncated));
+    mounted.surface.refresh(); await flush();
+    return mounted;
+  }
+  const article = (root: MiniElement, id: string) => root.querySelector(`article[data-finding-id="${id}"]`)!;
+  const inCard = (root: MiniElement, id: string, action: string) => root.querySelector(`article[data-finding-id="${id}"] [data-review-action="${action}"]`)!;
+  const rejected = (decisionId: string | null = null) => ({ card: { status: 'open', suggestion: decisionId === null ? null : { decision: { decisionId } } } });
+
+  it('keeps a fact-lens row whole when one of its actions repaints it in place', async () => {
+    const view = mount('settled'); await flush();
+    Object.assign(view.api, { updateEditorialMark: vi.fn(async () => ({ card: { status: 'resolved' } })) });
+    const row = () => view.root.querySelector('li.fact-lens-row')!;
+    row().querySelector('[data-review-action="ignore"]')!.click(); await flush();
+    row().querySelector('[data-review-action="ignore-cancel"]')!.click(); await flush();
+    for (const selector of ['.fact-lens-states', '.fact-lens-level', '.fact-lens-decision', '[data-fact-action="fact-workspace"]', '[data-fact-action="fact-go-to-text"]']) {
+      expect(row().querySelector(selector)).not.toBeNull();
+    }
+    expect(view.root.textContent).not.toContain('未外部复核');
+    view.inspectReviewWorkspace.mockClear();
+    row().querySelector('[data-review-action="mark-handled"]')!.click(); await flush();
+    expect(view.inspectReviewWorkspace).not.toHaveBeenCalled();
+    expect(row().querySelector('article.review-finding')!.dataset['status']).toBe('handled');
+    expect(row().querySelector('.fact-lens-states')).not.toBeNull();
+    expect(view.root.textContent).not.toContain('未外部复核');
+  });
+
+  it('enables a card painted while another decision was in flight once that decision ends', async () => {
+    const second = deferred<ReturnType<typeof rejected>>();
+    const ask = deferred<unknown>();
+    const reject = vi.fn().mockResolvedValueOnce(rejected('decision-1')).mockReturnValueOnce(second.promise);
+    const { root } = await view([suggestion(1), suggestion(2), suggestion(3)], {
+      recordChangeSuggestionDecision: reject, recordLearningReasonAsk: vi.fn(() => ask.promise) });
+    article(root, 'rvf_s1').focus();
+    article(root, 'rvf_s1').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
+    expect(miniDocument.activeElement).toBe(article(root, 'rvf_s2'));
+    article(root, 'rvf_s2').dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
+    // Card 1's reason ask lands while card 2's decision is still in flight: card 1 is painted with its controls held.
+    ask.resolve({ askId: 'ask-1', decisionId: 'decision-1', question: '为什么拒绝？', options: [] }); await flush();
+    expect(root.querySelector('article[data-finding-id="rvf_s1"] .learning-reason-ask')).not.toBeNull();
+    expect((inCard(root, 'rvf_s1', 'go-to-text') as MiniElement).disabled).toBe(true);
+    second.resolve(rejected()); await flush();
+    expect((inCard(root, 'rvf_s1', 'go-to-text') as MiniElement).disabled).toBe(false);
+    expect(root.querySelectorAll('[data-work-held]')).toHaveLength(0);
+  });
+
+  it('enables every control of a full repaint drawn while a decision was in flight', async () => {
+    const pending = deferred<ReturnType<typeof rejected>>();
+    const { root, surface } = await view([suggestion(1), suggestion(2)], { recordChangeSuggestionDecision: vi.fn(() => pending.promise) });
+    const enabled = () => root.querySelectorAll('button').filter((node) => !node.disabled).length;
+    const before = enabled();
+    inCard(root, 'rvf_s1', 'reject').click(); await flush();
+    surface.refresh(); await flush();
+    expect(root.querySelector('[data-review-action="batch-prepare"]')!.disabled).toBe(true);
+    pending.resolve(rejected()); await flush();
+    expect(root.querySelectorAll('[data-work-held]')).toHaveLength(0);
+    expect(root.querySelector('[data-review-action="batch-prepare"]')!.disabled).toBe(false);
+    expect(root.querySelectorAll('[data-review-filter] button').every((node) => !node.disabled)).toBe(true);
+    expect((inCard(root, 'rvf_s2', 'reject') as MiniElement).disabled).toBe(false);
+    // Card 1 is decided, so it no longer offers 接受并应用 and 拒绝; nothing else stays disabled.
+    expect(enabled()).toBe(before - 2);
+  });
+
+  it('reads the Run again when a decision fails', async () => {
+    const { root, inspectReviewWorkspace, status } = await view([suggestion(1)], { recordChangeSuggestionDecision: vi.fn(async () => { throw new Error('refused'); }) });
+    inspectReviewWorkspace.mockClear();
+    inCard(root, 'rvf_s1', 'reject').click(); await flush();
+    expect(inspectReviewWorkspace).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenCalledWith('未能拒绝这条修改建议。', 'error');
+  });
+
+  it('reads the Run again for an ignored finding beyond the page the service answers with', async () => {
+    const note: ReviewFindingProjection = { ...finding(), findingId: 'rvf_far', categoryId: 'typos-and-usage', ordinal: 301 };
+    // The service answers with the Run's first findings page, which does not hold finding 301.
+    const record = vi.fn(async () => typos([]));
+    const { root, inspectReviewWorkspace } = await view([note], { recordReviewFindingDisposition: record });
+    inspectReviewWorkspace.mockClear();
+    inspectReviewWorkspace.mockImplementation(async () => typos([{ ...note, status: 'ignored', statusLabel: '已忽略', statusDetail: '已忽略并说明原因' }]));
+    inCard(root, 'rvf_far', 'ignore-now').click(); await flush();
+    expect(inspectReviewWorkspace).toHaveBeenCalledTimes(1);
+    expect(article(root, 'rvf_far').dataset['status']).toBe('ignored');
+  });
+
+  it('decides only while the card itself has focus, never from one of its controls', async () => {
+    const reject = vi.fn(async () => rejected());
+    const apply = vi.fn();
+    const { root, goToText } = await view([suggestion(1)], { recordChangeSuggestionDecision: reject, applyChangeSuggestion: apply });
+    const card = article(root, 'rvf_s1');
+    const inner = [inCard(root, 'rvf_s1', 'go-to-text'), inCard(root, 'rvf_s1', 'reject'), inCard(root, 'rvf_s1', 'accept-apply'), card.querySelector('.review-card-more > summary')];
+    for (const target of inner.filter((node): node is MiniElement => node !== null)) {
+      for (const key of ['a', 'r', 'Enter']) card.dispatchEvent({ type: 'keydown', key, target });
+    }
+    await flush();
+    expect(reject).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+    expect(goToText).not.toHaveBeenCalled();
+    // Enter goes back to the text only from the card, and not while an input method composes or a modifier is held.
+    for (const event of [{ isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) card.dispatchEvent({ type: 'keydown', key: 'Enter', ...event });
+    await flush();
+    expect(goToText).not.toHaveBeenCalled();
+    card.dispatchEvent({ type: 'keydown', key: 'Enter' }); await flush();
+    expect(goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 1, blockId: suggestion(1).blockId }));
+  });
+
+  it('keeps 拒绝 direct on a 修改建议, 忽略 direct on one whose words changed, and 知道了 only folds the batch line', async () => {
+    const changed = { ...suggestion(2), markId: null, markStatus: null };
+    const { root } = await view([suggestion(1), changed], { applyChangeSuggestionBatch: vi.fn(async () => ({ application: { effectId: 'effect' } })) });
+    expect(inCard(root, 'rvf_s1', 'reject').closest('.review-card-more') === null).toBe(true);
+    expect(inCard(root, 'rvf_s2', 'ignore-now').closest('.review-card-more') === null).toBe(true);
+    expect((inCard(root, 'rvf_s2', 'accept-apply') as MiniElement).disabled).toBe(true);
+    root.querySelector('[data-review-action="batch-prepare"]')!.click(); await flush();
+    const done = root.querySelector('section.review-batch-applied [data-review-action="batch-cancel"]')!;
+    expect(done.textContent).toBe('知道了');
+  });
+
+  it('offers 撤销 after 拒绝, which withdraws that decision and makes the finding pending again', async () => {
+    const decide = vi.fn().mockResolvedValueOnce(rejected()).mockResolvedValueOnce({ card: { status: 'open', suggestion: null } });
+    const { root, inspectReviewWorkspace } = await view([suggestion(1)], { recordChangeSuggestionDecision: decide });
+    inCard(root, 'rvf_s1', 'reject').click(); await flush();
+    expect(article(root, 'rvf_s1').dataset['status']).toBe('handled');
+    expect(article(root, 'rvf_s1').textContent).toContain('已拒绝这条修改建议');
+    inspectReviewWorkspace.mockClear();
+    const undo = miniDocument.body.querySelector('[data-toast] button')!;
+    expect(undo.textContent).toBe('撤销');
+    undo.click(); await flush();
+    expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ markId: 'm1', disposition: 'withdrawn' }));
+    expect(inspectReviewWorkspace).not.toHaveBeenCalled();
+    expect(article(root, 'rvf_s1').dataset['status']).toBe('pending');
+  });
+
+  it('draws no heading for a category with no finding on show under a filter', async () => {
+    const mounted = await view([suggestion(1)], {});
+    mounted.inspectReviewWorkspace.mockImplementation(async () => { const next = typos([]); next.run!.categories[0]!.findingsCount = 3; return next; });
+    mounted.root.querySelector('[data-review-filter="status"] [data-filter-value="ignored"]')!.click(); await flush();
+    expect(mounted.root.querySelectorAll('section.review-group')).toHaveLength(0);
+  });
+
+  it('says only that an unfiltered empty Run has no findings', async () => {
+    const view = mount('settled', 0); await flush();
+    expect(view.root.querySelector('.review-no-findings')!.textContent).toBe('这次审阅还没有发现。');
+  });
+});
+
+describe('the way back from a finding (#1525)', () => {
+  const place = (back = vi.fn()) => ({ bookId: BOOK, manuscriptId: 'manuscript-a', branchId: 'branch-a', ordinal: 4, back });
+
+  it('is cleared by going back, and by opening 审阅 for that Book another way', async () => {
+    const { rememberReviewReturn, reviewReturnButton } = await import('../../src/renderer/review-return.js');
+    const back = vi.fn();
+    rememberReviewReturn(place(back));
+    const chip = reviewReturnButton('manuscript-a', 'branch-a')!;
+    expect(chip.textContent).toBe('回到审阅 · 第 4 条');
+    chip.click();
+    expect(back).toHaveBeenCalledOnce();
+    expect(reviewReturnButton('manuscript-a', 'branch-a')).toBeNull();
+    rememberReviewReturn(place());
+    mount(); await flush();
+    expect(reviewReturnButton('manuscript-a', 'branch-a')).toBeNull();
+  });
+
+  it('names the row\'s finding for a jump from a fact-lens row', async () => {
+    const view = mount('settled'); await flush();
+    view.root.querySelector('[data-fact-action="fact-go-to-text"]')!.click(); await flush();
+    expect(view.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 1, blockId: result().blockId }));
+  });
+});
+
+describe('the round trip through 回到原文 (#1525)', () => {
+  const typo = (ordinal: number): ReviewFindingProjection => ({ ...finding(), findingId: `rvf_t${ordinal}`, categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语',
+    ordinal, output: 'change-suggestion', markId: `m${ordinal}`, replacement: '改后', quote: '原文', blockId: `blk_${String(ordinal).repeat(24)}` });
+  const note = (ordinal: number): ReviewFindingProjection => ({ ...finding(), findingId: `rvf_n${ordinal}`, categoryId: 'local-text-check', categoryLabel: '本地文字检查',
+    ordinal, markId: `m${ordinal}`, blockId: `blk_${String(ordinal).repeat(24)}` });
+
+  it('comes back to the same Run, filters, pages, groups, scroll and finding, with a finding handled meanwhile', async () => {
+    const findings = [typo(1), typo(2), note(3), note(4)];
+    const page = (input: Parameters<RendererApi['inspectReviewWorkspace']>[0]): ReviewWorkspaceProjection => {
+      const base = workspace(RUN, 'settled', findings.length);
+      const run = base.run!;
+      const category = run.categories[0]!;
+      const second = input?.findingsAfterOrdinal != null;
+      return { ...base, run: { ...run, findingsTruncated: !second, findingsTotal: findings.length,
+        categories: [
+          { ...category, categoryId: 'typos-and-usage', label: '错别字与规范用语', output: 'change-suggestion', batchApply: false, state: 'settled', findingsCount: 2 },
+          { ...category, categoryId: 'local-text-check', label: '本地文字检查', output: 'annotation', batchApply: false, state: 'settled', findingsCount: 2 },
+        ],
+        findings: (second ? findings.slice(2) : findings.slice(0, 2)).map((entry) => ({ ...entry })) } };
+    };
+    const scroller = { scrollTop: 0 };
+    Object.defineProperty(miniDocument, 'scrollingElement', { configurable: true, value: scroller });
+    try {
+      const first = mount();
+      first.inspectReviewWorkspace.mockImplementation(async (input) => page(input));
+      first.surface.refresh(); await flush();
+      first.root.querySelector('[data-review-filter="status"] [data-filter-value="pending"]')!.click(); await flush();
+      first.root.querySelector('[data-review-action="more-findings"]')!.click(); await flush();
+      expect(first.root.querySelector('article[data-finding-id="rvf_n4"]')).not.toBeNull();
+      const typos = first.root.querySelector('section.review-group[data-review-category="typos-and-usage"] details.review-category-fold')!;
+      typos.open = false; typos.dispatchEvent({ type: 'toggle' });
+      scroller.scrollTop = 420;
+      first.root.querySelector('article[data-finding-id="rvf_n4"] [data-review-action="go-to-text"]')!.click(); await flush();
+      expect(first.goToText).toHaveBeenCalledWith(expect.objectContaining({ ordinal: 4 }));
+      first.surface.destroy(); first.root.remove();
+      scroller.scrollTop = 0;
+      // Accepted in the manuscript meanwhile: 修改建议 1 no longer has a ⋯ menu, so every fold after it stands one place earlier.
+      findings[0] = { ...findings[0]!, status: 'handled', statusLabel: '已处理', statusDetail: '已接受并应用', markStatus: 'applied' };
+      const back = mount('failed', 1, null, true, page);
+      await flush();
+      const asked = back.inspectReviewWorkspace.mock.calls.map(([input]) => input);
+      expect(asked[0]).toEqual(expect.objectContaining({ reviewRunId: RUN, status: 'pending' }));
+      expect(asked).toContainEqual(expect.objectContaining({ findingsAfterOrdinal: 2, status: 'pending' }));
+      expect(back.root.querySelector('section.review-group[data-review-category="typos-and-usage"] details.review-category-fold')!.open).toBe(false);
+      expect(back.root.querySelector('section.review-group[data-review-category="local-text-check"] details.review-category-fold')!.open).toBe(true);
+      expect(back.root.querySelectorAll('details.review-card-more').filter((node) => node.open)).toHaveLength(0);
+      expect(miniDocument.activeElement).toBe(back.root.querySelector('article[data-finding-id="rvf_n4"]'));
+      expect(scroller.scrollTop).toBe(420);
+    } finally { Reflect.deleteProperty(miniDocument, 'scrollingElement'); }
   });
 });
