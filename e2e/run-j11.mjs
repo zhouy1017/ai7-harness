@@ -3724,10 +3724,12 @@ async function main() {
     await pointerClick(renderer, waitFor, '[data-library-action="add"]', 'launch-reference-add');
     await waitFor(renderer, `document.querySelector('article.library-material [data-library-action="attribute"]')?.disabled===false`, 'launch-reference-added');
     const launchReferenceId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then(page=>page.materials[0].materialId)`);
-    await pointerClick(renderer, waitFor, '[data-library-action="attribute"]', 'launch-reference-attribute');
+    // Press the buttons of the item just added, not the first of the kind on the page.
+    const launchReferenceItem = `article.library-material[data-material-id="${launchReferenceId}"]`;
+    await pointerClick(renderer, waitFor, `${launchReferenceItem} [data-library-action="attribute"]`, 'launch-reference-attribute');
     await pointerClick(renderer, waitFor, '.library-attribution-chooser [data-library-choice="house"]', 'launch-reference-house');
     await pointerClick(renderer, waitFor, '[data-library-action="confirm-attribution"]', 'launch-reference-attributed');
-    await pointerClick(renderer, waitFor, '[data-library-action="eligibility"]', 'launch-reference-eligibility');
+    await pointerClick(renderer, waitFor, `${launchReferenceItem} [data-library-action="eligibility"]`, 'launch-reference-eligibility');
     await pointerClick(renderer, waitFor, '.library-eligibility-chooser [data-library-choice="excluded"]', 'launch-reference-excluded');
     await pointerClick(renderer, waitFor, '[data-library-action="confirm-eligibility"]', 'launch-reference-confirmed');
     await waitFor(renderer, `window.ai7.inspectLibraryMaterial({materialId:${JSON.stringify(launchReferenceId)}}).then(page=>page.index.state==='complete'&&page.reference.state==='available')`, 'launch-reference-indexed', 60_000);
