@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Schema } from 'prosemirror-model';
 import { describe, expect, it } from 'vitest';
 import { getAutoApplyEditorRevisions, setAutoApplyEditorRevisions } from '../../src/renderer/editor-input-mode.js';
@@ -84,6 +85,24 @@ describe('✎ 已改 and 🔒 in the text', () => {
     expect(locked.map((decoration) => (decoration.spec as { key?: string }).key ?? 'node')).toEqual(['node', 'ai-lock:b1']);
     expect((locked[0] as unknown as { type: { attrs: Record<string, string> } }).type.attrs['data-ai-locked']).toBe('true');
   });
+});
+
+it('keeps a paragraph where it stands when it gets its first revision line: every left line and padding add up alike (#1523)', () => {
+  const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//gu, '');
+  const rule = (selector: string): string => {
+    const at = css.indexOf(`\n${selector} {`);
+    return at < 0 ? '' : css.slice(css.indexOf('{', at) + 1, css.indexOf('}', at));
+  };
+  const inset = (body: string): number => {
+    const width = Number(/border-(?:left|inline-start)(?:-width)?:\s*([\d.]+)px/u.exec(body)?.[1]);
+    const padding = /padding-(?:left|inline-start):\s*(?:calc\(\.65rem - ([\d.]+)px\)|(\.65rem))/u.exec(body);
+    return width + 10.4 - Number(padding?.[1] ?? 0) + (padding === null ? Number.NaN : 0);
+  };
+  const plain = inset(rule('.ProseMirror [data-block-id]'));
+  expect(plain).toBeCloseTo(12.4);
+  for (const selector of ['.ProseMirror [data-block-id][data-mark-line]', '.ProseMirror [data-block-id][data-mark-revised="true"]', '.paragraph-revision-bar']) {
+    expect(inset(rule(selector)), selector).toBeCloseTo(plain);
+  }
 });
 
 describe('the find panel’s contexts', () => {
