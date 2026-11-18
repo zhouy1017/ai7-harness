@@ -21,6 +21,7 @@ const labels = (): string[] => rows().map((node) => node.textContent ?? '');
 const search = (): MiniElement => miniDocument.body.querySelector('input')!;
 const type = (text: string): void => { const box = search(); box.value = text; box.dispatchEvent({ type: 'input' }); };
 const enter = (): void => { search().dispatchEvent({ type: 'keydown', key: 'Enter', bubbles: true, cancelable: true, preventDefault() {} } as never); };
+const sidebar = (...destinations: string[]): void => { for (const destination of destinations) { const link = document.createElement('a'); link.dataset['navDestination'] = destination; miniDocument.body.append(link as never); } };
 const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 it('settles visible editing before a palette task starts, and respects a refused settlement', async () => {
@@ -62,6 +63,7 @@ it('still runs the first command on Enter, and says so when nothing matches', as
   const restore = installMiniDom();
   try {
     const execute = vi.fn();
+    sidebar('library');
     const palette = make({ execute, screen: { ...everything, has: (id) => id === 'nav.library' || id === 'book.switch' } });
     await palette.open(); await settled();
     type('书库'); enter();
@@ -76,6 +78,7 @@ it('still runs the first command on Enter, and says so when nothing matches', as
 it('lists only commands that do something on this screen, with the current Book first', async () => {
   const restore = installMiniDom();
   try {
+    sidebar('library', 'series');
     const palette = make({ screen: { ...everything, has: (id) => id === 'nav.library' || id === 'nav.series', currentBookId: () => 'book-two' } });
     await palette.open(); await settled();
     const shown = labels();
