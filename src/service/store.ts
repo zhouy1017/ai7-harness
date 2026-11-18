@@ -8,6 +8,8 @@ import { LEGACY_WORKFLOW_PROFILE, LEGACY_WORKFLOW_PROFILE_DIGEST, BASELINE_EDITO
 import * as importReviewOperations from './import-review-records.js';
 import { type AbandonmentCleanupIntent, type CommitAttempt, type DraftSnapshot, INGEST_BATCH_SIZE, type ImmutableManuscriptImportResult, type IngestedDocx, MANUSCRIPT_REIMPORT_NON_EFFECTS, MANUSCRIPT_REIMPORT_RECORD_SCHEMA, REIMPORT_COMMIT_FILE_BATCH_BYTES, REIMPORT_GROUPING, REIMPORT_GROUP_PAGE_SIZE, REIMPORT_MAPPING_BATCH_SIZE, REIMPORT_WIRE_HEADROOM_BYTES, type ReimportBlockFact, type ReimportCommitWork, type ReimportMappingBatch, type ReimportMappingFact, type ReimportPendingResolution, type ReimportPreparationWork, type ReimportReplayWork, type ReimportResolutionWork, type ResolvedImportTarget, type ResolvedReimportTarget, type ResolvedSourceImportTarget, type ReviewedFidelity, SOURCE_IMPORT_NON_EFFECTS, SOURCE_IMPORT_RECORD_SCHEMA, type StoredImportCommitProjection, type WordIntakePlan, appendReimportOffsetSegment, canonicalDegradationDecision, commitRequestFingerprint, continuationNotice, conversionFidelityReport, createImportReviewDigestV6, createLegacyNewBookReviewDigestV2, createReimportComparisonHasher, createReimportResolutionHasher, createReimportReviewDigest, createSourceImportReviewDigest, degradationReview, draftSourceProjection, emptyReimportResolutionDigest, immutableCommitResult, isNotAWordprocessingPackage, manuscriptBlockDigest, readConversionColumns, reconstructReviewedTargetChoice, requireSourceFormat, safeDisplayName, sourceImportRetainedBoundary, workingObjectRelativeKey } from './import-review-records.js';
 import { writeImportedManuscriptRows } from './import-intake-operations.js';
+import * as editorialMarkOperations from './editorial-mark-operations.js';
+import * as manuscriptOperations from './manuscript/operations.js';
 import { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { reviewCategoryDisplayLabel } from '../shared/review-synthesis-wording.js';
 import { launchedTaskPlan } from './task-plan-creation.js';
@@ -20,11 +22,10 @@ import { launchFromSnapshot, TaskLaunchError } from './task-launch-snapshots.js'
 import { WalCheckpointMaintenance, type CheckpointWorkerFactory } from './wal-checkpoint-maintenance.js';
 import type { RuntimeExecutionConfig } from '../shared/runtime-execution-config.js';
 import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
-import { initializeInlineEditorRevisionSchema, decideInlineEditorRevision } from './inline-editor-revisions.js';
-import { commitReplacementAsRevisions } from './replacement-revisions.js';
+import { initializeInlineEditorRevisionSchema } from './inline-editor-revisions.js';
 import { initializeDerivativeWorkspaceSchema, saveProductionDocumentType, deleteProductionDocumentType, reorderProductionDocumentTypes } from './production-document-types.js';
 import type { SaveProductionDocumentTypeInput, DeleteProductionDocumentTypeInput, ReorderProductionDocumentTypesInput, UpdateProductionDocumentMetaInput, ProductionDocumentTypesProjection } from '../shared/protocol.js';
-import { aiLockedMarkRefusal, initializeAiEditLockSchema, inspectAiEditLocks, scopedEditWorkingBlocks, setAiEditLocks } from './ai-edit-locks.js';
+import { initializeAiEditLockSchema } from './ai-edit-locks.js';
 import type { AiEditLocksProjection, InspectAiEditLocksInput, SetAiEditLocksInput } from '../shared/protocol/scoped-edit.js';
 import type { CommitReplacementRevisionsInput, ReplacementRevisionsProjection } from '../shared/protocol/series.js';
 import { effectiveModelReasoningEffort, modelProfileFor } from './provider/model-profile.js';
@@ -110,7 +111,6 @@ import {
   TASK_PLAN_KINDS,
   fidelityStatusLabel,
   isReviewCategoryKindId,
-  resolveMilestonePurpose,
   type ControlTaskRunInput,
   type EditTaskPlanInput,
   type CoverageManifestProjection,
@@ -1195,10 +1195,7 @@ import {
   BoundedStoreFatalError,
   initializeBoundedSchema,
   initializeManuscriptEntryPositionSchema,
-  type RecoverySnapshotCursor,
-  type RecoverySnapshotRecord,
   type ReimportCheckpointBinding,
-  type VerifiedRecoverySnapshot,
 } from './bounded-manuscript.js';
 import { RecoveryObjectStore } from './recovery-objects.js';
 import {
@@ -8628,71 +8625,10 @@ export class EditorialStore {
     return { state: 'prior-work', priorWork: this.listPriorWork() };
   }
 
-  async #preferredRecoverySnapshot(attentionId: string): Promise<{
-    verified: VerifiedRecoverySnapshot;
-    record: RecoverySnapshotRecord | null;
-    comparisonSnapshotId: string | null;
-  }> {
-    let cursor: RecoverySnapshotCursor | null = null;
-    let newestUnavailable: Extract<VerifiedRecoverySnapshot, { state: 'unavailable' }> | null = null;
-    let newestSnapshotId: string | null = null;
-    while (true) {
-      const record = this.#boundedCall(() =>
-        this.#boundedAuthority.nextRecoverySnapshotForAttention(attentionId, cursor));
-      if (record === null) {
-        return {
-          verified: newestUnavailable ?? { state: 'none' },
-          record: null,
-          comparisonSnapshotId: newestSnapshotId,
-        };
-      }
-      newestSnapshotId ??= record.snapshotId;
-      const verified = await this.#recoveryObjects.verify(record);
-      if (verified.state === 'eligible') {
-        return { verified, record, comparisonSnapshotId: record.snapshotId };
-      }
-      if (verified.state === 'unavailable') {
-        newestUnavailable ??= verified;
-      }
-      cursor = { createdAt: record.createdAt, snapshotId: record.snapshotId };
-    }
-  }
+  getRecoveryComparison(attentionId: string): Promise<RecoveryComparisonProjection> { return manuscriptOperations.getRecoveryComparison(this.#manuscriptOperationsHost, attentionId); }
 
-  async getRecoveryComparison(attentionId: string): Promise<RecoveryComparisonProjection> {
-    this.#assertAvailable();
-    const { verified } = await this.#preferredRecoverySnapshot(attentionId);
-    return this.#boundedCall(() => this.#boundedAuthority.getRecoveryComparison(attentionId, verified));
-  }
-
-  async viewRecoveryCandidate(
-    attentionId: string,
-    expectedAttentionVersion: number,
-    selection: RecoverySelection,
-    target: RecoveryWindowTarget,
-  ): Promise<RecoveryWindowProjection> {
-    this.#assertAvailable();
-    if (selection.kind !== 'snapshot') {
-      const projection = this.#boundedCall(() =>
-        this.#boundedAuthority.getRecoveryDatabaseWindow(attentionId, selection, target));
-      this.#boundedCall(() =>
-        this.#boundedAuthority.recordRecoveryView(attentionId, expectedAttentionVersion, selection));
-      return projection;
-    }
-    const record = this.#boundedCall(() =>
-      this.#boundedAuthority.recoverySnapshotByIdForAttention(attentionId, selection.snapshotId));
-    let window: Awaited<ReturnType<RecoveryObjectStore['readWindow']>>;
-    try {
-      // readWindow performs the complete digest-bound scan while retaining only the requested bounded window.
-      window = await this.#recoveryObjects.readWindow(record, target);
-    } catch {
-      throw new StoreError('RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照未通过独立校验。');
-    }
-    this.#boundedCall(() =>
-      this.#boundedAuthority.recordRecoveryView(attentionId, expectedAttentionVersion, selection));
-    return {
-      attentionId, selection, title: '已验证恢复快照', revisionId: record.revisionId,
-      revisionLabel: record.revisionLabel, readonly: true, blocks: window.blocks, nextTarget: window.nextTarget,
-    };
+  viewRecoveryCandidate(attentionId: string, expectedAttentionVersion: number, selection: RecoverySelection, target: RecoveryWindowTarget): Promise<RecoveryWindowProjection> {
+    return manuscriptOperations.viewRecoveryCandidate(this.#manuscriptOperationsHost, attentionId, expectedAttentionVersion, selection, target);
   }
 
   async deferRecovery(attentionId: string, expectedAttentionVersion: number): Promise<RecoveryDeferralProjection> {
@@ -8708,46 +8644,8 @@ export class EditorialStore {
     };
   }
 
-  async restoreRecovery(
-    restorationId: string,
-    attentionId: string,
-    expectedAttentionVersion: number,
-    selection: RecoverySelection,
-  ): Promise<RecoveryRestorationProjection> {
-    this.#assertAvailable();
-    const existing = this.#boundedCall(() => this.#boundedAuthority.existingRecoveryRestoration(
-      restorationId, attentionId, expectedAttentionVersion, selection,
-    ));
-    if (existing !== null) return existing;
-    let snapshotStageStarted = false;
-    try {
-      let comparisonSnapshotId: string | null;
-      if (selection.kind === 'snapshot') {
-        const record = this.#boundedCall(() =>
-          this.#boundedAuthority.recoverySnapshotByIdForAttention(attentionId, selection.snapshotId));
-        comparisonSnapshotId = record.snapshotId;
-        this.#boundedCall(() =>
-          this.#boundedAuthority.beginRecoverySnapshotStage(attentionId, expectedAttentionVersion, record.snapshotId));
-        snapshotStageStarted = true;
-        try {
-          // forEachBatch verifies the complete object and leaves only bounded batches in process memory.
-          await this.#recoveryObjects.forEachBatch(record, (blocks) => {
-            this.#boundedCall(() => this.#boundedAuthority.stageRecoverySnapshotBlocks(attentionId, blocks));
-          });
-        } catch {
-          throw new StoreError('RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照未通过独立校验。');
-        }
-      } else {
-        ({ comparisonSnapshotId } = await this.#preferredRecoverySnapshot(attentionId));
-      }
-      return this.#boundedCall(() => this.#boundedAuthority.restoreRecovery(
-        restorationId, attentionId, expectedAttentionVersion, selection, comparisonSnapshotId,
-      ));
-    } finally {
-      if (snapshotStageStarted) {
-        this.#boundedCall(() => this.#boundedAuthority.clearRecoveryStage(attentionId));
-      }
-    }
+  restoreRecovery(restorationId: string, attentionId: string, expectedAttentionVersion: number, selection: RecoverySelection): Promise<RecoveryRestorationProjection> {
+    return manuscriptOperations.restoreRecovery(this.#manuscriptOperationsHost, restorationId, attentionId, expectedAttentionVersion, selection);
   }
 
   async continueImportDraft(draftId: string, expectedDraftVersion: number): Promise<ContinueImportProjection> { return importIntakeOperations.continueImportDraft(this.#importIntakeOperationsHost, draftId, expectedDraftVersion); }
@@ -9079,41 +8977,28 @@ export class EditorialStore {
     );
   }
 
-  readManuscriptImageChunk(input: import('../shared/protocol.js').ServiceOperationMap['readManuscriptImageChunk']['input']) {
-    const branch = this.#authority.prepare('SELECT base_revision_id FROM manuscript_branches WHERE manuscript_id = ? AND branch_id = ?')
-      .get(input.manuscriptId, input.branchId) as SqlRow | undefined;
-    requireStore(branch !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件不存在。');
-    return this.#boundedCall(() => this.#boundedAuthority.sourceObjects!.imageChunk(asString(branch.base_revision_id), input.sourceVersionId, input.ordinal, input.offset));
+  /** What the Manuscript window and history operations in manuscript/operations.ts reach of the store (Issue #1536), read live. */
+  readonly #manuscriptOperationsHost: manuscriptOperations.ManuscriptOperationsHost = this.#manuscriptOperationsHostOf();
+  #manuscriptOperationsHostOf(): manuscriptOperations.ManuscriptOperationsHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get bounded() { return store.#bounded; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get recoveryObjects() { return store.#recoveryObjects; },
+      get lifetimeId() { return store.#lifetimeId; },
+      assertAvailable: this.#assertAvailable.bind(this),
+      boundedCall: this.#boundedCall.bind(this),
+      withRecoveryObjectLifecycle: this.#withRecoveryObjectLifecycle.bind(this),
+      captureManual: (source) => new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope),
+      analysisResultSetRevision: (bookId) => this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision,
+      get cancelReplacement() { return store.cancelReplacement.bind(store); },
+    };
   }
 
-  /**
-   * Remember where the editor is in this Manuscript, against the Revision the branch works on now.
-   * The position is durable editor state, not a record of the work: it is written on the authority
-   * connection and rewritten in place for the same Book and Revision.
-   */
-  recordManuscriptEntryPosition(manuscriptId: string, branchId: string, blockId: string, grapheme: number): void {
-    this.#boundedCall(() => this.#boundedAuthority.recordManuscriptEntryPosition(
-      manuscriptId,
-      branchId,
-      blockId,
-      this.#addressableGrapheme(branchId, blockId, grapheme),
-      new Date().toISOString(),
-    ));
-  }
+  readManuscriptImageChunk(input: import('../shared/protocol.js').ServiceOperationMap['readManuscriptImageChunk']['input']) { return manuscriptOperations.readManuscriptImageChunk(this.#manuscriptOperationsHost, input); }
 
-  /**
-   * A caret resting after a block's last grapheme is a real place to leave from, but a block addresses
-   * `[0, length)`, so the last addressable offset answers for it and the editor is remembered at the
-   * end of that block rather than not remembered at all. A block the working state does not hold is
-   * left untouched for the bounded store to refuse, which is where `稿件位置不存在` belongs.
-   */
-  #addressableGrapheme(branchId: string, blockId: string, grapheme: number): number {
-    if (!Number.isSafeInteger(grapheme) || grapheme < 0) return grapheme;
-    const block = this.#authority.prepare(
-      'SELECT grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
-    ).get(branchId, blockId) as SqlRow | undefined;
-    return block === undefined ? grapheme : Math.min(grapheme, Math.max(0, asNumber(block.grapheme_length) - 1));
-  }
+  recordManuscriptEntryPosition(manuscriptId: string, branchId: string, blockId: string, grapheme: number): void { manuscriptOperations.recordManuscriptEntryPosition(this.#manuscriptOperationsHost, manuscriptId, branchId, blockId, grapheme); }
 
   /** Where the editor last was, resolved against the working state now, or `null` if never recorded. */
   readManuscriptEntryPosition(manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null {
@@ -9137,138 +9022,67 @@ export class EditorialStore {
     return this.#learningCall(() => this.#memoryFacade().manualSourcePage(signalId, cursor, budgetBytes));
   }
 
-  /**
-   * Editorial Marks (Issue #407). They are records of the work, written on the authority connection;
-   * none of these changes a character of the manuscript, and a Proposal Decision is recorded apart
-   * from the item it decides.
-   */
-  createEditorialMark(input: CreateEditorialMarkInput): EditorialMarkCommandProjection {
-    return this.#markCall(() => this.#editorialMarks.create(input));
+  /** What the Editorial Mark operations in editorial-mark-operations.ts reach of the store (Issue #1536), read live. */
+  readonly #editorialMarkOperationsHost: editorialMarkOperations.EditorialMarkOperationsHost = this.#editorialMarkOperationsHostOf();
+  #editorialMarkOperationsHostOf(): editorialMarkOperations.EditorialMarkOperationsHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get lifetimeId() { return store.#lifetimeId; },
+      get editorialMarks() { return store.#editorialMarks; },
+      get manuscriptApply() { return store.#manuscriptApply; },
+      get proposalConflicts() { return store.#proposalConflicts; },
+      markCall: this.#markCall.bind(this),
+      conflictCall: this.#conflictCall.bind(this),
+      boundedCall: this.#boundedCall.bind(this),
+      transaction: this.#transaction.bind(this),
+      factualLineageOfMark: (markId) => this.#verificationCall(() => this.#factualVerification.lineageOfMark(markId)),
+    };
   }
 
-  getEditorialMarkCard(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection {
-    const card = this.#markCall(() => this.#editorialMarks.card(manuscriptId, branchId, markId));
-    // A Correction Proposal's 修改建议 carries its factual lineage into 依据与核查 (Issue #901; CORR-012, EASSURE-012).
-    const lineage = this.#verificationCall(() => this.#factualVerification.lineageOfMark(card.markId));
-    return lineage === null ? card : { ...card, factualCorrection: lineage };
+  createEditorialMark(input: CreateEditorialMarkInput): EditorialMarkCommandProjection { return editorialMarkOperations.createEditorialMark(this.#editorialMarkOperationsHost, input); }
+
+  getEditorialMarkCard(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection { return editorialMarkOperations.getEditorialMarkCard(this.#editorialMarkOperationsHost, manuscriptId, branchId, markId); }
+
+  updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection { return editorialMarkOperations.updateEditorialMark(this.#editorialMarkOperationsHost, input); }
+
+  recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): EditorialMarkCommandProjection { return editorialMarkOperations.recordChangeSuggestionDecision(this.#editorialMarkOperationsHost, input); }
+
+  recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): EditorialMarkCommandProjection { return editorialMarkOperations.recordProposalDecisionReason(this.#editorialMarkOperationsHost, input); }
+
+  recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): EditorialMarkCommandProjection { return editorialMarkOperations.recordProposalDecisionFeedback(this.#editorialMarkOperationsHost, input); }
+
+  applyChangeSuggestion(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection { return editorialMarkOperations.applyChangeSuggestion(this.#editorialMarkOperationsHost, input); }
+
+  applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): ManuscriptApplyCommandProjection { return editorialMarkOperations.applyChangeSuggestionBatch(this.#editorialMarkOperationsHost, input); }
+
+  commitReplacementRevisions(input: CommitReplacementRevisionsInput): ReplacementRevisionsProjection { return editorialMarkOperations.commitReplacementRevisions(this.#editorialMarkOperationsHost, input); }
+
+  inspectAiEditLocks(input: InspectAiEditLocksInput): AiEditLocksProjection { return editorialMarkOperations.inspectAiEditLocks(this.#editorialMarkOperationsHost, input); }
+
+  setAiEditLocks(input: SetAiEditLocksInput): AiEditLocksProjection { return editorialMarkOperations.setAiEditLocks(this.#editorialMarkOperationsHost, input); }
+
+  scopedEditWorkingBlocks(manuscriptId: string, branchId: string, selector: Parameters<typeof editorialMarkOperations.scopedEditWorkingBlocks>[3]): ReturnType<typeof editorialMarkOperations.scopedEditWorkingBlocks> {
+    return editorialMarkOperations.scopedEditWorkingBlocks(this.#editorialMarkOperationsHost, manuscriptId, branchId, selector);
   }
 
-  updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {
-    if (input.action === 'apply-inline-revision' || input.action === 'revert-inline-revision') {
-      return this.#markCall(() => this.#boundedCall(() => decideInlineEditorRevision(this.#authority, this.#boundedAuthority, this.#lifetimeId, input)));
-    }
-    return this.#markCall(() => this.#editorialMarks.update(input));
-  }
+  reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): ManuscriptApplyCommandProjection { return editorialMarkOperations.reverseAppliedChangeSuggestion(this.#editorialMarkOperationsHost, input); }
 
-  recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): EditorialMarkCommandProjection {
-    return this.#markCall(() => this.#editorialMarks.decide(input));
-  }
+  inspectProposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection { return editorialMarkOperations.inspectProposalWorkspace(this.#editorialMarkOperationsHost, input); }
+  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection { return editorialMarkOperations.saveProposalDecisionDraft(this.#editorialMarkOperationsHost, input); }
+  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection { return editorialMarkOperations.batchProposalDecisionDraft(this.#editorialMarkOperationsHost, input); }
+  recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection { return editorialMarkOperations.recordProposalDecision(this.#editorialMarkOperationsHost, input); }
+  inspectApplyReceipt(input: InspectApplyReceiptInput): ApplyReceiptProjection { return editorialMarkOperations.inspectApplyReceipt(this.#editorialMarkOperationsHost, input); }
+  prepareReverseApply(input: PrepareReverseApplyInput): ReverseApplyPreparationProjection { return editorialMarkOperations.prepareReverseApply(this.#editorialMarkOperationsHost, input); }
+  getManuscriptApplyOutcome(manuscriptId: string, branchId: string, clientEffectId: string): ManuscriptApplyOutcomeProjection { return editorialMarkOperations.getManuscriptApplyOutcome(this.#editorialMarkOperationsHost, manuscriptId, branchId, clientEffectId); }
 
-  recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): EditorialMarkCommandProjection {
-    return this.#markCall(() => this.#editorialMarks.recordDecisionReason(input));
-  }
+  getManuscriptRail(manuscriptId: string, branchId: string): ManuscriptRailProjection { return manuscriptOperations.getManuscriptRail(this.#manuscriptOperationsHost, manuscriptId, branchId); }
 
-  /** `不说明` or `改原因` after a Proposal Decision (Issue #61, S26a). */
-  recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): EditorialMarkCommandProjection {
-    return this.#markCall(() => this.#editorialMarks.recordDecisionFeedback(input));
-  }
+  createProducedEditorialMark(input: ProducedEditorialMarkInput): string { return editorialMarkOperations.createProducedEditorialMark(this.#editorialMarkOperationsHost, input); }
 
-  /**
-   * AI7 Apply for Change Suggestions (Issue #408): the one path by which a suggestion's text reaches
-   * the manuscript, each commit written with its Effect Receipt in one transaction on the authority
-   * connection.
-   */
-  applyChangeSuggestion(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection {
-    this.#refuseAiLocked(input.branchId, [input.markId]);
-    return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.apply(input)));
-  }
-
-  applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): ManuscriptApplyCommandProjection {
-    this.#refuseAiLocked(input.branchId, input.markIds);
-    return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.applyBatch(input)));
-  }
-
-  /** 🔒 锁定 (Issue #1412): an AI7 suggestion is never applied to a block locked now, whichever task made it. */
-  #refuseAiLocked(branchId: unknown, markIds: unknown): void {
-    if (typeof branchId !== 'string' || !Array.isArray(markIds) || !markIds.every((markId) => typeof markId === 'string')) return;
-    const refusal = this.#markCall(() => aiLockedMarkRefusal(this.#authority, branchId, markIds as string[]));
-    requireStore(refusal === null, 'AI_EDIT_LOCKED', refusal ?? '');
-  }
-
-  /**
-   * 全部替换 as per-occurrence revision cards (Issue #1411): Lane 3A's `commitReplacementAsRevisions` in
-   * `./replacement-revisions.js`, on the authority connection the marks and the Apply records write through, so every
-   * occurrence's revision is written in one transaction or none is.
-   */
-  commitReplacementRevisions(input: CommitReplacementRevisionsInput): ReplacementRevisionsProjection {
-    return this.#markCall(() => this.#boundedCall(() => commitReplacementAsRevisions({
-      db: this.#authority, manuscript: this.#boundedAuthority, marks: this.#editorialMarks, apply: this.#manuscriptApply,
-    }, input)));
-  }
-
-  /** 🔒 锁定 (Issue #1412): a manuscript branch's AI edit locks. */
-  inspectAiEditLocks(input: InspectAiEditLocksInput): AiEditLocksProjection {
-    return this.#markCall(() => inspectAiEditLocks(this.#authority, input));
-  }
-
-  /** Lock or unlock blocks or sections against the lock set the editor saw; one appended row per changed target. */
-  setAiEditLocks(input: SetAiEditLocksInput): AiEditLocksProjection {
-    return this.#markCall(() => setAiEditLocks(this.#authority, input, (work) => this.#transaction(this.#authority, work)));
-  }
-
-  /** The working blocks a scoped AI edit reads, with their locks now (Issue #1412): a read of the authority's working state. */
-  scopedEditWorkingBlocks(manuscriptId: string, branchId: string, selector: Parameters<typeof scopedEditWorkingBlocks>[2]): ReturnType<typeof scopedEditWorkingBlocks> {
-    return this.#markCall(() => {
-      requireStore(this.#authority.prepare('SELECT 1 FROM manuscript_branches WHERE manuscript_id = ? AND branch_id = ?').get(manuscriptId, branchId) !== undefined,
-        'MANUSCRIPT_NOT_FOUND', '稿件不存在。');
-      return scopedEditWorkingBlocks(this.#authority, branchId, selector);
-    });
-  }
-
-  reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): ManuscriptApplyCommandProjection {
-    return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.reverse(input)));
-  }
-
-  inspectProposalWorkspace(input: ProposalWorkspaceInput): ProposalWorkspaceProjection { return this.#markCall(() => this.#editorialMarks.inspectProposalWorkspace(input)); }
-  saveProposalDecisionDraft(input: SaveProposalDecisionDraftInput): ProposalWorkspaceProjection { return this.#markCall(() => this.#editorialMarks.saveProposalDecisionDraft(input)); }
-  batchProposalDecisionDraft(input: BatchProposalDecisionDraftInput): ProposalDraftBatchProjection { return this.#markCall(() => this.#editorialMarks.batchProposalDecisionDraft(input)); }
-  recordProposalDecision(input: RecordProposalDecisionInput): ProposalWorkspaceProjection { return this.#markCall(() => this.#editorialMarks.recordProposalDecision(input)); }
-  inspectApplyReceipt(input: InspectApplyReceiptInput): ApplyReceiptProjection { return this.#markCall(() => this.#manuscriptApply.inspectApplyReceipt(input)); }
-  prepareReverseApply(input: PrepareReverseApplyInput): ReverseApplyPreparationProjection { return this.#markCall(() => this.#manuscriptApply.prepareReverseApply(input)); }
-  getManuscriptApplyOutcome(manuscriptId: string, branchId: string, clientEffectId: string): ManuscriptApplyOutcomeProjection {
-    return this.#markCall(() => this.#manuscriptApply.outcome(manuscriptId, branchId, clientEffectId));
-  }
-
-  /**
-   * The position rail's places (Issue #409). The ranges the analysis left unread come from the latest
-   * Result Set Revision's gaps; a Book never analysed has none to show, which is `null`, not empty.
-   */
-  getManuscriptRail(manuscriptId: string, branchId: string): ManuscriptRailProjection {
-    const bookId = this.#boundedCall(() => this.#bounded.bookIdOf(manuscriptId, branchId));
-    let unread: Array<{ blockIds: ReadonlyArray<string>; reason: string }> | null = null;
-    // The Book's analysis reads its Manuscript: a Production Document's rail has no unread ranges to show (Issue #415).
-    const primary = this.#authority.prepare("SELECT 1 FROM manuscripts WHERE manuscript_id = ? AND role = 'primary'").get(manuscriptId) !== undefined;
-    try {
-      const revision = primary ? this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision : null;
-      if (revision !== null) unread = revision.gaps.map((gap) => ({ blockIds: gap.blockIds, reason: gap.reason }));
-    } catch {
-      // A Book whose analysis cannot be read has no unread ranges the rail can stand behind.
-      unread = null;
-    }
-    return this.#boundedCall(() => this.#bounded.getRail(manuscriptId, branchId, unread));
-  }
-
-  /** A mark AI7 or an import produces; the manuscript surface is never its caller. */
-  createProducedEditorialMark(input: ProducedEditorialMarkInput): string {
-    return this.#markCall(() => this.#editorialMarks.createProduced(input));
-  }
-
-  /**
-   * Several marks AI7 produces in one transaction (润色这段, Issue #842), each verified as one is: an input whose words no longer
-   * stand at its range is `null` in the list, and `record` receives the list inside the same transaction.
-   */
   createProducedEditorialMarks<T>(inputs: ReadonlyArray<ProducedEditorialMarkInput>, record: (markIds: ReadonlyArray<string | null>) => T): T {
-    return this.#markCall(() => this.#editorialMarks.createProducedMany(inputs, record));
+    return editorialMarkOperations.createProducedEditorialMarks(this.#editorialMarkOperationsHost, inputs, record);
   }
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
@@ -9297,9 +9111,7 @@ export class EditorialStore {
     });
   }
 
-  getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
-    return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
-  }
+  getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection { return manuscriptOperations.getHistoricalRevision(this.#manuscriptOperationsHost, revisionId, cursor); }
 
   getSearchBackendSettings(): import('../shared/protocol.js').SearchBackendSettingsProjection {
     return modelSearchSettings.getSearchBackendSettings(this.#modelSearchSettingsHost);
@@ -9470,57 +9282,16 @@ export class EditorialStore {
     return this.#boundedCall(() => this.#bounded.advanceReplacementWork(previewId));
   }
 
-  commitReplacement(previewId: string): ReplacementCommitProjection {
-    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId, (source) =>
-      new EditorialMemoryFacade(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
-  }
+  commitReplacement(previewId: string): ReplacementCommitProjection { return manuscriptOperations.commitReplacement(this.#manuscriptOperationsHost, previewId); }
 
   cancelReplacement(previewId: string): boolean {
     return this.#boundedCall(() => this.#bounded.cancelReplacement(previewId));
   }
 
-  dismissReplacementPreview(previewId: string): ReplacementDismissalProjection {
-    const cancelled = this.cancelReplacement(previewId);
-    requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
-    return { previewId, state: 'cancelled' };
-  }
+  dismissReplacementPreview(previewId: string): ReplacementDismissalProjection { return manuscriptOperations.dismissReplacementPreview(this.#manuscriptOperationsHost, previewId); }
 
-  /**
-   * 保存里程碑版本. The purpose is one of the four frozen purposes or the editor's own words (Issue
-   * #414); either way it is stored as words — a frozen purpose as its own label — so the bounded store
-   * keeps its one purpose rule and every milestone reads its kind back from what it holds.
-   */
-  async saveMilestone(
-    manuscriptId: string,
-    branchId: string,
-    label: string,
-    purposeKind: MilestonePurposeKind,
-    purpose: string | null,
-    note: string,
-  ): Promise<MilestoneProjection> {
-    this.#assertAvailable();
-    const resolved = resolveMilestonePurpose(purposeKind, purpose);
-    requireStore(resolved !== null, 'MILESTONE_INVALID', '请选择里程碑用途，或自行输入 1–120 个字符。');
-    let result: MilestoneProjection | undefined;
-    await this.#withRecoveryObjectLifecycle(async () => {
-      const plan = this.#boundedCall(() =>
-        this.#boundedAuthority.prepareMilestoneRecoverySnapshot(manuscriptId, branchId, label, resolved.purpose, note));
-      const object = await this.#recoveryObjects.form(
-        plan,
-        (afterPosition) => this.#boundedCall(() =>
-          this.#boundedAuthority.getRecoverySnapshotBlocks(plan, afterPosition)),
-      );
-      try {
-        result = this.#boundedCall(() => this.#boundedAuthority.saveMilestone(plan, object));
-      } catch (error) {
-        const referenced = this.#boundedCall(() =>
-          this.#boundedAuthority.isRecoveryObjectReferenced(object.objectRelativeKey));
-        await this.#recoveryObjects.removeUnreferenced(object, referenced);
-        throw error;
-      }
-    });
-    requireStore(result !== undefined, 'MILESTONE_INVALID', '里程碑与恢复快照未产生结果。');
-    return result;
+  saveMilestone(manuscriptId: string, branchId: string, label: string, purposeKind: MilestonePurposeKind, purpose: string | null, note: string): Promise<MilestoneProjection> {
+    return manuscriptOperations.saveMilestone(this.#manuscriptOperationsHost, manuscriptId, branchId, label, purposeKind, purpose, note);
   }
 
   // ---- ⑥ 交付物 · 发稿 (Issue #414, plan slice S65) -------------------------------------------------
@@ -10675,25 +10446,15 @@ export class EditorialStore {
 
   // ---- 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22) ----------------------------------------
 
-  /** The Three-way Proposal Conflict of one 修改建议, read against the working state as it is now. */
-  inspectProposalConflict(input: ProposalConflictBindingInput): ProposalConflictProjection {
-    return this.#conflictCall(() => this.#proposalConflicts.inspect(input));
-  }
+  inspectProposalConflict(input: ProposalConflictBindingInput): ProposalConflictProjection { return editorialMarkOperations.inspectProposalConflict(this.#editorialMarkOperationsHost, input); }
 
-  /** Save the Resolution Draft on exactly the basis the editor saw; the manuscript is untouched. */
-  saveProposalConflictDraft(input: SaveProposalConflictDraftInput): ProposalConflictDraftSaveProjection {
-    return this.#conflictCall(() => this.#proposalConflicts.saveDraft(input));
-  }
+  saveProposalConflictDraft(input: SaveProposalConflictDraftInput): ProposalConflictDraftSaveProjection { return editorialMarkOperations.saveProposalConflictDraft(this.#editorialMarkOperationsHost, input); }
 
-  /** 基于当前稿件重新生成建议 (Issue #842): its Resolution Draft, saved as any other with the regeneration's lineage beside it. */
   saveRegeneratedProposalConflictDraft(input: SaveProposalConflictDraftInput, lineage: ProposalConflictRegenerationLineage): ProposalConflictDraftSaveProjection {
-    return this.#conflictCall(() => this.#proposalConflicts.saveDraft(input, lineage));
+    return editorialMarkOperations.saveRegeneratedProposalConflictDraft(this.#editorialMarkOperationsHost, input, lineage);
   }
 
-  /** 保留当前稿件, 暂不处理, or 保存为新提案版本 — none of which writes the manuscript. */
-  resolveProposalConflict(input: ResolveProposalConflictInput): ProposalConflictResolutionProjection {
-    return this.#conflictCall(() => this.#proposalConflicts.resolve(input));
-  }
+  resolveProposalConflict(input: ResolveProposalConflictInput): ProposalConflictResolutionProjection { return editorialMarkOperations.resolveProposalConflict(this.#editorialMarkOperationsHost, input); }
 
   // ---- 待我处理 · Global Attention (Issue #424, plan slice S78) -----------------------------------------
 
@@ -11692,13 +11453,9 @@ export class EditorialStore {
     }
   }
 
-  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-    return this.#boundedCall(() => this.#bounded.undo(manuscriptId, branchId, expectedWorkingDigest, this.#lifetimeId));
-  }
+  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.undoManuscript(this.#manuscriptOperationsHost, manuscriptId, branchId, expectedWorkingDigest); }
 
-  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-    return this.#boundedCall(() => this.#bounded.redo(manuscriptId, branchId, expectedWorkingDigest, this.#lifetimeId));
-  }
+  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection { return manuscriptOperations.redoManuscript(this.#manuscriptOperationsHost, manuscriptId, branchId, expectedWorkingDigest); }
 
   #loadCommitAttempt(attemptId: string): CommitAttempt {
     const row = one(
