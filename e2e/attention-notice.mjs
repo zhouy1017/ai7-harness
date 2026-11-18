@@ -60,13 +60,13 @@ export async function pressQuietResult(renderer, waitFor, name) {
  * centre of every control in the menu hits that control.
  */
 export async function attentionNoticeClearsMenu(renderer, waitFor, requireJourney, name) {
-  const summary = '[data-screen="editor"] details[data-save-menu] > summary';
+  const summary = '#context-actions details[data-save-menu="manuscript"] > summary';
   try {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `innerWidth === 1008 && document.querySelector('[data-attention-toast]')?.hidden === false`, `${name}-size`);
     await pointerClick(renderer, waitFor, summary, `${name}-open`);
     const covered = await renderer.evaluate(`(() => {
-      const body = document.querySelector('details[data-save-menu][open] .editor-save-menu-body');
+      const body = document.querySelector('#context-actions details[data-save-menu="manuscript"][open] .editor-save-menu-body');
       if (!(body instanceof HTMLElement)) return null;
       const notice = document.querySelector('[data-attention-toast]');
       const a = body.getBoundingClientRect(); const b = notice.getBoundingClientRect();
@@ -78,7 +78,7 @@ export async function attentionNoticeClearsMenu(renderer, waitFor, requireJourne
     })()`);
     requireJourney(covered === 0, `${name}-controls-covered`, { covered });
     await pointerClick(renderer, waitFor, summary, `${name}-close`);
-    await waitFor(renderer, `document.querySelector('details[data-save-menu]')?.open === false`, `${name}-closed`);
+    await waitFor(renderer, `document.querySelector('#context-actions details[data-save-menu="manuscript"]')?.open === false`, `${name}-closed`);
   } finally {
     await renderer.send('Emulation.clearDeviceMetricsOverride');
   }

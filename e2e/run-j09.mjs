@@ -1788,11 +1788,10 @@ async function main() {
       // the next notice is the question's, and so that the caret below is read after everything that could move it.
       if (await renderer.evaluate(`document.querySelector('[data-attention-toast]')?.hidden === false`)) {
         await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'model-question-summary-close');
+        await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'model-question-summary-closed');
       }
-      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden !== false`, 'model-question-no-summary');
-      const place = () => pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'model-question-caret');
-      await place();
-      let caret = await renderer.evaluate(READ_CARET);
+      await pointerClick(renderer, waitFor, '[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]', 'model-question-caret');
+      const caret = await renderer.evaluate(READ_CARET);
       requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-placed', caret);
       await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
       await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='awaiting-clarification')`, 'model-question-asked', 120_000);
@@ -1801,13 +1800,11 @@ async function main() {
       await attentionNoticeHolds(renderer, waitFor, requireJourney, 'model-question-notice', `《${asked}》分析在等你回答`, caret);
       // Over an open menu at 1008 px the notice covers none of its controls (it stands below menus and sheets).
       await attentionNoticeClearsMenu(renderer, waitFor, requireJourney, 'model-question-notice-menu');
-      await place();
-      caret = await renderer.evaluate(READ_CARET);
-      requireJourney(caret.focused === true && caret.block !== null, 'model-question-caret-replaced', caret);
-      // Closing it with the mouse takes nothing from the page: the caret and the focus stay.
-      await pointerClick(renderer, waitFor, '[data-attention-toast-close]', 'model-question-notice-close');
-      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true`, 'model-question-notice-closed');
-      requireJourney(JSON.stringify(await renderer.evaluate(READ_CARET)) === JSON.stringify(caret), 'model-question-notice-close-keeps-caret');
+      // 去处理, pressed with the pointer, opens the question where it is answered — this Book's 分析 with the drawer on the Run — and the notice goes.
+      await pointerClick(renderer, waitFor, '[data-attention-toast-action]', 'model-question-notice-go');
+      await waitFor(renderer, `document.querySelector('[data-attention-toast]')?.hidden === true && document.querySelector('#screen')?.dataset.screen === 'book-analysis' && document.querySelector('#task-drawer')?.dataset.taskDrawer === 'open' && document.querySelector('.task-plan-clarification-question')`, 'model-question-notice-opened', 30_000);
+      const route = await renderer.evaluate('window.ai7.getBookWorkbenchRoute()');
+      requireJourney((route?.bookId ?? null) === questionBook, 'model-question-notice-same-book', route);
     } finally {
       await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
     }

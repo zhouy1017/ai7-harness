@@ -478,12 +478,11 @@ describe('a task that needs the editor (#1528)', () => {
     expect(attentionLabel(event)).toBe(words);
   });
 
-  it('raises none for a state that is not a task stopped for the editor, and none for a Book that is not named', () => {
+  it('raises none for a state that is not a task stopped for the editor', () => {
     const attention = vi.fn();
     const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed: vi.fn(), attention, startedAt: START });
     observe(projection([
       item({ itemId: 'plan', state: 'analysis-plan-revision' }), item({ itemId: 'recovery', state: 'recovery-pending', group: 'exceptions' }),
-      item({ itemId: 'import', state: 'analysis-failed', group: 'exceptions', book: { bookId: null, title: 'New' } }),
     ]));
     expect(attention).not.toHaveBeenCalled();
     expect(attentionKind(item({ state: 'analysis-failed', group: 'exceptions' }))).toBe('failed');
@@ -669,17 +668,23 @@ describe('the notices of tasks as the window leaves and returns (#1528)', () => 
 });
 
 describe('review round 1 of #1528', () => {
-  it('a failed or interrupted dialogue is a task that needs the editor, never a completion; a cancelled one says nothing', () => {
+  it('a failed or interrupted dialogue is a task that needs the editor, never a completion; what the editor cancelled is quiet or silent', () => {
     const completed = vi.fn(); const attention = vi.fn();
     const observe = createNotificationObserver({ api: { notify: vi.fn(async () => {}) }, focused: () => true, completed, attention, startedAt: START });
-    const dialogue = (state: GlobalAttentionItemProjection['state'], itemId: string) => item({ itemId, group: 'recent', state, object: { kind: 'dialogue', question: null },
-      target: { kind: 'dialogue', bookId: 'synthetic-book', dialogueId: itemId } });
+    const dialogue = (state: GlobalAttentionItemProjection['state'], itemId: string, change: Partial<GlobalAttentionItemProjection> = {}) => item({ itemId, group: 'recent', state, object: { kind: 'dialogue', question: null },
+      target: { kind: 'dialogue', bookId: 'synthetic-book', dialogueId: itemId }, ...change });
     const failed = dialogue('dialogue-failed', 'd1'); const interrupted = dialogue('dialogue-interrupted', 'd2');
-    observe(projection([failed, interrupted, dialogue('dialogue-stopped', 'd3'), item({ itemId: 'cancelled', group: 'recent', state: 'analysis-cancelled', object: { kind: 'task', taskKind: 'initial-evaluation' },
-      target: { kind: 'task-plan', bookId: 'synthetic-book', taskKind: 'initial-evaluation', ref: 'cancelled' } })]));
-    expect(attention.mock.calls.map(([entry]) => entry.itemId)).toEqual(['d1', 'd2']);
-    expect(completed).not.toHaveBeenCalled();
+    // The editor's cancellation of a Book dialogue is `dialogue-interrupted` with `dialogueCancelled` (dialogue-execution.ts).
+    const cancelled = dialogue('dialogue-interrupted', 'd3', { facts: { progress: null, categories: [], revisionOrdinal: null, dialogueCancelled: true } });
+    const globalFailed = dialogue('dialogue-failed', 'd4', { book: { bookId: null, title: null }, target: { kind: 'global-agent-dialogue', dialogueId: 'd4' } });
+    const cancelledTask = item({ itemId: 'cancelled', group: 'recent', state: 'analysis-cancelled', object: { kind: 'task', taskKind: 'initial-evaluation' },
+      target: { kind: 'task-plan', bookId: 'synthetic-book', taskKind: 'initial-evaluation', ref: 'cancelled' } });
+    observe(projection([failed, interrupted, cancelled, globalFailed, cancelledTask]));
+    expect(attention.mock.calls.map(([entry]) => entry.itemId)).toEqual(['d1', 'd2', 'd4']);
+    expect(completed.mock.calls.map(([entry]) => entry.itemId)).toEqual(['d3']);
     expect(attentionLabel(failed)).toBe('《Synthetic private title》对话没有完成');
+    expect(attentionLabel(globalFailed)).toBe('对话没有完成');
+    expect(completionLabel(cancelled)).toBe('《Synthetic private title》对话已取消');
   });
 
   it('a press on the notice takes no focus from the page', () => {
@@ -703,6 +708,13 @@ describe('review round 1 of #1528', () => {
       expect(host.children[0]?.textContent).toBe('你不在时，有 1 项任务需要你处理');
       notice.raise(item({ itemId: 'after' }));
       expect(host.children[0]?.textContent).toBe('有 3 项任务需要你处理');
+      // What finished is all it can still say once nothing is waiting: never 「有 0 项」.
+      const done = item({ itemId: 'done', group: 'recent', state: 'analysis-completed' });
+      const again = mountAttentionNotice(vi.fn());
+      again.summarize([done], []);
+      again.raise(item({ itemId: 'late' }));
+      again.settle(new Set());
+      expect(miniDocument.body.querySelectorAll('[data-attention-toast]')[1]?.children[0]?.textContent).toBe('你不在时，1 项任务已完成');
     } finally { restore(); }
   });
 });

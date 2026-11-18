@@ -71,7 +71,8 @@ const ATTENTION_KINDS: Partial<Record<GlobalAttentionStateKey, AttentionKind>> =
   'analysis-outcome-unknown': 'unconfirmed', 'analysis-outcome-unconfirmed': 'unconfirmed',
 };
 export function attentionKind(item: GlobalAttentionItemProjection): AttentionKind | null {
-  if (item.book.bookId === null || item.group === 'active') return null;
+  // A dialogue the editor cancelled is the editor's own doing: quiet, as in 0.7.2. A global dialogue has no Book to name.
+  if (item.group === 'active' || item.facts.dialogueCancelled === true) return null;
   return ATTENTION_KINDS[item.state] ?? null;
 }
 

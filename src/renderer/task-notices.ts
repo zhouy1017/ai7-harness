@@ -1,5 +1,6 @@
 import { navigation } from './navigation-generation.js';
 import { AUTO_RESULT_KEY, createNotificationObserver, mountAttentionNotice, mountQuietNotice, openCurrentBookCompletion } from './notifications.js';
+import { attentionKind } from './notification-labels.js';
 import type { GlobalAttentionReader } from './global-attention.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import type { GlobalAttentionItemProjection, RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
@@ -30,7 +31,7 @@ export function mountTaskNotices(options: TaskNoticeOptions): void {
   const showQuietNotice = mountQuietNotice((item) => options.openResult(item));
   const notice = mountAttentionNotice((items) => {
     const [only] = items;
-    if (items.length === 1 && only !== undefined) { if (only.group === 'recent') options.openResult(only); else options.openAttention(only); return; }
+    if (items.length === 1 && only !== undefined) { if (attentionKind(only) === null) options.openResult(only); else options.openAttention(only); return; }
     const books = new Set(items.map((item) => item.book.bookId));
     options.openList(books.size === 1 ? items[0]?.book.bookId ?? undefined : undefined);
   });

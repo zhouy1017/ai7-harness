@@ -221,7 +221,8 @@ export function mountAttentionNotice(open: (items: ReadonlyArray<GlobalAttention
     if (waiting.length + finished.length === 0) { host.hidden = true; return; }
     if (!host.isConnected) document.body.append(host);
     const counted = waiting.filter((item) => summaryIds.has(item.itemId)).length;
-    if (summary && finished.length + counted > 0) {
+    // With nothing left to wait for, what finished is all the line can still say.
+    if ((summary || waiting.length === 0) && finished.length + counted > 0) {
       write(text, awaySummaryLabel(finished.length, counted));
       write(go, waiting.length > 0 ? ATTENTION_NOTICE_WORDS.go : finished.length === 1 ? QUIET_NOTICE_WORDS.view : ATTENTION_NOTICE_WORDS.view);
     } else {
