@@ -1126,6 +1126,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #1022: the authorized overlap/Unicode mark, Apply and reversal variation.
     'review-overlap-relaunch',
     'review-overlap-synthetic-edits',
+    // Issue #1506: 生成统合总结 on the overlap Book's 暂缺 summary, at both window sizes.
+    'review-synthesis-only',
+    'review-synthesis-only-wide',
+    'review-synthesis-only-gate',
     // Issue #1430: 导出审阅报告（DOCX） in one click on the overlap Book, its published DOCX read back.
     'review-report-docx-one-step',
     // Issue #901: 事实核查 at its levels on a fresh sample1 Book — the selector, the Evidence Workspace, a review decision, a
