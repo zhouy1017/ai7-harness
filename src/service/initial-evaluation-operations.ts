@@ -13,7 +13,7 @@ import {
   type TaskMaterialSource,
 } from './task-material-references.js';
 import { DatabaseSync } from 'node:sqlite';
-import { DIGEST_PATTERN, StoreError, asString, canonicalJson, requireStore, sha256, type SqlRow } from './store-records.js';
+import { DIGEST_PATTERN, StoreError, asNumber, asString, canonicalJson, requireStore, sha256, type SqlRow } from './store-records.js';
 import {
   type EvaluationProfilesProjection,
   type EvaluationProfileProjection,
@@ -143,6 +143,39 @@ export function startEvaluation(host: InitialEvaluationOperationsHost, bookId: s
     const recordId = host.transaction(host.authority, () => host.evaluations.start(bookId, fromInitial, skipDamaged));
     return internalWithEvaluationMaterials(host, host.evaluations.workspace(bookId, title, recordId));
   });
+}
+
+/** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */
+export function saveEvaluation(host: InitialEvaluationOperationsHost, input: { bookId: string; recordId: string; expectedEntries: number; content: unknown; finalize: boolean }): EvaluationWorkspaceProjection {
+  return host.evaluationCall(() => {
+    const title = host.evaluationBookTitle(input.bookId);
+    host.transaction(host.authority, () => host.evaluations.save(input.bookId, input.recordId, input.expectedEntries, input.content, input.finalize));
+    return internalWithEvaluationMaterials(host, host.evaluations.workspace(input.bookId, title, input.recordId));
+  });
+}
+
+/**
+ * Where a new 评估 version binds (Issue #429, S81a; EVAL-001): the Book's primary manuscript at its branch's current revision,
+ * and whether edits wait in its journal beyond it; `null` for a Book without a manuscript.
+ */
+export function evaluationManuscript(host: Pick<InitialEvaluationOperationsHost, 'authority'>, bookId: string): { manuscriptId: string; revisionId: string; revisionLabel: string; uncheckpointed: boolean } | null {
+  const rows = host.authority.prepare(
+    `SELECT m.manuscript_id, bws.base_revision_id, mr.revision_label, bws.journal_sequence, bws.last_checkpoint_sequence
+     FROM manuscripts m
+     JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
+     JOIN branch_working_state bws ON bws.manuscript_id = m.manuscript_id AND bws.branch_id = mb.branch_id
+     JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+     WHERE m.book_id = ? AND m.role = 'primary'`,
+  ).all(bookId) as SqlRow[];
+  requireStore(rows.length <= 1, 'BOOK_MANUSCRIPT_STATE_INVALID', '图书主稿件关系或记录图不完整。');
+  const row = rows[0];
+  if (row === undefined) return null;
+  return {
+    manuscriptId: asString(row.manuscript_id),
+    revisionId: asString(row.base_revision_id),
+    revisionLabel: asString(row.revision_label),
+    uncheckpointed: asNumber(row.journal_sequence) > asNumber(row.last_checkpoint_sequence),
+  };
 }
 
 export function internalWithEvaluationMaterials(host: InitialEvaluationOperationsHost, page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {

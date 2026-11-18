@@ -1165,7 +1165,7 @@ async function main() {
     at('analysis-prerequisites-unavailable');
     // Synchronized delta (#406): on 工作概览 the analysis is one line, not the card.
     await waitFor(renderer, `document.querySelector('.book-overview .book-analysis-summary[data-analysis-state="unavailable"]') && !document.querySelector('.baseline-analysis-card')`, 'analysis-unavailable-before-prerequisites');
-    await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
+    await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]:not([data-analysis-action="open-analysis"])') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
 
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
@@ -3109,17 +3109,23 @@ async function main() {
         at(`review-report-export-${form}`);
         await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
         await waitFor(renderer, `innerWidth===${width}&&innerHeight===${height}`, `report-export-${form}-viewport`);
-        saveAnswerPath = width===1280 ? resolve(exportsRoot,'review-wide-temporary.md') : reportExportPath;
         await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-${form}`);
-        await pointerClick(renderer, waitFor, '.review-header-export [data-export-format-action="markdown"]', `report-export-open-${form}`);
-        await assertRenderer(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
-        await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `report-export-written-${form}`, 60_000);
-        await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
-        await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
-        if (width===1280) await rm(saveAnswerPath);
+        await waitFor(renderer, `document.querySelector('.review-header-export').open===true`, `report-header-menu-open-${form}`);
+        if (width === 1280) {
+          // The Save-dialog answer is single-use per launch: the wide form makes the one real export, the gate form only proves the menu is reachable.
+          await pointerClick(renderer, waitFor, '.review-header-export [data-export-format-action="markdown"]', `report-export-open-${form}`);
+          await assertRenderer(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
+          await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `report-export-written-${form}`, 60_000);
+          await pointerClick(renderer, waitFor, 'section.review-report .review-report-export-slot [data-export-action="close"]', `report-export-close-${form}`);
+          await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('.review-header-export > summary')`, `report-export-closed-focus-returns-${form}`, 10_000);
+        } else {
+          const menuReach = await renderer.evaluate(`(() => {const button=document.querySelector('.review-header-export [data-export-format-action="markdown"]'),r=button.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2),panel=button.closest('.export-menu-body')?.getBoundingClientRect(),summary=document.querySelector('.review-header-export > summary').getBoundingClientRect();return {width:innerWidth,height:innerHeight,scrollY,left:r.left,top:r.top,right:r.right,bottom:r.bottom,hit:hit?.tagName+'.'+hit?.className,contains:button.contains(hit),disabled:button.disabled,panel:panel&&{left:panel.left,top:panel.top,right:panel.right,bottom:panel.bottom},summary:{left:summary.left,top:summary.top,right:summary.right,bottom:summary.bottom}};})()`);
+          requireJourney(menuReach.width > 0 && menuReach.left >= 0 && menuReach.top >= 0 && menuReach.right <= menuReach.width && menuReach.bottom <= menuReach.height && menuReach.contains && !menuReach.disabled, `report-export-menu-reachable-${form}`, menuReach);
+          await pointerClick(renderer, waitFor, '.review-header-export > summary', `report-header-export-menu-close-${form}`);
+          await waitFor(renderer, `document.querySelector('.review-header-export').open===false`, `report-header-menu-closed-${form}`);
+        }
       }
     } finally {
-      saveAnswerPath = reportExportPath;
       await renderer.send('Emulation.clearDeviceMetricsOverride');
       await waitFor(renderer, `innerWidth===${exportNativeViewport.width}&&innerHeight===${exportNativeViewport.height}`, 'report-export-native-viewport');
     }

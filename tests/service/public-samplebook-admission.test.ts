@@ -220,6 +220,8 @@ describe('the ADR 0091 Public SampleBooks under the analysis lineage check (Issu
   });
 });
 
+const FULL_RUN_BOOK = 'luxun-zhaohua-xishi.docx';
+
 describe('the developer-live transmittable set before dispatch (Issue #990)', { timeout: 180_000 }, () => {
   it.each(ADR_0091_PUBLIC_SAMPLEBOOKS.map((book) => [book.path, book] as const))(
     'admits a Run over %s past the transmittable check to the stub transport', async (_path, book) => {
@@ -235,7 +237,11 @@ describe('the developer-live transmittable set before dispatch (Issue #990)', { 
     try {
       // Admission itself does not throw EXECUTION_SOURCE_NOT_TRANSMITTABLE: the Run reaches the (refusing) transport.
       expect(refusal(() => execution.admitAndDispatch(authorized.dispatchRunRecordId!))).toBe('no-throw');
-      await execution.whenIdle();
+      // The smallest Book carries the full-run routing claim: every call of the whole Run, to its end, goes to the one endpoint.
+      // The larger Books run the same admission and routing code and are checked at the first call only; a Book of
+      // wujingzi-rulin-waishi's size spent 138 s of 150 s on later requests refused alike (#1537). `finally` aborts the rest.
+      if (book.path === FULL_RUN_BOOK) await execution.whenIdle();
+      else await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0), { timeout: 60_000, interval: 20 });
       expect(calls.length).toBeGreaterThan(0);
       expect(new Set(calls)).toEqual(new Set([DEVELOPER_LIVE_POLICY_BINDING.endpoint]));
     } finally {

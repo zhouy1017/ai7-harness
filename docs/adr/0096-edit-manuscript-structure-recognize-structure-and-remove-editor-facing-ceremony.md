@@ -7,6 +7,8 @@ amends: ADR 0006 and ADR 0025 (structural edits as ordinary journal edits; note 
 
 # 0096 · Edit manuscript structure, recognize structure on import, and remove editor-facing ceremony
 
+> Amended by [ADR 0105 §1–§2](./0105-fold-the-storage-baseline-undo-by-editor-step-and-upgrade-in-app.md#2--split-and-join-keep-a-marks-undo): §1's drift sentence — a structural edit drifts a ranged 修改建议 only when it cuts through it or sits at the caret; a mark moved whole keeps its state and its 撤销本次修改. Apply steps are undone by Ctrl+Z as editor steps.
+
 On 2026-10-23 the Owner accepted the assessment that the manuscript editor cannot split, merge, insert or delete a paragraph or change a heading level, that a DOCX without Word heading styles enters AI7 as one unstructured run of paragraphs, that footnotes are neither shown nor editable, and that several confirmations, identifiers and one static status label stand between the editor and the work. This record decides the editor-side changes; [ADR 0095](0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) decides the execution side. It is design, not implementation; [PROGRESS](../../PROGRESS.md) owns delivered behavior.
 
 ## 1. Structural edits are ordinary edits
