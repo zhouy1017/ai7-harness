@@ -63,7 +63,7 @@ describe('the 任务 panel as the right co-pilot', () => {
     expect(reads.tasks).toBe(9);
   });
 
-  it('closes on 全域智能体, releases its column and stops book reads', async () => {
+  it('closes on AI 助手, releases its column and stops book reads', async () => {
     const { root, drawer, reads, settle } = harness();
     drawer.openPanel(BOOK, () => null);
     await settle();
