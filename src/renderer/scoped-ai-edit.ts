@@ -50,6 +50,13 @@ export const SCOPED_AI_EDIT_WORDS = {
   sectionUnlocked: '已解锁本节',
 } as const;
 
+/** The toolbar's 让 AI 修改… names the scope its composer opens on (Issue #1523): the selection, the caret's section or the text. */
+export const SCOPED_AI_EDIT_ENTRY_LABELS = {
+  selected: '让 AI 修改所选…',
+  section: '让 AI 修改本节…',
+  document: '让 AI 修改全文…',
+} as const;
+
 /** How long the composer waits before reading a request again. */
 const READ_AGAIN_MS = 800;
 
