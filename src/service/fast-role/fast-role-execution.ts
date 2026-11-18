@@ -27,6 +27,7 @@ import {
 import { transmitOnce } from '../provider/live-transmission.js';
 import { localFixtureRegisteredProfile, type LocalFixtureExecutionContext, type LocalFixtureRuntimeContext, type ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, ProviderResultCacheError, type ProviderTestItemSlice } from '../provider/provider-result-cache.js';
+import { connectionTestTransport } from '../provider/request-deadlines.js';
 import {
   CONFLICT_REGENERATE_KIND,
   CONFLICT_REGENERATE_PROMPT_CONTRACT,
@@ -437,7 +438,8 @@ export class FastRoleExecutionOwner {
             modelProfile: route.modelProfile,
             signal,
             beforeSend: () => requireRunning(signal),
-            ...(live.transportSettings === undefined ? {} : { transportSettings: live.transportSettings }),
+            ...(kind.kindId === CONNECTION_TEST_KIND ? { transportSettings: connectionTestTransport(live.transportSettings) }
+              : live.transportSettings === undefined ? {} : { transportSettings: live.transportSettings }),
             sessionId: () => harness.currentSessionId(),
             transport: async (url, init) => {
               requireRunning(init.signal);
