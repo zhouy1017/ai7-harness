@@ -950,7 +950,7 @@ async function main() {
     at('first-run-data-location-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-settings]');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="settings"]')`, 'first-run-settings-ready');
-    await firstRunClick(onboardingPage, '[data-settings-entry="data-storage"]');
+    await firstRunClick(onboardingPage, '[data-settings-entry="data-storage"] button');
     await waitFor(onboardingPage, `document.querySelector('[data-screen="data-storage"]')`, 'first-run-data-storage-ready');
     await assertRenderer(onboardingPage, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(onboardingRoot)}`, 'first-run-location-in-settings');
     await firstRunClick(onboardingPage, '#app-sidebar [data-nav-destination="library"]');
