@@ -71,3 +71,8 @@ export function withEditorialMemoryDefinition(base: AnalysisKindDefinition, memo
 export function editorialMemoryBasePromptDigest(envelope: Record<string, unknown>): string {
   return String(envelope.editorialMemoryBasePromptContractDigest ?? envelope.promptContractDigest);
 }
+
+/** Task owners supply only these source facts; no dialogue object crosses the seam. */
+export function dialogueMemoryContext(book: { bookId: string; workspace: boolean } | null): [string | null, string] {
+  return [book?.bookId ?? null, book === null ? 'global-agent' : book.workspace ? 'agent-workspace' : 'editorial-dialogue'];
+}

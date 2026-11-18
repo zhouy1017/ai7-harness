@@ -1,39 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { SQLInputValue } from 'node:sqlite';
 import { EditorialLearningLedger, LearningReads } from '../../../src/service/learning/ledger.js';
 import { EditorialMemoryFacade } from '../../../src/service/learning/memory-facade.js';
 import { BookPeople } from '../../../src/service/book-people.js';
 import { canonicalRecord } from '../../../src/service/analysis/canonical.js';
-import { initializeDecisionFeedbackSchema } from '../../../src/service/decision-feedback.js';
-import { LearningEligibilityLedger, proposalDecisionCandidate, learningMaterialDigest, type LearningMaterialCandidate } from '../../../src/service/learning-eligibility.js';
-import { HouseReviewPreferenceLedger, type HousePreferenceSource } from '../../../src/service/house-review-preference.js';
-import { SupervisionDirectives, editorialMemoryGovernanceItem, governedMemoryItems, preferenceItems } from '../../../src/service/learning/supervision-directives.js';
-import type { CreateEditorialMemoryInput, EditorialMemoryVersion, RecordLearningSupervisionInput, ChangeEditorialLearningInput, DeactivateEditorialMemoryInput, DecideLearningMaterialInput } from '../../../src/shared/protocol.js';
+import { LearningEligibilityLedger } from '../../../src/service/learning-eligibility.js';
+import * as memoryOperations from '../../../src/service/house-review-preference.js';
+import * as globalOperations from '../../../src/service/global-agent-operations.js';
+import { SupervisionDirectives } from '../../../src/service/learning/supervision-directives.js';
+import type { CreateEditorialMemoryInput, EditorialMemoryVersion, RecordLearningSupervisionInput, ChangeEditorialLearningInput, DeactivateEditorialMemoryInput, DecideLearningMaterialInput, AcceptEditorialMemoryInput, EditorialLearningProjection } from '../../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, sourceSpanText } from '../composed-fixture.js';
-import { editorialMemoryDatabase, transaction } from './editorial-memory.js';
-
-// external-owner stub — not a schema or provenance proof.
-// Only the upstream columns consumed by the unmocked domain readers are projected here.
-// The service parity case checks every declared column/type and every relied-on key/nullability.
-export const MEMORY_SOURCE_PROJECTION_SQL = {
-  review_runs: 'CREATE TABLE review_runs(review_run_id TEXT PRIMARY KEY) STRICT',
-  analysis_task_intents: 'CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY, book_id TEXT, kind TEXT) STRICT',
-  editorial_marks: 'CREATE TABLE editorial_marks(mark_id TEXT PRIMARY KEY, book_id TEXT, manuscript_id TEXT, branch_id TEXT) STRICT',
-  proposal_change_items: 'CREATE TABLE proposal_change_items(item_id TEXT PRIMARY KEY, mark_id TEXT, current_text TEXT, proposed_text TEXT) STRICT',
-  proposal_item_decisions: `CREATE TABLE proposal_item_decisions(decision_id TEXT PRIMARY KEY, item_id TEXT, ordinal INTEGER,
-    disposition TEXT, edited_text TEXT, decided_revision_id TEXT, decided_journal_sequence INTEGER, decided_block_digest TEXT, recorded_at TEXT) STRICT`,
-  proposal_decision_reasons: 'CREATE TABLE proposal_decision_reasons(decision_id TEXT PRIMARY KEY, reason TEXT, reason_source TEXT) STRICT',
-  proposal_conflict_outcomes: 'CREATE TABLE proposal_conflict_outcomes(decision_id TEXT) STRICT',
-  review_findings: 'CREATE TABLE review_findings(review_run_id TEXT, finding_id TEXT, mark_id TEXT, category_id TEXT) STRICT',
-  analysis_result_set_revisions: 'CREATE TABLE analysis_result_set_revisions(revision_id TEXT PRIMARY KEY, canonical_json TEXT, sha256 TEXT) STRICT',
-  review_run_category_events: `CREATE TABLE review_run_category_events(review_run_id TEXT, category_id TEXT, state TEXT, sequence INTEGER,
-    result_set_revision_id TEXT) STRICT`,
-} as const;
-export function initializeMemorySourceProjections(db: DatabaseSync): void {
-  for (const sql of Object.values(MEMORY_SOURCE_PROJECTION_SQL)) db.exec(sql);
-  initializeDecisionFeedbackSchema(db);
-}
-
+import { editorialMemoryDatabase } from './editorial-memory.js';
+import { initializeMemorySourceProjections } from './memory-projections.js';
+import { transaction } from './transaction.js';
 // One admitted source read per test file; no generated manuscript fixture or fingerprint.
 let sampleText: Promise<string> | undefined;
 export async function memoryDomainFixture(admitLegacy = true) {
@@ -55,34 +34,41 @@ export async function memoryDomainFixture(admitLegacy = true) {
   const write = <T>(operation: () => T): T => call(() => transaction(db, operation));
   const people = new BookPeople(db);
   const eligibility = new LearningEligibilityLedger(db);
-  const names = () => (db.prepare('SELECT book_id FROM books').all()).flatMap((row) => {
-    const current = people.current(String(row.book_id)); return [...current.authors, ...current.editors];
-  });
-  const facade = () => new EditorialMemoryFacade(db, learning, names);
-  const candidates = new Map<string, { bookId: string; candidate: LearningMaterialCandidate; decisionId: string; reason: string; disposition: string }>();
-  const inspect = () => call(() => facade().inspect({ signalOffset: 0, itemOffset: 0 }));
-  const rebuild = () => {
-    const sources: HousePreferenceSource[] = [];
-    for (const { bookId, candidate, decisionId, reason, disposition } of candidates.values()) {
-      const decision = eligibility.history(bookId, candidate.materialKey).at(-1);
-      if (!decision || decision.materialDigest !== learningMaterialDigest(candidate) || !['house', 'book'].includes(decision.choice)) continue;
-      sources.push({ bookId, bookTitle: String(db.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId)!.title),
-        categoryId: 'typos-and-usage', categoryLabel: '错别字与规范用语', materialDigest: decision.materialDigest, decisionId,
-        eligibilityDecisionId: decision.decisionId, eligibility: decision.choice, operationalScope: 'ordinary-production', disposition, reason,
-        attribution: decision.attribution ?? { peopleVersion: 0, authors: [], editors: [] },
-        // No Apply exists in this external-owner stub. Apply/provenance assertions stay in service.
-        quality: { applied: 0, surviving: 0, editVolume: 0, lineageDigest: '0'.repeat(64) } });
-    }
-    facade().rebuild('ordinary-production', sources, names());
+  const unexpected = (): never => { throw new Error('This upstream operation is outside the memory fixture'); };
+  // Upstream read stubs only: no Task/Run, Apply, analysis result or dialogue claim is made here.
+  const baseline = { launch: { operationalScope: 'ordinary-production', policy: null, live: null },
+    curationBudgetUse: () => ({ passesUsed: 0, reservedTokens: 0 }), curationRuns: () => [] } as unknown as memoryOperations.EditorialLearningStoreHost['baselineAnalysis'];
+  const feedback = { latestWithWords: () => [], latestEntries: () => [] } as unknown as memoryOperations.LearningSupervisionStoreHost['analysisFeedback'];
+  const facade = (): EditorialMemoryFacade => new EditorialMemoryFacade(db, learning, () => memoryOperations.housePreferencePeopleNames(supervisionHost));
+  const supervisionHost: memoryOperations.LearningSupervisionStoreHost = {
+    get authority() { return db; }, get baselineAnalysis() { return baseline; }, get bookPeople() { return people; },
+    get learningEligibility() { return eligibility; }, get analysisFeedback() { return feedback; },
+    learningCall: call, transaction, memoryFacade: facade,
+    evaluationBookTitle: bookId => String(db.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId)!.title),
+    inspectBaselineAnalysis: unexpected,
+    inspectGlobalAgent: () => globalOperations.inspectGlobalAgent(globalHost),
+    inspectLearningMaterial: (bookId, key) => memoryOperations.inspectLearningMaterial(editorialHost, bookId, key),
+    learningCandidates: (bookId, excerpt, word) => memoryOperations.learningCandidates(supervisionHost, bookId, excerpt, word),
+    learningMaterialSource: (bookId, candidate) => memoryOperations.learningMaterialSource(supervisionHost, bookId, candidate),
+    reviewRuns: { planFacts: unexpected } as unknown as memoryOperations.LearningSupervisionStoreHost['reviewRuns'],
+    series: {} as memoryOperations.LearningSupervisionStoreHost['series'],
+    safeTitle: unexpected, requireSeries: unexpected, reviewCall: call, analysisItemLabel: unexpected,
   };
-  const global = () => call(() => {
-    const memory = facade(); const basis = memory.globalSourceBasis('ordinary-production');
-    const facts = memory.globalSources('ordinary-production', true, basis);
-    const base = basis.preference === null ? null : { ...basis.preference, lines: basis.preference.governance?.baseLines ?? basis.preference.lines };
-    const items = governedMemoryItems(preferenceItems(base), facts.legacyDirectives).map((item) => ({ ...item,
-      revisionId: item.revisionId + '@' + (basis.directives.at(-1)?.directiveId ?? 'base') }));
-    return { items: [...items, ...facts.revisions.map((entry) => editorialMemoryGovernanceItem(entry, entry.current.editorialDimension))], directives: basis.directives };
-  });
+  const editorialHost: memoryOperations.EditorialLearningStoreHost = {
+    get authority() { return db; }, get baselineAnalysis() { return baseline; }, get bookPeople() { return people; },
+    get learningEligibility() { return eligibility; }, get learningSupervisionHost() { return supervisionHost; },
+    learningCall: call, transaction, memoryFacade: facade, replacementFrozen: () => false,
+    learningMaterialSource: (bookId, candidate) => memoryOperations.learningMaterialSource(supervisionHost, bookId, candidate),
+    inspectEditorialLearning: input => memoryOperations.inspectEditorialLearning(editorialHost, input),
+    dialogueTask: unexpected, editorialMemory: (bookId, kind) => memoryOperations.editorialMemory(editorialHost, bookId, kind),
+  };
+  // The real Global Agent projection is an upstream read of the real memory operations.
+  // Its unrelated conversation/provider/procedure inputs are empty in this fixture.
+  const globalHost = {
+    get authority() { return db; }, get baselineAnalysis() { return baseline; }, memoryFacade: facade, learningCall: call,
+    getConfiguredModelRoleBinding: () => null, dialogues: { globalTasks: () => [] },
+  } as unknown as globalOperations.GlobalAgentOperationsHost;
+  const inspect = (): EditorialLearningProjection => memoryOperations.inspectEditorialLearning(editorialHost, { signalOffset: 0, itemOffset: 0 });
   const current = (itemId: string): EditorialMemoryVersion => {
     const version = learning().version(itemId);
     if (version.schema !== 'ai7.global-editorial-memory/2') throw new Error('Expected governed memory');
@@ -90,26 +76,17 @@ export async function memoryDomainFixture(admitLegacy = true) {
   };
   const create = (signalIds: readonly string[], title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
     signalIds, applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
+  // Bind real feature functions to the test owner. No operation or projection is reimplemented.
   const subject = {
-    createEditorialMemory(input: CreateEditorialMemoryInput) { return write(() => facade().create(input, 'ordinary-production')); },
-    acceptEditorialMemory(input: { itemId: string; expectedVersionId: string; actionId: string }) { return write(() => facade().accept(input, 'ordinary-production')); },
-    deactivateEditorialMemory(input: DeactivateEditorialMemoryInput) { return write(() => facade().deactivate(input, 'ordinary-production')); },
-    changeEditorialLearning(input: ChangeEditorialLearningInput) { return write(() => { facade().change(input); rebuild(); }); },
-    recordLearningSupervision(input: RecordLearningSupervisionInput) { return write(() => {
-      facade().recordSupervision('ordinary-production', input, input.targets.length === 0 ? [] : global().items);
-      return { get items() { return global().items; }, get directives() { return global().directives; } };
-    }); },
-    inspectGlobalAgent: global,
-    inspectHouseReviewPreference() { const history = facade().history('ordinary-production'); return { current: history.at(-1) ?? null, history }; },
-    inspectLearningMaterial(bookId: string, materialKey: string) {
-      const value = candidates.get(materialKey); if (!value || value.bookId !== bookId) throw new Error('Unknown fixture source');
-      return eligibility.project(bookId, [value.candidate])[0]!;
-    },
-    decideLearningMaterial(input: DecideLearningMaterialInput) { return write(() => {
-      const value = candidates.get(input.materialKey); if (!value) throw new Error('Unknown fixture source');
-      eligibility.decide({ bookId: input.bookId, candidate: value.candidate, expectedDecisions: input.expectedDecisions, choice: input.choice,
-        note: input.note, attribution: { peopleVersion: 0, authors: [], editors: [] } }); rebuild();
-    }); },
+    createEditorialMemory: (input: CreateEditorialMemoryInput) => memoryOperations.createEditorialMemory(editorialHost, input),
+    acceptEditorialMemory: (input: AcceptEditorialMemoryInput) => memoryOperations.acceptEditorialMemory(editorialHost, input),
+    deactivateEditorialMemory: (input: DeactivateEditorialMemoryInput) => memoryOperations.deactivateEditorialMemory(editorialHost, input),
+    changeEditorialLearning: (input: ChangeEditorialLearningInput) => memoryOperations.changeEditorialLearning(editorialHost, input),
+    recordLearningSupervision: (input: RecordLearningSupervisionInput) => memoryOperations.recordLearningSupervision(supervisionHost, input),
+    inspectGlobalAgent: () => globalOperations.inspectGlobalAgent(globalHost),
+    inspectHouseReviewPreference: () => memoryOperations.inspectHouseReviewPreference(supervisionHost),
+    inspectLearningMaterial: (bookId: string, key: string) => memoryOperations.inspectLearningMaterial(editorialHost, bookId, key),
+    decideLearningMaterial: (input: DecideLearningMaterialInput) => memoryOperations.decideLearningMaterial(editorialHost, input),
   };
   const make = (input: CreateEditorialMemoryInput) => {
     const ids = new Set(db.prepare('SELECT item_id FROM global_editorial_memory_items').all().map((row) => String(row.item_id)));
@@ -126,22 +103,26 @@ export async function memoryDomainFixture(admitLegacy = true) {
   const sourceBook = async (title: string) => {
     const book = { bookId: randomUUID(), manuscriptId: randomUUID(), branchId: randomUUID() };
     const at = '2026-11-16T00:00:00.000Z'; const runId = randomUUID(), revisionId = randomUUID();
-    db.prepare('INSERT INTO books VALUES (?, ?, ?, ?)').run(book.bookId, `book:${book.bookId}`, title, at);
-    const result = canonicalRecord({ policyPin: { operationalScope: 'ordinary-production' } });
-    db.prepare('INSERT INTO analysis_result_set_revisions VALUES (?, ?, ?)').run(revisionId, result.json, result.digest);
-    db.prepare('INSERT INTO review_run_category_events VALUES (?, ?, ?, ?, ?)').run(runId, 'typos-and-usage', 'materialized', 1, revisionId);
+    const insert = (table: string, row: Record<string, SQLInputValue>) => {
+      const columns = Object.keys(row);
+      db.prepare(`INSERT INTO ${table}(${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`).run(...Object.values(row));
+    };
+    insert('books', { book_id: book.bookId, stable_identity: `book:${book.bookId}`, title, created_at: at });
+    const result = canonicalRecord({ reviewRunId: runId, policyPin: { operationalScope: 'ordinary-production' } });
+    insert('analysis_result_set_revisions', { revision_id: revisionId, canonical_json: result.json, sha256: result.digest });
+    insert('review_run_category_events', { event_id: randomUUID(), review_run_id: runId, category_id: 'typos-and-usage', state: 'materialized', sequence: 1, result_set_revision_id: revisionId });
     for (let index = 0; index < 4; index++) {
       const decisionId = randomUUID(), itemId = randomUUID(), markId = randomUUID();
       const disposition = index === 1 ? 'rejected' : 'accepted-with-edit'; const edited = index === 1 ? null : `合成统一表达${index}`;
-      const reason = '合成编辑判断。';
-      db.prepare('INSERT INTO editorial_marks VALUES (?, ?, ?, ?)').run(markId, book.bookId, book.manuscriptId, book.branchId);
-      db.prepare('INSERT INTO proposal_change_items VALUES (?, ?, ?, ?)').run(itemId, markId, text, `${text}合成`);
-      db.prepare('INSERT INTO proposal_item_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(decisionId, itemId, 1, disposition, edited, revisionId, 0, null, at);
-      db.prepare('INSERT INTO proposal_decision_reasons VALUES (?, ?, ?)').run(decisionId, reason, 'reason-field');
-      db.prepare('INSERT INTO review_findings VALUES (?, ?, ?, ?)').run(runId, `rvf_${index}`, markId, 'typos-and-usage');
-      const candidate = proposalDecisionCandidate({ decisionId, disposition, currentText: text, proposedText: `${text}合成`, editedText: edited,
-        reason, reasonSource: 'reason-field', feedbackEntries: 0, recordedAt: at, decidedAt: at }, false);
-      candidates.set(candidate.materialKey, { bookId: book.bookId, candidate, decisionId, reason, disposition });
+      insert('editorial_marks', { mark_id: markId, book_id: book.bookId, manuscript_id: book.manuscriptId, branch_id: book.branchId,
+        block_id: randomUUID(), status: 'resolved', anchor_state: 'exact', source_task_id: null, source_label: null, from_grapheme: 0, to_grapheme: 1 });
+      insert('proposal_change_items', { item_id: itemId, mark_id: markId, current_text: text, proposed_text: `${text}合成` });
+      insert('proposal_item_decisions', { decision_id: decisionId, item_id: itemId, ordinal: 1, disposition, edited_text: edited,
+        decided_revision_id: revisionId, decided_journal_sequence: 0, decided_block_digest: null, recorded_at: at });
+      insert('proposal_decision_reasons', { decision_id: decisionId, reason: '合成编辑判断。', reason_source: 'reason-field' });
+      const finding = canonicalRecord({});
+      insert('review_findings', { review_run_id: runId, finding_id: `rvf_${index}`, mark_id: markId, category_id: 'typos-and-usage',
+        output: 'change-suggestion', canonical_json: finding.json, sha256: finding.digest });
       learning().captureDecision(decisionId);
     }
     const signals = inspect().signals.filter((signal) => signal.source.bookId === book.bookId);
@@ -151,7 +132,7 @@ export async function memoryDomainFixture(admitLegacy = true) {
   const seedPreferences = (texts: readonly string[]) => write(() => {
     for (const text of texts) new SupervisionDirectives(db).record('ordinary-production', { operation: 'create', targets: [],
       scope: { kind: 'house' }, categoryId: 'style-and-format', text, effect: 'guide' }, []);
-    facade().refreshGovernance('ordinary-production', names(), true);
+    facade().refreshGovernance('ordinary-production', memoryOperations.housePreferencePeopleNames(supervisionHost), true);
   });
   // Fixture setup creates/accepts real rows and publishes the completed setup once.
   // The cases use the facade for each admission/refusal they assert at the boundary.
@@ -163,16 +144,9 @@ export async function memoryDomainFixture(admitLegacy = true) {
       learning().accept({ itemId: created.itemId, expectedVersionId: created.versionId, actionId: randomUUID() }, 'ordinary-production');
       return current(created.itemId);
     });
-    facade().refreshGovernance('ordinary-production', names(), 'memory');
+    facade().refreshGovernance('ordinary-production', memoryOperations.housePreferencePeopleNames(supervisionHost), 'memory');
     return versions;
   });
-  const prepare = () => {
-    const reviewRunId = randomUUID(), taskIntentId = randomUUID();
-    db.prepare('INSERT INTO review_runs VALUES (?)').run(reviewRunId);
-    db.prepare('INSERT INTO analysis_task_intents VALUES (?, ?, ?)').run(taskIntentId, book.bookId, 'editorial-review/typos-and-usage');
-    new HouseReviewPreferenceLedger(db, learning).pin(reviewRunId, taskIntentId, 'a'.repeat(64), facade().reviewPreference('ordinary-production', book.bookId, 'typos-and-usage')!);
-    return { reviewRunId, categories: [{ categoryId: 'typos-and-usage', taskIntentId }] };
-  };
   const { book, signals } = await sourceBook('合成记忆来源');
   const explicit = signals[1]!;
   if (admitLegacy) {
@@ -180,5 +154,5 @@ export async function memoryDomainFixture(admitLegacy = true) {
     subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
       expectedDecisions: material.decisions, choice: 'house', note: null });
   }
-  return { db, subject, book, signals, explicit, inspect, create, make, accept, current, govern, sourceBook, prepare, seedPreferences, seedActiveMemories };
+  return { db, subject, book, signals, explicit, inspect, create, make, accept, current, govern, sourceBook, seedPreferences, seedActiveMemories };
 }

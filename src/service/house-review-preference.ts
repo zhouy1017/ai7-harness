@@ -1,5 +1,5 @@
 import { one } from './store-operation-support.js';
-import { dialogueMemoryContext } from './learning/memory-facade.js';
+import { dialogueMemoryContext } from './learning/editorial-memory.js';
 import { decisionResolvesConflict } from './proposal-conflicts.js';
 import type { BaselineAnalysisResultSetRevisionProjection, LearningMaterialsProjection, LearningAuditInput, LearningAuditProjection, LearningAuditBookProjection } from '../shared/protocol.js';
 import { MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, LEARNING_MATERIAL_KEY_PATTERN } from '../shared/protocol.js';
