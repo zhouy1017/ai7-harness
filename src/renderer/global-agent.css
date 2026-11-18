@@ -29,6 +29,7 @@
 /* Inside a popover the sections are told apart by spacing and a soft background, never another box. */
 .global-agent-pop > :is(.global-agent-sources, .global-agent-scope, .global-agent-governance, .global-agent-directives) { padding: .6rem .7rem; border: 1px solid transparent; border-radius: .5rem; background: var(--surface-subdued); }
 .global-agent [hidden] { display: none !important; }
+.global-agent-main > [data-global-agent-setup] { justify-self: start; }
 .global-agent h2, .global-agent h3, .global-agent h4, .global-agent p { margin: 0; }
 .global-agent-heading, .global-agent-conversation, .global-agent-previous-turns,
 .global-agent-answer, .global-agent-turn { display: grid; gap: .8rem; min-width: 0; }
