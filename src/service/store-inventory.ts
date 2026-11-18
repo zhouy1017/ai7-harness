@@ -170,6 +170,11 @@ export const INVENTORY_TABLES = [
   'manuscript_reimport_records',
   'manuscript_revisions',
   'manuscripts',
+  'material_index_builds',
+  'material_index_segments',
+  'material_index_translations',
+  'material_index_vectors',
+  'material_translation_attempts',
   'milestone_signoff_records',
   'milestone_versions',
   'model_service_connections',
@@ -284,24 +289,19 @@ export const INVENTORY_TABLES = [
   'writing_tasks',
 ] as const;
 
-/** Tables that are deliberately not counted, with why. ADR 0105 §5 drops the UI-session tables and rebuilds the indexes. */
+/** Tables that are deliberately not counted, with why. ADR 0105 §5 drops the five UI-session tables and rebuilds the FTS search tables; every other table is copied. */
 export const NOT_COUNTED: Readonly<Record<string, string>> = {
-  manuscript_search_sessions: 'UI session: an open search; ADR 0105 §5 does not keep it',
-  manuscript_search_results: 'UI session: an open search; ADR 0105 §5 does not keep it',
-  manuscript_replacement_previews: 'UI session: an open 全部替换 preview; ADR 0105 §5 does not keep it',
-  manuscript_replacement_matches: 'UI session: an open 全部替换 preview; ADR 0105 §5 does not keep it',
-  task_launch_snapshots: 'UI session: instance-local launch commands; ADR 0105 §5 does not keep it',
-  working_block_search: 'search index (FTS virtual table); rebuilt by the upgrade',
-  working_block_search_config: 'search index shadow table; rebuilt by the upgrade',
-  working_block_search_content: 'search index shadow table; rebuilt by the upgrade',
-  working_block_search_data: 'search index shadow table; rebuilt by the upgrade',
-  working_block_search_docsize: 'search index shadow table; rebuilt by the upgrade',
-  working_block_search_idx: 'search index shadow table; rebuilt by the upgrade',
-  material_index_builds: 'Material Index, built from the original on this machine; rebuilt',
-  material_index_segments: 'Material Index, built from the original on this machine; rebuilt',
-  material_index_translations: 'Material Index, made again on request from the build; rebuilt',
-  material_index_vectors: 'Material Index, made again on request from the build; rebuilt',
-  material_translation_attempts: "attempts name this machine's exact build and batch; not carried",
+  manuscript_search_sessions: 'UI session: an open search; ADR 0105 §5 drops it',
+  manuscript_search_results: 'UI session: an open search; ADR 0105 §5 drops it',
+  manuscript_replacement_previews: 'UI session: an open 全部替换 preview; ADR 0105 §5 drops it',
+  manuscript_replacement_matches: 'UI session: an open 全部替换 preview; ADR 0105 §5 drops it',
+  task_launch_snapshots: 'UI session: instance-local launch commands; ADR 0105 §5 drops it',
+  working_block_search: 'search index (FTS virtual table); rebuilt by the upgrade (ADR 0105 §5)',
+  working_block_search_config: 'search index shadow table; rebuilt by the upgrade (ADR 0105 §5)',
+  working_block_search_content: 'search index shadow table; rebuilt by the upgrade (ADR 0105 §5)',
+  working_block_search_data: 'search index shadow table; rebuilt by the upgrade (ADR 0105 §5)',
+  working_block_search_docsize: 'search index shadow table; rebuilt by the upgrade (ADR 0105 §5)',
+  working_block_search_idx: 'search index shadow table; rebuilt by the upgrade (ADR 0105 §5)',
 };
 
 /** Tables that are neither counted nor listed as not counted, or are both. The guard of the policy test. */
