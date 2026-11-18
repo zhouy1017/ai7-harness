@@ -454,6 +454,13 @@ it('reports a startup error after that flow committed its own landing', async ()
  expect(page.context['renderError']).toHaveBeenCalledWith(error,expect.any(Function));
 });
 
+it('reports a landing paint that rejects after reading, through the existing error path', async () => {
+ const page=harness({getStartup:async()=>({state:'none',priorWork:[]}),listBooks:async()=>({books:[],nextAfter:null})});
+ const error=new Error('paint failed');page.context['renderLanding']=async()=>{page.replaceScreen('landing');await Promise.resolve();throw error;};
+ await page.run('initializeStartup()');
+ expect(page.context['renderError']).toHaveBeenCalledWith(error,expect.any(Function));
+});
+
 it('keeps the manuscript visible when a refused second exit is followed by a failed re-acquire', async () => {
  const leave=Promise.withResolvers<void>();const page=harness({leaveBookWorkbench:()=>leave.promise,openBookWorkbench:async()=>{throw new Error('offline');}});
  const manuscript=document.createElement('section');manuscript.dataset['bookId']='book-a';page.replaceScreen('editor',manuscript);

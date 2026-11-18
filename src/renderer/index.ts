@@ -1546,7 +1546,7 @@ async function renderStartupProjection(
       api.listBooks({ after: null }),
     ]);
     if (!navigationRoute.isCurrent()) return;
-    navigation.present(() => renderLanding(priorWork, recoveryReturn, books));
+    await navigation.presentAsync(() => renderLanding(priorWork, recoveryReturn, books));
     return;
   }
   if (startup.state === 'committed-recovered') {
@@ -1565,7 +1565,7 @@ async function renderApplicationStartup(startup: StartupProjection, navigationRo
   } else {
     const books = await api.listBooks({ after: null });
     if (!navigationRoute.isCurrent()) return;
-    navigation.present(() => renderLanding(startup.priorWork, undefined, books));
+    await navigation.presentAsync(() => renderLanding(startup.priorWork, undefined, books));
   }
 }
 
@@ -1576,7 +1576,7 @@ async function renderLandingFromAuthority(
 ): Promise<void> {
   const books = await api.listBooks({ after: null });
   if (!navigationRoute.isCurrent()) return;
-  renderLanding(priorWork, recoveryReturn, books);
+  await navigation.presentAsync(() => renderLanding(priorWork, recoveryReturn, books));
 }
 
 function recoveryCandidateCard(

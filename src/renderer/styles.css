@@ -2472,7 +2472,6 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .onboarding-card:empty, .onboarding-guidance:empty { display: none; }
 .onboarding-card, .onboarding-guidance { margin-block: 1.5rem; padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; }
 .onboarding-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; list-style: none; padding: 0; }
-.onboarding-data-location { overflow-wrap: anywhere; }
 .onboarding-steps li { min-width: 200px; }
 
 /* Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015): the Book-bound workspace's central screen — its safety state, the

@@ -173,6 +173,16 @@ describe('工作概览 refusals (#992)', () => {
     expect(recovered()).toBe(false);
   });
 
+  it.each(['ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE'])('the 分析 page keeps its service sentence for %s while the overview tile offers 去设置', async code => {
+    const page = await refusalHarness('analysis', code);
+    expect(page.host.textContent).toContain('原有拒绝说明。');
+    expect(page.host.textContent).not.toContain('尚未连接模型服务');
+    expect(page.host.querySelector('button')).toBeNull();
+    const tile = await refusalHarness('overview', code);
+    expect(tile.host.textContent).not.toContain('原有拒绝说明。');
+    expect(tile.host.textContent).toContain('去设置');
+  });
+
   it.each(['overview', 'analysis'] as const)('keeps other refusal text without a next-step button on %s', async (surface) => {
     const { host, navigate, serviceRead } = await refusalHarness(surface, 'ANALYSIS_LINEAGE_UNAVAILABLE');
     expect(host.textContent).toContain(surface === 'overview' ? '暂时无法读取分析状态，请打开分析重试。' : '原有拒绝说明。');

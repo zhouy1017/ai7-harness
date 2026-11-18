@@ -385,7 +385,7 @@ screen.addEventListener('drop', (event) => {
   event.preventDefault();
   if (dropImportBusy) return;
   if (!/\.docx$/iu.test(file.name)) {
-    if (!screen.querySelector('[data-document-id]')) setStatus('请拖入 DOCX 格式的稿件。', 'error');
+    if (!screen.querySelector('[data-manuscript-kind="derivative"]')) setStatus('请拖入 DOCX 格式的稿件。', 'error');
     return;
   }
   dropImportBusy = true;
