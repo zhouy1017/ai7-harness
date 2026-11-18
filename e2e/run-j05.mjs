@@ -1266,7 +1266,14 @@ async function main() {
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewRunId===${JSON.stringify(runId)} && document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]')?.disabled===false`, 'review-triage-cleanup-ready');
         await triageClick(renderer,'section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]');
         await waitFor(renderer, `document.querySelector('.review-batch-applied [data-review-action="batch-undo"]')!==null`, 'review-triage-cleanup-applied');
-        await waitFor(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}})).run?.findingCounts.pending===0)()`, 'review-triage-cleanup-none-pending');
+        // What the Book's pending list counts: a pending finding with a mark on the manuscript. One with none (its words already
+        // carry another mark) adds nothing to it and cannot be accepted.
+        const leftover=`(async () => (await window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}, findingsAfterOrdinal:null, categoryId:null, severity:null, status:'pending', chapterBlockId:null})).run.findings.filter((item)=>item.markId!==null).map((item)=>[item.ordinal,item.quote,item.output,item.markStatus,item.anchorState]))()`;
+        try {
+          await waitFor(renderer, `${leftover}.then((items)=>items.length===0)`, 'review-triage-cleanup-none-pending', 20_000);
+        } catch {
+          requireJourney(false, 'review-triage-cleanup-none-pending', await renderer.evaluate(leftover));
+        }
         await triageClick(renderer,'[data-nav-book-section="manuscript"]');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-cleanup-back-on-text');
       }
