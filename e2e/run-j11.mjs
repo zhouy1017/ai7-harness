@@ -1420,7 +1420,11 @@ async function main() {
     const wheel = async (deltaY) => {
       await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await renderer.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
     };
-    const LAST_LINE_CLEAR = `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = document.querySelector('#screen').lastElementChild; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`;
+    // The page's last line is its last element in the flow: a fixed control appended to the page (developer mode's technical
+    // details) is a bottom control the bar stands above, not a line of the page.
+    const LAST_IN_FLOW = `Array.from(document.querySelector('#screen').children).filter((node) => node instanceof HTMLElement && !['fixed', 'absolute'].includes(getComputedStyle(node).position) && node.getBoundingClientRect().height > 0).at(-1)`;
+    const LAST_LINE_CLEAR = `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = ${LAST_IN_FLOW}; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`;
+    const LAST_LINE_DETAIL = `(() => { const last = ${LAST_IN_FLOW}; const r = last?.getBoundingClientRect(); return { ...${statusBarOverlaps()}, last: last ? [last.tagName, String(last.className), Math.round(r.top), Math.round(r.bottom)] : null, scroll: [scrollY, innerHeight, document.documentElement.scrollHeight] }; })()`;
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -1447,7 +1451,7 @@ async function main() {
             }
             await waitFor(renderer, statusBarClear(), `library-error-${kind}-${form}-clear`);
             await wheel(100000);
-            await waitFor(renderer, `(document.documentElement.scrollHeight <= innerHeight + 1 || scrollY > 0) && scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`, 60_000, statusBarOverlaps());
+            await waitFor(renderer, `(document.documentElement.scrollHeight <= innerHeight + 1 || scrollY > 0) && scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`, 60_000, LAST_LINE_DETAIL);
             await wheel(-100000);
             await waitFor(renderer, `scrollY === 0`, `library-error-${kind}-${form}-scrolled-back`);
           }
