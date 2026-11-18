@@ -12,7 +12,7 @@ import { technicalWords, identityWords, technicalLayerVisible } from './technica
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { hideToast, showToast } from './components/toast.js';
-import { reportResult } from './notifications.js';
+import { reportResult, type StatusSetter } from './notifications.js';
 import { filterChoices, menuPanel, enhanceSelect } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate, reviewReadFailedLine, reviewPartMoreName,
@@ -281,7 +281,8 @@ export interface MountReviewWorkspaceOptions {
   api: ReviewApi;
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
-  setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
+  /** The status line; `settle` ends an error this page raised once a read succeeds again (Issue #1592). */
+  setStatus: StatusSetter;
   errorMessage(error: unknown, fallback: string): string;
   errorCode(error: unknown): string | null;
   /** 打开稿件 — the manuscript at the editor's last position, as the destination's own action opens it. */
@@ -824,7 +825,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function readPartPage(path: string, focus: string): void {
     const asked = projection;
     const meta = asked?.listPages?.[path];
-    if (asked === null || meta === undefined || meta.nextOrdinal === null || pagesReading.has(path) || working) return;
+    if (asked === null || meta === undefined || meta.nextOrdinal === null || working) return;
     const runId = asked.run?.reviewRunId ?? null;
     pagesReading.add(path);
     pageFailures.delete(path);
@@ -922,6 +923,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const previous = projection;
     next = retainTaskPlanPages(next, previous);
     projection = next;
+    // A read that succeeds after refused ones ends the error they raised, silently, unless another has replaced it.
+    if (readFailure !== null) options.setStatus.settle(readFailure);
     readFailure = null;
     if (card !== undefined) {
       delete card.dataset['reviewRead'];

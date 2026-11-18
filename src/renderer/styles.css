@@ -472,6 +472,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-batch-scope { margin: 0; font-weight: 800; }
 .review-batch-items { margin: .45rem 0 0; padding-left: 1.4rem; line-height: 1.7; }
 .review-report-versions, .review-report-list { margin: .55rem 0 0; padding-left: 1.4rem; line-height: 1.65; }
+/* A list read in part (Issue #1592): how much is shown, 显示更多, and a failed page said beside it. */
+.review-part-paging { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin: .45rem 0 0; font-size: .86rem; color: var(--text-subdued); }
+.review-page-failed { flex-basis: 100%; color: var(--status-blocked); font-weight: 700; }
+.review-chapter-page { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
 .review-report-part { margin-top: .8rem; }
 .review-report-table { width: 100%; margin-top: .45rem; border-collapse: collapse; font-size: .9rem; }
 .review-report-table th, .review-report-table td { padding: .35rem .5rem; border-bottom: 1px solid var(--boundary); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
