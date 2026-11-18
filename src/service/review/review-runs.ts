@@ -584,11 +584,10 @@ const QUALITY_SIGNAL_SCHEMA = 'ai7.quality-signal/1' as const;
 /**
  * What one workspace answer spends on its page of findings at most. A finding weighs about a kilobyte on
  * the wire and up to three with a long note, replacement and clause, so the page is bounded by weight as
- * well as by count, and never by more than the frame leaves once everything else is in.
+ * well as by count. It is the page's own share: the transport edge (`reviewWorkspaceWire`, #1592) pages the
+ * workspace's growing lists first and shortens this page only to what the reply then leaves.
  */
 const FINDINGS_PAGE_BYTES = 256 * 1024;
-/** Room kept beside the workspace for the response envelope and, on the job path, the job around it. */
-const WORKSPACE_WIRE_HEADROOM_BYTES = 8 * 1024;
 /** The first page of every finding: what an answer that names no page carries. */
 const FIRST_FINDING_PAGE: ReviewFindingPageRequest = { findingsAfterOrdinal: null, categoryId: null, severity: null, status: null, chapterBlockId: null };
 
@@ -609,21 +608,16 @@ function wireBytes(value: unknown): number {
 
 /**
  * The page of findings one answer carries: from the cursor on, in ordinal order, at most
- * `MAX_REVIEW_FINDINGS_PER_PAGE`, and no more than the frame leaves once the rest of the workspace is
- * weighed — but always at least one while any remain, so paging always reaches the end.
+ * `MAX_REVIEW_FINDINGS_PER_PAGE` and `FINDINGS_PAGE_BYTES` — but always at least one while any remain, so
+ * paging always reaches the end.
  */
-function findingPage(
-  workspace: ReviewWorkspaceProjection,
-  run: ReviewRunProjection,
-  candidates: ReadonlyArray<ReviewFindingProjection>,
-): ReviewRunProjection {
-  const budget = Math.min(FINDINGS_PAGE_BYTES, MAX_FRAME_BYTES - WORKSPACE_WIRE_HEADROOM_BYTES - wireBytes(workspace));
+function findingPage(run: ReviewRunProjection, candidates: ReadonlyArray<ReviewFindingProjection>): ReviewRunProjection {
   const page: ReviewFindingProjection[] = [];
   let spent = 0;
   for (const finding of candidates) {
     if (page.length >= MAX_REVIEW_FINDINGS_PER_PAGE) break;
     const weight = wireBytes(finding) + 1;
-    if (page.length > 0 && spent + weight > budget) break;
+    if (page.length > 0 && spent + weight > FINDINGS_PAGE_BYTES) break;
     page.push(finding);
     spent += weight;
   }
@@ -4007,7 +4001,7 @@ export class ReviewRunStore {
         ...(head !== null && run.projection.state === 'prepared' && run.projection.authorization === null
           ? { referenceInput: this.repeatRequest(bookId, run.projection.reviewRunId) } : {}) },
     };
-    return run === null ? workspace : { ...workspace, run: findingPage(workspace, workspace.run!, run.candidates) };
+    return run === null ? workspace : { ...workspace, run: findingPage(workspace.run!, run.candidates) };
   }
 
   #head(bookId: string): ManuscriptHead | null {

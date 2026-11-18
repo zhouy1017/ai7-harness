@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { serializedBytes } from '../../src/service/analysis/baseline-analysis-wire.js';
 import { reviewWorkspaceWire, taskPlanOutbound } from '../../src/service/task-plan.js';
-import { encodeServiceResponse } from '../../src/service/request-frames.js';
+import { decodeRequest, encodeServiceResponse } from '../../src/service/request-frames.js';
 import { appendTaskPlanPage } from '../../src/renderer/analysis-paging.js';
 import { MAX_FRAME_BYTES, type ReviewFindingProjection, type ReviewWorkspaceProjection, type ServiceResponse } from '../../src/shared/protocol.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
@@ -24,6 +24,43 @@ afterEach(async () => { store?.close(); await roots.dispose(); });
 const noModel = (): ReviewRunExecutionOwner => ({ get busy(): boolean { throw new Error('local stage consulted model governor'); },
   admitAndDispatch() { throw new Error('local stage dispatched a model'); }, whenPlaceFree() { throw new Error('local stage requested model permit'); },
   whenDone() { throw new Error('local stage awaited a model'); } });
+
+/** Every listed path read to its end as the renderer would: a request frame decoded, the store's page, a response frame encoded. */
+function readAll(bookId: string, runId: string, start: ReviewWorkspaceProjection): { wire: ReviewWorkspaceProjection; paged: string[] } {
+  let wire = start;
+  const paged = Object.entries(wire.listPages ?? {}).filter(([, meta]) => meta.nextOrdinal !== null).map(([path]) => path);
+  for (const path of paged) {
+    while (wire.listPages![path]!.nextOrdinal !== null) {
+      const meta = wire.listPages![path]!;
+      const request = decodeRequest(new TextEncoder().encode(JSON.stringify({ id: ID, op: 'getTaskPlanPage',
+        input: { bookId, kind: 'review-run', ref: runId, path, afterOrdinal: meta.nextOrdinal, digest: meta.digest } })));
+      const page = store.getTaskPlanPage(request.input as Parameters<EditorialStore['getTaskPlanPage']>[0]);
+      expect(encodeServiceResponse({ id: ID, ok: true, op: 'getTaskPlanPage', result: page } as ServiceResponse).length).toBeLessThanOrEqual(MAX_FRAME_BYTES + 4);
+      wire = appendTaskPlanPage(wire, page);
+    }
+  }
+  return { wire, paged };
+}
+
+/**
+ * Every reply that carries a workspace, as the service dispatch shapes it: the workspace itself as `result`, inside a job's `result`
+ * (prepareReviewRun, pollServiceJob, cancelServiceJob) and as quick start's `projection`; each crosses one frame.
+ */
+const WORKSPACE_OPS = ['inspectReviewWorkspace', 'launchReviewRun', 'authorizeReviewRun', 'continueReviewRun', 'recordReviewFindingDisposition',
+  'generateReviewReport', 'cancelReviewRun'] as const;
+function everyReplyCrosses(workspace: ReviewWorkspaceProjection): void {
+  const job = { jobId: ID, kind: 'review-run-preparation', state: 'completed', progress: { completed: 1, total: 1, label: '已完成' }, result: workspace, failure: null };
+  const replies = [...WORKSPACE_OPS.map((op) => ({ op, result: workspace })), ...(['prepareReviewRun', 'pollServiceJob', 'cancelServiceJob'] as const).map((op) => ({ op, result: job })),
+    { op: 'quickStartReviewRun', result: { outcome: 'fell-back', reasons: [], projection: workspace } }];
+  for (const reply of replies) {
+    const frame = encodeServiceResponse({ id: ID, ok: true, ...reply } as ServiceResponse);
+    expect(frame.length, reply.op).toBeLessThanOrEqual(MAX_FRAME_BYTES + 4);
+    const decoded = JSON.parse(frame.subarray(4).toString('utf8')) as { ok: boolean; result: Record<string, unknown> };
+    expect(decoded.ok, reply.op).toBe(true);
+    const carried = (decoded.result['projection'] ?? (reply.result === job ? decoded.result['result'] : decoded.result)) as ReviewWorkspaceProjection;
+    expect(carried.run!.findings.length, reply.op).toBeGreaterThan(0);
+  }
+}
 
 function crossing(workspace: ReviewWorkspaceProjection): ReviewWorkspaceProjection {
   const wire = taskPlanOutbound(workspace) as ReviewWorkspaceProjection;
@@ -58,21 +95,45 @@ it('reads a settled Run of 1,024 findings and its report within the reply budget
   expect(whole.run!.report).not.toBeNull();
   expect(serializedBytes(whole)).toBeGreaterThan(REPLY_BUDGET);
 
-  // The first answer: a first page of findings and every growing list of the report paged, with its facts.
-  let wire = crossing(whole);
-  expect(wire.run!.findings.length).toBeGreaterThan(0);
-  const paged = Object.entries(wire.listPages!).filter(([, meta]) => meta.nextOrdinal !== null).map(([path]) => path);
-  expect(paged).toContain('run.report.record.findings.entries');
-  for (const path of paged) {
-    while (wire.listPages![path]!.nextOrdinal !== null) {
-      const meta = wire.listPages![path]!;
-      const page = store.getTaskPlanPage({ bookId: book.bookId, kind: 'review-run', ref: runId, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
-      expect(encodeServiceResponse({ id: ID, ok: true, op: 'getTaskPlanPage', result: page } as ServiceResponse).length).toBeLessThanOrEqual(MAX_FRAME_BYTES + 4);
-      wire = appendTaskPlanPage(wire, page);
-    }
+  everyReplyCrosses(whole);
+  // The first answer: a first page of findings and every growing list of the report paged, with its facts; at every budget the
+  // wire answers, each paged list reads back whole through the request frame and the store.
+  expect(crossing(whole).run!.findings.length).toBeGreaterThan(0);
+  const pagedEver = new Set<string>();
+  for (let budget = REPLY_BUDGET; ; budget = Math.floor(budget * 0.8)) {
+    let start: ReviewWorkspaceProjection;
+    try { start = reviewWorkspaceWire(whole, budget); } catch { expect(budget).toBeLessThan(64 * 1024); break; }
+    expect(serializedBytes(start)).toBeLessThanOrEqual(budget);
+    const { wire, paged } = readAll(book.bookId, runId, start);
+    for (const path of paged) pagedEver.add(path);
+    expect(wire.run!.report).toEqual(whole.run!.report);
+    expect(wire.run!.localCheck).toEqual(whole.run!.localCheck);
+    expect(wire.scopeOptions).toEqual(whole.scopeOptions);
   }
-  expect(wire.run!.report).toEqual(whole.run!.report);
-  expect(wire.scopeOptions).toEqual(whole.scopeOptions);
+  expect([...pagedEver]).toEqual(expect.arrayContaining(['scopeOptions.chapters.chapters', 'run.report.record.findings.entries']));
+
+  // Lists this Run keeps short, grown past the share: each pages and reads back, and the findings page keeps its own share.
+  const report = whole.run!.report!;
+  const mustItems = Array.from({ length: 400 }, (_, index) => ({ ...whole.run!.findings[index % whole.run!.findings.length]!, findingId: whole.run!.findings[index % 200]!.findingId,
+    locationLabel: `段落 ${index}`, quote: '停住…又望。', note: '省略号写法不统一。' }))
+    .map(({ findingId, categoryId, categoryLabel, locationLabel, quote, note, status, statusLabel }) => ({ findingId, categoryId, categoryLabel, locationLabel, quote, note, status, statusLabel }));
+  const inflated: ReviewWorkspaceProjection = { ...whole, run: { ...whole.run!,
+    localCheck: { ...whole.run!.localCheck!, excluded: Array.from({ length: 800 }, (_, index) => ({ candidateId: `candidate-${index}`, reason: 'exact-grapheme-anchor-invalid' })) },
+    report: { ...report, record: { ...report.record, mustItems: { ...report.record.mustItems, items: mustItems },
+      statistics: { ...report.record.statistics!, rows: Array.from({ length: 2000 }, (_, index) => ({ ...report.record.statistics!.rows[index % report.record.statistics!.rows.length]!, label: `第 ${index + 1} 章` })) },
+      appendix: { ...report.record.appendix, referencedRules: mustItems.map(({ findingId, categoryLabel, locationLabel }) => ({ findingId, categoryLabel, locationLabel, rules: [] })) } } } } };
+  expect(serializedBytes(inflated) - serializedBytes(whole.run!.findings)).toBeGreaterThan(256 * 1024);
+  const spy = vi.spyOn(store, 'inspectReviewWorkspace').mockReturnValue(inflated);
+  try {
+    everyReplyCrosses(inflated);
+    const first = crossing(inflated);
+    expect(first.run!.findings).toHaveLength(whole.run!.findings.length);
+    const { wire, paged } = readAll(book.bookId, runId, first);
+    expect(paged).toEqual(expect.arrayContaining(['run.report.record.findings.entries', 'run.report.record.mustItems.items',
+      'run.report.record.appendix.referencedRules', 'run.report.record.statistics.rows', 'run.localCheck.excluded']));
+    expect(wire.run!.report).toEqual(inflated.run!.report);
+    expect(wire.run!.localCheck).toEqual(inflated.run!.localCheck);
+  } finally { spy.mockRestore(); }
 
   // The findings page by their own cursor; a reply that cannot hold the domain's page shortens it and says so.
   for (const budget of [REPLY_BUDGET, 192 * 1024]) {
@@ -94,8 +155,8 @@ it('reads a settled Run of 1,024 findings and its report within the reply budget
 
   // A report that changed between pages is refused by its digest, as a changed chapter list is.
   const stale = crossing(whole).listPages!['run.report.record.findings.entries']!;
-  store.recordReviewFindingDisposition(book.bookId, runId, whole.run!.findings[0]!.findingId, '保留作者的省略号写法');
-  crossing(store.generateReviewReport(book.bookId, runId));
+  everyReplyCrosses(store.recordReviewFindingDisposition(book.bookId, runId, whole.run!.findings[0]!.findingId, '保留作者的省略号写法'));
+  everyReplyCrosses(store.generateReviewReport(book.bookId, runId));
   expect(() => store.getTaskPlanPage({ bookId: book.bookId, kind: 'review-run', ref: runId, path: 'run.report.record.findings.entries',
     afterOrdinal: stale.nextOrdinal!, digest: stale.digest })).toThrow(/审阅结果已变化/u);
 }, 300_000);
