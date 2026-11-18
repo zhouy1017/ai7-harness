@@ -1,3 +1,4 @@
+import { rightColumnGeometry } from './comments-pane.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { launchTaskFromBar } from './launch-task-bar.mjs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1158,6 +1159,7 @@ async function main() {
     })()`);
 
     at('chip-persists');
+    await rightColumnGeometry(renderer, requireJourney, waitFor);
     // Until it is used the chip stays: across 导航, and across leaving the manuscript and coming back.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'chip-navigation-open');
     await waitFor(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === false && ${CHIP} !== null`, 'chip-navigation');

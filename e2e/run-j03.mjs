@@ -1,3 +1,4 @@
+import { rightColumnGeometry } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -1002,6 +1003,7 @@ async function main() {
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
     await assertShellFrame(renderer, 'shell-frame-manuscript');
+    await rightColumnGeometry(renderer, requireJourney, waitFor);
     await assertCardFrames(renderer);
     for (const section of ['overview', 'analysis', 'review', 'evaluation', 'deliverables']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section(section)), `shell-frame-open-${section}`);
