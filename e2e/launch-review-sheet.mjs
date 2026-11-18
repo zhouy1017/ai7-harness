@@ -8,7 +8,8 @@ export async function launchReviewFromSheet(renderer, waitFor, viewport) {
     for (const [width, height] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await pointerClick(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-${width}`);
-      await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .review-estimate')?.textContent`, `review-estimate-${width}`);
+      // The estimate is shown once computed; a local-only review has no model call to estimate, so its line may be empty.
+      await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-estimate')?.hidden===false`, `review-estimate-${width}`);
       await waitFor(renderer, `!!document.querySelector('dialog.review-sheet .task-launch-estimate .review-consequences') && ${popoverShownInside(`document.querySelector('dialog.review-sheet .task-launch-estimate .task-launch-popover')`)}`, `review-plan-reachable-${width}`);
       await pointerClick(renderer, waitFor, 'dialog.review-sheet .task-launch-estimate > summary', `review-plan-close-${width}`);
     }
