@@ -1176,10 +1176,107 @@ async function main() {
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
     await settled(renderer, 'local-workflow-settled');
 
+    await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
+    await commentsTriageForms(renderer, requireJourney, waitFor, at);
+
+    at('editor-revision');
+    // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') { toggle.click(); document.querySelector('[data-edit-method="auto"]').click(); } return true; })()`, 'revision-reading-mode');
+    await waitFor(renderer, `${READING_REVISION} && document.querySelector('[data-editor-input-mode-toggle]').textContent==='修订 · 自动应用 ▾' && document.querySelector('[data-editor-input-mode-toggle]').dataset.autoApply==='true'`, 'revision-reading-mode-ready');
+    await assertRenderer(renderer, `(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return false; window.__j05RevBlock=block.dataset.blockId; window.__j05RevOriginal=window.__j05.text(block.dataset.blockId); return typeof window.__j05RevOriginal==='string'; })()`, 'revision-block');
+    // Typing over a selection writes in place; its settle creates an applied editor card without a composer.
+    await selectInlineRevision(renderer, 'revision-select');
+    await renderer.send('Input.insertText', { text: REVISED_TEXT });
+    await waitFor(renderer, `window.__j05.composer()===null && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-ins')!==null`, 'revision-inline-draft');
+    await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const badge=block?.querySelector('.editorial-mark-applied-badge'); const mark=block?.querySelector('.editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="editor"]'); return window.__j05.composer()===null && window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal.slice(0,4)+${JSON.stringify(REVISED_TEXT)}+window.__j05RevOriginal.slice(8) && badge?.getAttribute('aria-label')?.startsWith('✎ 已改') && badge.textContent==='' && mark!==null && block.dataset.markRevised==='true'; })()`, 'revision-applied-with-badge');
+    await assertRenderer(renderer, `(() => { const badge=window.__j05.block(window.__j05RevBlock).querySelector('.editorial-mark-applied-badge'); window.__j05RevMark=badge.dataset.appliedMarkId; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return typeof window.__j05RevMark==='string'; })()`, 'revision-badge-click');
+    await waitFor(renderer, `(() => { const pane=document.querySelector('#manuscript-comments-pane'); const card=pane?.querySelector('[data-comment-card="'+window.__j05RevMark+'"]'); return pane?.hidden===false && card?.className.includes('editorial-mark-card-active') && card.querySelector('[data-mark-block="original"]')?.textContent.includes('修改前') && card.querySelector('[data-mark-block="proposed"]')?.textContent.includes(${JSON.stringify(REVISED_TEXT)}) && card.querySelector('[data-mark-block="rationale"]')?.textContent==='编辑修订' && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'revision-card-forward');
+    await assertRenderer(renderer, `(() => { const control=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j05RevMark+'"] [data-mark-action="reverse-revision"]'); control.click(); return true; })()`, 'revision-undo');
+    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')===null`, 'revision-undo-restores', 30_000);
+    await settled(renderer, 'revision-settled');
+
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-editor-input-mode-toggle]').click(); document.querySelector('[data-edit-method="confirm"]').click(); return true; })()`, 'revision-toggle-off');
+    await waitFor(renderer, `document.querySelector('[data-editor-input-mode-toggle]')?.dataset.autoApply==='false'`, 'revision-toggle-off-ready');
+    await selectInlineRevision(renderer, 'revision-pending-select');
+    await renderer.send('Input.insertText', { text: REVISED_TEXT });
+    await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const mark=block?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence==='confirmed' && block.querySelector('.inline-track-del')!==null && block.querySelector('.inline-track-ins')!==null && block.classList.contains('paragraph-revision-bar'); })()`, 'revision-pending-redline', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'`, 'revision-pending-card');
+    await commentsSelectMark(renderer, requireJourney, waitFor, await renderer.evaluate('window.__j05PendingMark'));
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-pending-ignore');
+    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-ignore-restores', 30_000);
+    await settled(renderer, 'revision-ignore-settled');
+    await selectInlineRevision(renderer, 'revision-ime-select');
+    await assertRenderer(renderer, `(() => { window.__j05ImeJournal=Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence); return true; })()`, 'revision-ime-journal');
+    await renderer.send('Input.imeSetComposition', { text: REVISED_TEXT, selectionStart: REVISED_TEXT.length, selectionEnd: REVISED_TEXT.length });
+    await assertRenderer(renderer, `(async () => { await new Promise((resolve)=>setTimeout(resolve,900)); const editor=document.querySelector('[data-testid="manuscript-editor"]'); return editor.dataset.composing==='true' && Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence)===window.__j05ImeJournal && !window.__j05.block(window.__j05RevBlock).querySelector('[data-mark-status="open"][data-mark-source="editor"]'); })()`, 'revision-ime-no-card-before-end');
+    await renderer.send('Input.insertText', { text: REVISED_TEXT });
+    await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'; })()`, 'revision-ime-card-after-end', 30_000);
+    await commentsSelectMark(renderer, requireJourney, waitFor, await renderer.evaluate('window.__j05PendingMark'));
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-ime-ignore');
+    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal`, 'revision-ime-restores', 30_000);
+    await settled(renderer, 'revision-ime-settled');
+    await selectInlineRevision(renderer, 'revision-paste-select');
+    await assertRenderer(renderer, `(() => { const data=new DataTransfer(); data.setData('text/plain',${JSON.stringify(REVISED_TEXT)}); document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true})); return true; })()`, 'revision-paste');
+    await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改'; })()`, 'revision-paste-card', 30_000);
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-testid="manuscript-editor"]').focus(); return true; })()`, 'revision-undo-focus');
+    await press(renderer, 'z', 2);
+    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && !window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')`, 'revision-history-undo', 30_000);
+    await settled(renderer, 'revision-history-undo-settled');
+    await assertRenderer(renderer, `(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); editor.focus(); return document.activeElement===editor && editor.dataset.operationLocked==='false' && editor.getAttribute('aria-readonly')==='false'; })()`, 'revision-redo-focus');
+    await press(renderer, 'z', 10);
+    await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改' && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')!==null`, 'revision-history-redo', 30_000);
+    await settled(renderer, 'revision-history-redo-settled');
+    await commentsSelectMark(renderer, requireJourney, waitFor, await renderer.evaluate('window.__j05PendingMark'));
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]').click(); return true; })()`, 'revision-pending-apply');
+    await waitFor(renderer, `window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')!==null && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-pending-applied');
+    await settled(renderer, 'revision-pending-settled');
+
+    at('ai-locks');
+    // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
+    // is still refused before execution, so this stage sends no model request.
+    fastCredentialSaved = true;
+    fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
+    requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
+    // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
+    // offers 解锁; 就选中部分让 AI 修改… on only locked words is refused before any model is asked; the badge unlocks it again.
+    const lockBlock = await renderer.evaluate(`(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && node.dataset.blockId!==window.__j05RevBlock && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return null; window.__j05LockOriginal=window.__j05.text(block.dataset.blockId); return block.dataset.blockId; })()`);
+    requireJourney(typeof lockBlock === 'string', 'lock-block');
+    await openSelectionMenu(renderer, lockBlock, 2, 10, 'lock-menu');
+    await chooseMenuItem(renderer, 'ai-lock-selection', 'lock-choose');
+    await waitFor(renderer, `(() => { const block=window.__j05.block(${JSON.stringify(lockBlock)}); const badge=block?.querySelector('[data-ai-lock-block]'); return block?.dataset.aiLocked==='true' && badge?.getAttribute('aria-label')?.startsWith('已锁定：AI 生成或改写时此段保持原样') && badge.textContent==='' && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal && window.__j05.notice().startsWith('已锁定 1 段'); })()`, 'lock-drawn');
+    await openSelectionMenu(renderer, lockBlock, 2, 10, 'lock-menu-again');
+    await assertRenderer(renderer, `window.__j05.item('ai-unlock-selection')?.disabled===false && window.__j05.item('ai-lock-selection')===null && window.__j05.item('scoped-ai-edit')?.disabled===false`, 'lock-menu-offers-unlock');
+    await chooseMenuItem(renderer, 'scoped-ai-edit', 'scoped-edit-choose');
+    await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true && document.activeElement===document.querySelector('[data-scoped-ai-edit="instruction"]')`, 'scoped-edit-composer');
+    await waitFor(renderer, `!document.querySelector('[data-scoped-ai-edit="composer"] .dispatch-chooser summary')?.textContent.includes('加载中')`, 'scoped-choice-ready');
+    try {
+      for (const [width, height] of [[1280, 800], [1008, 681]]) {
+        at(width===1280 ? 'scoped-dispatch-wide' : 'scoped-dispatch-gate');
+        await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+        // #1542: the reading measure decides the sidebar's form after the resize has laid out, so the composer settles a frame or two
+        // later (at 1008 the full sidebar first stands beside the docked 批注栏). Wait for that form and two still frames, then check.
+        const resized = `(() => { const root=document.documentElement, form=document.querySelector('[data-scoped-ai-edit="composer"]'); return {rightColumn:root.dataset.rightColumn??null,sidebar:root.dataset.sidebar??null,fits:form?form.scrollWidth<=form.clientWidth:null}; })()`;
+        if (localDebugEnabled()) recordDebugDetail('J-05', `scoped composer right after ${width}x${height}: ${JSON.stringify(await renderer.evaluate(resized))}`);
+        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height} && (!['icons','overlay'].includes(document.documentElement.dataset.rightColumn) || document.documentElement.dataset.sidebar==='icons') && new Promise(resolve=>{const box=()=>JSON.stringify(document.querySelector('[data-scoped-ai-edit="composer"]')?.getBoundingClientRect());const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(first!==undefined&&box()===first)));})`, 'scoped-dispatch-settled');
+        // The same conjunction as before, returned with its parts so a failure says which one held.
+        const reachable = await renderer.evaluate(`(async () => {const form=document.querySelector('[data-scoped-ai-edit="composer"]');if(!form)return {pass:false,form:false,rightColumn:document.documentElement.dataset.rightColumn??null};form.scrollIntoView({block:'nearest'});await new Promise(resolve=>requestAnimationFrame(resolve));const summary=form.querySelector('.dispatch-chooser summary');summary.focus();const button=form.querySelector('[data-scoped-ai-edit="submit"]'),box=button.getBoundingClientRect();const focused=document.activeElement===summary,label=summary.textContent,inView=box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight,fits=form.scrollWidth<=form.clientWidth;return {pass:focused && label.startsWith('模型 ') && inView && fits,focused,active:document.activeElement?.className??null,label,inView,box:[box.left,box.top,box.right,box.bottom],viewport:[innerWidth,innerHeight],fits,scrollWidth:form.scrollWidth,clientWidth:form.clientWidth,rightColumn:document.documentElement.dataset.rightColumn??null,sidebar:document.documentElement.dataset.sidebar??null};})()`);
+        requireJourney(reachable?.pass === true, 'scoped-launch-controls-reachable', reachable);
+        await chooseDispatch(renderer, waitFor, '[data-scoped-ai-edit="composer"] .dispatch-chooser', 'scoped-dispatch-pointer');
+      }
+    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+    await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value='把这段改短一点。'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
+    await waitFor(renderer, `window.__j05.status().includes('所选的段落都已锁定，AI 不会修改它们；先解锁再试。') && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal`, 'scoped-edit-locked-refused', 30_000);
+    await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-scoped-ai-edit="cancel"]'); if(cancel instanceof HTMLButtonElement) cancel.click(); return document.querySelector('[data-scoped-ai-edit="composer"]')===null; })()`, 'scoped-edit-closed');
+    await assertRenderer(renderer, `(() => { const badge=window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'unlock-badge-click');
+    await waitFor(renderer, `window.__j05.block(${JSON.stringify(lockBlock)})?.dataset.aiLocked===undefined && !window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]') && window.__j05.notice().startsWith('已解锁 1 段')`, 'unlocked', 30_000);
+    await settled(renderer, 'locks-settled');
+
+    // Last before closing (#1592): the large Run leaves several hundred open marks in one paragraph, more than one manuscript
+    // window carries, so every 批注栏 and later stage runs before it on the Book state it was written for.
     // #1525: a fresh local review supplies real findings for keyboard triage and the return route. A tester's edit of sample1:
     // each single 「…」 is one 修改建议 (P02): several hundred of them, so the Run's findings need a second page (#1592) and
     // deciding walks focus past the window.
-    await assertRenderer(renderer, `(() => {return window.__j05.place(window.__j05LocalBlock,0,0) && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
+    await assertRenderer(renderer, `(() => {return (() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05TriageBlock=block.dataset.blockId; return window.__j05.place(window.__j05TriageBlock,0,0); })() && ${DIRECT_EDIT} && document.execCommand('insertText',false,'逐条…检查…建议…保留…位置…往返…完成。'+'甲…'.repeat(360));})()`, 'review-triage-tester-edit');
     await settled(renderer, 'review-triage-edit-saved');
     const ACTIVE_CARD = `document.activeElement?.closest('article.review-finding')`;
     try {
@@ -1277,101 +1374,6 @@ async function main() {
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');
       }
     } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
-
-    await commentsPaneForms(renderer, requireJourney, waitFor, at, 'apply');
-    await commentsTriageForms(renderer, requireJourney, waitFor, at);
-
-    at('editor-revision');
-    // Inline revision editing (#1428): ordinary input creates cards after settle, with automatic application or pending redlines.
-    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('[data-editor-input-mode-toggle]'); if(toggle?.dataset.inputMode==='direct-edit') { toggle.click(); document.querySelector('[data-edit-method="auto"]').click(); } return true; })()`, 'revision-reading-mode');
-    await waitFor(renderer, `${READING_REVISION} && document.querySelector('[data-editor-input-mode-toggle]').textContent==='修订 · 自动应用 ▾' && document.querySelector('[data-editor-input-mode-toggle]').dataset.autoApply==='true'`, 'revision-reading-mode-ready');
-    await assertRenderer(renderer, `(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return false; window.__j05RevBlock=block.dataset.blockId; window.__j05RevOriginal=window.__j05.text(block.dataset.blockId); return typeof window.__j05RevOriginal==='string'; })()`, 'revision-block');
-    // Typing over a selection writes in place; its settle creates an applied editor card without a composer.
-    await selectInlineRevision(renderer, 'revision-select');
-    await renderer.send('Input.insertText', { text: REVISED_TEXT });
-    await waitFor(renderer, `window.__j05.composer()===null && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-ins')!==null`, 'revision-inline-draft');
-    await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const badge=block?.querySelector('.editorial-mark-applied-badge'); const mark=block?.querySelector('.editorial-mark-change-suggestion[data-mark-status="applied"][data-mark-source="editor"]'); return window.__j05.composer()===null && window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal.slice(0,4)+${JSON.stringify(REVISED_TEXT)}+window.__j05RevOriginal.slice(8) && badge?.getAttribute('aria-label')?.startsWith('✎ 已改') && badge.textContent==='' && mark!==null && block.dataset.markRevised==='true'; })()`, 'revision-applied-with-badge');
-    await assertRenderer(renderer, `(() => { const badge=window.__j05.block(window.__j05RevBlock).querySelector('.editorial-mark-applied-badge'); window.__j05RevMark=badge.dataset.appliedMarkId; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return typeof window.__j05RevMark==='string'; })()`, 'revision-badge-click');
-    await waitFor(renderer, `(() => { const pane=document.querySelector('#manuscript-comments-pane'); const card=pane?.querySelector('[data-comment-card="'+window.__j05RevMark+'"]'); return pane?.hidden===false && card?.className.includes('editorial-mark-card-active') && card.querySelector('[data-mark-block="original"]')?.textContent.includes('修改前') && card.querySelector('[data-mark-block="proposed"]')?.textContent.includes(${JSON.stringify(REVISED_TEXT)}) && card.querySelector('[data-mark-block="rationale"]')?.textContent==='编辑修订' && card.querySelector('[data-mark-action="reverse-revision"]')?.disabled===false; })()`, 'revision-card-forward');
-    await assertRenderer(renderer, `(() => { const control=document.querySelector('#manuscript-comments-pane [data-comment-card="'+window.__j05RevMark+'"] [data-mark-action="reverse-revision"]'); control.click(); return true; })()`, 'revision-undo');
-    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')===null`, 'revision-undo-restores', 30_000);
-    await settled(renderer, 'revision-settled');
-
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-editor-input-mode-toggle]').click(); document.querySelector('[data-edit-method="confirm"]').click(); return true; })()`, 'revision-toggle-off');
-    await waitFor(renderer, `document.querySelector('[data-editor-input-mode-toggle]')?.dataset.autoApply==='false'`, 'revision-toggle-off-ready');
-    await selectInlineRevision(renderer, 'revision-pending-select');
-    await renderer.send('Input.insertText', { text: REVISED_TEXT });
-    await waitFor(renderer, `(() => { const block=window.__j05.block(window.__j05RevBlock); const mark=block?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence==='confirmed' && block.querySelector('.inline-track-del')!==null && block.querySelector('.inline-track-ins')!==null && block.classList.contains('paragraph-revision-bar'); })()`, 'revision-pending-redline', 30_000);
-    await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'`, 'revision-pending-card');
-    await commentsSelectMark(renderer, requireJourney, waitFor, await renderer.evaluate('window.__j05PendingMark'));
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-pending-ignore');
-    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-ignore-restores', 30_000);
-    await settled(renderer, 'revision-ignore-settled');
-    await selectInlineRevision(renderer, 'revision-ime-select');
-    await assertRenderer(renderer, `(() => { window.__j05ImeJournal=Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence); return true; })()`, 'revision-ime-journal');
-    await renderer.send('Input.imeSetComposition', { text: REVISED_TEXT, selectionStart: REVISED_TEXT.length, selectionEnd: REVISED_TEXT.length });
-    await assertRenderer(renderer, `(async () => { await new Promise((resolve)=>setTimeout(resolve,900)); const editor=document.querySelector('[data-testid="manuscript-editor"]'); return editor.dataset.composing==='true' && Number(document.querySelector('[data-editor-persistence]').dataset.journalSequence)===window.__j05ImeJournal && !window.__j05.block(window.__j05RevBlock).querySelector('[data-mark-status="open"][data-mark-source="editor"]'); })()`, 'revision-ime-no-card-before-end');
-    await renderer.send('Input.insertText', { text: REVISED_TEXT });
-    await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]')?.textContent==='忽略/还原'; })()`, 'revision-ime-card-after-end', 30_000);
-    await commentsSelectMark(renderer, requireJourney, waitFor, await renderer.evaluate('window.__j05PendingMark'));
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="reverse-revision"]').click(); return true; })()`, 'revision-ime-ignore');
-    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal`, 'revision-ime-restores', 30_000);
-    await settled(renderer, 'revision-ime-settled');
-    await selectInlineRevision(renderer, 'revision-paste-select');
-    await assertRenderer(renderer, `(() => { const data=new DataTransfer(); data.setData('text/plain',${JSON.stringify(REVISED_TEXT)}); document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true})); return true; })()`, 'revision-paste');
-    await waitFor(renderer, `(() => { const mark=window.__j05.block(window.__j05RevBlock)?.querySelector('[data-mark-status="open"][data-mark-source="editor"]'); if(!mark)return false; window.__j05PendingMark=mark.dataset.markId; return document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改'; })()`, 'revision-paste-card', 30_000);
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-testid="manuscript-editor"]').focus(); return true; })()`, 'revision-undo-focus');
-    await press(renderer, 'z', 2);
-    await waitFor(renderer, `window.__j05.text(window.__j05RevBlock)===window.__j05RevOriginal && !window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')`, 'revision-history-undo', 30_000);
-    await settled(renderer, 'revision-history-undo-settled');
-    await assertRenderer(renderer, `(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); editor.focus(); return document.activeElement===editor && editor.dataset.operationLocked==='false' && editor.getAttribute('aria-readonly')==='false'; })()`, 'revision-redo-focus');
-    await press(renderer, 'z', 10);
-    await waitFor(renderer, `document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]')?.textContent==='应用修改' && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')!==null`, 'revision-history-redo', 30_000);
-    await settled(renderer, 'revision-history-redo-settled');
-    await commentsSelectMark(renderer, requireJourney, waitFor, await renderer.evaluate('window.__j05PendingMark'));
-    await assertRenderer(renderer, `(() => { document.querySelector('[data-comment-card="'+window.__j05PendingMark+'"] [data-mark-action="accept-and-apply"]').click(); return true; })()`, 'revision-pending-apply');
-    await waitFor(renderer, `window.__j05.block(window.__j05RevBlock)?.querySelector('.editorial-mark-applied-badge')!==null && window.__j05.block(window.__j05RevBlock)?.querySelector('.inline-track-del')===null`, 'revision-pending-applied');
-    await settled(renderer, 'revision-pending-settled');
-
-    at('ai-locks');
-    // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
-    // is still refused before execution, so this stage sends no model request.
-    fastCredentialSaved = true;
-    fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
-    requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
-    // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
-    // offers 解锁; 就选中部分让 AI 修改… on only locked words is refused before any model is asked; the badge unlocks it again.
-    const lockBlock = await renderer.evaluate(`(() => { const segmenter=new Intl.Segmenter('zh-CN',{granularity:'grapheme'}); const block=Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node)=>!node.querySelector('.editorial-mark') && node.dataset.blockId!==window.__j05RevBlock && Array.from(segmenter.segment((node.textContent??'').slice(0,40))).length===40)[1]; if(!block)return null; window.__j05LockOriginal=window.__j05.text(block.dataset.blockId); return block.dataset.blockId; })()`);
-    requireJourney(typeof lockBlock === 'string', 'lock-block');
-    await openSelectionMenu(renderer, lockBlock, 2, 10, 'lock-menu');
-    await chooseMenuItem(renderer, 'ai-lock-selection', 'lock-choose');
-    await waitFor(renderer, `(() => { const block=window.__j05.block(${JSON.stringify(lockBlock)}); const badge=block?.querySelector('[data-ai-lock-block]'); return block?.dataset.aiLocked==='true' && badge?.getAttribute('aria-label')?.startsWith('已锁定：AI 生成或改写时此段保持原样') && badge.textContent==='' && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal && window.__j05.notice().startsWith('已锁定 1 段'); })()`, 'lock-drawn');
-    await openSelectionMenu(renderer, lockBlock, 2, 10, 'lock-menu-again');
-    await assertRenderer(renderer, `window.__j05.item('ai-unlock-selection')?.disabled===false && window.__j05.item('ai-lock-selection')===null && window.__j05.item('scoped-ai-edit')?.disabled===false`, 'lock-menu-offers-unlock');
-    await chooseMenuItem(renderer, 'scoped-ai-edit', 'scoped-edit-choose');
-    await waitFor(renderer, `document.querySelector('[data-scoped-ai-edit="composer"] [data-scoped-ai-edit-scope="selected"]')?.checked===true && document.activeElement===document.querySelector('[data-scoped-ai-edit="instruction"]')`, 'scoped-edit-composer');
-    await waitFor(renderer, `!document.querySelector('[data-scoped-ai-edit="composer"] .dispatch-chooser summary')?.textContent.includes('加载中')`, 'scoped-choice-ready');
-    try {
-      for (const [width, height] of [[1280, 800], [1008, 681]]) {
-        at(width===1280 ? 'scoped-dispatch-wide' : 'scoped-dispatch-gate');
-        await renderer.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
-        // #1542: the reading measure decides the sidebar's form after the resize has laid out, so the composer settles a frame or two
-        // later (at 1008 the full sidebar first stands beside the docked 批注栏). Wait for that form and two still frames, then check.
-        const resized = `(() => { const root=document.documentElement, form=document.querySelector('[data-scoped-ai-edit="composer"]'); return {rightColumn:root.dataset.rightColumn??null,sidebar:root.dataset.sidebar??null,fits:form?form.scrollWidth<=form.clientWidth:null}; })()`;
-        if (localDebugEnabled()) recordDebugDetail('J-05', `scoped composer right after ${width}x${height}: ${JSON.stringify(await renderer.evaluate(resized))}`);
-        await waitFor(renderer, `innerWidth===${width} && innerHeight===${height} && (!['icons','overlay'].includes(document.documentElement.dataset.rightColumn) || document.documentElement.dataset.sidebar==='icons') && new Promise(resolve=>{const box=()=>JSON.stringify(document.querySelector('[data-scoped-ai-edit="composer"]')?.getBoundingClientRect());const first=box();requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(first!==undefined&&box()===first)));})`, 'scoped-dispatch-settled');
-        // The same conjunction as before, returned with its parts so a failure says which one held.
-        const reachable = await renderer.evaluate(`(async () => {const form=document.querySelector('[data-scoped-ai-edit="composer"]');if(!form)return {pass:false,form:false,rightColumn:document.documentElement.dataset.rightColumn??null};form.scrollIntoView({block:'nearest'});await new Promise(resolve=>requestAnimationFrame(resolve));const summary=form.querySelector('.dispatch-chooser summary');summary.focus();const button=form.querySelector('[data-scoped-ai-edit="submit"]'),box=button.getBoundingClientRect();const focused=document.activeElement===summary,label=summary.textContent,inView=box.left>=0 && box.top>=0 && box.right<=innerWidth && box.bottom<=innerHeight,fits=form.scrollWidth<=form.clientWidth;return {pass:focused && label.startsWith('模型 ') && inView && fits,focused,active:document.activeElement?.className??null,label,inView,box:[box.left,box.top,box.right,box.bottom],viewport:[innerWidth,innerHeight],fits,scrollWidth:form.scrollWidth,clientWidth:form.clientWidth,rightColumn:document.documentElement.dataset.rightColumn??null,sidebar:document.documentElement.dataset.sidebar??null};})()`);
-        requireJourney(reachable?.pass === true, 'scoped-launch-controls-reachable', reachable);
-        await chooseDispatch(renderer, waitFor, '[data-scoped-ai-edit="composer"] .dispatch-chooser', 'scoped-dispatch-pointer');
-      }
-    } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
-    await assertRenderer(renderer, `(() => { const field=document.querySelector('[data-scoped-ai-edit="instruction"]'); field.value='把这段改短一点。'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-scoped-ai-edit="submit"]').click(); return true; })()`, 'scoped-edit-submit');
-    await waitFor(renderer, `window.__j05.status().includes('所选的段落都已锁定，AI 不会修改它们；先解锁再试。') && window.__j05.text(${JSON.stringify(lockBlock)})===window.__j05LockOriginal`, 'scoped-edit-locked-refused', 30_000);
-    await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-scoped-ai-edit="cancel"]'); if(cancel instanceof HTMLButtonElement) cancel.click(); return document.querySelector('[data-scoped-ai-edit="composer"]')===null; })()`, 'scoped-edit-closed');
-    await assertRenderer(renderer, `(() => { const badge=window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]'); if(!badge)return false; badge.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0})); return true; })()`, 'unlock-badge-click');
-    await waitFor(renderer, `window.__j05.block(${JSON.stringify(lockBlock)})?.dataset.aiLocked===undefined && !window.__j05.block(${JSON.stringify(lockBlock)})?.querySelector('[data-ai-lock-block]') && window.__j05.notice().startsWith('已解锁 1 段')`, 'unlocked', 30_000);
-    await settled(renderer, 'locks-settled');
 
     at('completion-browser-close');
     await close();
