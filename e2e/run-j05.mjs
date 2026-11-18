@@ -1221,16 +1221,17 @@ async function main() {
         await press(renderer,'ArrowDown',1);
         const decided=[];
         let outside=0;
-        // R, A, R, then R until a decision has moved focus to a card that started below the window, at least once.
+        // R, A, R, then R until a decision has moved focus to a card that was not wholly in the window before it, at least once.
         for (let index=0; index<3 || outside===0; index+=1) {
-          requireJourney(index<24,'review-keyboard-next-below-window',{decided});
-          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, below:next!==undefined && next.getBoundingClientRect().top>=innerHeight}; })()`);
+          requireJourney(index<24,'review-keyboard-next-not-wholly-visible',{decided});
+          const state=await renderer.evaluate(`(() => { const card=${ACTIVE_CARD}; const next=Array.from(document.querySelectorAll('article.review-finding[data-status="pending"]')).find((node)=>node!==card && (card.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)); return {id:card?.dataset.findingId??null, next:next?.dataset.findingId??null, hidden:next!==undefined && next.getBoundingClientRect().bottom>innerHeight}; })()`);
           requireJourney(state.id!==null && !decided.includes(state.id),'review-keyboard-focused-distinct',{state,decided});
-          if (state.below) outside+=1;
+          if (state.hidden) outside+=1;
           await press(renderer,index===1?'a':'r');
           decided.push(state.id);
-          // Decided in place; focus moves on, and the card it lands on is within the window, so the next key decides what is seen.
-          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.top<innerHeight && r.bottom>0; })()`, 'review-keyboard-decided-next-in-view');
+          // Decided in place; focus moves to the next pending card — the one not wholly in view before — and it is now wholly inside
+          // the window, so the next key decides what is seen.
+          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(state.id)})+']'); const next=${ACTIVE_CARD}; if(card?.dataset.status!=='handled'||!next||next===card)return false; if(${JSON.stringify(state.next)}!==null && next.dataset.findingId!==${JSON.stringify(state.next)})return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.bottom<=innerHeight; })()`, 'review-keyboard-decided-next-in-view');
         }
         // What the service recorded for every decided finding, not the card's own words.
         await waitFor(renderer, `(async () => { const runId=document.querySelector('.review-workspace-card')?.dataset.reviewRunId; const ids=${JSON.stringify(decided)}; let after=null; const found=new Map(); for (let page=0; page<8 && found.size<ids.length; page+=1) { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:runId, findingsAfterOrdinal:after, categoryId:null, severity:null, status:null, chapterBlockId:null})).run; for (const item of run.findings) if (ids.includes(item.findingId)) found.set(item.findingId,item.status); if(!run.findingsTruncated)break; after=run.findings.at(-1).ordinal; } return ids.every((id)=>found.get(id)==='handled'); })()`, 'review-keyboard-service-statuses');
