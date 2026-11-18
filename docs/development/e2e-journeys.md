@@ -1,5 +1,10 @@
 # E2E journeys: what each admitted runner proves
 
+## #1506 synchronized deltas (0.7.3, protocol 205)
+
+- J-04 adds `review-synthesis-only`, `review-synthesis-only-wide` and `review-synthesis-only-gate` on the overlap Book, whose fixture leaves its 《全书审阅统合总结》 暂缺. At 1280×800 and 1008×681 real pointer input opens and closes the 生成统合总结 row's dispatch chooser and checks that the row fits the window; at 1008×681 it presses 生成统合总结. The summary-only request is byte-identical to the stage's, so the fixture answers it as it answered the stage: the stage asserts exactly one admitted request, that the Run reads 暂缺 again with the offer back, and that every finding is unchanged. A completed summary, its model mark and its travel through export and merge are proven over the captured ordinary-production transport by `tests/service/review-synthesis-only.test.ts`; a Journey-visible completed summary would need an authored fixture answer, which changes policy bytes, and is not done.
+- J-01's exact `window.ai7` key list gains `generateReviewSynthesis`; J-12 reads diagnostics protocol 205. Every other stage is reused unchanged.
+
 ## #1529 synchronized deltas (0.7.3 first use)
 
 - J-12 retains the wide first-run stage and adds 1008×681 geometry: full-row card, columns at least 200 px, required buttons on steps ① and ②. Real pointer stages open model settings and import from those steps. The prior exact data-root proof moves to Settings › Data and storage in the same developer mode, through real clicks; skip persistence remains.
