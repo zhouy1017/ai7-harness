@@ -1759,6 +1759,7 @@ async function main() {
     await waitFor(renderer, findFinished, 'task-status-finished-recorded', 60000);
     const finishedItemId = await renderer.evaluate(findFinished);
     const finishedCard = `.task-overview-card[data-task-item="${finishedItemId}"]`;
+    await renderer.evaluate(`(() => { const log = globalThis.__j09Probe = { events: [], opened: null }; const kind = (n) => n?.closest?.('[data-task-action="result"]') ? 'card-result' : n?.closest?.('[data-task-drawer-control="view-result"]') ? 'view-result' : n?.closest?.('[data-task-drawer-control="close"]') ? 'drawer-close' : n?.closest?.('[data-task-action]') ? 'card-action' : n?.closest?.('.task-overview-card') ? 'card' : 'other'; for (const type of ['click', 'keydown', 'dblclick', 'auxclick']) document.addEventListener(type, (event) => log.events.push(type === 'click' ? kind(event.target) : type), true); new MutationObserver(() => { if (log.opened === null && document.querySelector('.task-result-window')) log.opened = { active: kind(document.activeElement), drawerHidden: document.querySelector('#task-drawer')?.hidden === true, events: log.events.length }; }).observe(document.body, { childList: true, subtree: true }); })()`);
     for (const [statusWidth, statusHeight] of [[1280, 800], [1008, 681]]) {
       await renderer.send('Emulation.setDeviceMetricsOverride', { width: statusWidth, height: statusHeight, deviceScaleFactor: 1, mobile: false });
       await pointerClick(renderer, waitFor, `${finishedCard} .task-overview-more > summary`, `task-status-finished-menu-${statusWidth}`);
@@ -1776,6 +1777,13 @@ async function main() {
       await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-close-no-result-${statusWidth}`);
       await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden===true`, `task-status-finished-closed-${statusWidth}`);
       await new Promise((resolveWait) => setTimeout(resolveWait, 1000));
+      const probed = await renderer.evaluate('globalThis.__j09Probe');
+      requireJourney(probed.opened === null || !probed.events.includes('card-result'), 'probe-card-result-clicked');
+      requireJourney(probed.opened === null || !probed.events.includes('view-result'), 'probe-view-result-clicked');
+      requireJourney(probed.opened === null || !probed.events.includes('keydown'), 'probe-key-pressed');
+      requireJourney(probed.opened === null || probed.events.at(-1) !== 'drawer-close', 'probe-last-event-is-close');
+      requireJourney(probed.opened === null || probed.events.at(-1) !== 'card', 'probe-last-event-is-card');
+      requireJourney(probed.opened === null, probed.opened?.active === 'card-result' ? 'probe-focus-card-result' : probed.opened?.active === 'card' ? 'probe-focus-card' : probed.opened?.drawerHidden ? 'probe-no-input-drawer-hidden' : 'probe-no-input');
       await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, `task-status-finished-closed-no-result-${statusWidth}`);
     }
     await renderer.send('Emulation.clearDeviceMetricsOverride');
