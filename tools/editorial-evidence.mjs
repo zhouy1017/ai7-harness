@@ -172,7 +172,7 @@ export function byKind(cases) {
   const groups = new Map();
   for (const entry of cases) {
     if (entry.error !== undefined) continue;
-    const cohort = entry.measuredPass !== null ? 'measured-pass' : entry.evidence.fixtures.every((fixture) => fixture.provenance === 'authored') ? 'authored' : 'earlier-capture';
+    const cohort = entry.measuredPass !== null ? (entry.pass === undefined ? 'measured-pass' : `measured-pass-${entry.pass}`) : entry.evidence.fixtures.every((fixture) => fixture.provenance === 'authored') ? 'authored' : 'earlier-capture';
     const key = `${entry.kind}/${cohort}`;
     const group = groups.get(key) ?? { kind: entry.kind, cohort, cases: 0, concerns: 0, matched: 0, missed: 0, unmeasured: 0,
       raisedButExcluded: 0, falsePositiveChecks: 0, usefulFindings: 0, falsePositiveFindings: 0 };

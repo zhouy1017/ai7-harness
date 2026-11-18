@@ -54,6 +54,8 @@ export interface EditorialCase {
   /** `null` only for a score-only case, whose evidence is a developer-live store outside the repository (#1074). */
   readonly fixture: string | null;
   readonly measuredPass: (typeof MEASURED_PASS_KINDS)[number] | null;
+  /** The measured pass a case belongs to when it is not the 2026-10 one (`YYYY-MM`, #1074); absent for 2026-10 and earlier. */
+  readonly pass?: string;
   /**
    * How the fixture replays: the deterministic route, or the developer-live owner with or without the v14 model-question wrapper.
    * `score-only` (#1074): no fixture exists; the case scores a copy of the developer-live data root its Run was made in.
@@ -97,6 +99,7 @@ export function validateCase(value: unknown, fileId: string): EditorialCase {
   require(manuscript.source === 'sample1' || replay.route !== 'developer-live', id, 'replay');
   require(scoreOnly ? value.fixture === null : typeof value.fixture === 'string' && ID.test(value.fixture), id, 'fixture');
   require(value.measuredPass === null || (MEASURED_PASS_KINDS as ReadonlyArray<unknown>).includes(value.measuredPass), id, 'measuredPass');
+  require(value.pass === undefined || (typeof value.pass === 'string' && /^[0-9]{4}-[0-9]{2}$/u.test(value.pass) && value.measuredPass !== null), id, 'pass');
   if (scoreOnly) {
     require(value.kind === 'review', id, 'kind');
     const scope = value.input.scope;

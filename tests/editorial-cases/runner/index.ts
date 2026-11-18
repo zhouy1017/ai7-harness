@@ -41,6 +41,7 @@ export interface CaseMetrics {
   readonly title: string;
   readonly manuscript: string;
   readonly measuredPass: EditorialCase['measuredPass'];
+  readonly pass?: string;
   readonly evidence: {
     readonly fixtures: ReadonlyArray<{ identity: string; sha256: string; provenance: string }>;
     readonly binding: 'deterministic' | 'developer-live-replay' | 'developer-live-store-copy';
@@ -234,6 +235,7 @@ function caseBase(testCase: EditorialCase) {
     id: testCase.id, kind: testCase.kind, title: testCase.title,
     manuscript: testCase.manuscript.source === 'sample1' ? 'sample1' : testCase.manuscript.source === 'synthetic' ? testCase.manuscript.id : testCase.manuscript.file,
     measuredPass: testCase.measuredPass,
+    ...(testCase.pass === undefined ? {} : { pass: testCase.pass }),
   };
 }
 

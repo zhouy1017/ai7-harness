@@ -418,6 +418,81 @@
         "sample1-recorded-v41-editorial-readers-report"
       ]
     },
+    "review-literary-sample1-remeasure": {
+      "outcome": {
+        "state": "settled",
+        "categories": [
+          {
+            "categoryId": "literary-expression",
+            "state": "settled"
+          }
+        ],
+        "unitsClosed": 2,
+        "unitsTotal": 8,
+        "gaps": [
+          "literary-expression/1:adapter-failure",
+          "literary-expression/2:adapter-failure",
+          "literary-expression/3:adapter-failure",
+          "literary-expression/4:adapter-failure",
+          "literary-expression/7:adapter-failure",
+          "literary-expression/8:adapter-failure"
+        ]
+      },
+      "findings": {
+        "listed": 21,
+        "located": 21,
+        "excluded": 0,
+        "useful": 1,
+        "precise": 1,
+        "unclassified": 20,
+        "falsePositives": 0
+      },
+      "concerns": {
+        "total": 2,
+        "met": [
+          "s1-stacked-adverbials"
+        ],
+        "missed": [
+          "s1-long-attributive"
+        ],
+        "unmeasured": [],
+        "excludedOnly": []
+      },
+      "checks": {
+        "total": 4,
+        "triggered": []
+      },
+      "effort": {
+        "adopted": 0,
+        "edited": 1,
+        "rejected": 0,
+        "left": 20,
+        "applied": 1,
+        "appliedCorrect": 1,
+        "reversed": 1,
+        "restoredExactly": true
+      },
+      "delivery": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
+      },
+      "replay": {
+        "answered": 2,
+        "unmatched": 10
+      },
+      "recordedUsage": {
+        "requests": 9,
+        "inputTokens": 25989,
+        "outputTokens": 18976
+      },
+      "contractsAgree": true,
+      "fixtures": [
+        "sample1-recorded-v2-editorial-quality-review"
+      ]
+    },
     "review-literary-sample1": {
       "outcome": {
         "state": "settled",
@@ -484,6 +559,78 @@
       "contractsAgree": true,
       "fixtures": [
         "sample1-recorded-v41-editorial-review"
+      ]
+    },
+    "review-style-sample1-remeasure": {
+      "outcome": {
+        "state": "settled",
+        "categories": [
+          {
+            "categoryId": "style-and-format",
+            "state": "settled"
+          }
+        ],
+        "unitsClosed": 6,
+        "unitsTotal": 8,
+        "gaps": [
+          "style-and-format/6:adapter-failure",
+          "style-and-format/7:adapter-failure"
+        ]
+      },
+      "findings": {
+        "listed": 9,
+        "located": 9,
+        "excluded": 0,
+        "useful": 2,
+        "precise": 2,
+        "unclassified": 6,
+        "falsePositives": 1
+      },
+      "concerns": {
+        "total": 2,
+        "met": [
+          "s1-circle-zero-1990",
+          "s1-circle-zero-1980"
+        ],
+        "missed": [],
+        "unmeasured": [],
+        "excludedOnly": []
+      },
+      "checks": {
+        "total": 3,
+        "triggered": [
+          "s1-inscription-mark"
+        ]
+      },
+      "effort": {
+        "adopted": 2,
+        "edited": 0,
+        "rejected": 1,
+        "left": 6,
+        "applied": 0,
+        "appliedCorrect": 0,
+        "reversed": 0,
+        "restoredExactly": true
+      },
+      "delivery": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
+      },
+      "replay": {
+        "answered": 10,
+        "unmatched": 4
+      },
+      "recordedUsage": {
+        "requests": 13,
+        "inputTokens": 36408,
+        "outputTokens": 29790
+      },
+      "contractsAgree": true,
+      "fixtures": [
+        "sample1-recorded-v2-editorial-quality-review"
       ]
     },
     "review-style-sample1": {
@@ -628,6 +775,82 @@
       "contractsAgree": null,
       "fixtures": [
         "synthetic-editorial-review-cross-chapter-authored"
+      ]
+    },
+    "review-typos-sample1-remeasure": {
+      "outcome": {
+        "state": "settled",
+        "categories": [
+          {
+            "categoryId": "typos-and-usage",
+            "state": "settled"
+          }
+        ],
+        "unitsClosed": 6,
+        "unitsTotal": 8,
+        "gaps": [
+          "typos-and-usage/2:adapter-failure",
+          "typos-and-usage/8:adapter-failure"
+        ]
+      },
+      "findings": {
+        "listed": 27,
+        "located": 27,
+        "excluded": 0,
+        "useful": 6,
+        "precise": 6,
+        "unclassified": 21,
+        "falsePositives": 0
+      },
+      "concerns": {
+        "total": 7,
+        "met": [
+          "s1-missing-de",
+          "s1-circle-1990",
+          "s1-stray-shang",
+          "s1-missing-object",
+          "s1-missing-lai",
+          "s1-missing-ta"
+        ],
+        "missed": [],
+        "unmeasured": [
+          "s1-circle-1980"
+        ],
+        "excludedOnly": []
+      },
+      "checks": {
+        "total": 4,
+        "triggered": []
+      },
+      "effort": {
+        "adopted": 5,
+        "edited": 1,
+        "rejected": 0,
+        "left": 21,
+        "applied": 6,
+        "appliedCorrect": 6,
+        "reversed": 6,
+        "restoredExactly": true
+      },
+      "delivery": null,
+      "result": {
+        "issue": 879,
+        "quoteNotFound": 0,
+        "verbatimInBook": 0,
+        "ownBlockOrdinalMatches": 0
+      },
+      "replay": {
+        "answered": 10,
+        "unmatched": 6
+      },
+      "recordedUsage": {
+        "requests": 15,
+        "inputTokens": 41404,
+        "outputTokens": 48384
+      },
+      "contractsAgree": true,
+      "fixtures": [
+        "sample1-recorded-v2-editorial-quality-review"
       ]
     },
     "review-typos-sample1": {

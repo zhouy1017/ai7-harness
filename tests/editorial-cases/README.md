@@ -30,6 +30,10 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
   outside the repository. The cases fix their references before any live output: the chapter rule, three false-positive traps
   (a name, and period-authentic forms a reprint keeps), and the reprint-fidelity rule below.
 
+- **The 2026-11 `sample1` re-measurement** (#1074): `review-{typos,style,literary}-sample1-remeasure` carry exactly the 2026-10
+  cases' references and replay `sample1-recorded-v2-editorial-quality-review`; `"pass": "2026-11"` keeps them in their own
+  cohort (`measured-pass-2026-11`). See [the 2026-11 report](../../docs/development/editorial-evidence-2026-11.md).
+
 ## Files
 
 - `cases/<id>.json` — one case, schema `ai7.editorial-case/1` below.
@@ -49,6 +53,7 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 | `bookTitle` | The title the Book is imported under. The live driver and the harness use the same title, so contracts that freeze Book metadata ask the same question |
 | `input` | Kind-specific Task input (below) |
 | `fixture` | The model fixture identity `--replay fixtures` replays; `null` for a score-only case |
+| `pass` | Optional `YYYY-MM` of a later measured pass (#1074); absent for the 2026-10 pass |
 | `measuredPass` | The kind of the one developer-live pass that produced the fixture (`review`, `polish`, `initial-evaluation`, `readers-report`, `writing-draft`), or `null` when the case replays earlier evidence or an authored fixture |
 | `replay` | `{ "route": "score-only" }` for the four ADR 0091 books (never replayed), `{ "route": "deterministic" }` (the product's fixture route), or `{ "route": "developer-live", "modelQuestions": true | false }` — the developer-live owner whose transport is the product's deterministic adapter, with the v14 model-question wrapper on for a capture made under it and off for an earlier one |
 | `expectedConcerns` | What an editor expects the Task to raise; each is a false-negative check (a *miss* when nothing matches it) |

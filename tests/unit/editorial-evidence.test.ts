@@ -188,6 +188,18 @@ describe('the case set', () => {
     expect(await scoreRefusal((store, book) => prepare(store, book, categories, chapters(store, book)))).toBe('EDITORIAL_CASE/score-run-unsettled');
   }, 240_000);
 
+  it('re-measures sample1 in 2026-11 against exactly the 2026-10 references (#1074)', async () => {
+    for (const category of ['typos', 'style', 'literary']) {
+      const read = async (id: string) => JSON.parse(await readFile(join(CASES, `${id}.json`), 'utf8')) as Record<string, unknown>;
+      const before = await read(`review-${category}-sample1`);
+      const after = await read(`review-${category}-sample1-remeasure`);
+      for (const field of ['kind', 'manuscript', 'bookTitle', 'input', 'measuredPass', 'replay', 'expectedConcerns', 'falsePositiveChecks', 'observations']) {
+        expect(after[field], `${category}/${field}`).toEqual(before[field]);
+      }
+      expect([after.fixture, after.pass]).toEqual(['sample1-recorded-v2-editorial-quality-review', '2026-11']);
+    }
+  });
+
   it('generates each synthetic manuscript deterministically with every anchor where the table says', () => {
     for (const id of SYNTHETIC_MANUSCRIPT_IDS) {
       const first = generateSyntheticManuscript(id);
@@ -245,6 +257,10 @@ describe('the harness', () => {
       expect(report.cases.find((entry) => entry.id === 'review-typos-sample1')!.concerns.unmeasured).toEqual(['s1-missing-ta']);
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass')).toMatchObject({
         cases: 3, concerns: 11, matched: 6, missed: 4, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
+      });
+      // #1074: the 2026-11 pass, replayed from the 38 convertible captures; the tool-using units are unmeasured gaps (#1598).
+      expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'measured-pass-2026-11')).toMatchObject({
+        cases: 3, concerns: 11, matched: 9, missed: 1, unmeasured: 1, raisedButExcluded: 0, falsePositiveChecks: 1,
       });
       expect(report.byKind.find((entry) => entry.kind === 'review' && entry.cohort === 'authored')).toMatchObject({
         cases: 2, concerns: 13, matched: 11, missed: 2, falsePositiveChecks: 2,
