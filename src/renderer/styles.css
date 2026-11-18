@@ -3163,6 +3163,10 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-filters > :is(.review-filtered, .review-no-findings) { font-size: .86rem; color: var(--text-subdued); }
 
 .review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }
+
+/* The menu controls place the panel from its width while it still sits in the narrow header box; a content-sized panel keeps that width right, so the panel stays inside a 1008 px window. */
+.review-header-export > .export-menu-body { width: max-content; max-width: calc(100vw - 16px); }
+
 .dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
 .dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
 .dialogue-attempt:not([open]) > summary { flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
