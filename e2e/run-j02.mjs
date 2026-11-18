@@ -1936,12 +1936,11 @@ async function runProtectionJourney(renderer) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await clickVisibleControl(renderer, '#editing-protection [data-protection-action="options"]', 'protection-geometry-open');
     await panelGeometry(renderer, '#editing-protection-options', width, height, true);
-    console.log('TEMP-HEADER ' + JSON.stringify(await renderer.evaluate(`(() => { const header = document.querySelector('.context-header'); const h = header.getBoundingClientRect(), b = document.querySelector('#editing-protection').getBoundingClientRect(); return { size: innerWidth + 'x' + innerHeight, baseline: ${headerHeights[index]}, headerH: h.height, header: [h.left, h.right, h.top, h.bottom].map(Math.round), banner: [b.left, b.right, b.top, b.bottom].map(Math.round), viewMenu: (() => { const m = header.querySelector('details.view-menu'); const l = m?.querySelector('.view-menu-list'); const r = l?.getBoundingClientRect(); const sr = m?.querySelector('summary')?.getBoundingClientRect(); return { open: m?.open, list: r && [r.left, r.right, r.top, r.bottom].map(Math.round), summary: sr && [sr.left, sr.right].map(Math.round), style: l?.style.cssText, visible: l?.checkVisibility?.() }; })(), off: [...header.querySelectorAll('button, summary')].filter(n => n.getClientRects().length > 0).map(n => { const r = n.getBoundingClientRect(); return [(n.textContent || '').trim().slice(0, 12), Math.round(r.left), Math.round(r.right)]; }).filter(x => x[1] < 0 || x[2] > innerWidth) }; })()`)));
     await assertRenderer(renderer, `(() => {
       const header = document.querySelector('.context-header');
       const h = header.getBoundingClientRect(), b = document.querySelector('#editing-protection').getBoundingClientRect();
       return b.width > 0 && b.height > 0 && b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom && header.getBoundingClientRect().height === ${headerHeights[index]}
-        && [...header.querySelectorAll('button, summary')].filter(node => node.getClientRects().length > 0)
+        && [...header.querySelectorAll('button, summary')].filter(node => node.checkVisibility())
           .every(node => { const r = node.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; });
     })()`, 'protection-header-height');
     await clickVisibleControl(renderer, '#editing-protection-options [data-protection-action="close"]', 'protection-geometry-close');
