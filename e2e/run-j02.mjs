@@ -1044,6 +1044,10 @@ async function milestoneGeometry(renderer) {
     await panelGeometry(renderer, '.editor-save-menu-body', width, height);
     await clickVisibleControl(renderer, '.milestone-section > summary', 'milestone-geometry-form-close');
     await clickVisibleControl(renderer, '.editor-save-menu > summary', 'milestone-geometry-close');
+    // The header's export menu: a narrow anchor at the right edge whose content is wider than the anchor.
+    await clickVisibleControl(renderer, 'details.export-menu > summary', 'export-geometry-open');
+    await panelGeometry(renderer, 'details.export-menu[open] > .export-menu-body', width, height);
+    await clickVisibleControl(renderer, 'details.export-menu > summary', 'export-geometry-close');
   }
   await renderer.send('Emulation.clearDeviceMetricsOverride');
 }
