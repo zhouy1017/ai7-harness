@@ -1,4 +1,4 @@
-import { chooseDispatch } from './dispatch-chooser.mjs';
+import { chooseDispatch, pointerClick } from './dispatch-chooser.mjs';
 import { commentsPaneForms, commentsSelectMark } from './comments-pane.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
@@ -209,10 +209,7 @@ async function settle(renderer, expression, timeout = 15_000) {
   return state;
 }
 async function triageClick(renderer, selector) {
-  const point = await renderer.evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!node||node.disabled)return null; node.scrollIntoView({block:'center'}); const r=node.getBoundingClientRect(); return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight?{x:r.x+r.width/2,y:r.y+r.height/2}:null; })()`);
-  requireJourney(point !== null, 'review-triage-control-in-window');
-  await renderer.send('Input.dispatchMouseEvent', {type:'mousePressed',button:'left',clickCount:1,...point});
-  await renderer.send('Input.dispatchMouseEvent', {type:'mouseReleased',button:'left',clickCount:1,...point});
+  await pointerClick(renderer, waitFor, selector, 'review-triage-pointer');
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
@@ -577,6 +574,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'dispatch-chooser-back-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'dispatch-chooser-back-ready');
     await renderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    fastCredentialSaved = false;
+    fastCredentialReference = undefined;
     at('selection-menu-empty');
 
     // Two paragraphs long enough to mark, whose first 80 code units are 80 graphemes.
@@ -1186,6 +1185,7 @@ async function main() {
         await renderer.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1,mobile:false});
         await triageClick(renderer,'[data-nav-book-section="review"]');
         await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'review-triage-ready');
+        await triageClick(renderer,'.review-new-actions > details > summary');
         await triageClick(renderer,'[data-review-action="new-local-check"]');
         await waitFor(renderer, `document.querySelector('dialog.review-sheet[open] [data-review-action="start"]')?.disabled===false`, 'review-triage-start-ready');
         await triageClick(renderer,'dialog.review-sheet [data-review-action="start"]');
@@ -1267,6 +1267,7 @@ async function main() {
     at('ai-locks');
     // Earlier missing-connection checks removed the placeholder. Restore it before opening the chooser; locked text
     // is still refused before execution, so this stage sends no model request.
+    fastCredentialSaved = true;
     fastCredentialReference = await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}}).then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.connection?.credentialReference)`);
     requireJourney(typeof fastCredentialReference==='string','scoped-placeholder-reference');
     // 🔒 锁定 (Issue #1412) in ordinary mode: the selection's paragraph is locked from the menu and drawn with its badge; the menu then
