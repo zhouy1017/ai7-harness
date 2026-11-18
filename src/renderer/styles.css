@@ -1970,10 +1970,25 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
-.status-bar { position: relative; flex: none; z-index: 20; width: fit-content; max-width: calc(100% - 1.5rem); margin: .65rem auto; padding: .4rem .85rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
+.status-bar { position: fixed; z-index: 40; bottom: calc(var(--bottom-controls, 0px) + .45rem); left: calc(var(--sidebar-width) + .75rem); right: calc(var(--status-area-right, 0px) + .75rem); display: flex; align-items: flex-start; gap: .4rem; width: fit-content; margin: 0 auto; padding: .3rem .85rem; box-shadow: 0 4px 20px var(--shadow); border: 1px solid var(--boundary); border-radius: 1rem; background: var(--surface); color: var(--text-subdued); font-size: .86rem; line-height: 1.45; overflow-wrap: anywhere; }
+/* A long message wraps to at most four lines and scrolls inside the bar beyond that; × stays in view beside it. */
+.status-line { min-width: 0; max-height: calc(4 * 1.45em); overflow-y: auto; scrollbar-width: thin; }
+.status-bar > .status-dismiss { flex: none; }
 .status-bar[data-tone="busy"] { color: var(--status-attention); }
 .status-bar[data-tone="success"] { color: var(--status-good); }
 .status-bar[data-tone="error"] { color: var(--status-blocked); }
+/* #1519: the bar is an overlay at the bottom of the content area, never in the page flow: it reserves nothing while hidden and
+   changes no element's height when it appears. It stands above the page's bottom controls (`--bottom-controls`, published by
+   `followBottomControls`) and between the sidebar and the Task Drawer, docked or overlaying; on the manuscript it keeps to the
+   text column (`--status-area-right`). Only while it shows does a scrolling page get the padding that lets its last line be
+   scrolled clear of it; the manuscript keeps its height and its text pane gets that padding instead. */
+body[data-task-drawer="open"] .status-bar { right: max(calc(min(var(--task-drawer-width), 100vw - 1rem) + .75rem), calc(var(--status-area-right, 0px) + .75rem)); }
+:root[data-focus-mode="on"] .status-bar { left: .75rem; }
+:root[data-status-bar="shown"] body:not(:has(#screen[data-screen="editor"])) { padding-bottom: calc(var(--status-bar-height, 0px) + 1rem); }
+/* A sticky action bar takes the bar's height as space above itself, so at the page's end the bar stands in that space and the
+   control just above the sticky bar is not under it. */
+:root[data-status-bar="shown"] #screen :is(.commit-bar, .workbench-actions, .task-overview-confirm) { margin-top: calc(1.4rem + var(--status-bar-height, 0px) + .45rem); }
+:root[data-status-bar="shown"] .editor-window { padding-bottom: calc(clamp(1.5rem, 3vw, 2.5rem) + var(--status-bar-height, 0px) + var(--bottom-controls, 0px)); }
 .error-panel { border-color: var(--status-blocked); background: var(--status-blocked-surface); }
 
 @media (max-width: 960px) {

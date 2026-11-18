@@ -5,7 +5,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { DIRECT_EDIT, CAPTURE_JOURNAL_EDIT, journalEditPersisted, MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, statusBarClear } from './controller.mjs';
 import { pointerClick } from './dispatch-chooser.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -492,19 +492,24 @@ async function runSettingsPages(renderer, cancellation) {
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-ready');
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-conflict');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('「书库」') && ${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-reset-conflict-refused');
+  // #1519: the refusal stands in a bar fixed to the bottom of the content area — inside the window, beside the sidebar, on a page taller
+  // than the window and without scrolling — and its appearance did not change the page's height. Both Gate-relevant window sizes.
+  for (const [width, height] of [[1280, 800], [1008, 681]]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && scrollY === 0 && document.documentElement.scrollHeight > innerHeight && ${statusBarClear()}`, `keyboard-error-fixed-${width}`);
+  }
+  await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
   // 全部恢复默认 for the whole section.
   await renderer.evaluate(`window.ai7.savePreference({ key: 'keyboard.bindings', value: { 'nav.series': 'Mod+Shift+U', 'nav.knowledge': 'Mod+Shift+K' } })`);
   await click(renderer, '返回', 'keyboard-back');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-back-library');
+  // A stale refusal does not follow the editor to another page.
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true && !document.querySelector('#persistence-status')?.textContent.includes('「书库」')`, 'keyboard-error-cleared-on-page-change');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen-all');
   await waitFor(renderer, `${label('nav.knowledge')}===${JSON.stringify(darwin ? 'Command+Shift+K' : 'Ctrl+Shift+K')}`, 'keyboard-two-remaps');
   await clickSelector(renderer, '[data-keyboard-reset-all]', 'keyboard-reset-all');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-all-restored');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-all-restored-kept');
-  // A4: a later successful reset leaves the earlier refusal visible until the editor acknowledges it.
-  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('「书库」') && document.querySelector('#persistence-status')?.hidden===false`, 'keyboard-error-retained-after-success');
-  await clickSelector(renderer, '#persistence-status .status-dismiss', 'keyboard-error-dismiss');
-  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true`, 'keyboard-error-dismissed');
   await click(renderer, '返回', 'keyboard-done');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-done-hub');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'keyboard-done-library');
@@ -1240,7 +1245,7 @@ async function main() {
     // At 1120 px and wider the page makes room for the drawer, which is a column beside it; below, the
     // drawer lies over the page and the page keeps its width (editor-surfaces §0.3).
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1180, height: 820, deviceScaleFactor: 1, mobile: false });
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('[data-toast]'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.width-500)<=1 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length===1; })()`, 'drawer-push-column');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('#persistence-status'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.width-500)<=1 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length<=1; })()`, 'drawer-push-column');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 820, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page)return false; const box=drawer.getBoundingClientRect(); return innerWidth===1000 && getComputedStyle(document.body).paddingRight==='0px' && getComputedStyle(drawer).position==='fixed' && page.getBoundingClientRect().right>box.left+100 && box.width<=document.documentElement.clientWidth; })()`, 'drawer-overlay-below-1120');
     await renderer.send('Emulation.clearDeviceMetricsOverride');

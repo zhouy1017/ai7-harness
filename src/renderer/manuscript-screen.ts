@@ -978,7 +978,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (saveMenu !== undefined) (saveMenu.element as HTMLDetailsElement).open = !(saveMenu.element as HTMLDetailsElement).open;
   };
   const saveMenuKeydown = (event: KeyboardEvent): void => {
-    if (saveMenu !== undefined && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); persistenceStatus.click(); }
+    // The bar's own 关闭 button keeps its keys; only the bar itself opens the menu.
+    if (saveMenu !== undefined && event.target === persistenceStatus && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); persistenceStatus.click(); }
   };
   const surface: ManuscriptScreen = {
     bookId: initialWindow.bookId,
@@ -1556,7 +1557,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // With the guard released a later navigation may already have put its own window on screen; its
       // arrival is then the one to name, and naming this one over it would state a place already left.
       if (!destroyed && currentWindow === next) {
-        setStatus(`已到达${positionWords(next)}。`, 'success');
+        // Paging is not an action to confirm: the line stays in the live region only.
+        setStatus(`已到达${positionWords(next)}。`);
       }
       return true;
     } catch (error) {
@@ -2806,7 +2808,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // Arriving is itself a position worth remembering: a manuscript opened and then left by closing the
   // product never reaches an exit this surface can see, and the entry is what should answer then.
   void rememberEntryPosition();
-  setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
+  setStatus(`已打开${positionWords(initialWindow)}。`);
   if (entryNotice !== undefined) showTransientNotice(entryNotice);
   // 审阅's 回到原文 arrives at a finding's mark: its card opens as a click on it would.
   if (openMarkId !== undefined) void editorialMarks.openMark(openMarkId);
@@ -2882,7 +2884,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const step = (): void => {
       if (!following()) return;
       if (Date.now() > deadline) {
-        setStatus(REVIEW_MARKS_FOLLOW_STOPPED, 'success');
+        // A follower's own line is not an action's result: a toast, which clears no standing error.
+        showTransientNotice(REVIEW_MARKS_FOLLOW_STOPPED);
         return;
       }
       void api.inspectReviewWorkspace({ reviewRunId, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(

@@ -1,4 +1,5 @@
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type RendererApi } from '../shared/protocol.js';
+import { reportResult } from './notifications.js';
 
 /**
  * 导出审阅报告（DOCX） (Issue #1430): one click compiles the Book's 审阅报告, opens the system Save dialog on
@@ -26,7 +27,7 @@ async function exportReviewReportDocx(api: ReportExportApi, bookId: string, setS
   if (reviewed.bookId !== bookId || reviewed.target.report === null) throw new Error(REVIEW_REPORT_EXPORT_WORDS.failed);
   const chosen = await api.chooseManuscriptExportDestination({ target: { kind: 'report', reportId: reviewed.target.report.reportId },
     revisionId: reviewed.target.revisionId, options, format: 'docx', reviewDigest: reviewed.reviewDigest, suggestedFileName: reviewed.suggestedFileName });
-  if (chosen.outcome === 'cancelled') { setStatus(REVIEW_REPORT_EXPORT_WORDS.cancelled); return; }
+  if (chosen.outcome === 'cancelled') { reportResult(setStatus, REVIEW_REPORT_EXPORT_WORDS.cancelled); return; }
   if (chosen.preparation.bookId !== bookId) throw new Error(REVIEW_REPORT_EXPORT_WORDS.failed);
   setStatus(REVIEW_REPORT_EXPORT_WORDS.writing, 'busy');
   const receipt = await api.approveManuscriptExport({ preparationId: chosen.preparation.preparationId });

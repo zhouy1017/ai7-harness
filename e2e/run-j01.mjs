@@ -1802,8 +1802,11 @@ async function runJourney(
       const blockId = block.dataset.blockId;
       const before = block.textContent;
       if (!blockId || before === null) return false;
-      const isBusy = () => status.dataset.tone === 'busy' && status.textContent.includes('写入修订日志');
-      const isDurable = () => status.dataset.tone === 'success' && status.textContent.includes('已写入修订日志');
+      // Autosave says nothing on screen (#1519), so the acknowledgement is read from the editor's own state: pending while a write
+      // is owed, confirmed with a later journal sequence once it is durable.
+      const startSequence = Number(save.dataset.journalSequence);
+      const isBusy = () => save.dataset.editorPersistence === 'pending';
+      const isDurable = () => save.dataset.editorPersistence === 'confirmed' && Number(save.dataset.journalSequence) > startSequence;
       let busy = isBusy();
       globalThis.__ai7JournalProbe = new Promise((resolve) => {
         let settled = false;
@@ -1819,7 +1822,7 @@ async function runJourney(
           busy ||= isBusy();
           if (isDurable()) finish(true);
         });
-        observer.observe(status, { attributes: true, attributeFilter: ['data-tone'], childList: true, subtree: true, characterData: true });
+        observer.observe(save, { attributes: true, attributeFilter: ['data-editor-persistence', 'data-journal-sequence'] });
         timeout = setTimeout(() => finish(false), 30000);
       });
       const dirtyReady = new Promise((resolve) => {
