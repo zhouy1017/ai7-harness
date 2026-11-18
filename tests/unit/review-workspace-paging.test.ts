@@ -120,7 +120,7 @@ function mount(state: Stub, status: StatusSetter = Object.assign(vi.fn(), { sett
     openManuscript: async () => undefined, goToText: async () => undefined, openPlan: () => undefined, openSearchSettings: () => undefined, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
-  return { root, surface, status: status as StatusSetter & ReturnType<typeof vi.fn>, unexpected, ...calls };
+  return { root, surface, api, status: status as StatusSetter & ReturnType<typeof vi.fn>, unexpected, ...calls };
 }
 
 const card = (root: MiniElement): MiniElement => root.querySelector('.review-workspace-card')!;
@@ -352,5 +352,81 @@ describe('a refused workspace read on the 审阅 page (#1592)', () => {
     card(view.root).querySelector('[data-review-action="reread"]')!.click(); await flush();
     expect(card(view.root).dataset['reviewState']).toBe('partial');
     expect(view.status.settle).toHaveBeenCalledWith(TOO_LARGE);
+  });
+});
+
+describe('a failed page of a review list (#1592 re-check)', () => {
+  const FAILED = '服务暂时无法回答。';
+  const realStatus = () => {
+    const bar = new MiniElement('div');
+    const real = createStatusSurface(bar as unknown as HTMLElement);
+    return { bar, real, status: Object.assign(vi.fn((message: string, tone?: 'busy' | 'success' | 'error') => real(message, tone)), { settle: vi.fn((message: string) => real.settle(message)) }) };
+  };
+
+  it('ends its error in the bar once the retry reads the page', async () => {
+    const { bar, status } = realStatus();
+    const view = mount(PAGED(), status); await flush();
+    view.getTaskPlanPage.mockRejectedValueOnce(refusal('SERVICE_UNAVAILABLE', FAILED));
+    more(view.root, MUST).click(); await flush();
+    expect(bar.textContent).toContain(FAILED);
+    more(view.root, MUST).click(); await flush();
+    expect(status.settle).toHaveBeenCalledWith(FAILED);
+    expect(bar.textContent).not.toContain(FAILED);
+    view.surface.refresh(); await flush();
+    expect(bar.textContent).not.toContain(FAILED);
+  });
+
+  it('frees its control when a decision on a finding that was in flight settles in place', async () => {
+    const state = PAGED();
+    const run = state.full.run!;
+    const category = { categoryId: 'typos-and-usage', label: '错别字与用法', position: 1, output: 'change-suggestion', riskPointsOnly: false, batchApply: true,
+      basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } },
+      state: 'settled', stateLabel: '已完成', detail: null, taskIntentId: null, planEnvelopeDigest: DIGEST, modeLabel: null, plan: null, progress: null, findingsCount: 1, excludedCount: 0 };
+    const finding = { findingId: 'f-1', categoryId: 'typos-and-usage', categoryLabel: '错别字与用法', ordinal: 1, severity: 'must', severityLabel: '必须处理',
+      output: 'change-suggestion', riskPoint: false, status: 'pending', statusLabel: '待处理', statusDetail: '公开合成状态', blockId: 'blk_777777777777777777777777',
+      fromGrapheme: 0, toGrapheme: 8, blockPosition: 0, chapterBlockId: null, chapterTitle: null, quote: '公开合成文字', note: '公开合成问题',
+      replacement: '公开合成替换', clauseRefs: [], stateLine: null, markId: 'm-1', markStatus: 'open', anchorState: 'exact', ignoreReason: null, historicalMarker: null };
+    state.full = { ...state.full, run: { ...run, categories: [category], findings: [finding], findingsTotal: 1 } } as ReviewWorkspaceProjection;
+    const view = mount(state); await flush();
+    let decide!: (value: unknown) => void;
+    const reject = vi.fn(() => new Promise((resolve) => { decide = resolve; }));
+    let failPage!: () => void;
+    view.getTaskPlanPage.mockImplementationOnce(() => new Promise((_resolve, reject) => { failPage = () => reject(refusal('SERVICE_UNAVAILABLE', FAILED)); }));
+    Object.assign(view.api, { recordChangeSuggestionDecision: reject });
+    more(view.root, MUST).click(); await flush();
+    view.root.querySelector('article[data-finding-id="f-1"]')!.dispatchEvent({ type: 'keydown', key: 'r' }); await flush();
+    expect(reject).toHaveBeenCalledTimes(1);
+    failPage(); await flush();
+    expect(paging(view.root, MUST)!.querySelector('[role="alert"]')!.textContent).toBe(FAILED);
+    decide({ card: { status: 'open', suggestion: null } }); await flush();
+    expect(view.inspectReviewWorkspace).toHaveBeenCalledTimes(1);
+    expect(more(view.root, MUST).disabled).toBe(false);
+  });
+
+  it('is not said beside the list of a Run opened afterwards', async () => {
+    const state = PAGED();
+    const view = mount(state); await flush();
+    view.getTaskPlanPage.mockRejectedValueOnce(refusal('SERVICE_UNAVAILABLE', FAILED));
+    more(view.root, MUST).click(); await flush();
+    expect(paging(view.root, MUST)!.querySelector('[role="alert"]')).not.toBeNull();
+    state.full = workspace(360, 1, 'partial', OTHER);
+    view.surface.refresh(); await flush();
+    expect(card(view.root).dataset['reviewRunId']).toBe(OTHER);
+    expect(paging(view.root, MUST)!.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+describe('重新读取 after the bar was dismissed (#1592 re-check)', () => {
+  it('says the same refusal again when the editor asks', async () => {
+    const bar = new MiniElement('div');
+    const real = createStatusSurface(bar as unknown as HTMLElement);
+    const status = Object.assign(vi.fn((message: string, tone?: 'busy' | 'success' | 'error') => real(message, tone)), { settle: vi.fn((message: string) => real.settle(message)) });
+    const TOO_LARGE = '审阅摘要超出可读取范围。';
+    const view = mount({ full: workspace(3), budget: 4 * 1024 * 1024, refuse: refusal('TASK_PLAN_SUMMARY_TOO_LARGE', TOO_LARGE) }, status); await flush();
+    bar.querySelector('.status-dismiss')!.click();
+    expect(bar.textContent).not.toContain(TOO_LARGE);
+    card(view.root).querySelector('[data-review-action="reread"]')!.click(); await flush();
+    expect(bar.textContent).toContain(TOO_LARGE);
+    expect(card(view.root).querySelector('[data-review-action="reread"]')!.disabled).toBe(false);
   });
 });
