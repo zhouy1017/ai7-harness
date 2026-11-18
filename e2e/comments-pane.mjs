@@ -1,4 +1,27 @@
+import { pointerClick, pointerElementDescription, pointerFailureDetail } from './dispatch-chooser.mjs';
 import { SIDEBAR, sidebarNavigate } from './controller.mjs';
+
+// Docking is possible only when an icon sidebar leaves the full reading measure, padding and edge rail. The rail counts at its
+// design width (4.75rem), never at the page's own measured width, so a rail moved on top of the pane cannot excuse an overlay.
+const commentsCanDock = `(() => { const pane=document.querySelector('.manuscript-comments-pane'),editor=document.querySelector('.editor-window'),style=getComputedStyle(editor),root=getComputedStyle(document.documentElement),page=getComputedStyle(document.body),outside=innerWidth-document.querySelector('.editor-workspace').getBoundingClientRect().width-parseFloat(page.paddingLeft)-parseFloat(page.paddingRight);return innerWidth-outside-parseFloat(root.getPropertyValue('--sidebar-icons-width'))-4.75*parseFloat(root.fontSize)-pane.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(editor.querySelector('.ProseMirror')).fontSize); })()`;
+// The permanent rail keeps its own grid place beside an overlaid column: static, and to the right of the pane.
+const commentsRailBeside = `(() => { const edge=document.querySelector('.editor-edge'),pane=document.querySelector('.manuscript-comments-pane'); return getComputedStyle(edge).position==='static' && pane.getBoundingClientRect().right<=edge.getBoundingClientRect().left+1; })()`;
+
+async function commentsReadingSize(renderer, check, waitFor, size) {
+  await pointerClick(renderer,waitFor,SIDEBAR.settings,'comments-reading-settings');
+  await waitFor(renderer, `document.querySelector('[data-settings-route="appearance"]')`, 'comments-reading-settings-ready');
+  await pointerClick(renderer,waitFor,'[data-settings-route="appearance"]','comments-reading-appearance');
+  await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]')`, 'comments-reading-size-ready');
+  const bounds=await renderer.evaluate(`(() => {const input=document.querySelector('[data-view-typography="fontSize"]');return {min:Number(input.min),max:Number(input.max),step:Number(input.step)};})()`);
+  await pointerClick(renderer,waitFor,'[data-view-typography="fontSize"]','comments-reading-size-focus');
+  const press=async(key,code)=>{await renderer.send('Input.dispatchKeyEvent',{type:'keyDown',key,code:key,windowsVirtualKeyCode:code});await renderer.send('Input.dispatchKeyEvent',{type:'keyUp',key,code:key,windowsVirtualKeyCode:code});};
+  if(size===bounds.max)await press('End',35);
+  else {await press('Home',36);for(let index=0;index<(size-bounds.min)/bounds.step;index++)await press('ArrowRight',39);}
+  await waitFor(renderer, `document.querySelector('[data-view-typography="fontSize"]').value===${JSON.stringify(String(size))} && getComputedStyle(document.documentElement).getPropertyValue('--manuscript-font-size').trim()===${JSON.stringify(String(size)+'px')}`, 'comments-reading-size-saved');
+  await pointerClick(renderer,waitFor,SIDEBAR.section('manuscript'),'comments-reading-return');
+  await waitFor(renderer, `document.querySelector('.manuscript-comments-pane') && document.querySelector('.ProseMirror')`, 'comments-reading-editor-ready');
+  if(await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`))await pointerClick(renderer,waitFor,'[data-edge-entry="comments"]','comments-reading-pane-open');
+}
 
 // All async service operations are evaluated directly and awaited; waitFor receives synchronous DOM predicates only.
 // pointer-events:none removes SVG from hit tests; compare its sibling stacking context
@@ -95,11 +118,12 @@ export async function commentsOrdinaryMode(renderer, check, waitFor) {
 }
 
 export async function commentsLayouts(renderer, check, waitFor) {
+  await rightColumnGeometry(renderer, check, waitFor);
   const native = await renderer.evaluate(`({ width: innerWidth, height: innerHeight })`);
   for (const size of [native, { width: 1280, height: 800 }, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
     check(await renderer.evaluate(`(() => { const entry=document.querySelector('[data-edge-entry="comments"]'); if(!entry||entry.disabled)return false; if(entry.getAttribute('aria-expanded')!=='true')entry.click(); return true; })()`), 'comments-layout-open');
-    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && (innerWidth>=1120 ? p.width>=300 && p.width<=340 && t.right<=p.left+1 : getComputedStyle(panel).position==='absolute' && p.width>=Math.min(300,document.querySelector('.editor-workspace').getBoundingClientRect().width-e.width) && p.left>=document.querySelector('.editor-workspace').getBoundingClientRect().left-1); })()`, 'comments-responsive-geometry');
+    await waitFor(renderer, `(() => { const panel=document.querySelector('.manuscript-comments-pane'), text=document.querySelector('.manuscript-surface'), edge=document.querySelector('.editor-edge'), editor=document.querySelector('.editor-window'), prose=editor.querySelector('.ProseMirror'); const p=panel.getBoundingClientRect(), t=text.getBoundingClientRect(), e=edge.getBoundingClientRect(), style=getComputedStyle(editor); const measure=28*parseFloat(getComputedStyle(prose).fontSize), content=editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight); const w=document.querySelector('.editor-workspace').getBoundingClientRect(); return !panel.hidden && p.height>100 && p.right<=e.left+1 && p.bottom<=innerHeight+1 && ${commentsRailBeside} && p.width>=Math.min(300,w.width-e.width)-1 && p.width<=341 && (${commentsCanDock} ? content>=measure-1 && t.right<=p.left+1 && getComputedStyle(panel).position==='static' : getComputedStyle(panel).position==='absolute' && p.left>=w.left-1 && (innerWidth<1008 || content>=measure-1)); })()`, 'comments-responsive-geometry');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='on' && getComputedStyle(document.querySelector('.manuscript-comments-pane')).display==='none'; })()`), 'comments-focus-hidden');
     check(await renderer.evaluate(`(() => { document.querySelector('[data-view-command="focus-mode"]').click(); return document.documentElement.dataset.focusMode==='off' && !document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-focus-restored');
     check(await renderer.evaluate(`(() => { document.querySelector('.manuscript-comments-heading [aria-label="关闭批注栏"]').click(); return document.querySelector('.manuscript-comments-pane').hidden; })()`), 'comments-layout-close');
@@ -119,11 +143,23 @@ export async function commentsPaneForms(renderer, check, waitFor, at, action) {
     for(const [form,size] of [['column',{width:1280,height:800}],['overlay',{width:1008,height:681}]]) {
       at('comments-inline-'+action+'-'+form);
       await seedCommentsPane(renderer,check,waitFor,size);
-      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===${JSON.stringify(form==='overlay'?'absolute':'static')}`, 'comments-'+form+'-viewport');
+      await waitFor(renderer,`innerWidth===${size.width} && innerHeight===${size.height} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position===(${commentsCanDock}?'static':'absolute')`, 'comments-'+form+'-viewport');
       await commentsGeometryAndScroll(renderer,check,waitFor);
       if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
       else await commentsReplyAndResolve(renderer,check,waitFor);
-      if(form==='overlay')await commentsSeedConnectorCases(renderer,check,waitFor);
+      if(form==='overlay') {
+        at('comments-connector-'+action+'-overlay');
+        const originalSize=await renderer.evaluate(`parseFloat(getComputedStyle(document.querySelector('.ProseMirror')).fontSize)`);
+        try {
+          await commentsReadingSize(renderer,check,waitFor,24);
+          await seedCommentsPane(renderer,check,waitFor,size);
+          await waitFor(renderer, `!${commentsCanDock} && getComputedStyle(document.querySelector('.manuscript-comments-pane')).position==='absolute' && ${commentsRailBeside}`, 'comments-reading-overlay-measure');
+          await commentsGeometryAndScroll(renderer,check,waitFor);
+          if(action==='apply')await commentsApplyAndReject(renderer,check,waitFor);
+          else await commentsReplyAndResolve(renderer,check,waitFor);
+          await commentsSeedConnectorCases(renderer,check,waitFor);
+        } finally { await commentsReadingSize(renderer,check,waitFor,originalSize); }
+      }
       check(true,'comments-'+form+'-complete');
     }
   } finally {
@@ -145,12 +181,15 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
     const short=item=>item && Array.from(item.text??'').length>=20 && Array.from(item.text??'').length<=120;
     const previous=globalThis.__commentsSeedBlocks??[];
     const candidates=paragraphs.map((item,index)=>({item,index})).filter(({item,index})=>short(item)&&short(paragraphs[index+1])&&!previous.includes(item.blockId)&&!previous.includes(paragraphs[index+1].blockId));
-    const previousIndex=paragraphs.findIndex(item=>item.blockId===previous[0]);
-    const block=previous.length?candidates.sort((a,b)=>Math.abs(b.index-previousIndex)-Math.abs(a.index-previousIndex))[0]?.item:(candidates.find(({index})=>index>=10)??candidates[0])?.item;
+    // Away from every earlier seed of this run, not only the last: a third pass (the 24 px overlay) must not land beside the
+    // first pass's resolved cards, which keep their place in the pane without highlighted words and push the new cards down.
+    const previousIndexes=previous.map(id=>paragraphs.findIndex(item=>item.blockId===id)).filter(index=>index>=0);
+    const distance=index=>Math.min(...previousIndexes.map(previousIndex=>Math.abs(index-previousIndex)));
+    const block=previousIndexes.length?candidates.sort((a,b)=>distance(b.index)-distance(a.index))[0]?.item:(candidates.find(({index})=>index>=10)??candidates[0])?.item;
     if(!block)return false;
     const second=paragraphs[paragraphs.indexOf(block)+1];
     if(!second)return false;
-    globalThis.__commentsSeedBlocks=[block.blockId,second.blockId];
+    globalThis.__commentsSeedBlocks=[...previous,block.blockId,second.blockId];
     const ids=[]; const kinds=['change-suggestion','change-suggestion','annotation','annotation','editor-note'];
     for(let index=0;index<12;index++){
       const current=index<5?block:second;
@@ -238,8 +277,13 @@ async function commentsInsideSelection(renderer,check,waitFor) {
   const id=await renderer.evaluate('__comments.ids[11]'),selector='.editor-window [data-mark-id="'+id+'"]';
   const point=()=>renderer.evaluate(`(() => {const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2;return {x,y,hit:words.contains(document.elementFromPoint(x,y)),inside:getSelection().containsNode(words,true)};})()`);
   for(const pane of [true,false]) {
-    if(!pane)check(await renderer.evaluate(`(() => {document.querySelector('[data-edge-entry="comments"]').click();return document.querySelector('.manuscript-comments-pane').hidden;})()`),'comments-existing-range-close-pane');
+    if(!pane) {
+      await pointerClick(renderer,waitFor,'[data-edge-entry="comments"]','comments-existing-range-close-pane');
+      await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden && document.documentElement.dataset.rightColumn==='none'`, 'comments-existing-range-pane-layout-closed');
+    }
     await commentsRangeInside(renderer,check,waitFor,selector);
+    await renderer.evaluate('globalThis.__commentsInkPrevious=null');
+    await waitFor(renderer, `(() => { const words=document.querySelector(${JSON.stringify(selector)}),r=words.getClientRects()[0],x=r.left+r.width/2,y=r.top+r.height/2; const before=globalThis.__commentsInkPrevious;globalThis.__commentsInkPrevious={x,y};return words.contains(document.elementFromPoint(x,y))&&getSelection().containsNode(words,true)&&before?.x===x&&before?.y===y;})()`, 'comments-existing-range-inside-stable');
     const before=await point();check(before.hit&&before.inside,'comments-existing-range-inside-hit',before);
     check((await commentsNativeClick(renderer,before)).real,'comments-existing-range-inside-real-click');
     await waitFor(renderer,pane?`document.querySelector('[data-comment-card="'+${JSON.stringify(id)}+'"]').dataset.selected==='true'`:`document.querySelector('.editorial-mark-layer [data-mark-card="'+${JSON.stringify(id)}+'"]')`,pane?'comments-existing-range-inside-pane-selected':'comments-existing-range-inside-floating-open');
@@ -302,7 +346,13 @@ export async function commentsSelectMark(renderer, check, waitFor, markId, requi
       if(y<p.top||y>p.bottom)return 'outside-pane';if(!node.contains(document.elementFromPoint(x,y)))return 'covered';return 'moving';
     })()`);
     const names={missing:'comments-card-hit-ready-missing','pane-hidden':'comments-card-hit-ready-pane-hidden','not-listed':'comments-card-hit-ready-not-listed','outside-pane':'comments-card-hit-ready-outside-pane',covered:'comments-card-hit-ready-covered',moving:'comments-card-hit-ready-moving'};
-    check(false,names[reason]??'comments-card-hit-ready');
+    const detail=await renderer.evaluate(`(() => {
+      const describe=${pointerElementDescription.toString()},node=document.querySelector('[data-comment-card="'+${id}+'"]'),r=node?.getBoundingClientRect(),x=r?r.left+12:null,y=r?r.top+10:null,hit=r?document.elementFromPoint(x,y):null,coveringAncestors=[];
+      for(let ancestor=hit?.parentElement;ancestor&&coveringAncestors.length<12;ancestor=ancestor.parentElement){const box=ancestor.getBoundingClientRect();coveringAncestors.push({...describe(ancestor),rect:[box.left,box.top,box.width,box.height]});}
+      return {viewport:[innerWidth,innerHeight],target:describe(node),frames:[{rect:r?[r.left,r.top,r.width,r.height]:null,point:r?[x,y]:null,hit:describe(hit),contains:!!node&&node.contains(hit)}],coveringAncestors};
+    })()`);
+    try { check(false,names[reason]??'comments-card-hit-ready'); }
+    catch(error) { if(error&&typeof error==='object')Object.defineProperty(error,'pointerFailure',{value:pointerFailureDetail(detail),configurable:true});throw error; }
   }
   const point=await renderer.evaluate(`__commentsPoint`);
   if(requireCompact)check(point.expanded==='false'&&point.selected!=='true','comments-card-compact-before-click',point);
@@ -379,8 +429,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const textMoved=scroll.scrollTop!==beforeText;
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     const cardTop=firstAnchor.card.getBoundingClientRect().top, wordsTop=firstAnchor.anchor.getBoundingClientRect().top;
+    const anchorlessAbove=Array.from(document.querySelectorAll('[data-comment-card]')).filter(card=>!card.hidden&&!document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')&&card.getBoundingClientRect().top<cardTop).length;
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
-    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
+    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,anchorlessAbove,selected};
   })()`);
   const assertCoordinates = coordinates => {
   check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
@@ -632,4 +683,37 @@ async function commentsHandledFilter(renderer, check, waitFor, indexes) {
   await waitFor(renderer, `__comments.ids.every((id,index)=>{const handled=${JSON.stringify(indexes)}.includes(index);return document.querySelector('[data-comment-card="'+id+'"]')?.hidden===!handled && document.querySelector('.editor-window [data-mark-id="'+id+'"]')?.dataset.markFilteredOut===(handled?undefined:'true');})`, 'comments-handled-cards-and-highlights');
   check(await renderer.evaluate(`(() => {document.querySelector('[data-mark-status-filter="all"]').click();return true;})()`), 'comments-handled-reset');
   await waitFor(renderer, `__comments.ids.every(id=>document.querySelector('[data-comment-card="'+id+'"]')?.hidden===false)`, 'comments-handled-all-restored');
+}
+
+// Exercise the column through actual mouse input at both supported forms.
+export async function rightColumnGeometry(renderer, check, waitFor) {
+  const native = await renderer.evaluate('({width:innerWidth,height:innerHeight})');
+  // The docked drawer moves the page's padding over several frames (#1490): press only a target that holds still, and name what covers it.
+  // Its stability wait is an async expression, which J-02's waitFor would read as a truthy Promise: poll it through evaluate, === true.
+  const settled = async (target, expression, name) => {
+    for (const deadline = Date.now() + 10_000; Date.now() < deadline; await new Promise(done => setTimeout(done, 50))) if (await target.evaluate(expression) === true) return;
+    check(false, name);
+  };
+  const click = selector => pointerClick(renderer, settled, selector, 'right-column-'+selector.replace(/[^a-z]+/g, '-').replace(/^-|-$/g, ''));
+  const measure = `(() => { const editor=document.querySelector('.editor-window'), style=getComputedStyle(editor), prose=editor.querySelector('.ProseMirror'); return editor.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)>=28*parseFloat(getComputedStyle(prose).fontSize)-1; })()`;
+  const initial = await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`);
+  try {
+    for (const size of [{width:1280,height:800},{width:1008,height:681}]) {
+      await renderer.send('Emulation.setDeviceMetricsOverride', {...size,deviceScaleFactor:1,mobile:false});
+      if(await renderer.evaluate(`document.querySelector('.manuscript-comments-pane').hidden`)) await click('[data-edge-entry="comments"]');
+      await waitFor(renderer, `innerWidth===${size.width} && innerHeight===${size.height} && ${measure} && (()=>{const p=document.querySelector('.manuscript-comments-pane'),t=document.querySelector('.manuscript-surface');return !p.hidden&&t.getBoundingClientRect().right<=p.getBoundingClientRect().left+1;})()`, 'right-column-docked-measure');
+      await click('[data-edge-entry="navigation"]');
+      await waitFor(renderer, `document.querySelector('.manuscript-comments-pane').hidden && !document.querySelector('.manuscript-navigator').hidden`, 'right-column-navigation-replaces');
+      await click('[data-edge-entry="navigation"]');
+      await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden && localStorage.getItem('ai7.comments-pane.'+document.querySelector('.editor-shell').dataset.bookId)==='true'`, 'right-column-comments-restored');
+      await click('[data-edge-entry="tasks"]');
+      await waitFor(renderer, `${measure} && document.querySelector('.manuscript-comments-pane').hidden && !document.querySelector('#task-drawer').hidden && document.documentElement.dataset.sidebar==='icons'`, 'right-column-drawer-measure');
+      if (size.width === 1280) await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer').getBoundingClientRect(), text=document.querySelector('.manuscript-surface').getBoundingClientRect(); return parseFloat(getComputedStyle(document.body).paddingRight)>0 && text.right<=drawer.left+1; })()`, 'right-column-drawer-docked');
+      await click('.task-drawer-close');
+      await waitFor(renderer, `!document.querySelector('.manuscript-comments-pane').hidden && ${measure}`, 'right-column-drawer-restores');
+      if (size.width === 1280) await waitFor(renderer, `document.documentElement.dataset.sidebarCollapsed==='true' || document.documentElement.dataset.sidebar==='full'`, 'right-column-sidebar-full-again');
+    }
+    if(initial) await click('[data-edge-entry="comments"]');
+  } finally { await renderer.send('Emulation.clearDeviceMetricsOverride'); }
+  await waitFor(renderer, `innerWidth===${native.width} && innerHeight===${native.height}`, 'right-column-native-restored');
 }

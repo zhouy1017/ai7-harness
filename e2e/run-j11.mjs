@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 import { admittedSpanText, ADMITTED_BASELINE_DOCX, fixedArchiveTime } from './composed-docx.mjs';
-import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass, statusBarClear } from './controller.mjs';
+import { DIRECT_EDIT, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass, statusBarClear, statusBarOverlaps } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
@@ -1414,13 +1414,22 @@ async function main() {
 
     // #1519: a failed 查找图书 stands in the bar fixed to the bottom of the content area — a short line and a very long one, at both
     // window sizes, with the sidebar open and folded to icons. The bar is whole inside the window, wraps its words (a long one
-    // scrolls inside the bar), covers neither the sidebar nor its pinned 设置 row, and with the page scrolled to its end the last
-    // line stands clear above it; × only dismisses it. The fault is armed apart from the press, which is real pointer input.
+    // scrolls inside the bar) and covers no control the page shows — the sidebar, its pinned 设置 row and every control of the
+    // library; × only dismisses it. (With the Journey's Books the library does not scroll at these sizes, so the last line is
+    // proved where a page scrolls with the bar showing: J-02's manuscript and J-12's import review.) The fault is armed apart
+    // from the press, which is real pointer input.
     const LONG_FAILURE = '查找没有完成：本机业务服务暂时没有回答，请稍后再试；这条说明故意写得很长，用来确认它在窗口里自行折行，既不超出窗口，也不压住侧栏、侧栏底部的设置，或页面的最后一行。'.repeat(5);
-    const wheel = async (deltaY) => {
-      await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: Math.round(await renderer.evaluate('innerWidth') * 0.6), y: 300, deltaX: 0, deltaY });
-    };
-    const LAST_LINE_CLEAR = `(() => { const bar = document.querySelector('#persistence-status').getBoundingClientRect(); const last = document.querySelector('#screen').lastElementChild; return last instanceof HTMLElement && last.getBoundingClientRect().bottom <= bar.top + 0.5; })()`;
+    // The bar covers no control the page shows: every visible button, link, field, select and disclosure outside the bar lies
+    // clear of its box, and a hit test at the control's centre lands on the control, not on the bar.
+    const COVERED_CONTROLS = `Array.from(document.querySelectorAll('button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"]')).filter((node) => {
+      const bar = document.querySelector('#persistence-status'); if (bar.contains(node)) return false;
+      const r = node.getBoundingClientRect(), box = bar.getBoundingClientRect();
+      if (!(r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) || getComputedStyle(node).visibility === 'hidden') return false;
+      const hit = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+      return !(r.right <= box.left + 0.5 || r.left >= box.right - 0.5 || r.bottom <= box.top + 0.5 || r.top >= box.bottom - 0.5) || (hit instanceof Element && bar.contains(hit));
+    })`;
+    const NO_CONTROL_COVERED = `${COVERED_CONTROLS}.length === 0`;
+    const COVERED_DETAIL = `({ ...${statusBarOverlaps()}, covered: ${COVERED_CONTROLS}.slice(0, 6).map((node) => [node.tagName, String(node.className), ...['left', 'top', 'width', 'height'].map((key) => Math.round(node.getBoundingClientRect()[key]))]) })`;
     try {
       for (const [width, height] of [[1280, 800], [1008, 681]]) {
         await renderer.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -1439,17 +1448,13 @@ async function main() {
           })()`, `library-error-${kind}-arm`);
           await pointerClick(renderer, waitFor, '[data-book-filter-action="find"]', `library-error-${kind}-find`);
           await waitFor(renderer, `(() => { const bar = document.querySelector('#persistence-status'); return bar instanceof HTMLElement && !bar.hidden && bar.dataset.tone === 'error' && bar.textContent.startsWith(${JSON.stringify(kind === 'short' ? '无法查找图书。' : '查找没有完成')}) && document.documentElement.dataset.statusBar === 'shown'; })()`, `library-error-${kind}-shown`);
-          await assertRenderer(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${width === 1008 ? 'document.documentElement.scrollHeight > innerHeight' : 'true'} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`);
+          await waitFor(renderer, `innerWidth === ${width} && innerHeight === ${height} && ${statusBarClear()} && ${kind === 'long' ? "(() => { const bar = document.querySelector('#persistence-status'), line = bar.querySelector('.status-line'); return bar.getBoundingClientRect().height > 40 && bar.getBoundingClientRect().height <= innerHeight / 4 && line.scrollHeight > line.clientHeight; })()" : 'true'}`, `library-error-${kind}-in-view`, 10_000, statusBarOverlaps());
           for (const form of ['full', 'icons']) {
             if (form === 'icons') {
               await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-fold-sidebar`);
               await waitFor(renderer, `document.documentElement.dataset.sidebar === 'icons'`, `library-error-${kind}-folded`);
             }
-            await waitFor(renderer, statusBarClear(), `library-error-${kind}-${form}-clear`);
-            await wheel(100000);
-            await waitFor(renderer, `scrollY + innerHeight >= document.documentElement.scrollHeight - 1 && ${LAST_LINE_CLEAR} && ${statusBarClear()}`, `library-error-${kind}-${form}-clear-of-last-line`);
-            await wheel(-100000);
-            await waitFor(renderer, `scrollY === 0`, `library-error-${kind}-${form}-scrolled-back`);
+            await waitFor(renderer, `${statusBarClear()} && ${NO_CONTROL_COVERED}`, `library-error-${kind}-${form}-covers-no-control`, 60_000, COVERED_DETAIL);
           }
           await pointerClick(renderer, waitFor, '#sidebar-toggle', `library-error-${kind}-open-sidebar`);
           await waitFor(renderer, `document.documentElement.dataset.sidebar !== 'icons'`, `library-error-${kind}-opened`);
@@ -2267,8 +2272,9 @@ async function main() {
       [['open-draft', '打开草稿', false], ['open-task', '查看任务', false]]]) &&
       JSON.stringify(versioned.templates[1][3]) === JSON.stringify([['prepare', '起草', false]]), 'readers-report-versioned-words', versioned);
     await mkdir(draftExportsRoot, { recursive: true });
-    await assertRenderer(renderer, `(() => { const menu=document.querySelector('.evaluation-readers-report li[data-template="author"] [data-export-menu]'); menu.querySelector('summary').click(); return menu.open && Array.from(menu.querySelectorAll('[data-export-format-action]'), button=>button.dataset.exportFormatAction).join(',')==='docx,pdf,markdown'; })()`, 'readers-report-export-menu');
-    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-export-format-action="docx"]', 'readers-report-export-open');
+    await pointerClick(renderer, waitFor, '.evaluation-readers-report li[data-template="author"] [data-export-menu] > summary', 'readers-report-export-menu');
+    await assertRenderer(renderer, `(() => { const menu=document.querySelector('.evaluation-readers-report li[data-template="author"] [data-export-menu]'); return menu.open && [...menu.querySelectorAll('[data-export-format-action]')].map(button => button.dataset.exportFormatAction).join(',') === 'docx,pdf,markdown' && menu.querySelectorAll('[data-export-clean]').length === 1; })()`, 'readers-report-export-four-choices');
+    await pointerClick(renderer, waitFor, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-export-format-action="docx"]', 'readers-report-export-open');
     const draftCard = `document.querySelector('[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export')`;
     await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'done' && ${draftCard}.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'readers-report-export-written', 120_000);
     const writtenDraft = await readFile(draftExportPath);

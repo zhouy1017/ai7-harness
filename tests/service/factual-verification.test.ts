@@ -988,9 +988,14 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }], maxTotalTokens: 180, twoAssertions: true });
     const book = await newBook('核查恢复边界');
     const materialize = vi.spyOn(store, 'materializeFactualVerification');
-    if (phase === 'findings') materialize.mockImplementation(() => { throw new Error('synthetic crash'); });
+    let injectedCrashes = 0;
+    if (phase === 'findings') materialize.mockImplementation(() => { injectedCrashes += 1; throw new Error('synthetic crash'); });
     const { reviewRunId } = await review(book, undefined, { steps: (steps) => phase === 'outcome'
       ? { ...steps, settle: () => { throw new Error('synthetic crash'); }, fail: () => undefined } : steps });
+    if (phase === 'findings') {
+      expect(materialize).toHaveBeenCalled();
+      expect(injectedCrashes).toBeGreaterThan(0);
+    }
     materialize.mockRestore();
     const initial = retentionRows(reviewRunId);
     expect(initial.outcome.classification).toBe('interrupted');
@@ -1142,7 +1147,10 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
       if (reviewRunId === failing) throw new Error('synthetic version failure');
       original.call(this, reviewRunId);
     });
-    try { await reopen(); } finally { fail.mockRestore(); }
+    try {
+      await reopen();
+      expect(fail).toHaveBeenCalledWith(failing);
+    } finally { fail.mockRestore(); }
     expect(store.inspectReviewWorkspace(first.bookId, failing).run?.categories[0]).toMatchObject({ state: 'interrupted', findingsCount: 1 });
     expect(lens(first, failing).results.length).toBe(0);
     expect(lens(second, kept).results.length).toBe(1);

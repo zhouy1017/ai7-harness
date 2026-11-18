@@ -347,6 +347,46 @@ describe('quiet notice lifetime', () => {
     } finally { restore(); }
   });
 
+  it('settle ends the standing error its owner names, silently, and nothing else', () => {
+    const restore = installMiniDom();
+    try {
+      const surface = miniDocument.createElement('div'); const announcer = miniDocument.createElement('div');
+      miniDocument.body.append(surface, announcer);
+      const update = createStatusSurface(surface as unknown as HTMLElement, announcer as unknown as HTMLElement);
+      // No standing error: nothing happens.
+      update('已保存');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('已保存');
+      expect(announcer.textContent).toBe('已保存');
+      // Another error stands: it is left untouched.
+      update('无法保存审阅偏好。', 'error');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(false);
+      expect(surface.textContent).toBe('无法保存审阅偏好。');
+      expect(surface.querySelector('.status-dismiss')).not.toBeNull();
+      // The named error: it ends, its × goes, no toast, the announcer says nothing.
+      update('无法读取审阅。', 'error');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(true);
+      expect(surface.textContent).toBe('');
+      expect(surface.querySelector('.status-dismiss')).toBeNull();
+      expect(miniDocument.body.querySelector('[data-toast]')).toBeNull();
+      expect(announcer.textContent).toBe('');
+      // Raised again after a settle, it shows again.
+      update('无法读取审阅。', 'error');
+      expect(surface.hidden).toBe(false);
+      expect(surface.dataset['tone']).toBe('error');
+      expect(surface.textContent).toBe('无法读取审阅。');
+      // A busy line beside the error stays when the error settles.
+      update('正在读取…', 'busy');
+      update.settle('无法读取审阅。');
+      expect(surface.hidden).toBe(false);
+      expect(surface.dataset['tone']).toBe('busy');
+      expect(surface.textContent).toBe('正在读取…');
+    } finally { restore(); }
+  });
+
   it('closing an error only dismisses it, and a new destination clears it', () => {
     const restore = installMiniDom();
     try {

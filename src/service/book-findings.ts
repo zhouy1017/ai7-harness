@@ -1,3 +1,7 @@
+import type { DatabaseSync } from 'node:sqlite';
+import { asString, requireStore } from './store-records.js';
+import { reviewFindingHasGuessedAnchor } from '../shared/review-basis.js';
+import type { ReviewWorkspaceProjection, ReviewFindingPageRequest, EvaluationWorkspaceProjection } from '../shared/protocol.js';
 import { BOOK_FINDINGS_PAGE_SIZE, type BookFindingProjection, type BookFindingsProjection, type BaselineAnalysisResultSetRevisionProjection, type ParagraphAnalysisProjection } from '../shared/protocol.js';
 
 /** A disposable page over the owning records. No dispositions or other records live here. */
@@ -49,4 +53,57 @@ export function paragraphAnalysis(bookId: string, manuscriptId: string, blockId:
     }
   }
   return { bookId, manuscriptId, blockId, revision: revision === null ? null : { revisionId: revision.revisionId, ordinal: revision.ordinal, freshness: revision.freshness }, total, items };
+}
+
+/** Aggregates current readings without owning their state. */
+export interface BookFindingsHost {
+  readonly authority: DatabaseSync;
+  evaluationBookTitle(bookId: string): string;
+  latestAnalysisRevision(bookId: string): BaselineAnalysisResultSetRevisionProjection | null;
+  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: undefined, page?: ReviewFindingPageRequest): ReviewWorkspaceProjection;
+  inspectEvaluation(bookId: string, recordId: string | null): EvaluationWorkspaceProjection;
+}
+
+/** Read-only aggregation: the source owners derive dispositions on every read. */
+export function inspectBookFindings(host: BookFindingsHost, bookId: string, offset = 0): BookFindingsProjection {
+  requireStore(Number.isSafeInteger(offset) && offset >= 0, 'FINDINGS_PAGE_INVALID', '发现分页无效。');
+  host.evaluationBookTitle(bookId);
+  const store = host;
+  function* findings(): Generator<BookFindingProjection> {
+    const revision = store.latestAnalysisRevision(bookId);
+    if (revision !== null) for (const gap of revision.gaps) {
+      yield { id: `gap:${revision.revisionId}:${gap.unitOrdinal}`, category: 'analysis-gaps', categoryLabel: '分析未覆盖', severity: '注意', status: '未覆盖', summary: gap.reason,
+        target: { kind: 'gap', revisionId: revision.revisionId, unitOrdinal: gap.unitOrdinal, blockId: gap.blockIds[0] ?? null } };
+    }
+    // The workspace's history is bounded; enumerate identities from its ledger, then page each Run through its owner.
+    const runs = store.authority.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').iterate(bookId);
+    for (const row of runs) {
+      const reviewRunId = asString(row.review_run_id);
+      let after: number | null = null;
+      for (;;) {
+        const run: NonNullable<ReviewWorkspaceProjection['run']> = store.inspectReviewWorkspace(bookId, reviewRunId, undefined,
+          { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
+        for (const finding of run.findings) if (finding.status === 'pending') {
+          yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
+            ...(finding.output === 'change-suggestion' && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null ? {
+              suggestion: { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, markId: finding.markId, blockId: finding.blockId,
+                batchAllowed: !reviewFindingHasGuessedAnchor(finding.note) && run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
+            } : {}),
+            target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
+        }
+        if (!run.findingsTruncated || run.findings.length === 0) break;
+        after = run.findings[run.findings.length - 1]!.ordinal;
+      }
+    }
+    // Only the version on show is current: an earlier version is immutable history, its risks carried or settled by the next.
+    const record = store.inspectEvaluation(bookId, null).record;
+    if (record !== null) {
+      for (const risk of record.content.risks) if (!risk.reviewed && (risk.level !== null || risk.statement !== null)) {
+        yield { id: `risk:${record.recordId}:${risk.riskId}`, category: 'evaluation-risks', categoryLabel: '评估风险', severity: risk.level === 'high' ? '高' : risk.level === 'medium' ? '中' : risk.level === 'low' ? '低' : '未评级', status: '待复核',
+          summary: risk.statement ?? record.profile.risks.find((item) => item.riskId === risk.riskId)?.label ?? '评估风险',
+          target: { kind: 'risk', recordId: record.recordId, riskId: risk.riskId, revisionId: record.revisionId } };
+      }
+    }
+  }
+  return bookFindingsPage(bookId, findings(), offset);
 }
