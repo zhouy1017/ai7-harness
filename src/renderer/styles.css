@@ -134,7 +134,7 @@ button:focus-visible, input:focus-visible {
    header above the screen. The page makes room for the sidebar as it does for the Task Drawer on the right; below 760 px,
    or when the editor collapses it, the sidebar shows SVG icons and Book initials, and
    the name stays the row's accessible name. */
-:root { --sidebar-width: 14rem; --sidebar-icons-width: 56px; }
+:root { --sidebar-full-width: 14rem; --sidebar-width: var(--sidebar-full-width); --sidebar-icons-width: 56px; }
 :root[data-sidebar="icons"] { --sidebar-width: var(--sidebar-icons-width); }
 body { padding-left: var(--sidebar-width); }
 .app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .4rem; width: var(--sidebar-width); padding: .5rem .55rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid var(--boundary); background: var(--shell); color: var(--text); }
@@ -693,15 +693,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    beside the central destination. Below 1120 px it lies over the page (§0.3: 所有面都要在 1120 px 以下把右侧辅助面
    改为覆盖抽屉); at 1120 px and wider the page makes room for it, so the manuscript stays visible beside the plan.
    It never scrolls sideways, its header and footer stay in view, and its content wraps at 200% zoom. */
-:root { --task-drawer-width: 500px; }
+:root { --task-drawer-width: 500px; --manuscript-min-measure: 28; }
 .task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(var(--task-drawer-width), calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
 .task-drawer[hidden] { display: none; }
 /* An ordinary launch keeps its initiating form until success; its start controls sit in front of that sheet. */
 .task-drawer[data-task-drawer-view="launch"] { z-index: 61; }
 body:has(.task-drawer[data-task-drawer-view="launch"]:not([hidden])) #task-drawer-separator { z-index: 62; }
-@media (min-width: 1120px) {
+:root:is([data-right-column="wide"], [data-right-column="icons"]) {
   body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
   .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
+}
+@media (min-width: 1120px) {
+  :root:not([data-right-column]) body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
+  :root:not([data-right-column]) .task-drawer { box-shadow: none; }
 }
 .task-drawer-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .5rem; padding: .55rem .8rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
 .task-drawer-identity { display: grid; gap: .2rem; min-width: 0; justify-items: start; }
@@ -1669,16 +1673,13 @@ body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
   .manuscript-comments-leaders path { stroke: Highlight; }
   .manuscript-comments-leaders circle { fill: Highlight; }
 }
-@media (min-width: 1120px) {
-  .editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; grid-template-rows: minmax(0, 1fr); }
-}
-@media (max-width: 1119px) {
-  .manuscript-comments-leaders { z-index: 9; }
-  .editor-workspace > .manuscript-comments-pane { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: min(340px, calc(100% - 4.75rem)); }
-}
-@media (max-width: 760px) {
-  .editor-workspace > .manuscript-comments-pane { right: 3.4rem; width: min(340px, calc(100% - 3.4rem)); }
-}
+.editor-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px) 4.75rem; }
+:root[data-right-column="overlay"] .manuscript-comments-leaders { z-index: 9; }
+/* Only the supporting columns overlay; the permanent rail (also an aside) keeps its grid place. A document keeps its lens
+   beside the text at the lens's narrowest width while the 批注栏 overlays it; with 导航 open the lens lies below the text. */
+:root[data-right-column="overlay"] .editor-workspace.document-workspace:has(> .manuscript-comments-pane:not([hidden])) { grid-template-columns: minmax(0, 1fr) 14rem 4.75rem; }
+:root[data-right-column="overlay"] .editor-workspace:has(> :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden])) { grid-template-columns: minmax(0, 1fr) 4.75rem; }
+:root[data-right-column="overlay"] .editor-workspace > :is(.manuscript-comments-pane, .manuscript-navigator):not([hidden]) { position: absolute; grid-area: auto; z-index: 8; inset: 0 4.75rem 0 auto; width: clamp(300px, 26vw, 340px); }
 :root[data-focus-mode="on"] .manuscript-comments-pane, :root[data-focus-mode="on"] .manuscript-comments-leaders { display: none !important; }
 .editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) var(--supporting-effective-width) 4.75rem; }
 .manuscript-surface { position: relative; grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -1794,6 +1795,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 /* ADR 0092: the former min(70vh, 760px) is a floor, so the pane is never shorter than before; it grows into the viewport height left after a 15rem header allowance, up to 960px. A context header taller than 15rem can still leave a small page scroll. */
 /* The text keeps the editor's own column (VIEW-004, about 72ch by default), centred with breathing room on both sides. */
 .editor-window { position: relative; flex: 1 1 0; min-height: 0; overflow: auto; padding: clamp(1.5rem, 3vw, 2.5rem) clamp(1.5rem, 4vw, 3.5rem); background: var(--manuscript); }
+:root:is([data-right-column="wide"], [data-right-column="icons"], [data-right-column="overlay"]) .editor-window { padding-inline: 1.25rem; }
 /* Manuscript reading typography (Issue #951; VIEW-004/005): the face, size, leading, column and alignment come from the local
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
@@ -2948,9 +2950,9 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-finding.is-split > .review-finding-main { grid-column: 1; min-width: 0; }
 .review-finding.is-split > .review-finding-actions { grid-column: 2; margin-top: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .35rem; }
 .review-finding.is-split > :not(.review-finding-heading):not(.review-finding-main):not(.review-finding-actions) { grid-column: 1 / -1; }
-@media (max-width: 760px) {
-  .review-finding.is-split { grid-template-columns: minmax(0, 1fr); }
-  .review-finding.is-split > .review-finding-actions { grid-column: 1; flex-wrap: wrap; }
+@container review-finding (max-width: 720px) {
+  .review-finding.is-split > .review-finding-main { grid-column: 1 / -1; }
+  .review-finding.is-split > .review-finding-actions { grid-column: 1 / -1; flex-wrap: wrap; margin-top: .35rem; }
 }
 
 /* BEGIN Issue #1429: semantic mark categories and persistent comments filters. */
@@ -3125,6 +3127,34 @@ html[data-reduced-motion="true"] :is(.ui-select-popover, .ui-menu-panel, .view-m
 .review-synthesis > summary::before { content: '▸'; }
 .review-synthesis[open] > summary::before { content: '▾'; }
 .review-synthesis-preview { display: inline; flex: 1; min-width: 0; }
+
+/* Review results: a compact header and filters leave the findings in view. */
+.review-workspace-card:has(.review-run-leading) { margin-top: .4rem; padding: .6rem .8rem; }
+.review-run-leading { margin-top: 0; padding-top: 0; border-top: 0; }
+.review-run-leading > .review-run-heading { justify-content: flex-start; gap: .3rem .5rem; font-size: .84rem; }
+.review-run-leading > .review-run-heading h4 { font: inherit; font-weight: 700; }
+.review-run-leading .review-run-meta, .review-run-leading .review-new-actions { margin: 0; }
+.review-run-leading .review-history-fold { flex: 0 0 auto; order: 0; position: relative; }
+.review-run-leading .review-history-fold[open] { flex-basis: 100%; order: 2; }
+.review-run-leading .review-new-actions { margin-left: auto; }
+/* Category frames already separate findings; no second padded divider above them. The .3rem gap keeps the header row apart from the filters and collapses into the synthesis box's margin. */
+.review-run-leading > .review-results { margin-top: .3rem; padding-top: 0; border-top: 0; }
+.review-run-leading .review-filters { margin-top: 0; gap: .3rem .5rem; align-items: center; }
+.review-run-leading .review-filter { display: flex; align-items: center; gap: .3rem; }
+.review-run-leading .review-filter:has(select) { max-width: 15rem; }
+.review-run-leading .review-group { margin-top: .35rem; padding: .35rem .5rem; }
+.review-category-fold > summary { cursor: pointer; }
+.review-category-fold > summary .review-group-heading { display: inline-flex; width: calc(100% - 1.5rem); }
+.review-card-more { position: relative; }
+.review-card-more > summary { cursor: pointer; padding: .15rem .65rem; }
+.review-finding { container: review-finding / inline-size; }
+
+.review-filters > :is(.review-filtered, .review-no-findings) { font-size: .86rem; color: var(--text-subdued); }
+
+.review-category-fold > article.review-finding:first-of-type { margin-top: .35rem; }
+
+/* The menu controls place the panel from its width while it still sits in the narrow header box; a content-sized panel keeps that width right, so the panel stays inside a 1008 px window. */
+.review-header-export > .export-menu-body { width: max-content; max-width: calc(100vw - 16px); }
 
 .dialogue-follow-up { display: grid; gap: .5rem; margin-top: 1rem; }
 .dialogue-follow-up textarea { width: 100%; box-sizing: border-box; }
