@@ -181,12 +181,15 @@ export async function seedCommentsPane(renderer, check, waitFor, size = {width:1
     const short=item=>item && Array.from(item.text??'').length>=20 && Array.from(item.text??'').length<=120;
     const previous=globalThis.__commentsSeedBlocks??[];
     const candidates=paragraphs.map((item,index)=>({item,index})).filter(({item,index})=>short(item)&&short(paragraphs[index+1])&&!previous.includes(item.blockId)&&!previous.includes(paragraphs[index+1].blockId));
-    const previousIndex=paragraphs.findIndex(item=>item.blockId===previous[0]);
-    const block=previous.length?candidates.sort((a,b)=>Math.abs(b.index-previousIndex)-Math.abs(a.index-previousIndex))[0]?.item:(candidates.find(({index})=>index>=10)??candidates[0])?.item;
+    // Away from every earlier seed of this run, not only the last: a third pass (the 24 px overlay) must not land beside the
+    // first pass's resolved cards, which keep their place in the pane without highlighted words and push the new cards down.
+    const previousIndexes=previous.map(id=>paragraphs.findIndex(item=>item.blockId===id)).filter(index=>index>=0);
+    const distance=index=>Math.min(...previousIndexes.map(previousIndex=>Math.abs(index-previousIndex)));
+    const block=previousIndexes.length?candidates.sort((a,b)=>distance(b.index)-distance(a.index))[0]?.item:(candidates.find(({index})=>index>=10)??candidates[0])?.item;
     if(!block)return false;
     const second=paragraphs[paragraphs.indexOf(block)+1];
     if(!second)return false;
-    globalThis.__commentsSeedBlocks=[block.blockId,second.blockId];
+    globalThis.__commentsSeedBlocks=[...previous,block.blockId,second.blockId];
     const ids=[]; const kinds=['change-suggestion','change-suggestion','annotation','annotation','editor-note'];
     for(let index=0;index<12;index++){
       const current=index<5?block:second;
@@ -426,8 +429,9 @@ export async function commentsGeometryAndScroll(renderer, check, waitFor) {
     const textMoved=scroll.scrollTop!==beforeText;
     const firstAnchor=Array.from(document.querySelectorAll('[data-comment-card]')).filter(node=>!node.hidden).map(card=>({card,anchor:document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')})).filter(item=>item.anchor).sort((a,b)=>a.anchor.getBoundingClientRect().top-b.anchor.getBoundingClientRect().top)[0];
     const cardTop=firstAnchor.card.getBoundingClientRect().top, wordsTop=firstAnchor.anchor.getBoundingClientRect().top;
+    const anchorlessAbove=Array.from(document.querySelectorAll('[data-comment-card]')).filter(card=>!card.hidden&&!document.querySelector('.editor-window [data-mark-id="'+card.dataset.commentCard+'"]')&&card.getBoundingClientRect().top<cardTop).length;
     const selected=!!document.querySelector('[data-comment-card][data-selected="true"]');
-    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,selected};
+    return {pass:reachable && textMoved && !selected && pane.scrollTop===0 && Math.abs(cardTop-wordsTop)<=4, reachable, textMoved, scrollTop:pane.scrollTop, cardTop,wordsTop,anchorlessAbove,selected};
   })()`);
   const assertCoordinates = coordinates => {
   check(coordinates.reachable, 'comments-scrolled-canvas-reachable', coordinates);
