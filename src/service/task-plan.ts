@@ -848,7 +848,7 @@ function baselinePlanEdit(
       ? null
       : { ordinal, recordedAt: madeBy.detectedAt, entries: madeBy.diff.map((entry) => driftEntry(entry, blocks)) },
     planEnvelopeDigest: started || drifted ? null : projection.planEnvelope?.digest ?? null,
-    // 设置上限… (Issue #51, S16a; MODEL-015): set with the plan's other edits — never under developer-live, whose launch sets it.
+    // 设置上限… (Issue #51, S16a; MODEL-015): set with the plan's other edits — never under developer-live (the frozen envelope's `providerStatus`), whose launch sets it.
     budget: { ceiling, settable: reason === null && !developerLive, reason: reason ?? (developerLive ? PLAN_CEILING_LAUNCH_REASON : null) },
   };
 }

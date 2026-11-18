@@ -29,7 +29,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { CLARIFICATION_UNANSWERABLE_ENDED } from '../../src/service/task-plan.js';
+import { CLARIFICATION_UNANSWERABLE_ENDED, PLAN_EDIT_DRIFT_REASON } from '../../src/service/task-plan.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -297,7 +297,6 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(settled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([5, 6, 7, 8]);
       expect(settled.providerResolutionPlan?.runBudgetCeiling).toEqual(tokens(20000));
       // The redo sends what an uninterrupted run under the same ceiling sends for the same ranges, and nothing more.
-      const redoRequests = captured.wireRequests.slice(sentBefore);
       const control = (await importSample1Book(store, roots.codeRoot, 'L2 sample1 普通模式预算对照')).bookId;
       await pinEditorialWorkspaceProfileRevision2(store, control);
       const controlPrepared = prepare(store, control);
@@ -307,23 +306,59 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       });
       const controlStart = captured.wireRequests.length;
       await run(store, execution, control, controlPrepared.taskIntent!.taskIntentId, controlEdited.planEnvelope!.digest);
-      const controlRequests = captured.wireRequests.slice(controlStart);
-      const unitOf = (request: { messages: Array<{ content: string }> }): number | null => parseUnitMessageHeader(request.messages.at(-1)!.content)?.ordinal ?? null;
-      for (const ordinal of [5, 6, 7, 8]) {
-        const redone = redoRequests.filter((request) => unitOf(request) === ordinal);
-        const original = controlRequests.filter((request) => unitOf(request) === ordinal);
-        expect(redone).toHaveLength(1);
-        expect(original).toHaveLength(1);
-        expect(redone[0]!.model).toBe(original[0]!.model);
-        // Block ids are minted per imported Book; everything else of the request is the same bytes.
-        const bytes = (request: (typeof redone)[number]): unknown => request.messages.map((message) => ({ ...message, content: message.content.replace(/blk_[0-9a-f]+/g, 'blk') }));
-        expect(bytes(redone[0]!)).toEqual(bytes(original[0]!));
+      // Every stage the redo sent — units 5 to 8, the reduction, the sample and the reflection — is the whole request body
+      // the uninterrupted control sent for the same stage and range. Only ids minted per imported Book (and the reflection's
+      // run UUID and accounting digest) are normalised; the ceiling reaches no request, and the redo sends no range it had already read.
+      const keyOf = (index: number): string => `${captured.requests[index]!.stage}:${captured.requests[index]!.unitOrdinal ?? ''}`;
+      const body = (index: number): string => JSON.stringify(captured.wireRequests[index]).replace(/blk_[0-9a-f]+/g, 'blk')
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, 'uuid')
+        // The reflection carries its own Run's accounting — a redo's (4 read, 4 reused) differs from an uninterrupted Run's by
+        // design — so for that stage its digest and accounting JSON are set aside; the rest of its body is compared whole.
+        .replace(/(账目摘要 )[0-9a-f]{64}/g, keyOf(index).startsWith('run-report-reflection') ? '$1digest' : '$&')
+        .replace(/\{\\"adaptationCount.*?(?=","role":"user")/g, keyOf(index).startsWith('run-report-reflection') ? 'accounting' : '$&');
+      const indexes = (from: number, to: number): number[] => Array.from({ length: to - from }, (_, offset) => from + offset);
+      const redoKeys = indexes(sentBefore, controlStart).map(keyOf);
+      expect(redoKeys.filter((key) => key.startsWith('units:'))).toEqual(['5', '6', '7', '8'].map((ordinal) => `units:${ordinal}`).sort((x, y) => redoKeys.indexOf(x) - redoKeys.indexOf(y)));
+      expect(new Set(redoKeys).size).toBe(redoKeys.length);
+      expect(redoKeys).toEqual(expect.arrayContaining(['cross-unit-reduction:', 'assurance-sampling:', 'run-report-reflection:']));
+      for (const index of indexes(sentBefore, controlStart)) {
+        const counterpart = indexes(controlStart, captured.wireRequests.length).filter((other) => keyOf(other) === keyOf(index));
+        expect(counterpart, keyOf(index)).toHaveLength(1);
+        expect(body(index), keyOf(index)).toBe(body(counterpart[0]!));
       }
-      expect(redoRequests.filter((request) => unitOf(request) !== null && ![5, 6, 7, 8].includes(unitOf(request)!))).toEqual([]);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
       try { captured.assertMatched(); } finally { store.close(); }
+    }
+  }, 300_000);
+
+  it('never offers the ceiling in a plan frozen under ordinary production once the launch is rebound to developer-live', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, () => undefined);
+    launchPolicy = captured.policy;
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 预算与启动重绑');
+      const prepared = prepare(store, bookId);
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const plan = () => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan().edit.budget).toEqual({ ceiling: 'unset', settable: true, reason: null });
+      // The launch changes under the frozen plan: the projection never says settable where the revision gate refuses.
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: captured.policy,
+        live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+          credentialSlot: 'opencode-go', credentialReference: '00000000-0000-4000-8000-000000000001', runBudgetCeiling: tokens(240_000) } });
+      // The rebinding moves the plan's key content: it is drifted — a revision pending — so the projection and the gate agree.
+      expect(store.inspectBaselineAnalysis(bookId).planRevision?.state).toBe('pending');
+      expect(plan().edit.budget).toEqual({ ceiling: 'unset', settable: false, reason: PLAN_EDIT_DRIFT_REASON });
+      expect(await refusal(() => store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(5000),
+      }))).toBe('ANALYSIS_PLAN_REVISION_PENDING');
+      store.markCleanShutdown();
+    } finally {
+      await captured.owner.dispose();
+      store.close();
     }
   }, 300_000);
 
