@@ -133,6 +133,7 @@ describe('the words of the 审阅 destination', () => {
       'batch-undo': '撤销本批应用',
       'more-findings': '显示更多发现',
       'generate-report': '生成报告',
+      'generate-synthesis': '生成统合总结',
       export: '导出',
       'open-manuscript': '打开稿件',
       'open-review': '打开审阅',
