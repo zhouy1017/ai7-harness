@@ -1192,19 +1192,36 @@ async function main() {
         await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled' && document.querySelectorAll('article.review-finding[data-status="pending"]').length>=3`, 'review-triage-findings');
         await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
         await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-triage-filter');
+        // 下一条待处理 is #1523's view.nextPending (Alt+↓ on Windows): the review page answers the same command.
         await press(renderer,'ArrowDown',1);
+        const decided=[];
         for (const key of ['r','a','r']) {
           const id=await renderer.evaluate(`document.activeElement?.closest('article.review-finding')?.dataset.findingId??null`);
-          requireJourney(id!==null,'review-keyboard-focused');
+          requireJourney(id!==null && !decided.includes(id),'review-keyboard-focused-distinct',{id,decided});
           await press(renderer,key);
-          await waitFor(renderer, `document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(id)})+']')?.dataset.status==='handled'`, 'review-keyboard-decided');
+          decided.push(id);
+          // Decided in place; focus moves on, and the card it lands on is within the window, so the next key decides what is seen.
+          await waitFor(renderer, `(() => { const card=document.querySelector('article[data-finding-id='+JSON.stringify(${JSON.stringify(id)})+']'); const next=document.activeElement?.closest('article.review-finding'); if(card?.dataset.status!=='handled'||!next||next===card)return false; const r=next.getBoundingClientRect(); return r.top>=0 && r.top<innerHeight && r.bottom>0; })()`, 'review-keyboard-decided-next-in-view');
         }
+        // What the service recorded for the three, not the card's own words.
+        await waitFor(renderer, `(async () => { const runId=document.querySelector('.review-workspace-card')?.dataset.reviewRunId; const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:runId})).run; const ids=${JSON.stringify(decided)}; return ids.every((id)=>run.findings.find((item)=>item.findingId===id)?.status==='handled'); })()`, 'review-keyboard-service-statuses');
         const id=await renderer.evaluate(`document.activeElement?.dataset.findingId??null`);
         requireJourney(id!==null,'review-return-finding-focused');
+        const PLACE = `(() => { const groups={}; for (const group of document.querySelectorAll('section.review-group[data-review-category]')) groups[group.dataset.reviewCategory]=group.querySelector('details.review-category-fold')?.open===true; return {groups, findings:document.querySelectorAll('article.review-finding').length, more:document.querySelector('[data-review-action="more-findings"]')?.textContent??null, scroll:document.scrollingElement.scrollTop, maxScroll:document.scrollingElement.scrollHeight-innerHeight}; })()`;
+        // The way back re-reads under the same filter: the three decided cards leave the pending list, so compare with that read.
+        await triageClick(renderer,'[data-review-filter="status"] [data-filter-value="pending"]');
+        await waitFor(renderer, `document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null && ${JSON.stringify(decided)}.every((id)=>document.querySelector('article[data-finding-id='+JSON.stringify(id)+']')===null) && document.querySelector('article.review-finding')!==null`, 'review-return-filter-reread');
+        await press(renderer,'ArrowDown',1);
+        await waitFor(renderer, `document.activeElement?.matches('article.review-finding[data-status="pending"]')===true`, 'review-return-next-pending-focused');
+        const kept=await renderer.evaluate(`document.activeElement.dataset.findingId`);
+        const before=await renderer.evaluate(PLACE);
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-review-return]')!==null`, 'review-return-chip-ready');
         await triageClick(renderer,'[data-review-return]');
-        await waitFor(renderer, `document.activeElement?.dataset.findingId===${JSON.stringify(id)} && document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-return-same-filter-and-finding');
+        await waitFor(renderer, `document.activeElement?.dataset.findingId===${JSON.stringify(kept)} && document.querySelector('[data-review-filter="status"] [data-filter-value="pending"][aria-pressed="true"]')!==null`, 'review-return-same-filter-and-finding');
+        const after=await renderer.evaluate(PLACE);
+        requireJourney(JSON.stringify(after.groups)===JSON.stringify(before.groups) && after.findings===before.findings && after.more===before.more, 'review-return-same-groups-and-pages', {before, after});
+        requireJourney(Math.abs(after.scroll-Math.min(before.scroll, after.maxScroll))<=2, 'review-return-same-scroll', {before, after});
         await press(renderer,'Enter');
         await waitFor(renderer, `document.querySelector('[data-screen="editor"]')!==null`, 'review-triage-back-on-text');
       }
