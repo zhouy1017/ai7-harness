@@ -31,8 +31,9 @@ function mounted(bookId: string, notice = vi.fn(), viewed = vi.fn(async () => un
   document.body.append(root, entry);
   const read = vi.fn(async () => reading(bookId));
   const openItem = vi.fn();
-  const panel = mountParagraphAnalysis({ bookId, root, entry, read, lastViewed: () => 1, viewed, notice, beforeOpen: vi.fn(), openItem });
-  return { root, entry, read, openItem, notice, viewed, panel };
+  const onClose = vi.fn();
+  const panel = mountParagraphAnalysis({ onClose, bookId, root, entry, read, lastViewed: () => 1, viewed, notice, beforeOpen: vi.fn(), openItem });
+  return { onClose, root, entry, read, openItem, notice, viewed, panel };
 }
 
 describe('mounted paragraph analysis', () => {
@@ -78,4 +79,13 @@ describe('mounted paragraph analysis', () => {
     mountedPanel.panel.refresh(); mountedPanel.panel.destroy();
     await vi.advanceTimersByTimeAsync(10_000); expect(mountedPanel.read).toHaveBeenCalledTimes(1);
   });
+});
+
+it('reports both explicit and toggle closes to the supporting column owner', () => {
+  const view = mounted('close-book');
+  view.panel.toggle(); view.panel.close();
+  expect(view.onClose).toHaveBeenCalledTimes(1);
+  view.panel.toggle(); view.panel.toggle();
+  expect(view.onClose).toHaveBeenCalledTimes(2);
+  view.panel.destroy();
 });
