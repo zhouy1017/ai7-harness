@@ -26,9 +26,7 @@ import {
   type SourceImportTargetSelection,
   type StagedImportProjection
 } from '../shared/protocol.js';
-import {
-  BoundedManuscriptStore
-} from './bounded-manuscript.js';
+import type { BoundedManuscriptStore } from './bounded-manuscript.js';
 import {
   WORD_DOCX_PARSER_IDENTITY,
   type ImportFidelityPlan,
@@ -38,9 +36,7 @@ import {
   type TextBoxDisposition,
   type WordTrackedCompilation
 } from './docx.js';
-import {
-  EditorialMarkStore
-} from './editorial-marks.js';
+import type { EditorialMarkStore } from './editorial-marks.js';
 import {
   recordTextBoxChoice,
   recordWordPreparedIntake,

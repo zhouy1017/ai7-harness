@@ -30,10 +30,7 @@ import {
   type ReviewBeforeManuscriptReimportProjection,
   type StagedImportProjection
 } from '../shared/protocol.js';
-import {
-  BoundedManuscriptStore,
-  type ReimportCheckpointBinding
-} from './bounded-manuscript.js';
+import type { BoundedManuscriptStore, ReimportCheckpointBinding } from './bounded-manuscript.js';
 import {
   DOCX_NOTE_PARSER_IDENTITY,
   DOCX_PARSER_IDENTITY,
@@ -42,7 +39,7 @@ import {
   type TextBoxDisposition
 } from './docx.js';
 import {
-  EditorialMarkStore,
+  type EditorialMarkStore,
   followReimportedMarks,
   resolveBranchMarksAfterRewrite,
   workingBlockDigests,

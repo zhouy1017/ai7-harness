@@ -17,9 +17,7 @@ import {
   type ManuscriptConversionProjection
 } from '../shared/protocol.js';
 import { hasExactKeys, isRecord, sha256Hex, canonicalJson as wordCanonicalJson } from './analysis/canonical.js';
-import {
-  BoundedManuscriptStore
-} from './bounded-manuscript.js';
+import type { BoundedManuscriptStore } from './bounded-manuscript.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { ParsedNoteSource } from './docx-notes.js';
 import {
@@ -42,9 +40,7 @@ import {
   type TextBoxDisposition,
   type WordTrackedCompilation
 } from './docx.js';
-import {
-  EditorialMarkStore
-} from './editorial-marks.js';
+import type { EditorialMarkStore } from './editorial-marks.js';
 import type { canonicalDegradationDecision, DraftSnapshot, IngestedDocx, ResolvedImportTarget, WordIntakePlan } from './import-review-records.js';
 import type { createWordImportedMarks, validateWordImportedMarkSources, stageImportedMarks, stagedImportedMarksMatch } from './imported-marks.js';
 import {
@@ -52,9 +48,7 @@ import {
   learningMaterialDigest,
   wordTrackedEditCandidate
 } from './learning-eligibility.js';
-import {
-  EditorialLearningLedger
-} from './learning/ledger.js';
+import type { EditorialLearningLedger } from './learning/ledger.js';
 import type { EditorialMemoryFacade } from './learning/memory-facade.js';
 import { stageParagraphPieces, stagedParagraphPiecesMatch, type StagedParagraphPiece } from './manuscript/import-structure.js';
 import {
