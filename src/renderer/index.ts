@@ -1136,7 +1136,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
       const reader = mountWordTrackedEditDetail({ root: content, api: api, ...target, openSourceVersion: openWordSourceVersion });
       if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
-      replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'history' });
+      replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'overview' });
       await reader.load();
       return;
     }
@@ -1939,7 +1939,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   if (projection.previousCursor) actions.append(button('上一窗口', 'quiet', () => showPage(projection.previousCursor!)));
   if (projection.nextCursor) actions.append(button('下一窗口', 'quiet', () => showPage(projection.nextCursor!)));
   content.append(actions);
-  replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'history' });
+  replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'overview' });
   agentWorkspaceReturns.set(content, () => renderHistoricalRevision(projection));
   focusRecoveryHeading(content);
   setStatus(technicalWords(`只读历史修订版已打开；${projection.position.label}。`, `已打开历史稿件；${projection.position.label}。`));
@@ -3204,7 +3204,7 @@ async function renderSeries(seriesId: string): Promise<void> {
  * A section of the current Book's groups, from the sidebar (Issue #934; IA-012): reuse the window's owned Book route so
  * section changes preserve its manuscript capabilities. Reassigning even the same Book deliberately revokes those in main.
  * A different route still goes through the window owner; 稿件 enters at the remembered position (RET-002), as 书库 does.
- * 发现 opens its read-only Book aggregate; 历史与恢复 is 工作概览's records.
+ * 待办汇总 opens its read-only Book aggregate; 工作概览 holds the 导入记录 the removed 历史与恢复 row once opened.
  */
 async function openBookSection(book: ShellBookEntry, section: ShellBookSection): Promise<void> {
   const navigationRoute = navigation.begin();
@@ -3227,18 +3227,6 @@ async function openBookSection(book: ShellBookEntry, section: ShellBookSection):
         const overview = await api.getBookOverview({ bookId, historyCursor: null });
         if (!navigationRoute.isCurrent()) return;
         navigation.present(() => renderBookOverview(overview, undefined, recoveryReturn));
-        if (section === 'history') {
-          shell.markSection('history');
-          const records = screen.querySelector<HTMLElement>('.record-navigation');
-          const folded = records?.closest('details');
-          if (folded) folded.open = true;
-          const heading = records?.querySelector<HTMLElement>('h3');
-          if (heading) {
-            heading.tabIndex = -1;
-            heading.focus();
-            records?.scrollIntoView({ block: 'start' });
-          }
-        }
       }
     };
     const ownedRoute = await api.getBookWorkbenchRoute();

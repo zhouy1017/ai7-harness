@@ -4,9 +4,9 @@
 
 import { technicalWords } from './technical-layer.js';
 
-// Ordinary mode reads AI 协作 and 修改建议 (Issue #1431 item 32): the proposal-set lifecycle is developer wording.
+// Ordinary mode reads AI 改稿 and 修改建议 (Issue #1431 item 32): the proposal-set lifecycle is developer wording.
 export const AGENT_WORKSPACE_WORDS = Object.freeze({
-  get heading() { return technicalWords('Agent 工作区', 'AI 协作'); },
+  get heading() { return technicalWords('Agent 工作区', 'AI 改稿'); },
   get lede() { return technicalWords('就所选稿件范围提出修改。提议先列在这里；提交后成为修改建议，是否采纳和应用由你在每张修改建议卡上决定。',
     '选择稿件范围并写下修改要求，AI 生成的修改建议会直接放到稿件上，由你逐条决定。'); },
   safety: '修改方式',
@@ -31,14 +31,14 @@ export const AGENT_WORKSPACE_WORDS = Object.freeze({
   discard: '放弃这组提议',
   get discarded() { return technicalWords('已放弃这组提议；没有新建修改建议，这轮提问的记录仍保留。', '已放弃这组修改。'); },
   openMarks: '在稿件中查看',
-  get opened() { return technicalWords('Agent 工作区已打开', 'AI 协作已打开'); },
-  get unavailable() { return technicalWords('无法打开当前图书的 Agent 工作区', '暂时无法为这本书打开 AI 协作'); },
-  get failed() { return technicalWords('无法读取 Agent 工作区。', '暂时无法打开 AI 协作。'); },
+  get opened() { return technicalWords('Agent 工作区已打开', 'AI 改稿已打开'); },
+  get unavailable() { return technicalWords('无法打开当前图书的 Agent 工作区', '暂时无法为这本书打开 AI 改稿'); },
+  get failed() { return technicalWords('无法读取 Agent 工作区。', '暂时无法打开 AI 改稿。'); },
   proposeFailed: '这轮提议没有开始。',
   promoteFailed: '没有新建修改建议。',
   discardFailed: '没有放弃这组提议。',
   manuscriptFailed: '无法读取本书的主稿件。',
   noManuscript: '这本书还没有主稿件；导入稿件后才能选择范围。',
-  get overviewEntry() { return technicalWords('打开 Agent 工作区', '打开 AI 协作'); },
+  get overviewEntry() { return technicalWords('打开 Agent 工作区', '打开 AI 改稿'); },
   get overviewNote() { return technicalWords('在 Agent 工作区里，可以就所选稿件范围提出修改，提交为修改建议后再逐条决定。', '选择稿件范围，让 AI 给出修改建议，再逐条决定。'); },
 });

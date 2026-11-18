@@ -89,7 +89,7 @@ export function knowledgeBaseTabView(tab: KnowledgeBaseTab): KnowledgeBaseTabVie
 
 export function visibleKnowledgeBaseTabs(developerMode: boolean): ReadonlyArray<KnowledgeBaseTabView> {
   return developerMode ? KNOWLEDGE_BASE_TAB_VIEWS : KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.developerOnly !== true)
-    .map((view) => view.tab === 'memory' ? { ...view, label: '本社审阅偏好' } : view);
+    .map((view) => view.tab === 'memory' ? { ...view, label: '审阅偏好' } : view);
 }
 
 // ---- 审阅规范文件 ----------------------------------------------------------------------------------------------------
